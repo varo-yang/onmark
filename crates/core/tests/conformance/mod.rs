@@ -1,5 +1,9 @@
 //! Stable-text support shared by conformance test targets.
 
+// Integration targets compile this shared module independently and each uses
+// only the renderers relevant to its own conformance layer.
+#![allow(dead_code)]
+
 use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};

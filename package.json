@@ -1,0 +1,17 @@
+{
+  "name": "onmark",
+  "private": true,
+  "packageManager": "pnpm@11.9.0",
+  "scripts": {
+    "generate": "cargo xtask schema",
+    "generate:check": "cargo xtask schema --check",
+    "test": "pnpm --recursive test",
+    "typecheck": "pnpm --recursive typecheck"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "ajv": "8.20.0",
+    "json-schema-to-typescript": "15.0.4",
+    "typescript": "7.0.2"
+  }
+}

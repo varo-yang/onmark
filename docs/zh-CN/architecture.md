@@ -322,6 +322,7 @@ onmark/
 │   ├── runtime/                 # 浏览器主时钟、handshake、adapter modules
 │   ├── authoring/               # TS 类型与组件 API
 │   └── bundler/                 # Node/esbuild 与 bundle manifest
+├── xtask/                        # 仓库 schema 与 codec 生成工具
 ├── deploy/
 │   └── aws-lambda/              # 第三关再加入：image、infra、示例
 ├── schemas/
@@ -331,10 +332,11 @@ onmark/
 └── docs/
 ```
 
-当前里程碑包含 `onmark-core` 与 `onmark-media`。Gate 一在对应行为首次被真实消费时再加入 `onmark-render` 与 `onmark-cli`：
+当前里程碑包含 `onmark-core`、`onmark-media`，以及 `@onmark/runtime` 已生成的 protocol 边界。Gate 一在对应行为首次被真实消费时再加入 `onmark-render` 与 `onmark-cli`：
 
 - `onmark-core` 是纯内核，内部用 `syntax`、`diagnostics`、`model`、`compiler`、`timeline`、`protocol` 模块保持结构；
 - `onmark-media` 只负责素材探测和规范化 metadata，使服务端 compile/lint 修正循环能够使用 `core + media` 而不链接 Chromium；
+- `@onmark/runtime` 因为运行在浏览器中、并被 authoring 与 bundler 消费而保持独立 package；
 - `onmark-render` 是 Chromium、FFmpeg 编码和单机执行器的重型边界，它依赖 `core + media`；
 - `onmark-cli` 只负责参数、终端展示和进程组装。
 
@@ -369,6 +371,8 @@ protocol    → diagnostics + timeline + model
 `syntax` 不得依赖 compiler，`timeline` 不得依赖 syntax，领域模块不得反向依赖 protocol。CI 使用 `syn` 对显式 Rust path 做语法感知检查。这是一条协作式护栏，覆盖普通路径、import、alias 和 re-export，但不覆盖宏内部生成的路径，也不等价于 rustc 的完整名字解析；这些边仍由评审负责。任何新增内部边必须先更新本文。
 
 `onmark-core` 只允许 `syntax` 使用 `xmlparser` 做纯计算、保留 span 的 XML-compatible fragment tokenization。树构建、嵌套检查、重复属性检查、引用解码和全部创作语义由 Onmark 自己拥有；parser error 在 syntax 边界翻译，该依赖不执行 IO。测试 target 可以使用 `proptest` 验证时间代数，并使用 `syn` 执行协作式模块依赖律检查；二者都不会链接进库消费者或运行时产物。
+
+`protocol` 模块使用 `serde` 定义稳定 JSON 边界。可选的 `schema` feature 只为仓库自有的 `onmark-xtask` 构建工具暴露 `schemars`，产品 binary 不启用它。`onmark-xtask` 因为拥有独立的 build-only 依赖预算而作为 workspace binary，只由开发者与 CI 消费；它只允许依赖启用 `schema` feature 的 core、`schemars`、`serde_json` 与固定版本的 Node generator，任何产品 crate/package 都不得反向依赖它。`cargo xtask schema` 先写 versioned schema，再调用 checked-in Node generator；`json-schema-to-typescript` 生成可审阅类型，Ajv 在构建期生成 standalone validator，TypeScript 检查生成后的 package。浏览器 runtime 不在运行期动态编译 schema。精确工具版本由 lockfile 与 `mise.toml` 固定，CI 会拒绝过期生成物。
 
 `onmark-media` 只依赖 core，以及用于私有 ffprobe response 边界的 `serde`/`serde_json`。它使用参数数组直接启动配置的 ffprobe executable，绝不经过 shell；退出后仍让派生进程持有输出 pipe 的 wrapper 不属于该 executable contract。在这条 direct-child 契约下，进程寿命和保留的 stdout/stderr 字节数都有显式上限，两条 pipe 并发排空；显式 shutdown 会报告 process-control failure，`Drop` 只作 best-effort termination fallback。私有 ffprobe response type 只在此边界翻译一次并产出 core-owned `AssetMetadata`；JSON value 与第三方 error type 不定义稳定 API，但底层 error 会通过标准 source chain 保留，供调试使用。
 
@@ -415,7 +419,9 @@ decode invocation
 - Timeline IR、Execution Plan、runtime message 属于跨进程 wire protocol；
 - components、props、hooks 属于手写的 authoring API。
 
-Rust wire types 是 source of truth。protocol 开始实现后，`cargo xtask schema` 从它们生成 versioned JSON Schema 和 TypeScript types/codecs，CI 重新生成并要求工作树零 diff。生成结果提交进仓库，供 npm package、diff review 和非 Rust 消费者直接使用；禁止手工修改。schema version 变化必须带 migration/conformance fixture。Rust 本身直接使用原始领域/wire types，不再从 schema 反向生成第二套 Rust 类型。
+Rust wire types 是 source of truth。`cargo xtask schema` 从它们生成 versioned JSON Schema 和 TypeScript types/codecs，CI 重新生成并要求工作树零 diff。生成结果提交进仓库，供 npm package、diff review 和非 Rust 消费者直接使用；禁止手工修改。schema version 变化必须带 migration/conformance fixture。Rust 本身直接使用原始领域/wire types，不再从 schema 反向生成第二套 Rust 类型。
+
+Gate 一的 `BrowserPlan` 目前只携带 browser clock 已真实消费的 frame rate 与 evaluation/output interval；component 与 Render Graph 事实等 runtime 真正消费时再加入，不提前把后续 gate 塞进协议。
 
 authoring API 可以追求浏览器端人体工程学，但不能复制求时语义。
 
@@ -470,6 +476,8 @@ Screenplay → Timeline IR → Browser Runtime → Chromium → FFmpeg → MP4
 每一关都使用最终方向的 IR 和协议，但只实现本关真实消费的部分。上一关没有稳定通过，不创建下一关的空架子。
 
 ## 13. 待实验决策
+
+Gate 一首轮 capture spike 已得到正向但刻意收窄的证据：页面自行控制 `FrameReady`，随后调用 CDP `Page.captureScreenshot`，DOM/CSS/Canvas 帧在同一锁定机器的独立 Chrome 进程间得到一致的 raw RGBA hash。这只决定下一轮实验路线，不等于最终 transport contract；decoded media、WebGL、异步组件、跨环境一致性与生产级 lifecycle 仍未证明。
 
 - Chromium 控制选择 CDP、WebDriver BiDi 还是极薄现有库；
 - 捕获选择 BeginFrame、screenshot、surface copy 还是编码流；

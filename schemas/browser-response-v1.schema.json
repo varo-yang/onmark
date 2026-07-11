@@ -1,0 +1,203 @@
+{
+  "$defs": {
+    "BrowserEvent": {
+      "description": "Closed Gate-one events emitted by the browser runtime.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "The immutable browser plan was accepted.",
+          "properties": {
+            "type": {
+              "const": "loaded",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Resources required at the evaluation start are stable.",
+          "properties": {
+            "evaluationStart": {
+              "$ref": "#/$defs/WireFrame",
+              "description": "Frame at which preparation completed."
+            },
+            "type": {
+              "const": "prepared",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "evaluationStart"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "One requested frame is stable and may be captured.",
+          "properties": {
+            "frame": {
+              "$ref": "#/$defs/WireFrame",
+              "description": "Exact frame now represented by browser state."
+            },
+            "stateHash": {
+              "$ref": "#/$defs/StateHash",
+              "description": "Canonical hash of runtime-owned state for this frame."
+            },
+            "type": {
+              "const": "frameReady",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "frame",
+            "stateHash"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The browser rejected a command or could not reach readiness.",
+          "properties": {
+            "code": {
+              "$ref": "#/$defs/ProtocolFailureCode",
+              "description": "Stable machine-readable failure category."
+            },
+            "message": {
+              "description": "Direct explanation in browser/runtime terms.",
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "pendingResources": {
+              "description": "Resources that prevented readiness, in deterministic order.",
+              "items": {
+                "pattern": "\\S",
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": {
+              "const": "failed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "code",
+            "message",
+            "pendingResources"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The browser session released its resources.",
+          "properties": {
+            "type": {
+              "const": "disposed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ProtocolFailureCode": {
+      "description": "Stable browser protocol failure category.",
+      "oneOf": [
+        {
+          "const": "protocolMismatch",
+          "description": "The envelope version is unsupported.",
+          "type": "string"
+        },
+        {
+          "const": "invalidRequest",
+          "description": "The command violates its wire contract.",
+          "type": "string"
+        },
+        {
+          "const": "loadFailed",
+          "description": "The immutable plan could not be installed.",
+          "type": "string"
+        },
+        {
+          "const": "prepareFailed",
+          "description": "Preparation could not stabilize required resources.",
+          "type": "string"
+        },
+        {
+          "const": "seekFailed",
+          "description": "The requested frame could not be evaluated.",
+          "type": "string"
+        },
+        {
+          "const": "readinessTimeout",
+          "description": "One or more resources missed the readiness deadline.",
+          "type": "string"
+        },
+        {
+          "const": "internal",
+          "description": "The runtime violated an internal invariant.",
+          "type": "string"
+        }
+      ]
+    },
+    "ProtocolVersion": {
+      "const": 1,
+      "description": "Version of the native-to-browser message contract.",
+      "format": "uint16",
+      "maximum": 65535,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "RequestId": {
+      "description": "Correlation identity shared by one request and its response events.",
+      "format": "uint32",
+      "maximum": 4294967295,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "StateHash": {
+      "description": "Canonical lowercase SHA-256 spelling of runtime-owned frame state.",
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "WireFrame": {
+      "description": "Exact frame integer accepted by JavaScript without rounding.",
+      "format": "uint64",
+      "maximum": 9007199254740991,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "$id": "https://onmark.dev/schemas/browser-response-v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "One versioned event returned by the browser runtime.",
+  "properties": {
+    "event": {
+      "$ref": "#/$defs/BrowserEvent"
+    },
+    "requestId": {
+      "$ref": "#/$defs/RequestId"
+    },
+    "version": {
+      "$ref": "#/$defs/ProtocolVersion"
+    }
+  },
+  "required": [
+    "version",
+    "requestId",
+    "event"
+  ],
+  "title": "BrowserResponse",
+  "type": "object"
+}

@@ -6,16 +6,28 @@ Onmark is a screenplay-first video compiler and rendering engine for people and 
 screenplay → deterministic Timeline IR → browser frames → encoded video
 ```
 
-The project is currently in design and delivery gate one: rendering one real video reliably through the final-direction compiler and browser protocol. The implemented foundation includes the pure domain model, structured authored diagnostics, span-preserving screenplay syntax, binding, typed resolution, and timeline solving in `onmark-core`, plus bounded ffprobe metadata normalization in `onmark-media`.
+The project is currently in design and delivery gate one: rendering one real video reliably through the final-direction compiler and browser protocol. The implemented foundation includes the pure domain model, structured authored diagnostics, span-preserving screenplay syntax, binding, typed resolution, timeline solving, and versioned browser wire types in `onmark-core`; bounded ffprobe metadata normalization in `onmark-media`; and generated TypeScript codecs in `@onmark/runtime`.
+
+## Repository map
+
+- `crates/` contains Rust product code.
+- `packages/` contains browser and authoring TypeScript packages.
+- `conformance/` contains behavior examples shared across implementations.
+- `schemas/` contains generated, versioned wire contracts.
+- `xtask/` contains the repository-only schema and codec generator.
 
 ## Development
 
-Rust 1.97.0 is pinned for both standard Rust tooling and mise users.
+Rust 1.97.0, Node.js 26.4.0, and pnpm 11.9.0 are pinned for reproducible development.
 
 ```bash
 cargo test --workspace
 cargo clippy --workspace --all-targets --all-features
 cargo fmt --all -- --check
+pnpm install --frozen-lockfile
+pnpm typecheck
+pnpm test
+cargo xtask schema --check
 ```
 
 ## Design documents
