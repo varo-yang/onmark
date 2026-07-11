@@ -6,7 +6,7 @@ Onmark is a screenplay-first video compiler and rendering engine for people and 
 screenplay → deterministic Timeline IR → browser frames → encoded video
 ```
 
-The project is currently in design and delivery gate one: rendering one real video reliably through the final-direction compiler and browser protocol. The first implemented boundary is the pure `onmark-core` domain model.
+The project is currently in design and delivery gate one: rendering one real video reliably through the final-direction compiler and browser protocol. The implemented foundation currently includes the pure domain model and structured authored diagnostics in `onmark-core`.
 
 ## Development
 

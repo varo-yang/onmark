@@ -563,13 +563,17 @@ An invalid screenplay is expected product input. Return diagnostics and aggregat
 
 ```rust
 pub struct Diagnostic {
-    pub code: DiagnosticCode,
-    pub severity: Severity,
-    pub span: SourceSpan,
-    pub message: String,
-    pub help: Option<String>,
+    code: DiagnosticCode,
+    primary: SourceSpan,
+    message: Box<str>,
+    help: Option<Box<str>>,
+    related: Vec<RelatedDiagnostic>,
 }
 ```
+
+Fields are exposed through read-only accessors. Constructors reject blank
+messages, help, and related explanations. Severity is determined by the
+stable diagnostic code rather than chosen independently at each call site.
 
 Do not stop at the first unknown cue if five independent errors can be reported safely.
 

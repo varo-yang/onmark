@@ -519,7 +519,7 @@ syntax → compiler → plan
 
 ### 8. 创作错误是数据，机器故障才是 error
 
-无效剧本是预期产品输入。返回并聚合 `Diagnostic { code, severity, span, message, help }`，在能安全报告多个错误时，不得遇到第一个未知 cue 就终止。
+无效剧本是预期产品输入。返回并聚合 `Diagnostic { code, primary, message, help, related }`。字段通过只读 accessor 暴露；构造器拒绝全空白的 message、help 和 related explanation；severity 由稳定 code 决定。在能安全报告多个错误时，不得遇到第一个未知 cue 就终止。
 
 文件系统失败、编码器崩溃、IPC 损坏和内部不变式被破坏是执行错误。库返回类型化 error enum，二进制边界可以增加面向人的上下文。
 

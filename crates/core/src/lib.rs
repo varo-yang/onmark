@@ -7,4 +7,5 @@
 #![warn(clippy::pedantic)]
 #![deny(clippy::print_stderr, clippy::print_stdout, clippy::unwrap_used)]
 
+pub mod diagnostics;
 pub mod model;
