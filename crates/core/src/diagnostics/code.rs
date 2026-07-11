@@ -11,7 +11,21 @@ use std::fmt;
 pub enum DiagnosticCode {
     /// An authored node ID violates the language's ID rules.
     InvalidNodeId,
-    /// Markup tokenization failed or input ended unexpectedly.
+    /// A valid node ID is declared more than once in one film.
+    DuplicateNodeId,
+    /// An element name is outside the Gate-one screenplay vocabulary.
+    UnknownElement,
+    /// No top-level film element exists.
+    MissingFilmRoot,
+    /// More than one top-level film element exists.
+    MultipleFilmRoots,
+    /// A known element appears under a parent that cannot own it.
+    MisplacedElement,
+    /// A film contains more than one cues container.
+    DuplicateCues,
+    /// Authored text appears in a structural or empty element.
+    UnexpectedText,
+    /// Markup tokenization failed before another trustworthy token was produced.
     MalformedSyntax,
     /// A closing tag does not match the currently open element.
     MismatchedClosingTag,
@@ -33,6 +47,13 @@ impl DiagnosticCode {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::InvalidNodeId => "ONM-ID-001",
+            Self::DuplicateNodeId => "ONM-ID-002",
+            Self::UnknownElement => "ONM-STRUCT-001",
+            Self::MissingFilmRoot => "ONM-STRUCT-002",
+            Self::MultipleFilmRoots => "ONM-STRUCT-003",
+            Self::MisplacedElement => "ONM-STRUCT-004",
+            Self::DuplicateCues => "ONM-STRUCT-005",
+            Self::UnexpectedText => "ONM-STRUCT-006",
             Self::MalformedSyntax => "ONM-SYNTAX-001",
             Self::MismatchedClosingTag => "ONM-SYNTAX-002",
             Self::DuplicateAttribute => "ONM-SYNTAX-003",
@@ -48,6 +69,13 @@ impl DiagnosticCode {
     pub const fn severity(self) -> Severity {
         match self {
             Self::InvalidNodeId
+            | Self::DuplicateNodeId
+            | Self::UnknownElement
+            | Self::MissingFilmRoot
+            | Self::MultipleFilmRoots
+            | Self::MisplacedElement
+            | Self::DuplicateCues
+            | Self::UnexpectedText
             | Self::MalformedSyntax
             | Self::MismatchedClosingTag
             | Self::DuplicateAttribute
@@ -93,6 +121,13 @@ mod tests {
     fn exposes_stable_code_and_severity() {
         assert_eq!(DiagnosticCode::InvalidNodeId.as_str(), "ONM-ID-001");
         assert_eq!(DiagnosticCode::InvalidNodeId.severity(), Severity::Error);
+        assert_eq!(DiagnosticCode::DuplicateNodeId.as_str(), "ONM-ID-002");
+        assert_eq!(DiagnosticCode::UnknownElement.as_str(), "ONM-STRUCT-001");
+        assert_eq!(DiagnosticCode::MissingFilmRoot.as_str(), "ONM-STRUCT-002");
+        assert_eq!(DiagnosticCode::MultipleFilmRoots.as_str(), "ONM-STRUCT-003");
+        assert_eq!(DiagnosticCode::MisplacedElement.as_str(), "ONM-STRUCT-004");
+        assert_eq!(DiagnosticCode::DuplicateCues.as_str(), "ONM-STRUCT-005");
+        assert_eq!(DiagnosticCode::UnexpectedText.as_str(), "ONM-STRUCT-006");
         assert_eq!(DiagnosticCode::MalformedSyntax.as_str(), "ONM-SYNTAX-001",);
         assert_eq!(
             DiagnosticCode::MismatchedClosingTag.as_str(),

@@ -1,0 +1,279 @@
+use std::collections::BTreeMap;
+
+use crate::model::{ElementKind, NodeId, SourceSpan};
+use crate::syntax::{Attribute, TextNode};
+
+/// Shared authored facts retained by every structurally bound element.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LinkedElement {
+    kind: ElementKind,
+    id: Option<NodeId>,
+    attributes: Vec<Attribute>,
+    span: SourceSpan,
+}
+
+impl LinkedElement {
+    pub(super) const fn new(
+        kind: ElementKind,
+        id: Option<NodeId>,
+        attributes: Vec<Attribute>,
+        span: SourceSpan,
+    ) -> Self {
+        Self {
+            kind,
+            id,
+            attributes,
+            span,
+        }
+    }
+
+    /// Returns the recognized screenplay element kind.
+    #[must_use]
+    pub const fn kind(&self) -> ElementKind {
+        self.kind
+    }
+
+    /// Returns the valid, film-unique ID when one was authored.
+    #[must_use]
+    pub const fn id(&self) -> Option<&NodeId> {
+        self.id.as_ref()
+    }
+
+    /// Returns non-ID attributes for later binding phases.
+    #[must_use]
+    pub fn attributes(&self) -> &[Attribute] {
+        &self.attributes
+    }
+
+    /// Returns the complete authored element span.
+    #[must_use]
+    pub const fn span(&self) -> SourceSpan {
+        self.span
+    }
+}
+
+/// A structurally bound screenplay with one film root and valid unique IDs.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LinkedFilm {
+    element: LinkedElement,
+    cues: Option<LinkedCues>,
+    scenes: Vec<LinkedScene>,
+    ids: BTreeMap<NodeId, LinkedNode>,
+}
+
+impl LinkedFilm {
+    pub(super) fn new(
+        element: LinkedElement,
+        cues: Option<LinkedCues>,
+        scenes: Vec<LinkedScene>,
+        ids: BTreeMap<NodeId, LinkedNode>,
+    ) -> Self {
+        Self {
+            element,
+            cues,
+            scenes,
+            ids,
+        }
+    }
+
+    #[must_use]
+    pub const fn element(&self) -> &LinkedElement {
+        &self.element
+    }
+
+    #[must_use]
+    pub const fn cues(&self) -> Option<&LinkedCues> {
+        self.cues.as_ref()
+    }
+
+    #[must_use]
+    pub fn scenes(&self) -> &[LinkedScene] {
+        &self.scenes
+    }
+
+    #[must_use]
+    pub fn ids(&self) -> impl ExactSizeIterator<Item = (&NodeId, &LinkedNode)> {
+        self.ids.iter()
+    }
+}
+
+/// One declaration in the film-wide ID index.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LinkedNode {
+    kind: ElementKind,
+    declared_at: SourceSpan,
+}
+
+impl LinkedNode {
+    pub(super) const fn new(kind: ElementKind, declared_at: SourceSpan) -> Self {
+        Self { kind, declared_at }
+    }
+
+    #[must_use]
+    pub const fn kind(&self) -> ElementKind {
+        self.kind
+    }
+
+    /// Returns the span of the authored ID value.
+    #[must_use]
+    pub const fn span(&self) -> SourceSpan {
+        self.declared_at
+    }
+}
+
+/// The optional singleton cue container owned by a film.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LinkedCues {
+    element: LinkedElement,
+    cues: Vec<LinkedCue>,
+}
+
+impl LinkedCues {
+    pub(super) const fn new(element: LinkedElement, cues: Vec<LinkedCue>) -> Self {
+        Self { element, cues }
+    }
+
+    #[must_use]
+    pub const fn element(&self) -> &LinkedElement {
+        &self.element
+    }
+
+    #[must_use]
+    pub fn cues(&self) -> &[LinkedCue] {
+        &self.cues
+    }
+}
+
+/// One named event declaration before its time value is parsed.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LinkedCue {
+    element: LinkedElement,
+}
+
+impl LinkedCue {
+    pub(super) const fn new(element: LinkedElement) -> Self {
+        Self { element }
+    }
+
+    #[must_use]
+    pub const fn element(&self) -> &LinkedElement {
+        &self.element
+    }
+}
+
+/// One sequential scene.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LinkedScene {
+    element: LinkedElement,
+    shots: Vec<LinkedShot>,
+}
+
+impl LinkedScene {
+    pub(super) const fn new(element: LinkedElement, shots: Vec<LinkedShot>) -> Self {
+        Self { element, shots }
+    }
+
+    #[must_use]
+    pub const fn element(&self) -> &LinkedElement {
+        &self.element
+    }
+
+    #[must_use]
+    pub fn shots(&self) -> &[LinkedShot] {
+        &self.shots
+    }
+}
+
+/// One sequential shot and its authored content order.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LinkedShot {
+    element: LinkedElement,
+    content: Vec<LinkedShotContent>,
+}
+
+impl LinkedShot {
+    pub(super) const fn new(element: LinkedElement, content: Vec<LinkedShotContent>) -> Self {
+        Self { element, content }
+    }
+
+    #[must_use]
+    pub const fn element(&self) -> &LinkedElement {
+        &self.element
+    }
+
+    #[must_use]
+    pub fn content(&self) -> &[LinkedShotContent] {
+        &self.content
+    }
+}
+
+/// Closed kinds of content that a shot may own during Gate one.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum LinkedShotContent {
+    Video(LinkedVideo),
+    VoiceOver(LinkedVoiceOver),
+    Overlay(LinkedOverlay),
+}
+
+/// Gate one's sole media element.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LinkedVideo {
+    element: LinkedElement,
+}
+
+impl LinkedVideo {
+    pub(super) const fn new(element: LinkedElement) -> Self {
+        Self { element }
+    }
+
+    #[must_use]
+    pub const fn element(&self) -> &LinkedElement {
+        &self.element
+    }
+}
+
+/// Authored voice-over text before media attributes are resolved.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LinkedVoiceOver {
+    element: LinkedElement,
+    text: Vec<TextNode>,
+}
+
+impl LinkedVoiceOver {
+    pub(super) const fn new(element: LinkedElement, text: Vec<TextNode>) -> Self {
+        Self { element, text }
+    }
+
+    #[must_use]
+    pub const fn element(&self) -> &LinkedElement {
+        &self.element
+    }
+
+    #[must_use]
+    pub fn text(&self) -> &[TextNode] {
+        &self.text
+    }
+}
+
+/// A title or call-to-action overlay owned by one shot.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LinkedOverlay {
+    element: LinkedElement,
+    text: Vec<TextNode>,
+}
+
+impl LinkedOverlay {
+    pub(super) const fn new(element: LinkedElement, text: Vec<TextNode>) -> Self {
+        Self { element, text }
+    }
+
+    #[must_use]
+    pub const fn element(&self) -> &LinkedElement {
+        &self.element
+    }
+
+    #[must_use]
+    pub fn text(&self) -> &[TextNode] {
+        &self.text
+    }
+}

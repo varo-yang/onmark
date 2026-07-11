@@ -2,10 +2,12 @@
 //!
 //! This module depends on no other `onmark-core` module.
 
+mod element;
 mod id;
 mod source;
 mod time;
 
+pub use element::ElementKind;
 pub use id::{InvalidNodeId, NodeId};
 pub use source::{ByteOffset, InvalidSourceSpan, SourceId, SourceSpan};
 pub use time::{

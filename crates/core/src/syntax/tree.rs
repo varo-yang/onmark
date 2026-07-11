@@ -3,20 +3,31 @@ use std::fmt;
 use crate::model::SourceSpan;
 
 /// A parsed screenplay fragment before language binding.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SourceDocument {
     nodes: Vec<Node>,
+    span: SourceSpan,
 }
 
 impl SourceDocument {
-    pub(super) const fn new(nodes: Vec<Node>) -> Self {
-        Self { nodes }
+    pub(super) const fn new(nodes: Vec<Node>, span: SourceSpan) -> Self {
+        Self { nodes, span }
     }
 
     /// Returns authored top-level nodes in source order.
     #[must_use]
     pub fn nodes(&self) -> &[Node] {
         &self.nodes
+    }
+
+    /// Returns the span of the complete authored source.
+    #[must_use]
+    pub const fn span(&self) -> SourceSpan {
+        self.span
+    }
+
+    pub(crate) fn into_parts(self) -> (Vec<Node>, SourceSpan) {
+        (self.nodes, self.span)
     }
 }
 

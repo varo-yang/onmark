@@ -229,4 +229,22 @@ mod tests {
             Some(DiagnosticCode::UnsupportedMarkupDirective),
         );
     }
+
+    #[test]
+    fn an_unclosed_doctype_cannot_hide_following_markup() {
+        let report = parse(SourceId::new(0), "<!DOCTYPE film [<film/>");
+        let codes = report
+            .diagnostics()
+            .iter()
+            .map(Diagnostic::code)
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            codes,
+            [
+                DiagnosticCode::UnsupportedMarkupDirective,
+                DiagnosticCode::MalformedSyntax,
+            ],
+        );
+    }
 }

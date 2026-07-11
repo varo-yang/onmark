@@ -1,0 +1,77 @@
+use std::fmt;
+
+/// Closed Gate-one screenplay vocabulary.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ElementKind {
+    Film,
+    Cues,
+    Cue,
+    Scene,
+    Shot,
+    Video,
+    VoiceOver,
+    Title,
+    CallToAction,
+}
+
+impl ElementKind {
+    /// Recognizes an unqualified, case-sensitive screenplay element name.
+    #[must_use]
+    pub fn from_local_name(name: &str) -> Option<Self> {
+        match name {
+            "film" => Some(Self::Film),
+            "cues" => Some(Self::Cues),
+            "cue" => Some(Self::Cue),
+            "scene" => Some(Self::Scene),
+            "shot" => Some(Self::Shot),
+            "video" => Some(Self::Video),
+            "vo" => Some(Self::VoiceOver),
+            "title" => Some(Self::Title),
+            "cta" => Some(Self::CallToAction),
+            _ => None,
+        }
+    }
+
+    /// Returns the stable source spelling for this element kind.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Film => "film",
+            Self::Cues => "cues",
+            Self::Cue => "cue",
+            Self::Scene => "scene",
+            Self::Shot => "shot",
+            Self::Video => "video",
+            Self::VoiceOver => "vo",
+            Self::Title => "title",
+            Self::CallToAction => "cta",
+        }
+    }
+}
+
+impl fmt::Display for ElementKind {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ElementKind;
+
+    #[test]
+    fn recognizes_the_closed_gate_one_vocabulary() {
+        let names = [
+            "film", "cues", "cue", "scene", "shot", "video", "vo", "title", "cta",
+        ];
+
+        for name in names {
+            let kind = ElementKind::from_local_name(name)
+                .expect("every Gate-one element name must be recognized");
+            assert_eq!(kind.as_str(), name);
+        }
+
+        assert_eq!(ElementKind::from_local_name("audio"), None);
+        assert_eq!(ElementKind::from_local_name("Film"), None);
+    }
+}

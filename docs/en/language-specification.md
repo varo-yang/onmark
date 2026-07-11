@@ -20,7 +20,7 @@ The language is paired with the render architecture through one versioned contra
 
 ## Core model
 
-The initial vocabulary is `film`, `scene`, `shot`, `vo`, `title`, `cta`, and `cue`. Scenes and shots are sequential containers. Titles and CTAs are overlays owned by a shot and do not participate in sibling sequencing.
+The Gate-one vocabulary is `film`, `cues`, `cue`, `scene`, `shot`, `video`, `vo`, `title`, and `cta`. A film may contain at most one direct `cues` child; that container owns only `cue` declarations and does not participate in scene sequencing. Scenes own sequential shots. A shot owns its `video`, `vo`, `title`, and `cta` content. Titles and CTAs are overlays and do not participate in sibling sequencing. `video` is Gate one's only media element and names its artifact with `src`; audio, image, and other media elements remain deferred. Structural binding retains `src` and other unparsed authored attributes for the attribute/reference binding slice rather than discarding them.
 
 Illustrative syntax:
 
@@ -69,7 +69,7 @@ All resolutions preserve provenance in `TimingReason`, allowing the compiler to 
 
 ## IDs and references
 
-Explicit IDs are non-empty, case-sensitive, and unique within one film. In keeping with the HTML `id` constraint, they may not contain ASCII whitespace. Non-ASCII characters are preserved exactly; the compiler does not silently normalize authored IDs.
+Explicit IDs, including cue IDs, are non-empty, case-sensitive, and globally unique within one film. In keeping with the HTML `id` constraint, they may not contain ASCII whitespace. Non-ASCII characters are preserved exactly; the compiler does not silently normalize authored IDs. A later typed `CueId` or `EventRef` distinguishes cue references without creating a second declaration namespace.
 
 ## Diagnostics
 
@@ -86,6 +86,19 @@ Initial markup diagnostics are:
 | `ONM-SYNTAX-005` | the source ends before an open element is closed |
 | `ONM-SYNTAX-006` | a closing tag appears without an open element |
 | `ONM-SYNTAX-007` | an XML declaration, processing instruction, or document type is unsupported |
+
+Initial structural-binding diagnostics are:
+
+| Code | Meaning |
+| --- | --- |
+| `ONM-ID-001` | an authored ID is empty or contains ASCII whitespace |
+| `ONM-ID-002` | an authored ID duplicates another ID in the same film |
+| `ONM-STRUCT-001` | an element is outside the Gate-one vocabulary |
+| `ONM-STRUCT-002` | the document has no top-level `film` element |
+| `ONM-STRUCT-003` | the document has more than one top-level `film` element |
+| `ONM-STRUCT-004` | a known element appears outside its legal parent |
+| `ONM-STRUCT-005` | a film contains more than one `cues` container |
+| `ONM-STRUCT-006` | authored text appears in a structural or empty element |
 
 The tokenizer stops after a fatal lexical error, so lexical recovery may produce one diagnostic. Onmark continues to aggregate independent nesting, binding, and semantic diagnostics whenever the remaining structure is trustworthy. At end of input, every still-open element receives one diagnostic whose primary span is its opening name and whose related span marks the end of the screenplay. A document type declaration produces one diagnostic even when the tokenizer exposes its internal subset as several tokens.
 

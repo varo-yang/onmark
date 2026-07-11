@@ -1,0 +1,17 @@
+# onmark diagnostic test rendering; not a wire format
+ONM-STRUCT-006 error @0:18..38 text is not allowed directly inside <film>
+  help: move this text into a text-bearing element or remove it
+ONM-STRUCT-005 error @0:93..97 film contains more than one <cues> container
+  help: merge all cue declarations into one <cues> container
+  related @0:39..43 the first <cues> container is here
+ONM-STRUCT-004 error @0:137..142 element <title> is not allowed inside <scene>
+  help: move <title> to a valid screenplay container
+ONM-ID-001 error @0:175..183 shot ID is invalid: node ID cannot contain ASCII whitespace
+  help: remove ASCII whitespace or replace it with a visible separator
+ONM-STRUCT-001 error @0:193..198 element <audio> is not part of the screenplay language
+  help: use a Gate-one screenplay element or remove this element
+ONM-STRUCT-004 error @0:225..230 element <scene> is not allowed inside <shot>
+  help: move <scene> to a valid screenplay container
+ONM-ID-002 error @0:260..264 shot ID "sale" is already used in this film
+  help: choose a unique id for this shot
+  related @0:125..129 ID "sale" is first declared here

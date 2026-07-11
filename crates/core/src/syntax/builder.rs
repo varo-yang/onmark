@@ -107,8 +107,8 @@ impl TreeBuilder {
         }
     }
 
-    pub(super) fn into_document(self) -> SourceDocument {
-        SourceDocument::new(self.roots)
+    pub(super) fn into_document(self, span: SourceSpan) -> SourceDocument {
+        SourceDocument::new(self.roots, span)
     }
 
     fn take_pending(&mut self) -> PendingElement {

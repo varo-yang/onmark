@@ -10,7 +10,7 @@ use super::{
 };
 
 /// Internal syntax output consumed by the compiler facade.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct SyntaxReport {
     document: SourceDocument,
     errors: Vec<SyntaxError>,
@@ -60,8 +60,10 @@ impl<'a> Parser<'a> {
 
         self.finish_open_elements();
 
+        let source_span = self.source.range(ByteOffset::new(0), self.source.end());
+
         SyntaxReport {
-            document: self.tree.into_document(),
+            document: self.tree.into_document(source_span),
             errors: self.errors,
         }
     }
@@ -91,6 +93,8 @@ impl<'a> Parser<'a> {
             }
         }
 
+        // Without a DTD end token there is no trustworthy fragment boundary.
+        // The entire remaining source belongs to the rejected declaration.
         Some(self.source.text.len())
     }
 

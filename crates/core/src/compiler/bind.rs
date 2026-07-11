@@ -1,0 +1,502 @@
+use std::collections::BTreeMap;
+
+use crate::diagnostics::{Diagnostic, DiagnosticCode, Diagnostics};
+use crate::model::{ElementKind, InvalidNodeId, NodeId, SourceSpan};
+use crate::syntax::{Attribute, Element, Node, SourceDocument, TextNode};
+
+use super::linked::{
+    LinkedCue, LinkedCues, LinkedElement, LinkedFilm, LinkedNode, LinkedOverlay, LinkedScene,
+    LinkedShot, LinkedShotContent, LinkedVideo, LinkedVoiceOver,
+};
+
+/// A partial linked film and every independently recoverable binding error.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BindReport {
+    film: Option<LinkedFilm>,
+    diagnostics: Diagnostics,
+}
+
+impl BindReport {
+    #[must_use]
+    pub const fn film(&self) -> Option<&LinkedFilm> {
+        self.film.as_ref()
+    }
+
+    #[must_use]
+    pub const fn diagnostics(&self) -> &Diagnostics {
+        &self.diagnostics
+    }
+
+    #[must_use]
+    pub fn into_parts(self) -> (Option<LinkedFilm>, Diagnostics) {
+        (self.film, self.diagnostics)
+    }
+}
+
+/// Binds one parsed document into Gate-one screenplay structure.
+#[must_use]
+pub fn bind(document: SourceDocument) -> BindReport {
+    let mut diagnostics = Diagnostics::new();
+    let mut films = Vec::new();
+    let (nodes, document_span) = document.into_parts();
+
+    for node in nodes {
+        match node {
+            Node::Text(text) if text.text().trim().is_empty() => {}
+            Node::Text(text) => diagnostics.push(unexpected_top_level_text(&text)),
+            Node::Element(element) => match element_kind(&element) {
+                Some(ElementKind::Film) => films.push(element),
+                Some(kind) => diagnostics.push(misplaced_element(&element, kind, None)),
+                None => diagnostics.push(unknown_element(&element)),
+            },
+        }
+    }
+
+    match films.as_slice() {
+        [] => {
+            diagnostics.push(missing_film_root(document_span));
+        }
+        [film] => {
+            let (film, diagnostics) = Binder::new(diagnostics).bind_film(film);
+            return BindReport {
+                film: Some(film),
+                diagnostics,
+            };
+        }
+        [first, rest @ ..] => {
+            // No root is canonical once cardinality fails. Choosing the first
+            // would make an invalid authoring order change the linked film.
+            for film in rest {
+                diagnostics.push(multiple_film_roots(first, film));
+            }
+        }
+    }
+
+    BindReport {
+        film: None,
+        diagnostics,
+    }
+}
+
+struct Binder {
+    ids: BTreeMap<NodeId, LinkedNode>,
+    diagnostics: Diagnostics,
+}
+
+impl Binder {
+    const fn new(diagnostics: Diagnostics) -> Self {
+        Self {
+            ids: BTreeMap::new(),
+            diagnostics,
+        }
+    }
+
+    fn bind_film(mut self, element: &Element) -> (LinkedFilm, Diagnostics) {
+        let linked = self.bind_element(element, ElementKind::Film);
+        let mut cues = None;
+        let mut scenes = Vec::new();
+
+        for node in element.children() {
+            let Some(child) = self.structural_child(node, ElementKind::Film) else {
+                continue;
+            };
+
+            match self.recognize_or_report(child) {
+                Some(ElementKind::Cues) => match &cues {
+                    None => cues = Some((child.name().span(), self.bind_cues(child))),
+                    Some((first, _)) => {
+                        // The rejected subtree must not contribute IDs or
+                        // attributes to the canonical linked film.
+                        self.diagnostics.push(duplicate_cues(child, *first));
+                    }
+                },
+                Some(ElementKind::Scene) => scenes.push(self.bind_scene(child)),
+                Some(kind) => {
+                    self.diagnostics
+                        .push(misplaced_element(child, kind, Some(ElementKind::Film)));
+                }
+                None => {}
+            }
+        }
+
+        let cues = cues.map(|(_, cues)| cues);
+        let film = LinkedFilm::new(linked, cues, scenes, self.ids);
+        (film, self.diagnostics)
+    }
+
+    fn bind_cues(&mut self, element: &Element) -> LinkedCues {
+        let linked = self.bind_element(element, ElementKind::Cues);
+        let mut cues = Vec::new();
+
+        for node in element.children() {
+            let Some(child) = self.structural_child(node, ElementKind::Cues) else {
+                continue;
+            };
+
+            match self.recognize_or_report(child) {
+                Some(ElementKind::Cue) => cues.push(self.bind_cue(child)),
+                Some(kind) => {
+                    self.diagnostics
+                        .push(misplaced_element(child, kind, Some(ElementKind::Cues)));
+                }
+                None => {}
+            }
+        }
+
+        LinkedCues::new(linked, cues)
+    }
+
+    fn bind_cue(&mut self, element: &Element) -> LinkedCue {
+        let linked = self.bind_element(element, ElementKind::Cue);
+        self.reject_child_elements_and_text(element, ElementKind::Cue);
+        LinkedCue::new(linked)
+    }
+
+    fn bind_scene(&mut self, element: &Element) -> LinkedScene {
+        let linked = self.bind_element(element, ElementKind::Scene);
+        let mut shots = Vec::new();
+
+        for node in element.children() {
+            let Some(child) = self.structural_child(node, ElementKind::Scene) else {
+                continue;
+            };
+
+            match self.recognize_or_report(child) {
+                Some(ElementKind::Shot) => shots.push(self.bind_shot(child)),
+                Some(kind) => {
+                    self.diagnostics
+                        .push(misplaced_element(child, kind, Some(ElementKind::Scene)));
+                }
+                None => {}
+            }
+        }
+
+        LinkedScene::new(linked, shots)
+    }
+
+    fn bind_shot(&mut self, element: &Element) -> LinkedShot {
+        let linked = self.bind_element(element, ElementKind::Shot);
+        let mut content = Vec::new();
+
+        for node in element.children() {
+            let Some(child) = self.structural_child(node, ElementKind::Shot) else {
+                continue;
+            };
+
+            match self.recognize_or_report(child) {
+                Some(ElementKind::Video) => {
+                    content.push(LinkedShotContent::Video(self.bind_video(child)));
+                }
+                Some(ElementKind::VoiceOver) => {
+                    content.push(LinkedShotContent::VoiceOver(self.bind_voice_over(child)));
+                }
+                Some(kind @ (ElementKind::Title | ElementKind::CallToAction)) => {
+                    content.push(LinkedShotContent::Overlay(self.bind_overlay(child, kind)));
+                }
+                Some(kind) => {
+                    self.diagnostics
+                        .push(misplaced_element(child, kind, Some(ElementKind::Shot)));
+                }
+                None => {}
+            }
+        }
+
+        LinkedShot::new(linked, content)
+    }
+
+    fn bind_video(&mut self, element: &Element) -> LinkedVideo {
+        let linked = self.bind_element(element, ElementKind::Video);
+        self.reject_child_elements_and_text(element, ElementKind::Video);
+        LinkedVideo::new(linked)
+    }
+
+    fn bind_voice_over(&mut self, element: &Element) -> LinkedVoiceOver {
+        let linked = self.bind_element(element, ElementKind::VoiceOver);
+        let text = self.bind_text(element, ElementKind::VoiceOver);
+        LinkedVoiceOver::new(linked, text)
+    }
+
+    fn bind_overlay(&mut self, element: &Element, kind: ElementKind) -> LinkedOverlay {
+        let linked = self.bind_element(element, kind);
+        let text = self.bind_text(element, kind);
+        LinkedOverlay::new(linked, text)
+    }
+
+    fn bind_text(&mut self, element: &Element, parent: ElementKind) -> Vec<TextNode> {
+        let mut text = Vec::new();
+
+        for node in element.children() {
+            match node {
+                Node::Text(node) => text.push(node.clone()),
+                Node::Element(child) => self.reject_child_element(child, parent),
+            }
+        }
+
+        text
+    }
+
+    fn reject_child_elements_and_text(&mut self, element: &Element, parent: ElementKind) {
+        for node in element.children() {
+            match node {
+                Node::Text(text) if text.text().trim().is_empty() => {}
+                Node::Text(text) => self.diagnostics.push(unexpected_text(text, parent)),
+                Node::Element(child) => self.reject_child_element(child, parent),
+            }
+        }
+    }
+
+    fn reject_child_element(&mut self, child: &Element, parent: ElementKind) {
+        if let Some(kind) = self.recognize_or_report(child) {
+            self.diagnostics
+                .push(misplaced_element(child, kind, Some(parent)));
+        }
+    }
+
+    fn structural_child<'a>(&mut self, node: &'a Node, parent: ElementKind) -> Option<&'a Element> {
+        match node {
+            Node::Element(element) => Some(element),
+            Node::Text(text) if text.text().trim().is_empty() => None,
+            Node::Text(text) => {
+                self.diagnostics.push(unexpected_text(text, parent));
+                None
+            }
+        }
+    }
+
+    fn recognize_or_report(&mut self, element: &Element) -> Option<ElementKind> {
+        let kind = element_kind(element);
+        if kind.is_none() {
+            self.diagnostics.push(unknown_element(element));
+        }
+        kind
+    }
+
+    fn bind_element(&mut self, element: &Element, kind: ElementKind) -> LinkedElement {
+        let id = self.bind_id(element, kind);
+        // Borrowing keeps the grammar walk rectangular. Clone only the small
+        // authored leaves that the next binding slice must still consume.
+        let attributes = element
+            .attributes()
+            .iter()
+            .filter(|attribute| !is_id_attribute(attribute))
+            .cloned()
+            .collect();
+
+        LinkedElement::new(kind, id, attributes, element.span())
+    }
+
+    fn bind_id(&mut self, element: &Element, kind: ElementKind) -> Option<NodeId> {
+        let attribute = id_attribute(element)?;
+        let id = match NodeId::parse(attribute.value()) {
+            Ok(id) => id,
+            Err(reason) => {
+                self.diagnostics
+                    .push(invalid_node_id(attribute, kind, reason));
+                return None;
+            }
+        };
+
+        if let Some(first) = self.ids.get(&id) {
+            self.diagnostics
+                .push(duplicate_node_id(attribute, kind, &id, first.span()));
+            return None;
+        }
+
+        self.ids
+            .insert(id.clone(), LinkedNode::new(kind, attribute.value_span()));
+        Some(id)
+    }
+}
+
+fn element_kind(element: &Element) -> Option<ElementKind> {
+    if element.name().prefix().is_some() {
+        return None;
+    }
+
+    ElementKind::from_local_name(element.name().local())
+}
+
+fn id_attribute(element: &Element) -> Option<&Attribute> {
+    element
+        .attributes()
+        .iter()
+        .find(|attribute| is_id_attribute(attribute))
+}
+
+fn is_id_attribute(attribute: &Attribute) -> bool {
+    attribute.name().prefix().is_none() && attribute.name().local() == "id"
+}
+
+fn unknown_element(element: &Element) -> Diagnostic {
+    Diagnostic::new(
+        DiagnosticCode::UnknownElement,
+        element.name().span(),
+        format!(
+            "element <{}> is not part of the screenplay language",
+            element.name()
+        ),
+    )
+    .expect("a formatted unknown-element message is non-blank")
+    .with_help("use a Gate-one screenplay element or remove this element")
+    .expect("the static unknown-element help is non-blank")
+}
+
+fn missing_film_root(document: SourceSpan) -> Diagnostic {
+    let primary = SourceSpan::new(document.source(), document.start(), document.start())
+        .expect("a point at the document start has ordered bounds");
+    Diagnostic::new(
+        DiagnosticCode::MissingFilmRoot,
+        primary,
+        "screenplay must contain one top-level <film> element",
+    )
+    .expect("the static missing-film message is non-blank")
+    .with_help("wrap the screenplay in one <film> element")
+    .expect("the static missing-film help is non-blank")
+}
+
+fn multiple_film_roots(first: &Element, duplicate: &Element) -> Diagnostic {
+    Diagnostic::new(
+        DiagnosticCode::MultipleFilmRoots,
+        duplicate.name().span(),
+        "screenplay contains more than one top-level <film> element",
+    )
+    .expect("the static multiple-film message is non-blank")
+    .with_help("keep exactly one top-level <film> element")
+    .expect("the static multiple-film help is non-blank")
+    .with_related(first.name().span(), "the first <film> element is here")
+    .expect("the static related message is non-blank")
+}
+
+fn misplaced_element(
+    element: &Element,
+    kind: ElementKind,
+    parent: Option<ElementKind>,
+) -> Diagnostic {
+    let message = match parent {
+        Some(parent) => format!("element <{kind}> is not allowed inside <{parent}>"),
+        None => format!("element <{kind}> is not allowed at the top level"),
+    };
+
+    Diagnostic::new(
+        DiagnosticCode::MisplacedElement,
+        element.name().span(),
+        message,
+    )
+    .expect("a formatted misplaced-element message is non-blank")
+    .with_help(format!("move <{kind}> to a valid screenplay container"))
+    .expect("a formatted misplaced-element help is non-blank")
+}
+
+fn duplicate_cues(element: &Element, first: SourceSpan) -> Diagnostic {
+    Diagnostic::new(
+        DiagnosticCode::DuplicateCues,
+        element.name().span(),
+        "film contains more than one <cues> container",
+    )
+    .expect("the static duplicate-cues message is non-blank")
+    .with_help("merge all cue declarations into one <cues> container")
+    .expect("the static duplicate-cues help is non-blank")
+    .with_related(first, "the first <cues> container is here")
+    .expect("the static related message is non-blank")
+}
+
+fn invalid_node_id(attribute: &Attribute, kind: ElementKind, reason: InvalidNodeId) -> Diagnostic {
+    Diagnostic::new(
+        DiagnosticCode::InvalidNodeId,
+        attribute.value_span(),
+        format!("{kind} ID is invalid: {reason}"),
+    )
+    .expect("a formatted invalid-ID message is non-blank")
+    .with_help(match reason {
+        InvalidNodeId::Empty => "provide a non-empty id value",
+        InvalidNodeId::ContainsAsciiWhitespace => {
+            "remove ASCII whitespace or replace it with a visible separator"
+        }
+    })
+    .expect("the static invalid-ID help is non-blank")
+}
+
+fn duplicate_node_id(
+    attribute: &Attribute,
+    kind: ElementKind,
+    id: &NodeId,
+    first: SourceSpan,
+) -> Diagnostic {
+    Diagnostic::new(
+        DiagnosticCode::DuplicateNodeId,
+        attribute.value_span(),
+        format!("{kind} ID \"{id}\" is already used in this film"),
+    )
+    .expect("a formatted duplicate-ID message is non-blank")
+    .with_help(format!("choose a unique id for this {kind}"))
+    .expect("a formatted duplicate-ID help is non-blank")
+    .with_related(first, format!("ID \"{id}\" is first declared here"))
+    .expect("a formatted related message is non-blank")
+}
+
+fn unexpected_top_level_text(text: &TextNode) -> Diagnostic {
+    Diagnostic::new(
+        DiagnosticCode::UnexpectedText,
+        text.span(),
+        "text is not allowed outside the top-level <film> element",
+    )
+    .expect("the static top-level-text message is non-blank")
+    .with_help("move this text into a text-bearing screenplay element or remove it")
+    .expect("the static top-level-text help is non-blank")
+}
+
+fn unexpected_text(text: &TextNode, parent: ElementKind) -> Diagnostic {
+    Diagnostic::new(
+        DiagnosticCode::UnexpectedText,
+        text.span(),
+        format!("text is not allowed directly inside <{parent}>"),
+    )
+    .expect("a formatted unexpected-text message is non-blank")
+    .with_help("move this text into a text-bearing element or remove it")
+    .expect("the static unexpected-text help is non-blank")
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::compiler::parse;
+    use crate::diagnostics::DiagnosticCode;
+    use crate::model::SourceId;
+
+    use super::{BindReport, bind};
+
+    fn bind_source(source: SourceId, text: &str) -> BindReport {
+        let parsed = parse(source, text);
+        let (document, diagnostics) = parsed.into_parts();
+        assert!(diagnostics.is_empty());
+        bind(document)
+    }
+
+    #[test]
+    fn locates_a_missing_film_in_an_empty_source() {
+        let report = bind_source(SourceId::new(7), "");
+        let diagnostic = report
+            .diagnostics()
+            .iter()
+            .next()
+            .expect("an empty screenplay has no film root");
+
+        assert_eq!(diagnostic.code(), DiagnosticCode::MissingFilmRoot);
+        assert_eq!(diagnostic.primary().source(), SourceId::new(7));
+        assert_eq!(diagnostic.primary().start().get(), 0);
+        assert_eq!(diagnostic.primary().end().get(), 0);
+    }
+
+    #[test]
+    fn cue_ids_share_the_film_wide_namespace() {
+        let source = "<film><cues><cue id=\"shared\"/></cues><scene id=\"shared\"/></film>";
+        let report = bind_source(SourceId::new(0), source);
+        let duplicate = report
+            .diagnostics()
+            .iter()
+            .find(|diagnostic| diagnostic.code() == DiagnosticCode::DuplicateNodeId);
+        let film = report.film().expect("the fixture has one film root");
+
+        assert!(duplicate.is_some());
+        assert_eq!(film.ids().count(), 1);
+    }
+}
