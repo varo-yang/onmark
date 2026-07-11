@@ -1,0 +1,13 @@
+<film>
+  <cues>
+    <cue id="anchor" time="1500ms" />
+  </cues>
+  <scene>
+    <shot duration="3.25s">
+      <video src="clip.mp4" delay="500ms" />
+      <vo src="voice.mp3" delay="1.5s">Narration</vo>
+      <title delay="250ms">Later</title>
+      <cta cue="anchor">Aligned</cta>
+    </shot>
+  </scene>
+</film>

@@ -25,6 +25,20 @@ pub enum DiagnosticCode {
     DuplicateCues,
     /// Authored text appears in a structural or empty element.
     UnexpectedText,
+    /// An authored duration violates the exact duration grammar or range.
+    InvalidDuration,
+    /// A cue reference does not name a resolved cue.
+    UnknownCueReference,
+    /// A resolved cue is never referenced.
+    UnusedCue,
+    /// An element contains an attribute outside its language contract.
+    UnknownAttribute,
+    /// An element omits an attribute required for resolution.
+    MissingRequiredAttribute,
+    /// An authored attribute value violates its domain rules.
+    InvalidAttributeValue,
+    /// Two attributes define mutually exclusive rules.
+    ConflictingAttributes,
     /// Markup tokenization failed before another trustworthy token was produced.
     MalformedSyntax,
     /// A closing tag does not match the currently open element.
@@ -54,6 +68,13 @@ impl DiagnosticCode {
             Self::MisplacedElement => "ONM-STRUCT-004",
             Self::DuplicateCues => "ONM-STRUCT-005",
             Self::UnexpectedText => "ONM-STRUCT-006",
+            Self::InvalidDuration => "ONM-TIME-001",
+            Self::UnknownCueReference => "ONM-REF-001",
+            Self::UnusedCue => "ONM-REF-002",
+            Self::UnknownAttribute => "ONM-ATTR-001",
+            Self::MissingRequiredAttribute => "ONM-ATTR-002",
+            Self::InvalidAttributeValue => "ONM-ATTR-003",
+            Self::ConflictingAttributes => "ONM-ATTR-004",
             Self::MalformedSyntax => "ONM-SYNTAX-001",
             Self::MismatchedClosingTag => "ONM-SYNTAX-002",
             Self::DuplicateAttribute => "ONM-SYNTAX-003",
@@ -76,6 +97,12 @@ impl DiagnosticCode {
             | Self::MisplacedElement
             | Self::DuplicateCues
             | Self::UnexpectedText
+            | Self::InvalidDuration
+            | Self::UnknownCueReference
+            | Self::UnknownAttribute
+            | Self::MissingRequiredAttribute
+            | Self::InvalidAttributeValue
+            | Self::ConflictingAttributes
             | Self::MalformedSyntax
             | Self::MismatchedClosingTag
             | Self::DuplicateAttribute
@@ -83,6 +110,7 @@ impl DiagnosticCode {
             | Self::UnclosedElement
             | Self::UnexpectedClosingTag
             | Self::UnsupportedMarkupDirective => Severity::Error,
+            Self::UnusedCue => Severity::Warning,
         }
     }
 }
@@ -128,6 +156,23 @@ mod tests {
         assert_eq!(DiagnosticCode::MisplacedElement.as_str(), "ONM-STRUCT-004");
         assert_eq!(DiagnosticCode::DuplicateCues.as_str(), "ONM-STRUCT-005");
         assert_eq!(DiagnosticCode::UnexpectedText.as_str(), "ONM-STRUCT-006");
+        assert_eq!(DiagnosticCode::InvalidDuration.as_str(), "ONM-TIME-001");
+        assert_eq!(DiagnosticCode::UnknownCueReference.as_str(), "ONM-REF-001");
+        assert_eq!(DiagnosticCode::UnusedCue.as_str(), "ONM-REF-002");
+        assert_eq!(DiagnosticCode::UnusedCue.severity(), Severity::Warning);
+        assert_eq!(DiagnosticCode::UnknownAttribute.as_str(), "ONM-ATTR-001");
+        assert_eq!(
+            DiagnosticCode::MissingRequiredAttribute.as_str(),
+            "ONM-ATTR-002"
+        );
+        assert_eq!(
+            DiagnosticCode::InvalidAttributeValue.as_str(),
+            "ONM-ATTR-003"
+        );
+        assert_eq!(
+            DiagnosticCode::ConflictingAttributes.as_str(),
+            "ONM-ATTR-004"
+        );
         assert_eq!(DiagnosticCode::MalformedSyntax.as_str(), "ONM-SYNTAX-001",);
         assert_eq!(
             DiagnosticCode::MismatchedClosingTag.as_str(),

@@ -164,6 +164,14 @@ impl Diagnostics {
         self.entries.is_empty()
     }
 
+    /// Returns whether the collection contains an error-severity diagnostic.
+    #[must_use]
+    pub fn has_errors(&self) -> bool {
+        self.entries
+            .iter()
+            .any(|diagnostic| diagnostic.severity() == Severity::Error)
+    }
+
     /// Returns diagnostics in their current order.
     #[must_use]
     pub fn iter(&self) -> impl ExactSizeIterator<Item = &Diagnostic> {
@@ -337,5 +345,28 @@ mod tests {
         diagnostics.push(diagnostic.clone());
 
         assert_eq!(diagnostics.into_vec(), vec![diagnostic.clone(), diagnostic]);
+    }
+
+    #[test]
+    fn distinguishes_errors_from_warnings() {
+        let warning = Diagnostic::new(
+            DiagnosticCode::UnusedCue,
+            span(0, 4, 8),
+            "cue is never referenced",
+        )
+        .expect("the fixture has a message");
+        let error = Diagnostic::new(
+            DiagnosticCode::InvalidDuration,
+            span(0, 12, 15),
+            "duration is invalid",
+        )
+        .expect("the fixture has a message");
+        let mut diagnostics = Diagnostics::new();
+
+        diagnostics.push(warning);
+        assert!(!diagnostics.has_errors());
+
+        diagnostics.push(error);
+        assert!(diagnostics.has_errors());
     }
 }

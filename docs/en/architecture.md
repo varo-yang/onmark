@@ -25,14 +25,16 @@ Rust does not reimplement browser layout. TypeScript does not duplicate timing o
 
 ```text
 Source AST
-  → Linked Film
-    → Timeline IR
-      → Render Graph
-        → Execution Plan
+  → Structurally Linked Film
+    → Resolved Film
+      → Timeline IR
+        → Render Graph
+          → Execution Plan
 ```
 
 - **Source AST** preserves authored structure and source spans.
-- **Linked Film** contains resolved IDs, cues, assets, and component references.
+- **Structurally Linked Film** contains known elements, legal ownership, and valid film-wide IDs while retaining unresolved authored attributes privately.
+- **Resolved Film** contains typed durations, cues, asset references, and content start rules without exposing syntax-layer attributes.
 - **Timeline IR** contains exact frame intervals and provenance for every timing decision.
 - **Render Graph** records pixel, media, transition, history, global-layer, and audio dependencies.
 - **Execution Plan** contains immutable work units, environments, dependencies, output intervals, evaluation intervals, and cache keys.
@@ -46,7 +48,9 @@ freeze inputs → probe media → compile → bundle → render graph
   → partition → capture/encode → mix audio → verify/assemble
 ```
 
-The compiler performs parse, bind, validate, solve, and lower without IO. The planner computes dependency closure before partitioning. Simple films naturally partition around shots; transitions, persistent elements, global effects, and historical shaders widen or merge units for correctness.
+The compiler performs parse, structural bind, attribute/reference resolve, validate, solve, and lower without IO. The planner computes dependency closure before partitioning. Simple films naturally partition around shots; transitions, persistent elements, global effects, and historical shaders widen or merge units for correctness.
+
+Attribute/reference resolution aggregates authored diagnostics while building its candidate output. An error withholds `ResolvedFilm` from the phase report so no recovery default can enter time solving as a compiler fact; warnings remain non-blocking.
 
 Each worker executes one state machine:
 

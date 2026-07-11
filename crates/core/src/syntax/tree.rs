@@ -255,6 +255,10 @@ impl TextNode {
     pub const fn span(&self) -> SourceSpan {
         self.span
     }
+
+    pub(crate) fn into_parts(self) -> (Box<str>, SourceSpan) {
+        (self.text, self.span)
+    }
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]

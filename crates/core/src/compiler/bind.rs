@@ -5,8 +5,8 @@ use crate::model::{ElementKind, InvalidNodeId, NodeId, SourceSpan};
 use crate::syntax::{Attribute, Element, Node, SourceDocument, TextNode};
 
 use super::linked::{
-    LinkedCue, LinkedCues, LinkedElement, LinkedFilm, LinkedNode, LinkedOverlay, LinkedScene,
-    LinkedShot, LinkedShotContent, LinkedVideo, LinkedVoiceOver,
+    LinkedCue, LinkedCues, LinkedElement, LinkedFilm, LinkedId, LinkedNode, LinkedOverlay,
+    LinkedScene, LinkedShot, LinkedShotContent, LinkedVideo, LinkedVoiceOver,
 };
 
 /// A partial linked film and every independently recoverable binding error.
@@ -285,26 +285,28 @@ impl Binder {
         LinkedElement::new(kind, id, attributes, element.span())
     }
 
-    fn bind_id(&mut self, element: &Element, kind: ElementKind) -> Option<NodeId> {
-        let attribute = id_attribute(element)?;
+    fn bind_id(&mut self, element: &Element, kind: ElementKind) -> LinkedId {
+        let Some(attribute) = id_attribute(element) else {
+            return LinkedId::Missing;
+        };
         let id = match NodeId::parse(attribute.value()) {
             Ok(id) => id,
             Err(reason) => {
                 self.diagnostics
                     .push(invalid_node_id(attribute, kind, reason));
-                return None;
+                return LinkedId::Rejected;
             }
         };
 
         if let Some(first) = self.ids.get(&id) {
             self.diagnostics
                 .push(duplicate_node_id(attribute, kind, &id, first.span()));
-            return None;
+            return LinkedId::Rejected;
         }
 
         self.ids
             .insert(id.clone(), LinkedNode::new(kind, attribute.value_span()));
-        Some(id)
+        LinkedId::Valid(id)
     }
 }
 

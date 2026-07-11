@@ -1,0 +1,17 @@
+# onmark resolution test rendering; not a wire format
+film id=-
+  cues id=-
+    cue id=offer id@0:29..34 time=3s time@0:42..44
+    cue id=cta id@0:62..65 time=7s time@0:73..75
+  scene id=sale
+    shot id=hero duration=-
+      video id=- src=product.mp4 delay=-
+      title id=- start=cue:offer
+        text "30% OFF" @0:190..197
+      cta id=- start=cue:cta
+        text "Buy now" @0:227..234
+index
+  cta -> cue @0:62..65
+  hero -> shot @0:124..128
+  offer -> cue @0:29..34
+  sale -> scene @0:103..107

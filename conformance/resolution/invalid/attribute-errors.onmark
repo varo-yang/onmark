@@ -1,0 +1,16 @@
+<film bogus="x">
+  <cues>
+    <cue id="used" time="1s" />
+    <cue id="unused" time="2s" />
+    <cue id="bad-time" time="1.0000000000s" />
+    <cue id="missing-time" />
+    <cue time="4s" />
+  </cues>
+  <scene>
+    <shot duration="3frames">
+      <video src="" delay="1.0000001ms" mystery="x" />
+      <title cue="missing" delay="1s" strange="x">Broken</title>
+      <cta cue="used">Used</cta>
+    </shot>
+  </scene>
+</film>

@@ -7,7 +7,7 @@ use crate::syntax::{Attribute, TextNode};
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LinkedElement {
     kind: ElementKind,
-    id: Option<NodeId>,
+    id: LinkedId,
     attributes: Vec<Attribute>,
     span: SourceSpan,
 }
@@ -15,7 +15,7 @@ pub struct LinkedElement {
 impl LinkedElement {
     pub(super) const fn new(
         kind: ElementKind,
-        id: Option<NodeId>,
+        id: LinkedId,
         attributes: Vec<Attribute>,
         span: SourceSpan,
     ) -> Self {
@@ -36,19 +36,44 @@ impl LinkedElement {
     /// Returns the valid, film-unique ID when one was authored.
     #[must_use]
     pub const fn id(&self) -> Option<&NodeId> {
-        self.id.as_ref()
-    }
-
-    /// Returns non-ID attributes for later binding phases.
-    #[must_use]
-    pub fn attributes(&self) -> &[Attribute] {
-        &self.attributes
+        self.id.as_node_id()
     }
 
     /// Returns the complete authored element span.
     #[must_use]
     pub const fn span(&self) -> SourceSpan {
         self.span
+    }
+
+    pub(super) fn into_parts(self) -> (ElementKind, LinkedId, Vec<Attribute>, SourceSpan) {
+        (self.kind, self.id, self.attributes, self.span)
+    }
+}
+
+/// Outcome of binding an optional authored ID.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) enum LinkedId {
+    /// No ID attribute was authored.
+    Missing,
+    /// An authored ID was invalid or duplicated and already diagnosed.
+    Rejected,
+    /// The ID is valid and unique within the film.
+    Valid(NodeId),
+}
+
+impl LinkedId {
+    const fn as_node_id(&self) -> Option<&NodeId> {
+        match self {
+            Self::Valid(id) => Some(id),
+            Self::Missing | Self::Rejected => None,
+        }
+    }
+
+    pub(super) fn into_node_id(self) -> Option<NodeId> {
+        match self {
+            Self::Valid(id) => Some(id),
+            Self::Missing | Self::Rejected => None,
+        }
     }
 }
 
@@ -94,6 +119,17 @@ impl LinkedFilm {
     #[must_use]
     pub fn ids(&self) -> impl ExactSizeIterator<Item = (&NodeId, &LinkedNode)> {
         self.ids.iter()
+    }
+
+    pub(super) fn into_parts(
+        self,
+    ) -> (
+        LinkedElement,
+        Option<LinkedCues>,
+        Vec<LinkedScene>,
+        BTreeMap<NodeId, LinkedNode>,
+    ) {
+        (self.element, self.cues, self.scenes, self.ids)
     }
 }
 
@@ -142,6 +178,10 @@ impl LinkedCues {
     pub fn cues(&self) -> &[LinkedCue] {
         &self.cues
     }
+
+    pub(super) fn into_parts(self) -> (LinkedElement, Vec<LinkedCue>) {
+        (self.element, self.cues)
+    }
 }
 
 /// One named event declaration before its time value is parsed.
@@ -158,6 +198,10 @@ impl LinkedCue {
     #[must_use]
     pub const fn element(&self) -> &LinkedElement {
         &self.element
+    }
+
+    pub(super) fn into_element(self) -> LinkedElement {
+        self.element
     }
 }
 
@@ -182,6 +226,10 @@ impl LinkedScene {
     pub fn shots(&self) -> &[LinkedShot] {
         &self.shots
     }
+
+    pub(super) fn into_parts(self) -> (LinkedElement, Vec<LinkedShot>) {
+        (self.element, self.shots)
+    }
 }
 
 /// One sequential shot and its authored content order.
@@ -204,6 +252,10 @@ impl LinkedShot {
     #[must_use]
     pub fn content(&self) -> &[LinkedShotContent] {
         &self.content
+    }
+
+    pub(super) fn into_parts(self) -> (LinkedElement, Vec<LinkedShotContent>) {
+        (self.element, self.content)
     }
 }
 
@@ -230,6 +282,10 @@ impl LinkedVideo {
     pub const fn element(&self) -> &LinkedElement {
         &self.element
     }
+
+    pub(super) fn into_element(self) -> LinkedElement {
+        self.element
+    }
 }
 
 /// Authored voice-over text before media attributes are resolved.
@@ -249,9 +305,8 @@ impl LinkedVoiceOver {
         &self.element
     }
 
-    #[must_use]
-    pub fn text(&self) -> &[TextNode] {
-        &self.text
+    pub(super) fn into_parts(self) -> (LinkedElement, Vec<TextNode>) {
+        (self.element, self.text)
     }
 }
 
@@ -272,8 +327,7 @@ impl LinkedOverlay {
         &self.element
     }
 
-    #[must_use]
-    pub fn text(&self) -> &[TextNode] {
-        &self.text
+    pub(super) fn into_parts(self) -> (LinkedElement, Vec<TextNode>) {
+        (self.element, self.text)
     }
 }

@@ -52,6 +52,8 @@ Text and attribute values support the five predefined XML entities (`amp`, `lt`,
 
 ## Time
 
+Authored durations use the exact grammar `integer[.fraction](s|ms)` with no whitespace or sign. Seconds admit at most nine fractional digits and milliseconds at most six, so every accepted value has an exact unsigned nanosecond representation. Frame units and floating-point approximations are not part of the language.
+
 A shot obtains duration from probed media, probed voice-over, a restricted explicit duration when content provides none, or an ending event. Multiple primary content sources extend the shot to the longest source. Overlay elements do not silently extend their shot.
 
 Two explicit relationships exist initially:
@@ -71,6 +73,10 @@ All resolutions preserve provenance in `TimingReason`, allowing the compiler to 
 
 Explicit IDs, including cue IDs, are non-empty, case-sensitive, and globally unique within one film. In keeping with the HTML `id` constraint, they may not contain ASCII whitespace. Non-ASCII characters are preserved exactly; the compiler does not silently normalize authored IDs. A later typed `CueId` or `EventRef` distinguishes cue references without creating a second declaration namespace.
 
+## Attributes and resolution
+
+Structural binding is followed by attribute and reference resolution. `film`, `cues`, and `scene` admit no non-ID attributes. `cue` requires `id` and `time`. `shot` admits optional `duration`. `video` and `vo` admit optional `src` and `delay`; `title` and `cta` admit optional `cue` or `delay`. `cue` and `delay` cannot appear together on one overlay because they define competing start rules. Missing media `src` remains valid for static analysis; an authored empty `src` is invalid. Unknown attributes are errors.
+
 ## Diagnostics
 
 Diagnostics contain a stable code, severity, source span, message, actionable help, and related spans. They use screenplay vocabulary rather than solver internals and aggregate independent authored errors when safe.
@@ -87,7 +93,7 @@ Initial markup diagnostics are:
 | `ONM-SYNTAX-006` | a closing tag appears without an open element |
 | `ONM-SYNTAX-007` | an XML declaration, processing instruction, or document type is unsupported |
 
-Initial structural-binding diagnostics are:
+Initial binding and resolution diagnostics are:
 
 | Code | Meaning |
 | --- | --- |
@@ -99,6 +105,15 @@ Initial structural-binding diagnostics are:
 | `ONM-STRUCT-004` | a known element appears outside its legal parent |
 | `ONM-STRUCT-005` | a film contains more than one `cues` container |
 | `ONM-STRUCT-006` | authored text appears in a structural or empty element |
+| `ONM-TIME-001` | an authored duration is invalid or outside the exact range |
+| `ONM-REF-001` | an overlay cue reference does not name a resolved cue |
+| `ONM-REF-002` | a resolved cue is never referenced |
+| `ONM-ATTR-001` | an element contains an unknown attribute |
+| `ONM-ATTR-002` | an element is missing a required attribute |
+| `ONM-ATTR-003` | an authored attribute value is invalid |
+| `ONM-ATTR-004` | two authored attributes define conflicting rules |
+
+`ONM-REF-002` is a warning; the other initial binding and resolution diagnostics are errors.
 
 The tokenizer stops after a fatal lexical error, so lexical recovery may produce one diagnostic. Onmark continues to aggregate independent nesting, binding, and semantic diagnostics whenever the remaining structure is trustworthy. At end of input, every still-open element receives one diagnostic whose primary span is its opening name and whose related span marks the end of the screenplay. A document type declaration produces one diagnostic even when the tokenizer exposes its internal subset as several tokens.
 

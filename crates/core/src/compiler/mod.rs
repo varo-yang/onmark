@@ -10,12 +10,19 @@
 //!
 //! let bound = compiler::bind(document);
 //! assert!(bound.diagnostics().is_empty());
-//! assert!(bound.film().is_some());
+//! let (film, binding_diagnostics) = bound.into_parts();
+//! assert!(binding_diagnostics.is_empty());
+//!
+//! let resolved = compiler::resolve(film.expect("the source contains one film"));
+//! assert!(resolved.diagnostics().is_empty());
+//! assert!(resolved.film().is_some());
 //! ```
 
 mod bind;
 mod linked;
 mod parse;
+mod resolve;
+mod resolved_film;
 
 pub use bind::{BindReport, bind};
 pub use linked::{
@@ -23,3 +30,9 @@ pub use linked::{
     LinkedShot, LinkedShotContent, LinkedVideo, LinkedVoiceOver,
 };
 pub use parse::{ParseReport, parse};
+pub use resolve::{ResolveReport, resolve};
+pub use resolved_film::{
+    Authored, ResolvedCue, ResolvedCues, ResolvedElement, ResolvedFilm, ResolvedNode,
+    ResolvedOverlay, ResolvedScene, ResolvedShot, ResolvedShotContent, ResolvedStart, ResolvedText,
+    ResolvedVideo, ResolvedVoiceOver,
+};

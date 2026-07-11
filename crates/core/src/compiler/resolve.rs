@@ -1,0 +1,501 @@
+use std::collections::{BTreeMap, BTreeSet};
+
+use crate::diagnostics::{Diagnostic, DiagnosticCode, Diagnostics};
+use crate::model::{
+    AssetRef, CueId, Duration, ElementKind, EventRef, InvalidAssetRef, InvalidDuration, NodeId,
+    SourceSpan,
+};
+use crate::syntax::{Attribute, TextNode};
+
+use super::linked::{
+    LinkedCue, LinkedCues, LinkedElement, LinkedFilm, LinkedId, LinkedNode, LinkedOverlay,
+    LinkedScene, LinkedShot, LinkedShotContent, LinkedVideo, LinkedVoiceOver,
+};
+use super::resolved_film::{
+    Authored, ResolvedCue, ResolvedCues, ResolvedElement, ResolvedFilm, ResolvedNode,
+    ResolvedOverlay, ResolvedScene, ResolvedShot, ResolvedShotContent, ResolvedStart, ResolvedText,
+    ResolvedVideo, ResolvedVoiceOver,
+};
+
+/// Optional typed attribute/reference output and its authored diagnostics.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ResolveReport {
+    film: Option<ResolvedFilm>,
+    diagnostics: Diagnostics,
+}
+
+impl ResolveReport {
+    /// Returns the resolved film when no error diagnostic was produced.
+    #[must_use]
+    pub const fn film(&self) -> Option<&ResolvedFilm> {
+        self.film.as_ref()
+    }
+
+    /// Returns all authored diagnostics produced during resolution.
+    #[must_use]
+    pub const fn diagnostics(&self) -> &Diagnostics {
+        &self.diagnostics
+    }
+
+    /// Returns the optional resolved film and its authored diagnostics.
+    #[must_use]
+    pub fn into_parts(self) -> (Option<ResolvedFilm>, Diagnostics) {
+        (self.film, self.diagnostics)
+    }
+}
+
+/// Resolves every remaining authored attribute without performing IO.
+///
+/// Error diagnostics withhold the resolved film; warnings remain non-blocking.
+#[must_use]
+pub fn resolve(film: LinkedFilm) -> ResolveReport {
+    Resolver::resolve(film)
+}
+
+struct Resolver {
+    cue_table: BTreeMap<CueId, CueState>,
+    ids: BTreeMap<NodeId, LinkedNode>,
+    rejected_ids: BTreeSet<NodeId>,
+    diagnostics: Diagnostics,
+}
+
+impl Resolver {
+    fn new(ids: BTreeMap<NodeId, LinkedNode>) -> Self {
+        Self {
+            cue_table: BTreeMap::new(),
+            ids,
+            rejected_ids: BTreeSet::new(),
+            diagnostics: Diagnostics::new(),
+        }
+    }
+
+    fn resolve(film: LinkedFilm) -> ResolveReport {
+        let (element, cues, scenes, ids) = film.into_parts();
+        let mut resolver = Self::new(ids);
+        let element = resolver.resolve_id_only_element(element);
+        let cues = cues.map(|cues| resolver.resolve_cues(cues));
+        let scenes = scenes
+            .into_iter()
+            .map(|scene| resolver.resolve_scene(scene))
+            .collect();
+
+        resolver.report_unused_cues();
+
+        let Self {
+            ids,
+            rejected_ids,
+            diagnostics,
+            ..
+        } = resolver;
+        let ids = ids
+            .into_iter()
+            .filter(|(id, _)| !rejected_ids.contains(id))
+            .map(|(id, node)| (id, resolved_node(node)))
+            .collect();
+        let candidate = ResolvedFilm::new(element, cues, scenes, ids);
+        let film = (!diagnostics.has_errors()).then_some(candidate);
+
+        ResolveReport { film, diagnostics }
+    }
+
+    fn resolve_cues(&mut self, cues: LinkedCues) -> ResolvedCues {
+        let (element, cues) = cues.into_parts();
+        let element = self.resolve_id_only_element(element);
+        let cues = cues
+            .into_iter()
+            .filter_map(|cue| self.resolve_cue(cue))
+            .collect();
+        ResolvedCues::new(element, cues)
+    }
+
+    fn resolve_cue(&mut self, cue: LinkedCue) -> Option<ResolvedCue> {
+        let input = ElementInput::new(cue.into_element());
+        let mut attributes = input.attributes;
+        let time = attributes.take("time");
+        attributes.reject_unknown(input.kind, &mut self.diagnostics);
+
+        let id = match input.id {
+            LinkedId::Valid(id) => Some(id),
+            LinkedId::Missing => {
+                self.diagnostics
+                    .push(missing_attribute(input.kind, "id", input.span));
+                None
+            }
+            LinkedId::Rejected => None,
+        };
+        let time = if let Some(attribute) = time {
+            self.resolve_duration(&attribute)
+        } else {
+            self.diagnostics
+                .push(missing_attribute(input.kind, "time", input.span));
+            None
+        };
+
+        let id = id?;
+        let Some(time) = time else {
+            self.rejected_ids.insert(id);
+            return None;
+        };
+
+        let declared_at = self
+            .ids
+            .get(&id)
+            .expect("every bound ID has an index entry")
+            .span();
+        let id = CueId::from(id);
+        // The resolved tree and lookup table independently own stable cue
+        // identity; neither borrows from the other phase output.
+        self.cue_table.insert(
+            id.clone(),
+            CueState {
+                declared_at,
+                used: false,
+            },
+        );
+
+        Some(ResolvedCue::new(
+            Authored::new(id, declared_at),
+            time,
+            input.span,
+        ))
+    }
+
+    fn resolve_scene(&mut self, scene: LinkedScene) -> ResolvedScene {
+        let (element, shots) = scene.into_parts();
+        let element = self.resolve_id_only_element(element);
+        let shots = shots
+            .into_iter()
+            .map(|shot| self.resolve_shot(shot))
+            .collect();
+        ResolvedScene::new(element, shots)
+    }
+
+    fn resolve_shot(&mut self, shot: LinkedShot) -> ResolvedShot {
+        let (element, content) = shot.into_parts();
+        let input = ElementInput::new(element);
+        let (element, mut attributes) = input.into_resolved_parts();
+        let duration = attributes
+            .take("duration")
+            .and_then(|attribute| self.resolve_duration(&attribute));
+        attributes.reject_unknown(element.kind(), &mut self.diagnostics);
+        let content = content
+            .into_iter()
+            .map(|content| self.resolve_content(content))
+            .collect();
+        ResolvedShot::new(element, duration, content)
+    }
+
+    fn resolve_content(&mut self, content: LinkedShotContent) -> ResolvedShotContent {
+        match content {
+            LinkedShotContent::Video(video) => {
+                ResolvedShotContent::Video(self.resolve_video(video))
+            }
+            LinkedShotContent::VoiceOver(voice_over) => {
+                ResolvedShotContent::VoiceOver(self.resolve_voice_over(voice_over))
+            }
+            LinkedShotContent::Overlay(overlay) => {
+                ResolvedShotContent::Overlay(self.resolve_overlay(overlay))
+            }
+        }
+    }
+
+    fn resolve_video(&mut self, video: LinkedVideo) -> ResolvedVideo {
+        let input = ElementInput::new(video.into_element());
+        let (element, mut attributes) = input.into_resolved_parts();
+        let src = attributes
+            .take("src")
+            .and_then(|attribute| self.resolve_asset(&attribute));
+        let delay = attributes
+            .take("delay")
+            .and_then(|attribute| self.resolve_duration(&attribute));
+        attributes.reject_unknown(element.kind(), &mut self.diagnostics);
+        ResolvedVideo::new(element, src, delay)
+    }
+
+    fn resolve_voice_over(&mut self, voice_over: LinkedVoiceOver) -> ResolvedVoiceOver {
+        let (element, text) = voice_over.into_parts();
+        let input = ElementInput::new(element);
+        let (element, mut attributes) = input.into_resolved_parts();
+        let src = attributes
+            .take("src")
+            .and_then(|attribute| self.resolve_asset(&attribute));
+        let delay = attributes
+            .take("delay")
+            .and_then(|attribute| self.resolve_duration(&attribute));
+        attributes.reject_unknown(element.kind(), &mut self.diagnostics);
+        ResolvedVoiceOver::new(element, src, delay, resolve_text(text))
+    }
+
+    fn resolve_overlay(&mut self, overlay: LinkedOverlay) -> ResolvedOverlay {
+        let (element, text) = overlay.into_parts();
+        let input = ElementInput::new(element);
+        let (element, mut attributes) = input.into_resolved_parts();
+        let cue = attributes.take("cue");
+        let delay = attributes.take("delay");
+        attributes.reject_unknown(element.kind(), &mut self.diagnostics);
+
+        let cue_value = cue
+            .as_ref()
+            .and_then(|attribute| self.resolve_cue_reference(attribute));
+        let delay_value = delay
+            .as_ref()
+            .and_then(|attribute| self.resolve_duration(attribute));
+        let start = match (cue, delay) {
+            (Some(cue), Some(delay)) => {
+                self.diagnostics.push(conflicting_attributes(&cue, &delay));
+                ResolvedStart::ShotStart
+            }
+            (Some(_), None) => cue_value.map_or(ResolvedStart::ShotStart, ResolvedStart::Cue),
+            (None, Some(_)) => delay_value.map_or(ResolvedStart::ShotStart, ResolvedStart::Delayed),
+            (None, None) => ResolvedStart::ShotStart,
+        };
+
+        ResolvedOverlay::new(element, start, resolve_text(text))
+    }
+
+    fn resolve_id_only_element(&mut self, element: LinkedElement) -> ResolvedElement {
+        let input = ElementInput::new(element);
+        let (element, attributes) = input.into_resolved_parts();
+        attributes.reject_unknown(element.kind(), &mut self.diagnostics);
+        element
+    }
+
+    fn resolve_duration(&mut self, attribute: &Attribute) -> Option<Authored<Duration>> {
+        match Duration::parse(attribute.value()) {
+            Ok(duration) => Some(Authored::new(duration, attribute.value_span())),
+            Err(reason) => {
+                self.diagnostics.push(invalid_duration(attribute, reason));
+                None
+            }
+        }
+    }
+
+    fn resolve_asset(&mut self, attribute: &Attribute) -> Option<Authored<AssetRef>> {
+        match AssetRef::parse(attribute.value()) {
+            Ok(asset) => Some(Authored::new(asset, attribute.value_span())),
+            Err(reason) => {
+                self.diagnostics
+                    .push(invalid_attribute_value(attribute, reason));
+                None
+            }
+        }
+    }
+
+    fn resolve_cue_reference(&mut self, attribute: &Attribute) -> Option<Authored<EventRef>> {
+        let id = CueId::parse(attribute.value()).ok();
+        let Some(id) = id else {
+            self.diagnostics.push(unknown_cue(attribute));
+            return None;
+        };
+        let Some(state) = self.cue_table.get_mut(&id) else {
+            self.diagnostics.push(unknown_cue(attribute));
+            return None;
+        };
+
+        state.used = true;
+        Some(Authored::new(EventRef::Cue(id), attribute.value_span()))
+    }
+
+    fn report_unused_cues(&mut self) {
+        for (id, state) in &self.cue_table {
+            if !state.used {
+                self.diagnostics.push(unused_cue(id, state.declared_at));
+            }
+        }
+    }
+}
+
+struct CueState {
+    declared_at: SourceSpan,
+    used: bool,
+}
+
+struct ElementInput {
+    kind: ElementKind,
+    id: LinkedId,
+    attributes: Attributes,
+    span: SourceSpan,
+}
+
+impl ElementInput {
+    fn new(element: LinkedElement) -> Self {
+        let (kind, id, attributes, span) = element.into_parts();
+        Self {
+            kind,
+            id,
+            attributes: Attributes(attributes),
+            span,
+        }
+    }
+
+    fn into_resolved_parts(self) -> (ResolvedElement, Attributes) {
+        (
+            ResolvedElement::new(self.kind, self.id.into_node_id(), self.span),
+            self.attributes,
+        )
+    }
+}
+
+struct Attributes(Vec<Attribute>);
+
+impl Attributes {
+    fn take(&mut self, name: &str) -> Option<Attribute> {
+        let index = self.0.iter().position(|attribute| {
+            attribute.name().prefix().is_none() && attribute.name().local() == name
+        })?;
+        Some(self.0.remove(index))
+    }
+
+    fn reject_unknown(self, kind: ElementKind, diagnostics: &mut Diagnostics) {
+        for attribute in self.0 {
+            diagnostics.push(unknown_attribute(&attribute, kind));
+        }
+    }
+}
+
+fn resolve_text(text: Vec<TextNode>) -> Vec<ResolvedText> {
+    text.into_iter()
+        .map(|text| {
+            let (text, span) = text.into_parts();
+            ResolvedText::new(text, span)
+        })
+        .collect()
+}
+
+fn resolved_node(node: LinkedNode) -> ResolvedNode {
+    ResolvedNode::new(node.kind(), node.span())
+}
+
+fn invalid_duration(attribute: &Attribute, reason: InvalidDuration) -> Diagnostic {
+    Diagnostic::new(
+        DiagnosticCode::InvalidDuration,
+        attribute.value_span(),
+        format!("duration \"{}\" is invalid: {reason}", attribute.value()),
+    )
+    .expect("a formatted duration message is non-blank")
+    .with_help("use an exact duration such as 3s, 500ms, or 1.5s")
+    .expect("the static duration help is non-blank")
+}
+
+fn unknown_cue(attribute: &Attribute) -> Diagnostic {
+    Diagnostic::new(
+        DiagnosticCode::UnknownCueReference,
+        attribute.value_span(),
+        format!(
+            "cue \"{}\" is not declared as a resolved event",
+            attribute.value()
+        ),
+    )
+    .expect("a formatted cue-reference message is non-blank")
+    .with_help("declare this cue with a valid id and time, or use another cue")
+    .expect("the static cue-reference help is non-blank")
+}
+
+fn unused_cue(id: &CueId, primary: SourceSpan) -> Diagnostic {
+    Diagnostic::new(
+        DiagnosticCode::UnusedCue,
+        primary,
+        format!("cue \"{id}\" is never referenced"),
+    )
+    .expect("a formatted unused-cue message is non-blank")
+    .with_help("remove the cue or reference it from an overlay")
+    .expect("the static unused-cue help is non-blank")
+}
+
+fn unknown_attribute(attribute: &Attribute, kind: ElementKind) -> Diagnostic {
+    Diagnostic::new(
+        DiagnosticCode::UnknownAttribute,
+        attribute.name().span(),
+        format!(
+            "attribute \"{}\" is not allowed on <{kind}>",
+            attribute.name()
+        ),
+    )
+    .expect("a formatted unknown-attribute message is non-blank")
+    .with_help(format!("remove the \"{}\" attribute", attribute.name()))
+    .expect("a formatted unknown-attribute help is non-blank")
+}
+
+fn missing_attribute(kind: ElementKind, name: &str, primary: SourceSpan) -> Diagnostic {
+    Diagnostic::new(
+        DiagnosticCode::MissingRequiredAttribute,
+        primary,
+        format!("element <{kind}> requires the \"{name}\" attribute"),
+    )
+    .expect("a formatted missing-attribute message is non-blank")
+    .with_help(format!("add {name}=\"...\" to <{kind}>"))
+    .expect("a formatted missing-attribute help is non-blank")
+}
+
+fn invalid_attribute_value(attribute: &Attribute, reason: InvalidAssetRef) -> Diagnostic {
+    Diagnostic::new(
+        DiagnosticCode::InvalidAttributeValue,
+        attribute.value_span(),
+        format!("attribute \"{}\" is invalid: {reason}", attribute.name()),
+    )
+    .expect("a formatted invalid-attribute message is non-blank")
+    .with_help(format!(
+        "provide a non-empty value for \"{}\"",
+        attribute.name()
+    ))
+    .expect("a formatted invalid-attribute help is non-blank")
+}
+
+fn conflicting_attributes(first: &Attribute, second: &Attribute) -> Diagnostic {
+    let (first, second) = if first.span() <= second.span() {
+        (first, second)
+    } else {
+        (second, first)
+    };
+    Diagnostic::new(
+        DiagnosticCode::ConflictingAttributes,
+        second.name().span(),
+        format!(
+            "attributes \"{}\" and \"{}\" define conflicting start rules",
+            first.name(),
+            second.name(),
+        ),
+    )
+    .expect("a formatted conflicting-attributes message is non-blank")
+    .with_help(format!(
+        "keep either \"{}\" or \"{}\", not both",
+        first.name(),
+        second.name()
+    ))
+    .expect("a formatted conflicting-attributes help is non-blank")
+    .with_related(
+        first.name().span(),
+        format!("\"{}\" is first authored here", first.name()),
+    )
+    .expect("a formatted related message is non-blank")
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::compiler;
+    use crate::diagnostics::{Diagnostic, DiagnosticCode};
+    use crate::model::SourceId;
+
+    #[test]
+    fn warnings_preserve_the_resolved_film() {
+        let source = r#"<film><cues><cue id="unused" time="1s" /></cues></film>"#;
+        let parsed = compiler::parse(SourceId::new(0), source);
+        let (document, syntax_diagnostics) = parsed.into_parts();
+        assert!(syntax_diagnostics.is_empty());
+
+        let bound = compiler::bind(document);
+        let (film, binding_diagnostics) = bound.into_parts();
+        assert!(binding_diagnostics.is_empty());
+
+        let report = super::resolve(film.expect("the fixture has one film"));
+        let codes = report
+            .diagnostics()
+            .iter()
+            .map(Diagnostic::code)
+            .collect::<Vec<_>>();
+
+        assert_eq!(codes, [DiagnosticCode::UnusedCue]);
+        assert!(!report.diagnostics().has_errors());
+        assert!(report.film().is_some());
+    }
+}

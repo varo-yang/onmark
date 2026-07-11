@@ -2,19 +2,12 @@
 film id=-
   cues id=-
     cue id=offer
-      attribute time="3s" @0:36..45 value@0:42..44
     cue id=cta
-      attribute time="7s" @0:67..76 value@0:73..75
   scene id=sale
     shot id=hero
       video id=-
-        attribute src="product.mp4" @0:144..161 value@0:149..160
       title id=-
-        attribute cue="offer" @0:178..189 value@0:183..188
-        text "30% OFF" @0:190..197
       cta id=-
-        attribute cue="cta" @0:217..226 value@0:222..225
-        text "Buy now" @0:227..234
 index
   cta -> cue @0:62..65
   hero -> shot @0:124..128
