@@ -331,7 +331,7 @@ onmark/
 └── docs/
 ```
 
-当前里程碑只有 `onmark-core`。Gate 一在对应行为首次被真实消费时再加入另外三个 Rust crate：
+当前里程碑包含 `onmark-core` 与 `onmark-media`。Gate 一在对应行为首次被真实消费时再加入 `onmark-render` 与 `onmark-cli`：
 
 - `onmark-core` 是纯内核，内部用 `syntax`、`diagnostics`、`model`、`compiler`、`timeline`、`protocol` 模块保持结构；
 - `onmark-media` 只负责素材探测和规范化 metadata，使服务端 compile/lint 修正循环能够使用 `core + media` 而不链接 Chromium；
@@ -369,6 +369,8 @@ protocol    → diagnostics + timeline + model
 `syntax` 不得依赖 compiler，`timeline` 不得依赖 syntax，领域模块不得反向依赖 protocol。CI 使用 `syn` 对显式 Rust path 做语法感知检查。这是一条协作式护栏，覆盖普通路径、import、alias 和 re-export，但不覆盖宏内部生成的路径，也不等价于 rustc 的完整名字解析；这些边仍由评审负责。任何新增内部边必须先更新本文。
 
 `onmark-core` 只允许 `syntax` 使用 `xmlparser` 做纯计算、保留 span 的 XML-compatible fragment tokenization。树构建、嵌套检查、重复属性检查、引用解码和全部创作语义由 Onmark 自己拥有；parser error 在 syntax 边界翻译，该依赖不执行 IO。测试 target 可以使用 `proptest` 验证时间代数，并使用 `syn` 执行协作式模块依赖律检查；二者都不会链接进库消费者或运行时产物。
+
+`onmark-media` 只依赖 core，以及用于私有 ffprobe response 边界的 `serde`/`serde_json`。它使用参数数组直接启动配置的 ffprobe executable，绝不经过 shell；退出后仍让派生进程持有输出 pipe 的 wrapper 不属于该 executable contract。在这条 direct-child 契约下，进程寿命和保留的 stdout/stderr 字节数都有显式上限，两条 pipe 并发排空；显式 shutdown 会报告 process-control failure，`Drop` 只作 best-effort termination fallback。私有 ffprobe response type 只在此边界翻译一次并产出 core-owned `AssetMetadata`；JSON value 与第三方 error type 不定义稳定 API，但底层 error 会通过标准 source chain 保留，供调试使用。
 
 校验失败原因保留为局部领域值。syntax 提供源码上下文后，由 `compiler` 模块唯一负责把 `InvalidNodeId` 等原因翻译成带源码位置的 `Diagnostic`，包括各阶段特有的 message 和 help；`diagnostics` 只拥有通用诊断表示与稳定 code。`model` 和 `syntax` 都不依赖 diagnostics，调用方也不得重复实现这层翻译。
 

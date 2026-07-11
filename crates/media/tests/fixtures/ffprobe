@@ -1,0 +1,65 @@
+#!/bin/sh
+
+if [ "$#" -ne 8 ] || \
+   [ "$1" != "-v" ] || [ "$2" != "error" ] || \
+   [ "$3" != "-show_entries" ] || [ "$4" != "format=duration" ] || \
+   [ "$5" != "-of" ] || [ "$6" != "json" ] || [ "$7" != "--" ]; then
+  printf 'unexpected ffprobe arguments\n' >&2
+  exit 2
+fi
+
+for argument do
+  input=$argument
+done
+
+case "${input##*/}" in
+  valid.mp4)
+    printf '{"format":{"duration":"2.500000"}}'
+    ;;
+  failed.mp4)
+    printf 'probe failed' >&2
+    exit 7
+    ;;
+  failed-tail.mp4)
+    index=0
+    while [ "$index" -lt 1024 ]; do
+      printf '0123456789abcdef' >&2
+      index=$((index + 1))
+    done
+    printf 'final probe failure' >&2
+    exit 7
+    ;;
+  invalid-json.mp4)
+    printf 'not json'
+    ;;
+  missing-duration.mp4)
+    printf '{"format":{}}'
+    ;;
+  invalid-duration.mp4)
+    printf '{"format":{"duration":"N/A"}}'
+    ;;
+  slow.mp4)
+    while :; do
+      :
+    done
+    ;;
+  large.mp4)
+    index=0
+    while [ "$index" -lt 8192 ]; do
+      printf '0123456789abcdef'
+      index=$((index + 1))
+    done
+    ;;
+  large-stderr.mp4)
+    index=0
+    while [ "$index" -lt 8192 ]; do
+      printf '0123456789abcdef' >&2
+      index=$((index + 1))
+    done
+    printf '{"format":{"duration":"1.000000"}}'
+    ;;
+  *)
+    printf 'unexpected fixture input: %s\n' "$input" >&2
+    exit 2
+    ;;
+esac
