@@ -13,6 +13,7 @@ Read only the documents relevant to the task:
 | Elements, attributes, timing, cue semantics, diagnostics, language evals | `docs/en/language-specification.md` |
 | New crate/package, dependency, process boundary, render pipeline, cache, deployment | `docs/en/architecture.md` |
 | Any Rust implementation or review | `docs/en/rust-style-guide.md` |
+| Any TypeScript/JavaScript implementation, generator, or review | `docs/en/typescript-style-guide.md` |
 | Chinese design discussion or details not yet expanded in English | matching file under `docs/zh-CN/` |
 
 When code and design documents disagree, stop and surface the conflict. Do not silently choose one.
@@ -60,6 +61,7 @@ Rust wire types generate checked-in schemas and TypeScript codecs. Generated fil
 
 - Code, identifiers, comments, public docs, and commit subjects use English. Chinese mirrors may carry fuller early design discussion.
 - Rust follows `docs/en/rust-style-guide.md`: rectangular functions, tree-shaped modules, linear pipelines.
+- TypeScript and JavaScript follow `docs/en/typescript-style-guide.md`: block-shaped control flow, explicit effects, bounded async work.
 - A language behavior change updates the language specification and adds conformance fixtures.
 - A pipeline or package-boundary change updates the architecture document.
 - The first step of a bug fix is a failing focused test or fixture.

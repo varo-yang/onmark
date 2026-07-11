@@ -7,7 +7,7 @@ use onmark_core::compiler;
 use onmark_core::model::{AssetMetadata, AssetRef, Duration, FrameRate, SourceId, Timebase};
 use onmark_core::protocol::{
     BrowserCommand, BrowserEvent, BrowserPlan, BrowserRequest, BrowserResponse, ProtocolFailure,
-    ProtocolFailureCode, RequestId, StateHash, WireFrame,
+    ProtocolFailureCode, RequestId, WireFrame,
 };
 
 use conformance::{assert_or_update, fixture};
@@ -49,14 +49,7 @@ fn gate_one_browser_responses_match_the_versioned_wire_contract() {
                 evaluation_start: WireFrame::new(0).expect("zero is browser-safe"),
             },
         ),
-        BrowserResponse::new(
-            RequestId::new(3),
-            BrowserEvent::FrameReady {
-                frame,
-                state_hash: StateHash::parse(&"0".repeat(64))
-                    .expect("the fixture hash is canonical"),
-            },
-        ),
+        BrowserResponse::new(RequestId::new(3), BrowserEvent::FrameReady { frame }),
         BrowserResponse::new(
             RequestId::new(3),
             BrowserEvent::Failed(

@@ -188,8 +188,6 @@ pub enum BrowserEvent {
     FrameReady {
         /// Exact frame now represented by browser state.
         frame: WireFrame,
-        /// Canonical hash of runtime-owned state for this frame.
-        state_hash: StateHash,
     },
     /// The browser rejected a command or could not reach readiness.
     Failed(ProtocolFailure),
@@ -329,78 +327,9 @@ pub enum ProtocolFailureCode {
     Internal,
 }
 
-/// Canonical lowercase SHA-256 spelling of runtime-owned frame state.
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
-#[serde(transparent)]
-pub struct StateHash(
-    #[cfg_attr(feature = "schema", schemars(regex(pattern = "^[0-9a-f]{64}$")))] Box<str>,
-);
-
-impl StateHash {
-    /// Parses one canonical lowercase SHA-256 spelling.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`InvalidStateHash`] unless the value contains exactly 64
-    /// lowercase hexadecimal ASCII digits.
-    pub fn parse(value: &str) -> Result<Self, InvalidStateHash> {
-        if value.len() != 64 {
-            return Err(InvalidStateHash::InvalidLength);
-        }
-        if !value
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-        {
-            return Err(InvalidStateHash::NonCanonicalDigit);
-        }
-        Ok(Self(Box::from(value)))
-    }
-
-    /// Returns the canonical hexadecimal spelling.
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl<'de> Deserialize<'de> for StateHash {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let value = Box::<str>::deserialize(deserializer)?;
-        Self::parse(&value).map_err(D::Error::custom)
-    }
-}
-
-/// Reason a browser state hash spelling is not canonical.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum InvalidStateHash {
-    /// SHA-256 hexadecimal output must contain exactly 64 digits.
-    InvalidLength,
-    /// Only lowercase hexadecimal ASCII digits are accepted.
-    NonCanonicalDigit,
-}
-
-impl fmt::Display for InvalidStateHash {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let message = match self {
-            Self::InvalidLength => "state hash must contain exactly 64 hexadecimal digits",
-            Self::NonCanonicalDigit => "state hash must use lowercase hexadecimal ASCII digits",
-        };
-        formatter.write_str(message)
-    }
-}
-
-impl Error for InvalidStateHash {}
-
 #[cfg(test)]
 mod tests {
-    use super::{
-        BrowserResponse, InvalidProtocolFailure, InvalidStateHash, ProtocolFailure,
-        ProtocolFailureCode, StateHash,
-    };
+    use super::{BrowserResponse, InvalidProtocolFailure, ProtocolFailure, ProtocolFailureCode};
 
     #[test]
     fn rejects_an_unsupported_deserialized_protocol_version() {
@@ -420,6 +349,19 @@ mod tests {
             "event": {
                 "type": "frameReady",
                 "frame": 9_007_199_254_740_992_u64,
+            },
+        });
+        assert!(serde_json::from_value::<BrowserResponse>(encoded).is_err());
+    }
+
+    #[test]
+    fn rejects_the_removed_runtime_state_hash() {
+        let encoded = serde_json::json!({
+            "version": 1,
+            "requestId": 1,
+            "event": {
+                "type": "frameReady",
+                "frame": 15,
                 "stateHash": "0".repeat(64),
             },
         });
@@ -454,18 +396,6 @@ mod tests {
                 vec![Box::from("\t")],
             ),
             Err(InvalidProtocolFailure::BlankPendingResource(0)),
-        );
-    }
-
-    #[test]
-    fn rejects_noncanonical_state_hashes() {
-        assert_eq!(
-            StateHash::parse("abc"),
-            Err(InvalidStateHash::InvalidLength)
-        );
-        assert_eq!(
-            StateHash::parse(&"A".repeat(64)),
-            Err(InvalidStateHash::NonCanonicalDigit),
         );
     }
 }

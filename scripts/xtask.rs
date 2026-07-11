@@ -23,7 +23,7 @@ fn run() -> Result<(), Box<dyn Error>> {
     let command = Command::parse(env::args().skip(1))?;
     let repository = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
-        .expect("xtask is nested directly below the repository root");
+        .expect("scripts is nested directly below the repository root");
 
     match command {
         Command::Schema(mode) => generate_protocol(repository, mode),
@@ -55,7 +55,7 @@ fn generate_protocol(repository: &Path, mode: GenerationMode) -> Result<(), Box<
 fn generate_typescript(repository: &Path, mode: GenerationMode) -> Result<(), Box<dyn Error>> {
     let mut command = ProcessCommand::new("node");
     command
-        .arg(repository.join("xtask/protocol-codegen.mjs"))
+        .arg(repository.join("scripts/protocol-codegen.mjs"))
         .current_dir(repository);
     if mode == GenerationMode::Check {
         command.arg("--check");

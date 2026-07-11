@@ -1,0 +1,5 @@
+<film>
+  <scene>
+    <shot duration="3s" until="ending" begin="1s" end="2s" />
+  </scene>
+</film>

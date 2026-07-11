@@ -1,6 +1,6 @@
 # Onmark Language Specification
 
-> Status: semantic draft. Stable semantics are separated from provisional surface spelling.
+> Status: Gate-one language contract. Deferred capabilities are listed explicitly.
 
 ## Purpose
 
@@ -40,7 +40,7 @@ Illustrative syntax:
 </film>
 ```
 
-The semantic commitment is alignment to a named cue. The final attribute spelling remains provisional until generation experiments validate it. Free-form `begin/end` expressions are not part of the default language.
+`cue="offer"` is the Gate-one spelling for aligning an overlay to a named cue. Free-form `begin`, `end`, and `until` expressions are not part of the language.
 
 ## Markup syntax
 
@@ -56,16 +56,16 @@ Authored durations use the exact grammar `integer[.fraction](s|ms)` with no whit
 
 The compiler maps exact nanosecond values onto a rational frame grid with integer arithmetic. Every conversion names either floor or ceiling rounding at its call site; no implicit cast or ambient default may choose a frame boundary. Gate-one authored starts, delays, cue times, and durations select the first frame boundary that is not earlier than the exact value (`Ceil`), so a positive sub-frame value never silently becomes zero frames. `Floor` remains available only for rules that explicitly require attribution to an earlier boundary.
 
-A shot obtains duration from probed media, probed voice-over, a restricted explicit duration when content provides none, or an ending event. Multiple primary content sources extend the shot to the longest source. Overlay elements do not silently extend their shot.
+A shot obtains duration from probed media, probed voice-over, or a restricted explicit duration when content provides none. Multiple primary content sources extend the shot to the longest source. Gate one does not allow a shot to end at a cue. Overlay elements do not silently extend their shot.
 
-Two explicit relationships exist initially:
+Gate one has two explicit relationships:
 
 - `delay` is relative to the owning shot's start;
-- a named cue aligns an element to an authored event.
+- a named cue aligns an overlay to an authored absolute film event.
 
 An overlay starts at its resolved relationship, or at the owning shot's start when none is authored, and remains active until that shot's exclusive end. Gate one gives overlays no independent default duration. An overlay therefore cannot extend its shot, and a resolved start outside the owning shot is an authored timing error.
 
-Initial cues use absolute film time. Later cue sources may include beats, media markers, semantic node boundaries, or a frozen upstream event table while sharing the same internal `EventRef` model.
+Gate-one cues use authored absolute film time. No other cue source is part of the current language.
 
 All resolutions preserve provenance in `TimingReason`, allowing the compiler to explain not only where an element landed but why.
 
@@ -141,11 +141,13 @@ constraint graph node 17 is unsatisfied
 
 ## Deferred capabilities
 
-Free `begin/end` expressions, negative offsets, general flex constraints, runtime branches, speed ramps, reverse playback, audio-reactive behavior, cross-scene persistence, content-aware transitions, and online media generation remain outside v0 until their semantics and generation reliability are tested.
+Free `begin/end/until` expressions, shots ending at cues, generated cues from media analysis or typed semantic boundaries, negative offsets, general flex constraints, runtime branches, speed ramps, reverse playback, audio-reactive behavior, cross-scene persistence, content-aware transitions, and online media generation remain outside Gate one until their semantics and generation reliability are tested. A future typed semantic boundary must still produce a named event; it does not reintroduce free timing attributes.
 
 ## Admission rule
 
 New syntax must represent a real domain concept, compose orthogonally with existing semantics, preserve readability, avoid contradictory states, improve or maintain generation reliability in controlled tests, and support local actionable diagnostics. Paper elegance is insufficient.
+
+Language evaluations are repository data rather than an informal result. A syntax proposal cannot change the Gate-one surface until its cases, prompts, grader, raw outputs, model settings, and comparison baseline are checked in and reproducible. CI may validate and rescore those frozen assets without calling a live model.
 
 ## Architecture boundary
 

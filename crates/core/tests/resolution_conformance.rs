@@ -33,6 +33,19 @@ fn attribute_and_reference_errors_match_stable_diagnostics() {
     assert_or_update(&expected_path, &render_diagnostics(report.diagnostics()));
 }
 
+#[test]
+fn deferred_timing_attributes_remain_outside_gate_one() {
+    let source_path = fixture("resolution", "invalid/deferred-timing-attributes.onmark");
+    let expected_path = fixture(
+        "resolution",
+        "invalid/deferred-timing-attributes.diagnostics.txt",
+    );
+    let report = resolve_fixture(&source_path);
+
+    assert!(report.film().is_none());
+    assert_or_update(&expected_path, &render_diagnostics(report.diagnostics()));
+}
+
 fn assert_valid_fixture(name: &str) {
     let source_path = fixture("resolution", &format!("valid/{name}.onmark"));
     let expected_path = fixture("resolution", &format!("valid/{name}.resolved.txt"));

@@ -10,6 +10,6 @@ mod plan;
 
 pub use message::{
     BrowserCommand, BrowserEvent, BrowserRequest, BrowserResponse, InvalidProtocolFailure,
-    InvalidStateHash, ProtocolFailure, ProtocolFailureCode, ProtocolVersion, RequestId, StateHash,
+    ProtocolFailure, ProtocolFailureCode, ProtocolVersion, RequestId,
 };
 pub use plan::{BrowserPlan, InvalidWireFrame, WireFrame, WireFrameRate, WireInterval};

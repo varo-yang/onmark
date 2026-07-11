@@ -19,10 +19,6 @@ export type BrowserEvent =
        * Exact frame now represented by browser state.
        */
       frame: number;
-      /**
-       * Canonical hash of runtime-owned state for this frame.
-       */
-      stateHash: string;
       type: "frameReady";
     }
   | {

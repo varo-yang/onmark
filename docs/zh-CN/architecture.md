@@ -229,11 +229,11 @@ timestamp = frame_index / rational_timebase
 Load(plan_fragment)
 Prepare(evaluation_start)
 Seek(frame_index)
-FrameReady(frame_index, state_hash)
+FrameReady(frame_index)
 Dispose
 ```
 
-`FrameReady` 只能在 DOM update、layout、字体、图片 decode、视频 seek、WebGL submission 和框架 microtask 稳定后返回。超时要指出未稳定资源，不能只报 `page timeout`。
+`FrameReady(frame)` 只表示稳定屏障，只能在 DOM update、layout、字体、图片 decode、视频 seek、WebGL submission 和框架 microtask 稳定后返回。native executor 收到它以后再捕获画面，并对实际消费的 raw RGBA bytes 做 hash；runtime 不发布另一份自行定义的 state hash。超时要指出未稳定资源，不能只报 `page timeout`。
 
 组件声明时间能力：
 
@@ -322,7 +322,7 @@ onmark/
 │   ├── runtime/                 # 浏览器主时钟、handshake、adapter modules
 │   ├── authoring/               # TS 类型与组件 API
 │   └── bundler/                 # Node/esbuild 与 bundle manifest
-├── xtask/                        # 仓库 schema 与 codec 生成工具
+├── scripts/                      # 仓库专用生成与质量检查
 ├── deploy/
 │   └── aws-lambda/              # 第三关再加入：image、infra、示例
 ├── schemas/
@@ -332,13 +332,15 @@ onmark/
 └── docs/
 ```
 
-当前里程碑包含 `onmark-core`、`onmark-media`，以及 `@onmark/runtime` 已生成的 protocol 边界。Gate 一在对应行为首次被真实消费时再加入 `onmark-render` 与 `onmark-cli`：
+当前里程碑包含 `onmark-core`、`onmark-media`，以及 `@onmark/runtime` 已生成的 protocol 边界与顺序 session 状态机。Gate 一在对应行为首次被真实消费时再加入 `onmark-render` 与 `onmark-cli`：
 
 - `onmark-core` 是纯内核，内部用 `syntax`、`diagnostics`、`model`、`compiler`、`timeline`、`protocol` 模块保持结构；
 - `onmark-media` 只负责素材探测和规范化 metadata，使服务端 compile/lint 修正循环能够使用 `core + media` 而不链接 Chromium；
 - `@onmark/runtime` 因为运行在浏览器中、并被 authoring 与 bundler 消费而保持独立 package；
 - `onmark-render` 是 Chromium、FFmpeg 编码和单机执行器的重型边界，它依赖 `core + media`；
 - `onmark-cli` 只负责参数、终端展示和进程组装。
+
+`evals/` 是 checked-in 的语言产品证据，不是 runtime package，也不是 CI 中调用在线模型的服务。它拥有冻结的题目、prompt、grader 规则、原始输出、模型参数和对照 baseline。只有真实实验材料可用时才加入这些资产；仓库不创建空框架，也不凭记忆伪造历史 baseline。
 
 `onmark-media` 必须独立而不能藏在 render feature 中，因为“无 Chromium 的素材探测服务”是明确消费者，同时满足依赖预算和独立消费两条判据。Feature 只表达同一包内正交能力，不能用来遮住真实存在的架构边界。
 
@@ -372,7 +374,7 @@ protocol    → diagnostics + timeline + model
 
 `onmark-core` 只允许 `syntax` 使用 `xmlparser` 做纯计算、保留 span 的 XML-compatible fragment tokenization。树构建、嵌套检查、重复属性检查、引用解码和全部创作语义由 Onmark 自己拥有；parser error 在 syntax 边界翻译，该依赖不执行 IO。测试 target 可以使用 `proptest` 验证时间代数，并使用 `syn` 执行协作式模块依赖律检查；二者都不会链接进库消费者或运行时产物。
 
-`protocol` 模块使用 `serde` 定义稳定 JSON 边界。可选的 `schema` feature 只为仓库自有的 `onmark-xtask` 构建工具暴露 `schemars`，产品 binary 不启用它。`onmark-xtask` 因为拥有独立的 build-only 依赖预算而作为 workspace binary，只由开发者与 CI 消费；它只允许依赖启用 `schema` feature 的 core、`schemars`、`serde_json` 与固定版本的 Node generator，任何产品 crate/package 都不得反向依赖它。`cargo xtask schema` 先写 versioned schema，再调用 checked-in Node generator；`json-schema-to-typescript` 生成可审阅类型，Ajv 在构建期生成 standalone validator，TypeScript 检查生成后的 package。浏览器 runtime 不在运行期动态编译 schema。精确工具版本由 lockfile 与 `mise.toml` 固定，CI 会拒绝过期生成物。
+`protocol` 模块使用 `serde` 定义稳定 JSON 边界。其可选的 `schema` feature 只为仓库生成工作暴露 `schemars`，产品 binary 不启用它。所有仓库专用自动化统一放在 `scripts/`；它既不是产品 package，也不是杂项应用层。其中的 Cargo manifest 只用于给 Rust schema generator 一份固定的 build-only 依赖预算和稳定的 `cargo xtask` 入口。这个 binary 只由开发者与 CI 消费，只允许依赖启用 `schema` feature 的 core、`schemars` 与 `serde_json`；任何产品 crate/package 都不得反向依赖它。相邻的 Node generator 可使用固定版本的 schema-to-TypeScript 与验证工具链。`cargo xtask schema` 先写 versioned schema，再调用该 generator；`json-schema-to-typescript` 生成可审阅类型，Ajv 在构建期生成 standalone validator，TypeScript 检查生成后的 package。Oxlint、窄范围 repository-shape check 与 Prettier 只作为仓库开发门禁，绝不进入 browser artifact。浏览器 runtime 不在运行期动态编译 schema。精确工具版本由 lockfile 与 `mise.toml` 固定，CI 会拒绝过期生成物。
 
 `onmark-media` 只依赖 core，以及用于私有 ffprobe response 边界的 `serde`/`serde_json`。它使用参数数组直接启动配置的 ffprobe executable，绝不经过 shell；退出后仍让派生进程持有输出 pipe 的 wrapper 不属于该 executable contract。在这条 direct-child 契约下，进程寿命和保留的 stdout/stderr 字节数都有显式上限，两条 pipe 并发排空；显式 shutdown 会报告 process-control failure，`Drop` 只作 best-effort termination fallback。私有 ffprobe response type 只在此边界翻译一次并产出 core-owned `AssetMetadata`；JSON value 与第三方 error type 不定义稳定 API，但底层 error 会通过标准 source chain 保留，供调试使用。
 
@@ -386,7 +388,7 @@ protocol    → diagnostics + timeline + model
        └──────────  @onmark/bundler
 ```
 
-`runtime` 是浏览器底座和长期稳定扩展点，拥有当前帧 hook、FrameReady 协议、`stateless/warmup/sequential` 能力声明以及 adapter contract。`authoring` 只通过 runtime 的 types-only entrypoint 使用这些公开类型，不能依赖 runtime 的副作用入口。`bundler` 注入固定 runtime artifact 并生成 manifest；runtime 永不依赖 authoring 或 bundler。
+`runtime` 是浏览器底座和长期稳定扩展点，拥有当前帧 hook、FrameReady 协议、`stateless/warmup/sequential` 能力声明以及 adapter contract。`authoring` 只通过 runtime 的 types-only entrypoint 使用这些公开类型，不能依赖 runtime 的副作用入口。`bundler` 注入固定 runtime artifact 并生成 manifest；runtime 永不依赖 authoring 或 bundler。Gate 一的 `RuntimeSession` 拥有 protocol 顺序、evaluation 边界检查与 terminal disposal；并发 command 直接拒绝，不暗中增长队列。浏览器具体工作只通过一个窄 adapter 进入，其等待必须有界，预期失败必须类型化。session contract 当前已经存在；确定性 clock 和真实 DOM/media/Chromium adapter 仍是 Gate 一待实现工作。
 
 ### AWS Lambda 是适配器，不是第二套引擎
 
@@ -419,7 +421,7 @@ decode invocation
 - Timeline IR、Execution Plan、runtime message 属于跨进程 wire protocol；
 - components、props、hooks 属于手写的 authoring API。
 
-Rust wire types 是 source of truth。`cargo xtask schema` 从它们生成 versioned JSON Schema 和 TypeScript types/codecs，CI 重新生成并要求工作树零 diff。生成结果提交进仓库，供 npm package、diff review 和非 Rust 消费者直接使用；禁止手工修改。schema version 变化必须带 migration/conformance fixture。Rust 本身直接使用原始领域/wire types，不再从 schema 反向生成第二套 Rust 类型。
+Rust wire types 是 source of truth。`cargo xtask schema` 从它们生成 versioned JSON Schema 和 TypeScript types/codecs，CI 重新生成并要求工作树零 diff。生成结果提交进仓库，供 npm package、diff review 和非 Rust 消费者直接使用；禁止手工修改。Gate 一首次对外发布之前，v1 可以原地收口，避免初始公开契约背负实验字段；一旦发布，任何不兼容 wire 变化都必须使用新 protocol version 并带 migration/conformance fixture。Rust 本身直接使用原始领域/wire types，不再从 schema 反向生成第二套 Rust 类型。
 
 Gate 一的 `BrowserPlan` 目前只携带 browser clock 已真实消费的 frame rate 与 evaluation/output interval；component 与 Render Graph 事实等 runtime 真正消费时再加入，不提前把后续 gate 塞进协议。
 

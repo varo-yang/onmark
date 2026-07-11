@@ -978,15 +978,13 @@ return errors === 0;
 validate20.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
 
 export const validateBrowserResponse = validate28;
-const schema42 = {"$defs":{"BrowserEvent":{"description":"Closed Gate-one events emitted by the browser runtime.","oneOf":[{"additionalProperties":false,"description":"The immutable browser plan was accepted.","properties":{"type":{"const":"loaded","type":"string"}},"required":["type"],"type":"object"},{"additionalProperties":false,"description":"Resources required at the evaluation start are stable.","properties":{"evaluationStart":{"$ref":"#/$defs/WireFrame","description":"Frame at which preparation completed."},"type":{"const":"prepared","type":"string"}},"required":["type","evaluationStart"],"type":"object"},{"additionalProperties":false,"description":"One requested frame is stable and may be captured.","properties":{"frame":{"$ref":"#/$defs/WireFrame","description":"Exact frame now represented by browser state."},"stateHash":{"$ref":"#/$defs/StateHash","description":"Canonical hash of runtime-owned state for this frame."},"type":{"const":"frameReady","type":"string"}},"required":["type","frame","stateHash"],"type":"object"},{"additionalProperties":false,"description":"The browser rejected a command or could not reach readiness.","properties":{"code":{"$ref":"#/$defs/ProtocolFailureCode","description":"Stable machine-readable failure category."},"message":{"description":"Direct explanation in browser/runtime terms.","pattern":"\\S","type":"string"},"pendingResources":{"description":"Resources that prevented readiness, in deterministic order.","items":{"pattern":"\\S","type":"string"},"type":"array"},"type":{"const":"failed","type":"string"}},"required":["type","code","message","pendingResources"],"type":"object"},{"additionalProperties":false,"description":"The browser session released its resources.","properties":{"type":{"const":"disposed","type":"string"}},"required":["type"],"type":"object"}]},"ProtocolFailureCode":{"description":"Stable browser protocol failure category.","oneOf":[{"const":"protocolMismatch","description":"The envelope version is unsupported.","type":"string"},{"const":"invalidRequest","description":"The command violates its wire contract.","type":"string"},{"const":"loadFailed","description":"The immutable plan could not be installed.","type":"string"},{"const":"prepareFailed","description":"Preparation could not stabilize required resources.","type":"string"},{"const":"seekFailed","description":"The requested frame could not be evaluated.","type":"string"},{"const":"readinessTimeout","description":"One or more resources missed the readiness deadline.","type":"string"},{"const":"internal","description":"The runtime violated an internal invariant.","type":"string"}]},"ProtocolVersion":{"const":1,"description":"Version of the native-to-browser message contract.","format":"uint16","maximum":65535,"minimum":0,"type":"integer"},"RequestId":{"description":"Correlation identity shared by one request and its response events.","format":"uint32","maximum":4294967295,"minimum":0,"type":"integer"},"StateHash":{"description":"Canonical lowercase SHA-256 spelling of runtime-owned frame state.","pattern":"^[0-9a-f]{64}$","type":"string"},"WireFrame":{"description":"Exact frame integer accepted by JavaScript without rounding.","format":"uint64","maximum":9007199254740991,"minimum":0,"type":"integer"}},"$id":"https://onmark.dev/schemas/browser-response-v1.schema.json","$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"description":"One versioned event returned by the browser runtime.","properties":{"event":{"$ref":"#/$defs/BrowserEvent"},"requestId":{"$ref":"#/$defs/RequestId"},"version":{"$ref":"#/$defs/ProtocolVersion"}},"required":["version","requestId","event"],"title":"BrowserResponse","type":"object"};
-const schema48 = {"description":"Correlation identity shared by one request and its response events.","format":"uint32","maximum":4294967295,"minimum":0,"type":"integer"};
-const schema49 = {"const":1,"description":"Version of the native-to-browser message contract.","format":"uint16","maximum":65535,"minimum":0,"type":"integer"};
-const schema43 = {"description":"Closed Gate-one events emitted by the browser runtime.","oneOf":[{"additionalProperties":false,"description":"The immutable browser plan was accepted.","properties":{"type":{"const":"loaded","type":"string"}},"required":["type"],"type":"object"},{"additionalProperties":false,"description":"Resources required at the evaluation start are stable.","properties":{"evaluationStart":{"$ref":"#/$defs/WireFrame","description":"Frame at which preparation completed."},"type":{"const":"prepared","type":"string"}},"required":["type","evaluationStart"],"type":"object"},{"additionalProperties":false,"description":"One requested frame is stable and may be captured.","properties":{"frame":{"$ref":"#/$defs/WireFrame","description":"Exact frame now represented by browser state."},"stateHash":{"$ref":"#/$defs/StateHash","description":"Canonical hash of runtime-owned state for this frame."},"type":{"const":"frameReady","type":"string"}},"required":["type","frame","stateHash"],"type":"object"},{"additionalProperties":false,"description":"The browser rejected a command or could not reach readiness.","properties":{"code":{"$ref":"#/$defs/ProtocolFailureCode","description":"Stable machine-readable failure category."},"message":{"description":"Direct explanation in browser/runtime terms.","pattern":"\\S","type":"string"},"pendingResources":{"description":"Resources that prevented readiness, in deterministic order.","items":{"pattern":"\\S","type":"string"},"type":"array"},"type":{"const":"failed","type":"string"}},"required":["type","code","message","pendingResources"],"type":"object"},{"additionalProperties":false,"description":"The browser session released its resources.","properties":{"type":{"const":"disposed","type":"string"}},"required":["type"],"type":"object"}]};
+const schema42 = {"$defs":{"BrowserEvent":{"description":"Closed Gate-one events emitted by the browser runtime.","oneOf":[{"additionalProperties":false,"description":"The immutable browser plan was accepted.","properties":{"type":{"const":"loaded","type":"string"}},"required":["type"],"type":"object"},{"additionalProperties":false,"description":"Resources required at the evaluation start are stable.","properties":{"evaluationStart":{"$ref":"#/$defs/WireFrame","description":"Frame at which preparation completed."},"type":{"const":"prepared","type":"string"}},"required":["type","evaluationStart"],"type":"object"},{"additionalProperties":false,"description":"One requested frame is stable and may be captured.","properties":{"frame":{"$ref":"#/$defs/WireFrame","description":"Exact frame now represented by browser state."},"type":{"const":"frameReady","type":"string"}},"required":["type","frame"],"type":"object"},{"additionalProperties":false,"description":"The browser rejected a command or could not reach readiness.","properties":{"code":{"$ref":"#/$defs/ProtocolFailureCode","description":"Stable machine-readable failure category."},"message":{"description":"Direct explanation in browser/runtime terms.","pattern":"\\S","type":"string"},"pendingResources":{"description":"Resources that prevented readiness, in deterministic order.","items":{"pattern":"\\S","type":"string"},"type":"array"},"type":{"const":"failed","type":"string"}},"required":["type","code","message","pendingResources"],"type":"object"},{"additionalProperties":false,"description":"The browser session released its resources.","properties":{"type":{"const":"disposed","type":"string"}},"required":["type"],"type":"object"}]},"ProtocolFailureCode":{"description":"Stable browser protocol failure category.","oneOf":[{"const":"protocolMismatch","description":"The envelope version is unsupported.","type":"string"},{"const":"invalidRequest","description":"The command violates its wire contract.","type":"string"},{"const":"loadFailed","description":"The immutable plan could not be installed.","type":"string"},{"const":"prepareFailed","description":"Preparation could not stabilize required resources.","type":"string"},{"const":"seekFailed","description":"The requested frame could not be evaluated.","type":"string"},{"const":"readinessTimeout","description":"One or more resources missed the readiness deadline.","type":"string"},{"const":"internal","description":"The runtime violated an internal invariant.","type":"string"}]},"ProtocolVersion":{"const":1,"description":"Version of the native-to-browser message contract.","format":"uint16","maximum":65535,"minimum":0,"type":"integer"},"RequestId":{"description":"Correlation identity shared by one request and its response events.","format":"uint32","maximum":4294967295,"minimum":0,"type":"integer"},"WireFrame":{"description":"Exact frame integer accepted by JavaScript without rounding.","format":"uint64","maximum":9007199254740991,"minimum":0,"type":"integer"}},"$id":"https://onmark.dev/schemas/browser-response-v1.schema.json","$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"description":"One versioned event returned by the browser runtime.","properties":{"event":{"$ref":"#/$defs/BrowserEvent"},"requestId":{"$ref":"#/$defs/RequestId"},"version":{"$ref":"#/$defs/ProtocolVersion"}},"required":["version","requestId","event"],"title":"BrowserResponse","type":"object"};
+const schema47 = {"description":"Correlation identity shared by one request and its response events.","format":"uint32","maximum":4294967295,"minimum":0,"type":"integer"};
+const schema48 = {"const":1,"description":"Version of the native-to-browser message contract.","format":"uint16","maximum":65535,"minimum":0,"type":"integer"};
+const schema43 = {"description":"Closed Gate-one events emitted by the browser runtime.","oneOf":[{"additionalProperties":false,"description":"The immutable browser plan was accepted.","properties":{"type":{"const":"loaded","type":"string"}},"required":["type"],"type":"object"},{"additionalProperties":false,"description":"Resources required at the evaluation start are stable.","properties":{"evaluationStart":{"$ref":"#/$defs/WireFrame","description":"Frame at which preparation completed."},"type":{"const":"prepared","type":"string"}},"required":["type","evaluationStart"],"type":"object"},{"additionalProperties":false,"description":"One requested frame is stable and may be captured.","properties":{"frame":{"$ref":"#/$defs/WireFrame","description":"Exact frame now represented by browser state."},"type":{"const":"frameReady","type":"string"}},"required":["type","frame"],"type":"object"},{"additionalProperties":false,"description":"The browser rejected a command or could not reach readiness.","properties":{"code":{"$ref":"#/$defs/ProtocolFailureCode","description":"Stable machine-readable failure category."},"message":{"description":"Direct explanation in browser/runtime terms.","pattern":"\\S","type":"string"},"pendingResources":{"description":"Resources that prevented readiness, in deterministic order.","items":{"pattern":"\\S","type":"string"},"type":"array"},"type":{"const":"failed","type":"string"}},"required":["type","code","message","pendingResources"],"type":"object"},{"additionalProperties":false,"description":"The browser session released its resources.","properties":{"type":{"const":"disposed","type":"string"}},"required":["type"],"type":"object"}]};
 const schema44 = {"description":"Exact frame integer accepted by JavaScript without rounding.","format":"uint64","maximum":9007199254740991,"minimum":0,"type":"integer"};
-const schema46 = {"description":"Canonical lowercase SHA-256 spelling of runtime-owned frame state.","pattern":"^[0-9a-f]{64}$","type":"string"};
-const schema47 = {"description":"Stable browser protocol failure category.","oneOf":[{"const":"protocolMismatch","description":"The envelope version is unsupported.","type":"string"},{"const":"invalidRequest","description":"The command violates its wire contract.","type":"string"},{"const":"loadFailed","description":"The immutable plan could not be installed.","type":"string"},{"const":"prepareFailed","description":"Preparation could not stabilize required resources.","type":"string"},{"const":"seekFailed","description":"The requested frame could not be evaluated.","type":"string"},{"const":"readinessTimeout","description":"One or more resources missed the readiness deadline.","type":"string"},{"const":"internal","description":"The runtime violated an internal invariant.","type":"string"}]};
-const pattern4 = new RegExp("^[0-9a-f]{64}$", "u");
-const pattern5 = new RegExp("\\S", "u");
+const schema46 = {"description":"Stable browser protocol failure category.","oneOf":[{"const":"protocolMismatch","description":"The envelope version is unsupported.","type":"string"},{"const":"invalidRequest","description":"The command violates its wire contract.","type":"string"},{"const":"loadFailed","description":"The immutable plan could not be installed.","type":"string"},{"const":"prepareFailed","description":"Preparation could not stabilize required resources.","type":"string"},{"const":"seekFailed","description":"The requested frame could not be evaluated.","type":"string"},{"const":"readinessTimeout","description":"One or more resources missed the readiness deadline.","type":"string"},{"const":"internal","description":"The runtime violated an internal invariant.","type":"string"}]};
+const pattern4 = new RegExp("\\S", "u");
 
 function validate29(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
 let vErrors = null;
@@ -1203,8 +1201,9 @@ vErrors.push(err15);
 }
 errors++;
 }
-if(data.stateHash === undefined){
-const err16 = {instancePath,schemaPath:"#/oneOf/2/required",keyword:"required",params:{missingProperty: "stateHash"},message:"must have required property '"+"stateHash"+"'"};
+for(const key2 in data){
+if(!((key2 === "frame") || (key2 === "type"))){
+const err16 = {instancePath,schemaPath:"#/oneOf/2/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key2},message:"must NOT have additional properties"};
 if(vErrors === null){
 vErrors = [err16];
 }
@@ -1213,9 +1212,11 @@ vErrors.push(err16);
 }
 errors++;
 }
-for(const key2 in data){
-if(!(((key2 === "frame") || (key2 === "stateHash")) || (key2 === "type"))){
-const err17 = {instancePath,schemaPath:"#/oneOf/2/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key2},message:"must NOT have additional properties"};
+}
+if(data.frame !== undefined){
+let data3 = data.frame;
+if(!(((typeof data3 == "number") && (!(data3 % 1) && !isNaN(data3))) && (isFinite(data3)))){
+const err17 = {instancePath:instancePath+"/frame",schemaPath:"#/$defs/WireFrame/type",keyword:"type",params:{type: "integer"},message:"must be integer"};
 if(vErrors === null){
 vErrors = [err17];
 }
@@ -1224,11 +1225,9 @@ vErrors.push(err17);
 }
 errors++;
 }
-}
-if(data.frame !== undefined){
-let data3 = data.frame;
-if(!(((typeof data3 == "number") && (!(data3 % 1) && !isNaN(data3))) && (isFinite(data3)))){
-const err18 = {instancePath:instancePath+"/frame",schemaPath:"#/$defs/WireFrame/type",keyword:"type",params:{type: "integer"},message:"must be integer"};
+if((typeof data3 == "number") && (isFinite(data3))){
+if(data3 > 9007199254740991 || isNaN(data3)){
+const err18 = {instancePath:instancePath+"/frame",schemaPath:"#/$defs/WireFrame/maximum",keyword:"maximum",params:{comparison: "<=", limit: 9007199254740991},message:"must be <= 9007199254740991"};
 if(vErrors === null){
 vErrors = [err18];
 }
@@ -1237,9 +1236,8 @@ vErrors.push(err18);
 }
 errors++;
 }
-if((typeof data3 == "number") && (isFinite(data3))){
-if(data3 > 9007199254740991 || isNaN(data3)){
-const err19 = {instancePath:instancePath+"/frame",schemaPath:"#/$defs/WireFrame/maximum",keyword:"maximum",params:{comparison: "<=", limit: 9007199254740991},message:"must be <= 9007199254740991"};
+if(data3 < 0 || isNaN(data3)){
+const err19 = {instancePath:instancePath+"/frame",schemaPath:"#/$defs/WireFrame/minimum",keyword:"minimum",params:{comparison: ">=", limit: 0},message:"must be >= 0"};
 if(vErrors === null){
 vErrors = [err19];
 }
@@ -1248,8 +1246,12 @@ vErrors.push(err19);
 }
 errors++;
 }
-if(data3 < 0 || isNaN(data3)){
-const err20 = {instancePath:instancePath+"/frame",schemaPath:"#/$defs/WireFrame/minimum",keyword:"minimum",params:{comparison: ">=", limit: 0},message:"must be >= 0"};
+}
+}
+if(data.type !== undefined){
+let data4 = data.type;
+if(typeof data4 !== "string"){
+const err20 = {instancePath:instancePath+"/type",schemaPath:"#/oneOf/2/properties/type/type",keyword:"type",params:{type: "string"},message:"must be string"};
 if(vErrors === null){
 vErrors = [err20];
 }
@@ -1258,13 +1260,8 @@ vErrors.push(err20);
 }
 errors++;
 }
-}
-}
-if(data.stateHash !== undefined){
-let data4 = data.stateHash;
-if(typeof data4 === "string"){
-if(!pattern4.test(data4)){
-const err21 = {instancePath:instancePath+"/stateHash",schemaPath:"#/$defs/StateHash/pattern",keyword:"pattern",params:{pattern: "^[0-9a-f]{64}$"},message:"must match pattern \""+"^[0-9a-f]{64}$"+"\""};
+if("frameReady" !== data4){
+const err21 = {instancePath:instancePath+"/type",schemaPath:"#/oneOf/2/properties/type/const",keyword:"const",params:{allowedValue: "frameReady"},message:"must be equal to constant"};
 if(vErrors === null){
 vErrors = [err21];
 }
@@ -1274,48 +1271,14 @@ vErrors.push(err21);
 errors++;
 }
 }
+}
 else {
-const err22 = {instancePath:instancePath+"/stateHash",schemaPath:"#/$defs/StateHash/type",keyword:"type",params:{type: "string"},message:"must be string"};
+const err22 = {instancePath,schemaPath:"#/oneOf/2/type",keyword:"type",params:{type: "object"},message:"must be object"};
 if(vErrors === null){
 vErrors = [err22];
 }
 else {
 vErrors.push(err22);
-}
-errors++;
-}
-}
-if(data.type !== undefined){
-let data5 = data.type;
-if(typeof data5 !== "string"){
-const err23 = {instancePath:instancePath+"/type",schemaPath:"#/oneOf/2/properties/type/type",keyword:"type",params:{type: "string"},message:"must be string"};
-if(vErrors === null){
-vErrors = [err23];
-}
-else {
-vErrors.push(err23);
-}
-errors++;
-}
-if("frameReady" !== data5){
-const err24 = {instancePath:instancePath+"/type",schemaPath:"#/oneOf/2/properties/type/const",keyword:"const",params:{allowedValue: "frameReady"},message:"must be equal to constant"};
-if(vErrors === null){
-vErrors = [err24];
-}
-else {
-vErrors.push(err24);
-}
-errors++;
-}
-}
-}
-else {
-const err25 = {instancePath,schemaPath:"#/oneOf/2/type",keyword:"type",params:{type: "object"},message:"must be object"};
-if(vErrors === null){
-vErrors = [err25];
-}
-else {
-vErrors.push(err25);
 }
 errors++;
 }
@@ -1332,10 +1295,40 @@ if(props0 !== true){
 props0 = true;
 }
 }
-const _errs25 = errors;
+const _errs22 = errors;
 if(data && typeof data == "object" && !Array.isArray(data)){
 if(data.type === undefined){
-const err26 = {instancePath,schemaPath:"#/oneOf/3/required",keyword:"required",params:{missingProperty: "type"},message:"must have required property '"+"type"+"'"};
+const err23 = {instancePath,schemaPath:"#/oneOf/3/required",keyword:"required",params:{missingProperty: "type"},message:"must have required property '"+"type"+"'"};
+if(vErrors === null){
+vErrors = [err23];
+}
+else {
+vErrors.push(err23);
+}
+errors++;
+}
+if(data.code === undefined){
+const err24 = {instancePath,schemaPath:"#/oneOf/3/required",keyword:"required",params:{missingProperty: "code"},message:"must have required property '"+"code"+"'"};
+if(vErrors === null){
+vErrors = [err24];
+}
+else {
+vErrors.push(err24);
+}
+errors++;
+}
+if(data.message === undefined){
+const err25 = {instancePath,schemaPath:"#/oneOf/3/required",keyword:"required",params:{missingProperty: "message"},message:"must have required property '"+"message"+"'"};
+if(vErrors === null){
+vErrors = [err25];
+}
+else {
+vErrors.push(err25);
+}
+errors++;
+}
+if(data.pendingResources === undefined){
+const err26 = {instancePath,schemaPath:"#/oneOf/3/required",keyword:"required",params:{missingProperty: "pendingResources"},message:"must have required property '"+"pendingResources"+"'"};
 if(vErrors === null){
 vErrors = [err26];
 }
@@ -1344,8 +1337,9 @@ vErrors.push(err26);
 }
 errors++;
 }
-if(data.code === undefined){
-const err27 = {instancePath,schemaPath:"#/oneOf/3/required",keyword:"required",params:{missingProperty: "code"},message:"must have required property '"+"code"+"'"};
+for(const key3 in data){
+if(!((((key3 === "code") || (key3 === "message")) || (key3 === "pendingResources")) || (key3 === "type"))){
+const err27 = {instancePath,schemaPath:"#/oneOf/3/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key3},message:"must NOT have additional properties"};
 if(vErrors === null){
 vErrors = [err27];
 }
@@ -1354,8 +1348,15 @@ vErrors.push(err27);
 }
 errors++;
 }
-if(data.message === undefined){
-const err28 = {instancePath,schemaPath:"#/oneOf/3/required",keyword:"required",params:{missingProperty: "message"},message:"must have required property '"+"message"+"'"};
+}
+if(data.code !== undefined){
+let data5 = data.code;
+const _errs27 = errors;
+let valid8 = false;
+let passing1 = null;
+const _errs28 = errors;
+if(typeof data5 !== "string"){
+const err28 = {instancePath:instancePath+"/code",schemaPath:"#/$defs/ProtocolFailureCode/oneOf/0/type",keyword:"type",params:{type: "string"},message:"must be string"};
 if(vErrors === null){
 vErrors = [err28];
 }
@@ -1364,8 +1365,8 @@ vErrors.push(err28);
 }
 errors++;
 }
-if(data.pendingResources === undefined){
-const err29 = {instancePath,schemaPath:"#/oneOf/3/required",keyword:"required",params:{missingProperty: "pendingResources"},message:"must have required property '"+"pendingResources"+"'"};
+if("protocolMismatch" !== data5){
+const err29 = {instancePath:instancePath+"/code",schemaPath:"#/$defs/ProtocolFailureCode/oneOf/0/const",keyword:"const",params:{allowedValue: "protocolMismatch"},message:"must be equal to constant"};
 if(vErrors === null){
 vErrors = [err29];
 }
@@ -1374,9 +1375,14 @@ vErrors.push(err29);
 }
 errors++;
 }
-for(const key3 in data){
-if(!((((key3 === "code") || (key3 === "message")) || (key3 === "pendingResources")) || (key3 === "type"))){
-const err30 = {instancePath,schemaPath:"#/oneOf/3/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key3},message:"must NOT have additional properties"};
+var _valid1 = _errs28 === errors;
+if(_valid1){
+valid8 = true;
+passing1 = 0;
+}
+const _errs30 = errors;
+if(typeof data5 !== "string"){
+const err30 = {instancePath:instancePath+"/code",schemaPath:"#/$defs/ProtocolFailureCode/oneOf/1/type",keyword:"type",params:{type: "string"},message:"must be string"};
 if(vErrors === null){
 vErrors = [err30];
 }
@@ -1385,15 +1391,8 @@ vErrors.push(err30);
 }
 errors++;
 }
-}
-if(data.code !== undefined){
-let data6 = data.code;
-const _errs30 = errors;
-let valid9 = false;
-let passing1 = null;
-const _errs31 = errors;
-if(typeof data6 !== "string"){
-const err31 = {instancePath:instancePath+"/code",schemaPath:"#/$defs/ProtocolFailureCode/oneOf/0/type",keyword:"type",params:{type: "string"},message:"must be string"};
+if("invalidRequest" !== data5){
+const err31 = {instancePath:instancePath+"/code",schemaPath:"#/$defs/ProtocolFailureCode/oneOf/1/const",keyword:"const",params:{allowedValue: "invalidRequest"},message:"must be equal to constant"};
 if(vErrors === null){
 vErrors = [err31];
 }
@@ -1402,8 +1401,19 @@ vErrors.push(err31);
 }
 errors++;
 }
-if("protocolMismatch" !== data6){
-const err32 = {instancePath:instancePath+"/code",schemaPath:"#/$defs/ProtocolFailureCode/oneOf/0/const",keyword:"const",params:{allowedValue: "protocolMismatch"},message:"must be equal to constant"};
+var _valid1 = _errs30 === errors;
+if(_valid1 && valid8){
+valid8 = false;
+passing1 = [passing1, 1];
+}
+else {
+if(_valid1){
+valid8 = true;
+passing1 = 1;
+}
+const _errs32 = errors;
+if(typeof data5 !== "string"){
+const err32 = {instancePath:instancePath+"/code",schemaPath:"#/$defs/ProtocolFailureCode/oneOf/2/type",keyword:"type",params:{type: "string"},message:"must be string"};
 if(vErrors === null){
 vErrors = [err32];
 }
@@ -1412,14 +1422,8 @@ vErrors.push(err32);
 }
 errors++;
 }
-var _valid1 = _errs31 === errors;
-if(_valid1){
-valid9 = true;
-passing1 = 0;
-}
-const _errs33 = errors;
-if(typeof data6 !== "string"){
-const err33 = {instancePath:instancePath+"/code",schemaPath:"#/$defs/ProtocolFailureCode/oneOf/1/type",keyword:"type",params:{type: "string"},message:"must be string"};
+if("loadFailed" !== data5){
+const err33 = {instancePath:instancePath+"/code",schemaPath:"#/$defs/ProtocolFailureCode/oneOf/2/const",keyword:"const",params:{allowedValue: "loadFailed"},message:"must be equal to constant"};
 if(vErrors === null){
 vErrors = [err33];
 }
@@ -1428,8 +1432,19 @@ vErrors.push(err33);
 }
 errors++;
 }
-if("invalidRequest" !== data6){
-const err34 = {instancePath:instancePath+"/code",schemaPath:"#/$defs/ProtocolFailureCode/oneOf/1/const",keyword:"const",params:{allowedValue: "invalidRequest"},message:"must be equal to constant"};
+var _valid1 = _errs32 === errors;
+if(_valid1 && valid8){
+valid8 = false;
+passing1 = [passing1, 2];
+}
+else {
+if(_valid1){
+valid8 = true;
+passing1 = 2;
+}
+const _errs34 = errors;
+if(typeof data5 !== "string"){
+const err34 = {instancePath:instancePath+"/code",schemaPath:"#/$defs/ProtocolFailureCode/oneOf/3/type",keyword:"type",params:{type: "string"},message:"must be string"};
 if(vErrors === null){
 vErrors = [err34];
 }
@@ -1438,19 +1453,8 @@ vErrors.push(err34);
 }
 errors++;
 }
-var _valid1 = _errs33 === errors;
-if(_valid1 && valid9){
-valid9 = false;
-passing1 = [passing1, 1];
-}
-else {
-if(_valid1){
-valid9 = true;
-passing1 = 1;
-}
-const _errs35 = errors;
-if(typeof data6 !== "string"){
-const err35 = {instancePath:instancePath+"/code",schemaPath:"#/$defs/ProtocolFailureCode/oneOf/2/type",keyword:"type",params:{type: "string"},message:"must be string"};
+if("prepareFailed" !== data5){
+const err35 = {instancePath:instancePath+"/code",schemaPath:"#/$defs/ProtocolFailureCode/oneOf/3/const",keyword:"const",params:{allowedValue: "prepareFailed"},message:"must be equal to constant"};
 if(vErrors === null){
 vErrors = [err35];
 }
@@ -1459,8 +1463,19 @@ vErrors.push(err35);
 }
 errors++;
 }
-if("loadFailed" !== data6){
-const err36 = {instancePath:instancePath+"/code",schemaPath:"#/$defs/ProtocolFailureCode/oneOf/2/const",keyword:"const",params:{allowedValue: "loadFailed"},message:"must be equal to constant"};
+var _valid1 = _errs34 === errors;
+if(_valid1 && valid8){
+valid8 = false;
+passing1 = [passing1, 3];
+}
+else {
+if(_valid1){
+valid8 = true;
+passing1 = 3;
+}
+const _errs36 = errors;
+if(typeof data5 !== "string"){
+const err36 = {instancePath:instancePath+"/code",schemaPath:"#/$defs/ProtocolFailureCode/oneOf/4/type",keyword:"type",params:{type: "string"},message:"must be string"};
 if(vErrors === null){
 vErrors = [err36];
 }
@@ -1469,19 +1484,8 @@ vErrors.push(err36);
 }
 errors++;
 }
-var _valid1 = _errs35 === errors;
-if(_valid1 && valid9){
-valid9 = false;
-passing1 = [passing1, 2];
-}
-else {
-if(_valid1){
-valid9 = true;
-passing1 = 2;
-}
-const _errs37 = errors;
-if(typeof data6 !== "string"){
-const err37 = {instancePath:instancePath+"/code",schemaPath:"#/$defs/ProtocolFailureCode/oneOf/3/type",keyword:"type",params:{type: "string"},message:"must be string"};
+if("seekFailed" !== data5){
+const err37 = {instancePath:instancePath+"/code",schemaPath:"#/$defs/ProtocolFailureCode/oneOf/4/const",keyword:"const",params:{allowedValue: "seekFailed"},message:"must be equal to constant"};
 if(vErrors === null){
 vErrors = [err37];
 }
@@ -1490,8 +1494,19 @@ vErrors.push(err37);
 }
 errors++;
 }
-if("prepareFailed" !== data6){
-const err38 = {instancePath:instancePath+"/code",schemaPath:"#/$defs/ProtocolFailureCode/oneOf/3/const",keyword:"const",params:{allowedValue: "prepareFailed"},message:"must be equal to constant"};
+var _valid1 = _errs36 === errors;
+if(_valid1 && valid8){
+valid8 = false;
+passing1 = [passing1, 4];
+}
+else {
+if(_valid1){
+valid8 = true;
+passing1 = 4;
+}
+const _errs38 = errors;
+if(typeof data5 !== "string"){
+const err38 = {instancePath:instancePath+"/code",schemaPath:"#/$defs/ProtocolFailureCode/oneOf/5/type",keyword:"type",params:{type: "string"},message:"must be string"};
 if(vErrors === null){
 vErrors = [err38];
 }
@@ -1500,19 +1515,8 @@ vErrors.push(err38);
 }
 errors++;
 }
-var _valid1 = _errs37 === errors;
-if(_valid1 && valid9){
-valid9 = false;
-passing1 = [passing1, 3];
-}
-else {
-if(_valid1){
-valid9 = true;
-passing1 = 3;
-}
-const _errs39 = errors;
-if(typeof data6 !== "string"){
-const err39 = {instancePath:instancePath+"/code",schemaPath:"#/$defs/ProtocolFailureCode/oneOf/4/type",keyword:"type",params:{type: "string"},message:"must be string"};
+if("readinessTimeout" !== data5){
+const err39 = {instancePath:instancePath+"/code",schemaPath:"#/$defs/ProtocolFailureCode/oneOf/5/const",keyword:"const",params:{allowedValue: "readinessTimeout"},message:"must be equal to constant"};
 if(vErrors === null){
 vErrors = [err39];
 }
@@ -1521,8 +1525,19 @@ vErrors.push(err39);
 }
 errors++;
 }
-if("seekFailed" !== data6){
-const err40 = {instancePath:instancePath+"/code",schemaPath:"#/$defs/ProtocolFailureCode/oneOf/4/const",keyword:"const",params:{allowedValue: "seekFailed"},message:"must be equal to constant"};
+var _valid1 = _errs38 === errors;
+if(_valid1 && valid8){
+valid8 = false;
+passing1 = [passing1, 5];
+}
+else {
+if(_valid1){
+valid8 = true;
+passing1 = 5;
+}
+const _errs40 = errors;
+if(typeof data5 !== "string"){
+const err40 = {instancePath:instancePath+"/code",schemaPath:"#/$defs/ProtocolFailureCode/oneOf/6/type",keyword:"type",params:{type: "string"},message:"must be string"};
 if(vErrors === null){
 vErrors = [err40];
 }
@@ -1531,19 +1546,8 @@ vErrors.push(err40);
 }
 errors++;
 }
-var _valid1 = _errs39 === errors;
-if(_valid1 && valid9){
-valid9 = false;
-passing1 = [passing1, 4];
-}
-else {
-if(_valid1){
-valid9 = true;
-passing1 = 4;
-}
-const _errs41 = errors;
-if(typeof data6 !== "string"){
-const err41 = {instancePath:instancePath+"/code",schemaPath:"#/$defs/ProtocolFailureCode/oneOf/5/type",keyword:"type",params:{type: "string"},message:"must be string"};
+if("internal" !== data5){
+const err41 = {instancePath:instancePath+"/code",schemaPath:"#/$defs/ProtocolFailureCode/oneOf/6/const",keyword:"const",params:{allowedValue: "internal"},message:"must be equal to constant"};
 if(vErrors === null){
 vErrors = [err41];
 }
@@ -1552,55 +1556,14 @@ vErrors.push(err41);
 }
 errors++;
 }
-if("readinessTimeout" !== data6){
-const err42 = {instancePath:instancePath+"/code",schemaPath:"#/$defs/ProtocolFailureCode/oneOf/5/const",keyword:"const",params:{allowedValue: "readinessTimeout"},message:"must be equal to constant"};
-if(vErrors === null){
-vErrors = [err42];
-}
-else {
-vErrors.push(err42);
-}
-errors++;
-}
-var _valid1 = _errs41 === errors;
-if(_valid1 && valid9){
-valid9 = false;
-passing1 = [passing1, 5];
-}
-else {
-if(_valid1){
-valid9 = true;
-passing1 = 5;
-}
-const _errs43 = errors;
-if(typeof data6 !== "string"){
-const err43 = {instancePath:instancePath+"/code",schemaPath:"#/$defs/ProtocolFailureCode/oneOf/6/type",keyword:"type",params:{type: "string"},message:"must be string"};
-if(vErrors === null){
-vErrors = [err43];
-}
-else {
-vErrors.push(err43);
-}
-errors++;
-}
-if("internal" !== data6){
-const err44 = {instancePath:instancePath+"/code",schemaPath:"#/$defs/ProtocolFailureCode/oneOf/6/const",keyword:"const",params:{allowedValue: "internal"},message:"must be equal to constant"};
-if(vErrors === null){
-vErrors = [err44];
-}
-else {
-vErrors.push(err44);
-}
-errors++;
-}
-var _valid1 = _errs43 === errors;
-if(_valid1 && valid9){
-valid9 = false;
+var _valid1 = _errs40 === errors;
+if(_valid1 && valid8){
+valid8 = false;
 passing1 = [passing1, 6];
 }
 else {
 if(_valid1){
-valid9 = true;
+valid8 = true;
 passing1 = 6;
 }
 }
@@ -1609,21 +1572,21 @@ passing1 = 6;
 }
 }
 }
-if(!valid9){
-const err45 = {instancePath:instancePath+"/code",schemaPath:"#/$defs/ProtocolFailureCode/oneOf",keyword:"oneOf",params:{passingSchemas: passing1},message:"must match exactly one schema in oneOf"};
+if(!valid8){
+const err42 = {instancePath:instancePath+"/code",schemaPath:"#/$defs/ProtocolFailureCode/oneOf",keyword:"oneOf",params:{passingSchemas: passing1},message:"must match exactly one schema in oneOf"};
 if(vErrors === null){
-vErrors = [err45];
+vErrors = [err42];
 }
 else {
-vErrors.push(err45);
+vErrors.push(err42);
 }
 errors++;
 }
 else {
-errors = _errs30;
+errors = _errs27;
 if(vErrors !== null){
-if(_errs30){
-vErrors.length = _errs30;
+if(_errs27){
+vErrors.length = _errs27;
 }
 else {
 vErrors = null;
@@ -1632,10 +1595,50 @@ vErrors = null;
 }
 }
 if(data.message !== undefined){
-let data7 = data.message;
-if(typeof data7 === "string"){
-if(!pattern5.test(data7)){
-const err46 = {instancePath:instancePath+"/message",schemaPath:"#/oneOf/3/properties/message/pattern",keyword:"pattern",params:{pattern: "\\S"},message:"must match pattern \""+"\\S"+"\""};
+let data6 = data.message;
+if(typeof data6 === "string"){
+if(!pattern4.test(data6)){
+const err43 = {instancePath:instancePath+"/message",schemaPath:"#/oneOf/3/properties/message/pattern",keyword:"pattern",params:{pattern: "\\S"},message:"must match pattern \""+"\\S"+"\""};
+if(vErrors === null){
+vErrors = [err43];
+}
+else {
+vErrors.push(err43);
+}
+errors++;
+}
+}
+else {
+const err44 = {instancePath:instancePath+"/message",schemaPath:"#/oneOf/3/properties/message/type",keyword:"type",params:{type: "string"},message:"must be string"};
+if(vErrors === null){
+vErrors = [err44];
+}
+else {
+vErrors.push(err44);
+}
+errors++;
+}
+}
+if(data.pendingResources !== undefined){
+let data7 = data.pendingResources;
+if(Array.isArray(data7)){
+const len0 = data7.length;
+for(let i0=0; i0<len0; i0++){
+let data8 = data7[i0];
+if(typeof data8 === "string"){
+if(!pattern4.test(data8)){
+const err45 = {instancePath:instancePath+"/pendingResources/" + i0,schemaPath:"#/oneOf/3/properties/pendingResources/items/pattern",keyword:"pattern",params:{pattern: "\\S"},message:"must match pattern \""+"\\S"+"\""};
+if(vErrors === null){
+vErrors = [err45];
+}
+else {
+vErrors.push(err45);
+}
+errors++;
+}
+}
+else {
+const err46 = {instancePath:instancePath+"/pendingResources/" + i0,schemaPath:"#/oneOf/3/properties/pendingResources/items/type",keyword:"type",params:{type: "string"},message:"must be string"};
 if(vErrors === null){
 vErrors = [err46];
 }
@@ -1645,8 +1648,9 @@ vErrors.push(err46);
 errors++;
 }
 }
+}
 else {
-const err47 = {instancePath:instancePath+"/message",schemaPath:"#/oneOf/3/properties/message/type",keyword:"type",params:{type: "string"},message:"must be string"};
+const err47 = {instancePath:instancePath+"/pendingResources",schemaPath:"#/oneOf/3/properties/pendingResources/type",keyword:"type",params:{type: "array"},message:"must be array"};
 if(vErrors === null){
 vErrors = [err47];
 }
@@ -1656,15 +1660,10 @@ vErrors.push(err47);
 errors++;
 }
 }
-if(data.pendingResources !== undefined){
-let data8 = data.pendingResources;
-if(Array.isArray(data8)){
-const len0 = data8.length;
-for(let i0=0; i0<len0; i0++){
-let data9 = data8[i0];
-if(typeof data9 === "string"){
-if(!pattern5.test(data9)){
-const err48 = {instancePath:instancePath+"/pendingResources/" + i0,schemaPath:"#/oneOf/3/properties/pendingResources/items/pattern",keyword:"pattern",params:{pattern: "\\S"},message:"must match pattern \""+"\\S"+"\""};
+if(data.type !== undefined){
+let data9 = data.type;
+if(typeof data9 !== "string"){
+const err48 = {instancePath:instancePath+"/type",schemaPath:"#/oneOf/3/properties/type/type",keyword:"type",params:{type: "string"},message:"must be string"};
 if(vErrors === null){
 vErrors = [err48];
 }
@@ -1673,9 +1672,8 @@ vErrors.push(err48);
 }
 errors++;
 }
-}
-else {
-const err49 = {instancePath:instancePath+"/pendingResources/" + i0,schemaPath:"#/oneOf/3/properties/pendingResources/items/type",keyword:"type",params:{type: "string"},message:"must be string"};
+if("failed" !== data9){
+const err49 = {instancePath:instancePath+"/type",schemaPath:"#/oneOf/3/properties/type/const",keyword:"const",params:{allowedValue: "failed"},message:"must be equal to constant"};
 if(vErrors === null){
 vErrors = [err49];
 }
@@ -1687,7 +1685,7 @@ errors++;
 }
 }
 else {
-const err50 = {instancePath:instancePath+"/pendingResources",schemaPath:"#/oneOf/3/properties/pendingResources/type",keyword:"type",params:{type: "array"},message:"must be array"};
+const err50 = {instancePath,schemaPath:"#/oneOf/3/type",keyword:"type",params:{type: "object"},message:"must be object"};
 if(vErrors === null){
 vErrors = [err50];
 }
@@ -1696,42 +1694,7 @@ vErrors.push(err50);
 }
 errors++;
 }
-}
-if(data.type !== undefined){
-let data10 = data.type;
-if(typeof data10 !== "string"){
-const err51 = {instancePath:instancePath+"/type",schemaPath:"#/oneOf/3/properties/type/type",keyword:"type",params:{type: "string"},message:"must be string"};
-if(vErrors === null){
-vErrors = [err51];
-}
-else {
-vErrors.push(err51);
-}
-errors++;
-}
-if("failed" !== data10){
-const err52 = {instancePath:instancePath+"/type",schemaPath:"#/oneOf/3/properties/type/const",keyword:"const",params:{allowedValue: "failed"},message:"must be equal to constant"};
-if(vErrors === null){
-vErrors = [err52];
-}
-else {
-vErrors.push(err52);
-}
-errors++;
-}
-}
-}
-else {
-const err53 = {instancePath,schemaPath:"#/oneOf/3/type",keyword:"type",params:{type: "object"},message:"must be object"};
-if(vErrors === null){
-vErrors = [err53];
-}
-else {
-vErrors.push(err53);
-}
-errors++;
-}
-var _valid0 = _errs25 === errors;
+var _valid0 = _errs22 === errors;
 if(_valid0 && valid0){
 valid0 = false;
 passing0 = [passing0, 3];
@@ -1744,10 +1707,44 @@ if(props0 !== true){
 props0 = true;
 }
 }
-const _errs53 = errors;
+const _errs50 = errors;
 if(data && typeof data == "object" && !Array.isArray(data)){
 if(data.type === undefined){
-const err54 = {instancePath,schemaPath:"#/oneOf/4/required",keyword:"required",params:{missingProperty: "type"},message:"must have required property '"+"type"+"'"};
+const err51 = {instancePath,schemaPath:"#/oneOf/4/required",keyword:"required",params:{missingProperty: "type"},message:"must have required property '"+"type"+"'"};
+if(vErrors === null){
+vErrors = [err51];
+}
+else {
+vErrors.push(err51);
+}
+errors++;
+}
+for(const key4 in data){
+if(!(key4 === "type")){
+const err52 = {instancePath,schemaPath:"#/oneOf/4/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key4},message:"must NOT have additional properties"};
+if(vErrors === null){
+vErrors = [err52];
+}
+else {
+vErrors.push(err52);
+}
+errors++;
+}
+}
+if(data.type !== undefined){
+let data10 = data.type;
+if(typeof data10 !== "string"){
+const err53 = {instancePath:instancePath+"/type",schemaPath:"#/oneOf/4/properties/type/type",keyword:"type",params:{type: "string"},message:"must be string"};
+if(vErrors === null){
+vErrors = [err53];
+}
+else {
+vErrors.push(err53);
+}
+errors++;
+}
+if("disposed" !== data10){
+const err54 = {instancePath:instancePath+"/type",schemaPath:"#/oneOf/4/properties/type/const",keyword:"const",params:{allowedValue: "disposed"},message:"must be equal to constant"};
 if(vErrors === null){
 vErrors = [err54];
 }
@@ -1756,9 +1753,10 @@ vErrors.push(err54);
 }
 errors++;
 }
-for(const key4 in data){
-if(!(key4 === "type")){
-const err55 = {instancePath,schemaPath:"#/oneOf/4/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key4},message:"must NOT have additional properties"};
+}
+}
+else {
+const err55 = {instancePath,schemaPath:"#/oneOf/4/type",keyword:"type",params:{type: "object"},message:"must be object"};
 if(vErrors === null){
 vErrors = [err55];
 }
@@ -1767,42 +1765,7 @@ vErrors.push(err55);
 }
 errors++;
 }
-}
-if(data.type !== undefined){
-let data11 = data.type;
-if(typeof data11 !== "string"){
-const err56 = {instancePath:instancePath+"/type",schemaPath:"#/oneOf/4/properties/type/type",keyword:"type",params:{type: "string"},message:"must be string"};
-if(vErrors === null){
-vErrors = [err56];
-}
-else {
-vErrors.push(err56);
-}
-errors++;
-}
-if("disposed" !== data11){
-const err57 = {instancePath:instancePath+"/type",schemaPath:"#/oneOf/4/properties/type/const",keyword:"const",params:{allowedValue: "disposed"},message:"must be equal to constant"};
-if(vErrors === null){
-vErrors = [err57];
-}
-else {
-vErrors.push(err57);
-}
-errors++;
-}
-}
-}
-else {
-const err58 = {instancePath,schemaPath:"#/oneOf/4/type",keyword:"type",params:{type: "object"},message:"must be object"};
-if(vErrors === null){
-vErrors = [err58];
-}
-else {
-vErrors.push(err58);
-}
-errors++;
-}
-var _valid0 = _errs53 === errors;
+var _valid0 = _errs50 === errors;
 if(_valid0 && valid0){
 valid0 = false;
 passing0 = [passing0, 4];
@@ -1820,12 +1783,12 @@ props0 = true;
 }
 }
 if(!valid0){
-const err59 = {instancePath,schemaPath:"#/oneOf",keyword:"oneOf",params:{passingSchemas: passing0},message:"must match exactly one schema in oneOf"};
+const err56 = {instancePath,schemaPath:"#/oneOf",keyword:"oneOf",params:{passingSchemas: passing0},message:"must match exactly one schema in oneOf"};
 if(vErrors === null){
-vErrors = [err59];
+vErrors = [err56];
 }
 else {
-vErrors.push(err59);
+vErrors.push(err56);
 }
 errors++;
 }

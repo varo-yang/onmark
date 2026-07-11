@@ -1,6 +1,8 @@
+// Cross-language wire compatibility tests for generated runtime codecs.
+// Checked-in JSONL examples must decode identically in Rust and TypeScript.
+
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
 import test from "node:test";
 
 import {
@@ -8,6 +10,13 @@ import {
   decodeBrowserRequest,
   decodeBrowserResponse,
 } from "../src/index.js";
+
+// Package tests execute from `dist/test`; URL resolution avoids a caller-cwd
+// assumption while preserving the checked-in conformance directory as owner.
+const PROTOCOL_FIXTURES = new URL(
+  "../../../../conformance/protocol/",
+  import.meta.url,
+);
 
 test("decodes every checked-in Gate-one protocol example", async () => {
   for (const request of await fixture("browser-requests-v1.jsonl")) {
@@ -34,12 +43,17 @@ test("rejects values outside the versioned browser contract", () => {
     {
       version: 1,
       requestId: 1,
-      event: { type: "failed", code: "internal", message: "", pendingResources: [] },
+      event: {
+        type: "failed",
+        code: "internal",
+        message: "",
+        pendingResources: [],
+      },
     },
     {
       version: 1,
       requestId: 1,
-      event: { type: "frameReady", frame: 0, stateHash: "A".repeat(64) },
+      event: { type: "frameReady", frame: 0, stateHash: "0".repeat(64) },
     },
   ];
 
@@ -49,7 +63,8 @@ test("rejects values outside the versioned browser contract", () => {
 });
 
 async function fixture(filename: string): Promise<unknown[]> {
-  const path = resolve(process.cwd(), "../../conformance/protocol", filename);
-  const lines = (await readFile(path, "utf8")).trim().split("\n");
+  const lines = (await readFile(new URL(filename, PROTOCOL_FIXTURES), "utf8"))
+    .trim()
+    .split("\n");
   return lines.map((line) => JSON.parse(line) as unknown);
 }

@@ -6,7 +6,7 @@ Onmark is a screenplay-first video compiler and rendering engine for people and 
 screenplay → deterministic Timeline IR → browser frames → encoded video
 ```
 
-The project is currently in design and delivery gate one: rendering one real video reliably through the final-direction compiler and browser protocol. The implemented foundation includes the pure domain model, structured authored diagnostics, span-preserving screenplay syntax, binding, typed resolution, timeline solving, and versioned browser wire types in `onmark-core`; bounded ffprobe metadata normalization in `onmark-media`; and generated TypeScript codecs in `@onmark/runtime`.
+The project is currently in design and delivery gate one: rendering one real video reliably through the final-direction compiler and browser protocol. The implemented foundation includes the pure domain model, structured authored diagnostics, span-preserving screenplay syntax, binding, typed resolution, timeline solving, and versioned browser wire types in `onmark-core`; bounded ffprobe metadata normalization in `onmark-media`; and generated TypeScript codecs plus the browser-independent protocol session in `@onmark/runtime`. The deterministic browser clock and real DOM/media/Chromium adapter remain Gate-one work.
 
 ## Repository map
 
@@ -14,7 +14,7 @@ The project is currently in design and delivery gate one: rendering one real vid
 - `packages/` contains browser and authoring TypeScript packages.
 - `conformance/` contains behavior examples shared across implementations.
 - `schemas/` contains generated, versioned wire contracts.
-- `xtask/` contains the repository-only schema and codec generator.
+- `scripts/` contains repository-only generation and quality checks.
 
 ## Development
 
@@ -25,6 +25,8 @@ cargo test --workspace
 cargo clippy --workspace --all-targets --all-features
 cargo fmt --all -- --check
 pnpm install --frozen-lockfile
+pnpm format:check
+pnpm lint
 pnpm typecheck
 pnpm test
 cargo xtask schema --check
@@ -35,6 +37,7 @@ cargo xtask schema --check
 - [Architecture](docs/en/architecture.md)
 - [Language specification](docs/en/language-specification.md)
 - [Rust style guide](docs/en/rust-style-guide.md)
+- [TypeScript style guide](docs/en/typescript-style-guide.md)
 - [中文文档](docs/zh-CN/)
 
 The design documents remain the project contract. Code and documentation disagreements must be resolved explicitly rather than silently choosing one side.

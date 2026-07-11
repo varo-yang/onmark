@@ -1,3 +1,6 @@
+// Generates runtime types and standalone validators from Rust-owned schemas.
+// The Rust xtask invokes this file after publishing deterministic JSON Schema.
+
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,27 +10,55 @@ import standaloneCode from "ajv/dist/standalone/index.js";
 import { compile } from "json-schema-to-typescript";
 
 const repository = resolve(fileURLToPath(new URL("..", import.meta.url)));
-const check = process.argv.slice(2).includes("--check");
 const generated = resolve(repository, "packages/runtime/src/generated");
 
-const requestSchema = await readJson("schemas/browser-request-v1.schema.json");
-const responseSchema = await readJson("schemas/browser-response-v1.schema.json");
+await main(process.argv.slice(2)).catch(reportFailure);
 
-const requestTypes = await compile(requestSchema, "BrowserRequest", typeOptions());
-const responseTypes = await compile(responseSchema, "BrowserResponse", typeOptions());
-const validators = compileValidators(requestSchema, responseSchema);
+async function main(arguments_) {
+  const mode = generationMode(arguments_);
+  const requestSchema = await readJson(
+    "schemas/browser-request-v1.schema.json",
+  );
+  const responseSchema = await readJson(
+    "schemas/browser-response-v1.schema.json",
+  );
 
-if (!check) {
-  await mkdir(generated, { recursive: true });
+  const requestTypes = await compile(
+    requestSchema,
+    "BrowserRequest",
+    typeOptions(),
+  );
+  const responseTypes = await compile(
+    responseSchema,
+    "BrowserResponse",
+    typeOptions(),
+  );
+  const validators = compileValidators(requestSchema, responseSchema);
+
+  if (mode === "write") {
+    await mkdir(generated, { recursive: true });
+  }
+  await publish(mode, "browser-request.ts", requestTypes);
+  await publish(mode, "browser-response.ts", responseTypes);
+  await publish(mode, "validators.js", validators);
+  await publish(mode, "validators.d.ts", validatorDeclarations());
+  await publish(mode, "codec.ts", codecSource());
 }
-await publish("browser-request.ts", requestTypes);
-await publish("browser-response.ts", responseTypes);
-await publish("validators.js", validators);
-await publish("validators.d.ts", validatorDeclarations());
-await publish("codec.ts", codecSource());
+
+function reportFailure(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  process.stderr.write(`protocol-codegen: ${message}\n`);
+  process.exitCode = 1;
+}
 
 async function readJson(relative) {
   return JSON.parse(await readFile(resolve(repository, relative), "utf8"));
+}
+
+function generationMode(arguments_) {
+  if (arguments_.length === 0) return "write";
+  if (arguments_.length === 1 && arguments_[0] === "--check") return "check";
+  throw new Error("usage: node scripts/protocol-codegen.mjs [--check]");
 }
 
 function typeOptions() {
@@ -127,14 +158,16 @@ function decode<T>(value: unknown, validator: ProtocolValidator, role: string): 
 `;
 }
 
-async function publish(filename, contents) {
+async function publish(mode, filename, contents) {
   const path = resolve(generated, filename);
-  if (check) {
+  if (mode === "check") {
     let current;
     try {
       current = await readFile(path, "utf8");
     } catch (error) {
-      throw new Error(`cannot read generated artifact: ${path}`, { cause: error });
+      throw new Error(`cannot read generated artifact: ${path}`, {
+        cause: error,
+      });
     }
     if (current !== contents) {
       throw new Error(`generated artifact is stale: ${path}`);

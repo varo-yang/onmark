@@ -1,0 +1,238 @@
+// Behavioral contract for the sequential browser runtime session.
+// A recording adapter replaces only the not-yet-implemented browser boundary.
+
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import {
+  RuntimeAdapterError,
+  RuntimeSession,
+  type BrowserPlan,
+  type BrowserRequest,
+  type BrowserResponse,
+  type RuntimeAdapter,
+} from "../src/index.js";
+
+const plan: BrowserPlan = {
+  timelineVersion: 1,
+  frameRate: { numerator: 30, denominator: 1 },
+  evaluation: { start: 10, end: 20 },
+  output: { start: 10, end: 20 },
+};
+
+// ── Protocol progression ──
+
+test("executes the Gate-one protocol in order", async () => {
+  const adapter = new RecordingAdapter();
+  const session = new RuntimeSession(adapter);
+
+  assert.deepEqual(await session.dispatch(request(1, { type: "load", plan })), {
+    version: 1,
+    requestId: 1,
+    event: { type: "loaded" },
+  });
+  assert.deepEqual(
+    await session.dispatch(
+      request(2, { type: "prepare", evaluationStart: 10 }),
+    ),
+    {
+      version: 1,
+      requestId: 2,
+      event: { type: "prepared", evaluationStart: 10 },
+    },
+  );
+  assert.deepEqual(
+    await session.dispatch(request(3, { type: "seek", frame: 15 })),
+    {
+      version: 1,
+      requestId: 3,
+      event: { type: "frameReady", frame: 15 },
+    },
+  );
+  assert.deepEqual(await session.dispatch(request(4, { type: "dispose" })), {
+    version: 1,
+    requestId: 4,
+    event: { type: "disposed" },
+  });
+  assert.deepEqual(adapter.operations, [
+    "load",
+    "prepare:10",
+    "seek:15",
+    "dispose",
+  ]);
+});
+
+test("rejects commands that violate session state or evaluation bounds", async () => {
+  const adapter = new RecordingAdapter();
+  const session = new RuntimeSession(adapter);
+
+  const beforeLoad = await session.dispatch(
+    request(1, { type: "seek", frame: 10 }),
+  );
+  assertFailure(beforeLoad, "invalidRequest");
+
+  await session.dispatch(request(2, { type: "load", plan }));
+  const wrongStart = await session.dispatch(
+    request(3, { type: "prepare", evaluationStart: 11 }),
+  );
+  assertFailure(wrongStart, "invalidRequest");
+
+  await session.dispatch(request(4, { type: "prepare", evaluationStart: 10 }));
+  const outside = await session.dispatch(
+    request(5, { type: "seek", frame: 20 }),
+  );
+  assertFailure(outside, "invalidRequest");
+  assert.deepEqual(adapter.operations, ["load", "prepare:10"]);
+});
+
+// ── Concurrency, failures, and ownership ──
+
+test("rejects concurrent commands instead of growing a hidden queue", async () => {
+  let finishLoad!: () => void;
+  const adapter = new RecordingAdapter();
+  adapter.loadBarrier = new Promise<void>((resolve) => {
+    finishLoad = resolve;
+  });
+  const session = new RuntimeSession(adapter);
+
+  const loading = session.dispatch(request(1, { type: "load", plan }));
+  const concurrent = await session.dispatch(request(2, { type: "dispose" }));
+
+  assertFailure(concurrent, "invalidRequest");
+  finishLoad();
+  assert.equal((await loading).event.type, "loaded");
+});
+
+test("translates typed adapter failures and contains untyped exceptions", async () => {
+  const adapter = new RecordingAdapter();
+  const session = new RuntimeSession(adapter);
+
+  await session.dispatch(request(1, { type: "load", plan }));
+  adapter.prepareError = new RuntimeAdapterError(
+    "readinessTimeout",
+    "fonts did not become ready",
+    ["font:Inter"],
+  );
+  const timeout = await session.dispatch(
+    request(2, { type: "prepare", evaluationStart: 10 }),
+  );
+  assert.deepEqual(timeout.event, {
+    type: "failed",
+    code: "readinessTimeout",
+    message: "fonts did not become ready",
+    pendingResources: ["font:Inter"],
+  });
+
+  adapter.prepareError = undefined;
+  await session.dispatch(request(3, { type: "prepare", evaluationStart: 10 }));
+  adapter.seekError = new Error("vendor-specific failure");
+  const internal = await session.dispatch(
+    request(4, { type: "seek", frame: 10 }),
+  );
+  assertFailure(internal, "internal");
+  if (internal.event.type === "failed") {
+    assert.equal(
+      internal.event.message,
+      "runtime adapter threw an untyped error",
+    );
+  }
+});
+
+test("reserves readiness timeouts for operations that wait for a frame", async () => {
+  const adapter = new RecordingAdapter();
+  adapter.loadError = new RuntimeAdapterError(
+    "readinessTimeout",
+    "browser launch timed out",
+    ["browser"],
+  );
+  const session = new RuntimeSession(adapter);
+
+  const failure = await session.dispatch(request(1, { type: "load", plan }));
+
+  assertFailure(failure, "loadFailed");
+});
+
+test("takes ownership of plan facts and makes disposal terminal", async () => {
+  const adapter = new RecordingAdapter();
+  const session = new RuntimeSession(adapter);
+  const mutablePlan = structuredClone(plan);
+
+  await session.dispatch(request(1, { type: "load", plan: mutablePlan }));
+  mutablePlan.evaluation.start = 12;
+  await session.dispatch(request(2, { type: "prepare", evaluationStart: 10 }));
+  adapter.disposeError = new RuntimeAdapterError(
+    "operation",
+    "browser cleanup failed",
+  );
+  const cleanup = await session.dispatch(request(3, { type: "dispose" }));
+  const disposed = await session.dispatch(
+    request(4, { type: "seek", frame: 10 }),
+  );
+
+  assertFailure(cleanup, "internal");
+  assertFailure(disposed, "invalidRequest");
+  assert.deepEqual(adapter.loadedPlan, plan);
+});
+
+// ── Test support ──
+
+function request(
+  requestId: number,
+  command: BrowserRequest["command"],
+): BrowserRequest {
+  return { version: 1, requestId, command };
+}
+
+function assertFailure(response: BrowserResponse, code: FailureCode): void {
+  assert.equal(response.event.type, "failed");
+  if (response.event.type === "failed") {
+    assert.equal(response.event.code, code);
+  }
+}
+
+type FailureCode = Extract<
+  BrowserResponse["event"],
+  { type: "failed" }
+>["code"];
+
+class RecordingAdapter implements RuntimeAdapter {
+  readonly operations: string[] = [];
+  loadedPlan: BrowserPlan | undefined;
+  loadBarrier: Promise<void> | undefined;
+  loadError: Error | undefined;
+  prepareError: Error | undefined;
+  seekError: Error | undefined;
+  disposeError: Error | undefined;
+
+  async load(plan: BrowserPlan): Promise<void> {
+    this.operations.push("load");
+    this.loadedPlan = plan;
+    if (this.loadError !== undefined) {
+      throw this.loadError;
+    }
+    if (this.loadBarrier !== undefined) {
+      await this.loadBarrier;
+    }
+  }
+
+  async prepare(evaluationStart: number): Promise<void> {
+    this.operations.push(`prepare:${evaluationStart}`);
+    if (this.prepareError !== undefined) {
+      throw this.prepareError;
+    }
+  }
+
+  async seek(frame: number): Promise<void> {
+    this.operations.push(`seek:${frame}`);
+    if (this.seekError !== undefined) {
+      throw this.seekError;
+    }
+  }
+
+  async dispose(): Promise<void> {
+    this.operations.push("dispose");
+    if (this.disposeError !== undefined) {
+      throw this.disposeError;
+    }
+  }
+}

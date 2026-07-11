@@ -1,6 +1,6 @@
 [package]
 name = "onmark-xtask"
-description = "Deterministic repository generation tasks for Onmark"
+description = "Deterministic schema generation for Onmark"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,6 +8,10 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 publish = false
+
+[[bin]]
+name = "onmark-xtask"
+path = "xtask.rs"
 
 [dependencies]
 onmark-core = { path = "../crates/core", features = ["schema"] }

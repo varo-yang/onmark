@@ -44,10 +44,6 @@
               "$ref": "#/$defs/WireFrame",
               "description": "Exact frame now represented by browser state."
             },
-            "stateHash": {
-              "$ref": "#/$defs/StateHash",
-              "description": "Canonical hash of runtime-owned state for this frame."
-            },
             "type": {
               "const": "frameReady",
               "type": "string"
@@ -55,8 +51,7 @@
           },
           "required": [
             "type",
-            "frame",
-            "stateHash"
+            "frame"
           ],
           "type": "object"
         },
@@ -164,11 +159,6 @@
       "maximum": 4294967295,
       "minimum": 0,
       "type": "integer"
-    },
-    "StateHash": {
-      "description": "Canonical lowercase SHA-256 spelling of runtime-owned frame state.",
-      "pattern": "^[0-9a-f]{64}$",
-      "type": "string"
     },
     "WireFrame": {
       "description": "Exact frame integer accepted by JavaScript without rounding.",

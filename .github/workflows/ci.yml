@@ -81,6 +81,12 @@ jobs:
       - name: Check TypeScript
         run: pnpm typecheck
 
+      - name: Lint TypeScript and JavaScript
+        run: pnpm lint
+
+      - name: Check TypeScript and JavaScript formatting
+        run: pnpm format:check
+
       - name: Test browser runtime
         run: pnpm test
 

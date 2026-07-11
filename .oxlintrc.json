@@ -1,0 +1,41 @@
+{
+  "rules": {
+    "consistent-type-imports": "error",
+    "no-console": "error",
+    "no-default-export": "error",
+    "no-explicit-any": "error",
+    "no-restricted-properties": [
+      "error",
+      {
+        "object": "process",
+        "property": "env",
+        "message": "environment access belongs at a process configuration boundary"
+      }
+    ]
+  },
+  "overrides": [
+    {
+      "files": ["packages/runtime/src/**/*.ts"],
+      "rules": {
+        "no-restricted-properties": [
+          "error",
+          {
+            "object": "process",
+            "property": "env",
+            "message": "environment access belongs at a process configuration boundary"
+          },
+          {
+            "object": "Date",
+            "property": "now",
+            "message": "captured browser state may not depend on wall time"
+          },
+          {
+            "object": "Math",
+            "property": "random",
+            "message": "captured browser state may not depend on unseeded randomness"
+          }
+        ]
+      }
+    }
+  ]
+}
