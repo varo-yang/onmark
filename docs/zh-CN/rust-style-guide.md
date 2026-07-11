@@ -558,6 +558,8 @@ Rustdoc 解释 API 为什么存在，提供真实示例，并在需要时写明 
 
 消息名、诊断码、文件名、环境变量、JSON 字段、缓存键部分和浏览器 global 都是协议。每个值只在所有者 crate 定义一次。线上 enum 和持久格式必须显式版本化。
 
+会持续增长的协议 enum 使用 `#[non_exhaustive]`，要求外部消费者容忍后续新增 variant。局部校验原因 enum 在描述单个构造器的封闭失败契约时保持可穷尽；新增原因应当成为一次有意的 API 变更，而不是被 wildcard 静默吞掉。
+
 ## 确定性
 
 ### 14. 稳定输出是设计结果
@@ -663,7 +665,7 @@ Lint 必须按 crate 类型分层。Workspace 默认只放高信号规则；`ped
 
 ```bash
 cargo fmt --all -- --check
-CARGO_BUILD_WARNINGS=deny cargo check --workspace --all-targets --all-features --keep-going
+RUSTFLAGS="-D warnings" cargo check --workspace --all-targets --all-features --keep-going
 cargo clippy --workspace --all-targets --all-features
 cargo test --workspace --all-features
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps

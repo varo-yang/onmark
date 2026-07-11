@@ -1,6 +1,11 @@
 use std::fmt;
 
 /// Stable identity of an authored problem.
+///
+/// Diagnostic codes are an expanding external protocol, so downstream code
+/// must tolerate codes added by later Onmark versions. Local validation-reason
+/// enums remain exhaustive because their variants belong to one constructor's
+/// closed failure contract.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[non_exhaustive]
 pub enum DiagnosticCode {

@@ -215,9 +215,55 @@ const fn greatest_common_divisor(mut left: u32, mut right: u32) -> u32 {
 
 #[cfg(test)]
 mod tests {
+    use proptest::prelude::*;
+
     use super::{
         FrameCount, FrameIndex, FrameInterval, FrameRate, InvalidFrameInterval, InvalidFrameRate,
+        greatest_common_divisor,
     };
+
+    proptest! {
+        #[test]
+        fn canonicalizes_equally_scaled_frame_rates(
+            numerator in 1_u32..=65_535,
+            denominator in 1_u32..=65_535,
+            scale in 1_u32..=65_535,
+        ) {
+            let original = FrameRate::new(numerator, denominator)
+                .expect("positive parts form a valid frame rate");
+            let scaled = FrameRate::new(numerator * scale, denominator * scale)
+                .expect("the generated products fit in u32 and remain positive");
+
+            prop_assert_eq!(scaled, original);
+        }
+
+        #[test]
+        fn canonical_frame_rate_parts_are_coprime(
+            numerator in 1_u32..=u32::MAX,
+            denominator in 1_u32..=u32::MAX,
+        ) {
+            let rate = FrameRate::new(numerator, denominator)
+                .expect("positive parts form a valid frame rate");
+
+            prop_assert_eq!(
+                greatest_common_divisor(rate.numerator(), rate.denominator()),
+                1,
+            );
+        }
+
+        #[test]
+        fn interval_length_reconstructs_its_end(left in any::<u64>(), right in any::<u64>()) {
+            let (start, end) = if left <= right {
+                (FrameIndex::new(left), FrameIndex::new(right))
+            } else {
+                (FrameIndex::new(right), FrameIndex::new(left))
+            };
+            let interval = FrameInterval::new(start, end)
+                .expect("ordered generated bounds form a valid interval");
+
+            prop_assert_eq!(start.checked_advance(interval.len()), Some(end));
+        }
+    }
 
     #[test]
     fn advances_without_hiding_overflow() {

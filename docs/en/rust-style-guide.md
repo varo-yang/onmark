@@ -620,6 +620,8 @@ Message names, diagnostic codes, filenames, environment variables, JSON field na
 
 Wire enums and persisted formats require explicit versioning. Internal enum renames must not silently alter serialized output.
 
+Expanding protocol enums use `#[non_exhaustive]` so external consumers must tolerate later variants. Local validation-reason enums remain exhaustive when they describe the closed failure contract of one constructor; adding a reason is then an intentional API change rather than silently falling through a wildcard.
+
 ---
 
 ## Determinism
@@ -753,7 +755,7 @@ Required merge gates:
 
 ```bash
 cargo fmt --all -- --check
-CARGO_BUILD_WARNINGS=deny cargo check --workspace --all-targets --all-features --keep-going
+RUSTFLAGS="-D warnings" cargo check --workspace --all-targets --all-features --keep-going
 cargo clippy --workspace --all-targets --all-features
 cargo test --workspace --all-features
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps

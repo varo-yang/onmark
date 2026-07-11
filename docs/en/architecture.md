@@ -96,6 +96,10 @@ The first Rust workspace contains `onmark-core`, `onmark-media`, `onmark-render`
 
 Core's internal dependency DAG is CI-enforced: `model` depends on nothing; `syntax`, `diagnostics`, and `timeline` may depend on model; `compiler` may depend on those four; `protocol` may depend on model, diagnostics, and timeline. No domain module depends back on protocol. New edges require an architecture change.
 
+`onmark-core` keeps its production dependency budget empty until a compiler capability requires otherwise. Its test targets may use `proptest` as a development-only dependency to exercise time algebra, interval relations, and canonicalization; it is not linked into library consumers or runtime artifacts.
+
+Validation reasons remain local domain values. Once syntax has supplied source context, the `compiler` module is the single owner that translates reasons such as `InvalidNodeId` into source-located `Diagnostic` values. Neither `model` nor `syntax` depends on diagnostics, and the translation must not be duplicated by callers.
+
 On the TypeScript side, runtime is the foundation. Authoring consumes runtime's types-only public hook and capability contract; bundler injects the pinned runtime artifact. Runtime never depends on authoring or bundler. Temporal capability declarations belong to runtime as the stable third-party adapter extension point.
 
 Rust wire types are the source of truth. `cargo xtask schema` generates checked-in versioned JSON Schema and TypeScript types/codecs. CI regenerates and requires a clean diff. Generated files are never hand-edited, and Rust does not regenerate a second Rust model from its own schema.

@@ -47,7 +47,7 @@ jobs:
 
       - name: Check compiler diagnostics
         env:
-          CARGO_BUILD_WARNINGS: deny
+          RUSTFLAGS: -D warnings
         run: cargo check --locked --workspace --all-targets --all-features --keep-going
 
       - name: Run Clippy

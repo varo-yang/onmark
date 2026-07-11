@@ -125,7 +125,11 @@ impl RelatedDiagnostic {
     }
 }
 
-/// Deterministically ordered collection of authored diagnostics.
+/// Deterministically ordered sequence of authored diagnostics.
+///
+/// Every submitted diagnostic is retained, including exact duplicates. The
+/// compiler phase that owns a diagnostic is responsible for emitting it once;
+/// silently deduplicating here would hide duplicate emission defects.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Diagnostics {
     entries: Vec<Diagnostic>,
@@ -320,5 +324,18 @@ mod tests {
         assert_eq!(diagnostics.len(), 2);
         assert_eq!(diagnostics.iter().next(), Some(&earlier));
         assert_eq!(diagnostics.into_vec()[0], earlier);
+    }
+
+    #[test]
+    fn retains_duplicate_diagnostics() {
+        let diagnostic =
+            Diagnostic::new(DiagnosticCode::InvalidNodeId, span(0, 10, 15), "invalid ID")
+                .expect("the fixture has a message");
+        let mut diagnostics = Diagnostics::new();
+
+        diagnostics.push(diagnostic.clone());
+        diagnostics.push(diagnostic.clone());
+
+        assert_eq!(diagnostics.into_vec(), vec![diagnostic.clone(), diagnostic]);
     }
 }

@@ -359,6 +359,10 @@ protocol    → diagnostics + timeline + model
 
 `syntax` 不得依赖 compiler，`timeline` 不得依赖 syntax，领域模块不得反向依赖 protocol。CI 使用模块依赖图检查，而不是脆弱的文本 grep；在工具选型完成前，架构测试至少枚举并断言 forbidden edges。任何新增内部边必须先更新本文。
 
+在真正的编译能力需要第三方库之前，`onmark-core` 的生产依赖预算保持为空。测试 target 可以把 `proptest` 作为仅开发依赖，用于验证时间代数、区间关系和规范化；它不会链接进库消费者或运行时产物。
+
+校验失败原因保留为局部领域值。syntax 提供源码上下文后，由 `compiler` 模块唯一负责把 `InvalidNodeId` 等原因翻译成带源码位置的 `Diagnostic`。`model` 和 `syntax` 都不依赖 diagnostics，调用方也不得重复实现这层翻译。
+
 ### TypeScript package 方向
 
 ```text
