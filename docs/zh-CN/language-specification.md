@@ -220,11 +220,11 @@ ONM-TIME-004 标题“立即购买”从第 13 秒开始，但所属 shot 在第
 | `ONM-STRUCT-005` | film 包含多个 `cues` 容器 |
 | `ONM-STRUCT-006` | 结构元素或空元素中出现了文本 |
 | `ONM-TIME-001` | 时长格式非法、精度过高或超出精确范围 |
-| `ONM-REF-001` | overlay 的 cue 引用没有指向已解析 cue |
+| `ONM-REF-001` | 格式良好的 overlay cue 引用没有指向已解析 cue |
 | `ONM-REF-002` | 已解析 cue 从未被引用 |
 | `ONM-ATTR-001` | 元素包含未知属性 |
 | `ONM-ATTR-002` | 元素缺少必需属性 |
-| `ONM-ATTR-003` | 属性值非法 |
+| `ONM-ATTR-003` | 属性值非法，包括格式错误的 cue ID |
 | `ONM-ATTR-004` | 两个属性定义了互相冲突的规则 |
 
 `ONM-REF-002` 的 severity 是 warning；其余首批 bind 与 resolve 诊断均为 error。

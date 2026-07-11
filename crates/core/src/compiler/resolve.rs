@@ -2,8 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::diagnostics::{Diagnostic, DiagnosticCode, Diagnostics};
 use crate::model::{
-    AssetRef, CueId, Duration, ElementKind, EventRef, InvalidAssetRef, InvalidDuration, NodeId,
-    SourceSpan,
+    AssetRef, CueId, Duration, ElementKind, EventRef, InvalidAssetRef, InvalidDuration,
+    InvalidNodeId, NodeId, SourceSpan,
 };
 use crate::syntax::{Attribute, TextNode};
 
@@ -276,17 +276,20 @@ impl Resolver {
             Ok(asset) => Some(Authored::new(asset, attribute.value_span())),
             Err(reason) => {
                 self.diagnostics
-                    .push(invalid_attribute_value(attribute, reason));
+                    .push(invalid_asset_reference(attribute, reason));
                 None
             }
         }
     }
 
     fn resolve_cue_reference(&mut self, attribute: &Attribute) -> Option<Authored<EventRef>> {
-        let id = CueId::parse(attribute.value()).ok();
-        let Some(id) = id else {
-            self.diagnostics.push(unknown_cue(attribute));
-            return None;
+        let id = match CueId::parse(attribute.value()) {
+            Ok(id) => id,
+            Err(reason) => {
+                self.diagnostics
+                    .push(invalid_cue_reference(attribute, reason));
+                return None;
+            }
         };
         let Some(state) = self.cue_table.get_mut(&id) else {
             self.diagnostics.push(unknown_cue(attribute));
@@ -434,7 +437,7 @@ fn missing_attribute(kind: ElementKind, name: &str, primary: SourceSpan) -> Diag
     .expect("a formatted missing-attribute help is non-blank")
 }
 
-fn invalid_attribute_value(attribute: &Attribute, reason: InvalidAssetRef) -> Diagnostic {
+fn invalid_asset_reference(attribute: &Attribute, reason: InvalidAssetRef) -> Diagnostic {
     Diagnostic::new(
         DiagnosticCode::InvalidAttributeValue,
         attribute.value_span(),
@@ -446,6 +449,17 @@ fn invalid_attribute_value(attribute: &Attribute, reason: InvalidAssetRef) -> Di
         attribute.name()
     ))
     .expect("a formatted invalid-attribute help is non-blank")
+}
+
+fn invalid_cue_reference(attribute: &Attribute, reason: InvalidNodeId) -> Diagnostic {
+    Diagnostic::new(
+        DiagnosticCode::InvalidAttributeValue,
+        attribute.value_span(),
+        format!("attribute \"cue\" is invalid: {reason}"),
+    )
+    .expect("a formatted cue-reference message is non-blank")
+    .with_help("use a non-empty cue ID without ASCII whitespace")
+    .expect("the static cue-reference help is non-blank")
 }
 
 fn conflicting_attributes(first: &Attribute, second: &Attribute) -> Diagnostic {

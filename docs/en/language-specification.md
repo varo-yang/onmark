@@ -106,11 +106,11 @@ Initial binding and resolution diagnostics are:
 | `ONM-STRUCT-005` | a film contains more than one `cues` container |
 | `ONM-STRUCT-006` | authored text appears in a structural or empty element |
 | `ONM-TIME-001` | an authored duration is invalid or outside the exact range |
-| `ONM-REF-001` | an overlay cue reference does not name a resolved cue |
+| `ONM-REF-001` | a well-formed overlay cue reference does not name a resolved cue |
 | `ONM-REF-002` | a resolved cue is never referenced |
 | `ONM-ATTR-001` | an element contains an unknown attribute |
 | `ONM-ATTR-002` | an element is missing a required attribute |
-| `ONM-ATTR-003` | an authored attribute value is invalid |
+| `ONM-ATTR-003` | an authored attribute value, including a malformed cue ID, is invalid |
 | `ONM-ATTR-004` | two authored attributes define conflicting rules |
 
 `ONM-REF-002` is a warning; the other initial binding and resolution diagnostics are errors.

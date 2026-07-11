@@ -24,3 +24,5 @@ ONM-ATTR-004 error @0:323..328 attributes "cue" and "delay" define conflicting s
   related @0:309..312 "cue" is first authored here
 ONM-ATTR-001 error @0:334..341 attribute "strange" is not allowed on <title>
   help: remove the "strange" attribute
+ONM-ATTR-003 error @0:410..417 attribute "cue" is invalid: node ID cannot contain ASCII whitespace
+  help: use a non-empty cue ID without ASCII whitespace

@@ -11,6 +11,7 @@
       <video src="" delay="1.0000001ms" mystery="x" />
       <title cue="missing" delay="1s" strange="x">Broken</title>
       <cta cue="used">Used</cta>
+      <cta cue="bad ref">Malformed reference</cta>
     </shot>
   </scene>
 </film>
