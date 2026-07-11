@@ -50,7 +50,7 @@ freeze inputs → probe media → compile → bundle → render graph
 
 The compiler performs parse, structural bind, attribute/reference resolve, validate, solve, and lower without IO. The planner computes dependency closure before partitioning. Simple films naturally partition around shots; transitions, persistent elements, global effects, and historical shaders widen or merge units for correctness.
 
-Attribute/reference resolution aggregates authored diagnostics while building its candidate output. An error withholds `ResolvedFilm` from the phase report so no recovery default can enter time solving as a compiler fact; warnings remain non-blocking.
+Structural binding and attribute/reference resolution aggregate authored diagnostics while building candidate outputs. An error withholds the phase value from its report so rejected structure or recovery defaults cannot enter the next phase as compiler facts; warnings remain non-blocking.
 
 Each worker executes one state machine:
 
@@ -96,7 +96,7 @@ onmark/
 ├── schemas/ conformance/ evals/ examples/ docs/
 ```
 
-The first Rust workspace contains `onmark-core`, `onmark-media`, `onmark-render`, and `onmark-cli`. Media is separate now because server-side compile/lint loops need probing without Chromium; this is already both a distinct dependency budget and a real consumer. Render depends on core and media. Syntax, diagnostics, model, compiler, timeline, and protocol remain rectangular modules inside core. Render graph and planning initially join core at gate two. Worker execution belongs to render. A coordinator appears only at gate three.
+The current milestone contains only `onmark-core`. Gate one adds `onmark-media`, `onmark-render`, and `onmark-cli` when their first consumed behavior is implemented. Media is a separate crate because server-side compile/lint loops need probing without Chromium; this is both a distinct dependency budget and a real consumer. Render depends on core and media. Syntax, diagnostics, model, compiler, timeline, and protocol remain rectangular modules inside core. Render graph and planning initially join core at gate two. Worker execution belongs to render. A coordinator appears only at gate three.
 
 Core's internal dependency DAG is CI-enforced: `model` depends on nothing; `syntax`, `diagnostics`, and `timeline` may depend on model; `compiler` may depend on those four; `protocol` may depend on model, diagnostics, and timeline. No domain module depends back on protocol. New edges require an architecture change. CI performs a syntax-aware check of explicit Rust paths with `syn`. This cooperative guard covers ordinary paths, imports, aliases, and re-exports, but not paths generated inside macros or full rustc name resolution; review remains responsible for those edges.
 
@@ -106,7 +106,7 @@ Validation reasons remain local domain values. Once syntax has supplied source c
 
 On the TypeScript side, runtime is the foundation. Authoring consumes runtime's types-only public hook and capability contract; bundler injects the pinned runtime artifact. Runtime never depends on authoring or bundler. Temporal capability declarations belong to runtime as the stable third-party adapter extension point.
 
-Rust wire types are the source of truth. `cargo xtask schema` generates checked-in versioned JSON Schema and TypeScript types/codecs. CI regenerates and requires a clean diff. Generated files are never hand-edited, and Rust does not regenerate a second Rust model from its own schema.
+Rust wire types are the source of truth. Once protocol work begins, `cargo xtask schema` will generate checked-in versioned JSON Schema and TypeScript types/codecs, and CI will require regeneration to produce a clean diff. Generated files are never hand-edited, and Rust does not regenerate a second Rust model from its own schema.
 
 AWS Lambda is an adapter, not another engine. A later independently published `@onmark/aws-lambda` surface owns invocation types, infrastructure definitions, the thin handler, and a container image with the pinned Rust binary, Chromium, FFmpeg, and fonts. The handler materializes a Render Unit, calls the same `onmark-render` executor, uploads an immutable artifact, and returns a structured result. AWS SDK types may not enter core. Other backends such as ECS or Kubernetes follow the same adapter rule.
 

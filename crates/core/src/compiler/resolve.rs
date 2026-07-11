@@ -7,7 +7,7 @@ use crate::model::{
 };
 use crate::syntax::{Attribute, TextNode};
 
-use super::linked::{
+use super::linked_film::{
     LinkedCue, LinkedCues, LinkedElement, LinkedFilm, LinkedId, LinkedNode, LinkedOverlay,
     LinkedScene, LinkedShot, LinkedShotContent, LinkedVideo, LinkedVoiceOver,
 };
@@ -200,20 +200,17 @@ impl Resolver {
     }
 
     fn resolve_video(&mut self, video: LinkedVideo) -> ResolvedVideo {
-        let input = ElementInput::new(video.into_element());
-        let (element, mut attributes) = input.into_resolved_parts();
-        let src = attributes
-            .take("src")
-            .and_then(|attribute| self.resolve_asset(&attribute));
-        let delay = attributes
-            .take("delay")
-            .and_then(|attribute| self.resolve_duration(&attribute));
-        attributes.reject_unknown(element.kind(), &mut self.diagnostics);
-        ResolvedVideo::new(element, src, delay)
+        let media = self.resolve_media_attributes(video.into_element());
+        ResolvedVideo::new(media.element, media.src, media.delay)
     }
 
     fn resolve_voice_over(&mut self, voice_over: LinkedVoiceOver) -> ResolvedVoiceOver {
         let (element, text) = voice_over.into_parts();
+        let media = self.resolve_media_attributes(element);
+        ResolvedVoiceOver::new(media.element, media.src, media.delay, resolve_text(text))
+    }
+
+    fn resolve_media_attributes(&mut self, element: LinkedElement) -> MediaAttributes {
         let input = ElementInput::new(element);
         let (element, mut attributes) = input.into_resolved_parts();
         let src = attributes
@@ -223,7 +220,11 @@ impl Resolver {
             .take("delay")
             .and_then(|attribute| self.resolve_duration(&attribute));
         attributes.reject_unknown(element.kind(), &mut self.diagnostics);
-        ResolvedVoiceOver::new(element, src, delay, resolve_text(text))
+        MediaAttributes {
+            element,
+            src,
+            delay,
+        }
     }
 
     fn resolve_overlay(&mut self, overlay: LinkedOverlay) -> ResolvedOverlay {
@@ -308,6 +309,12 @@ impl Resolver {
 struct CueState {
     declared_at: SourceSpan,
     used: bool,
+}
+
+struct MediaAttributes {
+    element: ResolvedElement,
+    src: Option<Authored<AssetRef>>,
+    delay: Option<Authored<Duration>>,
 }
 
 struct ElementInput {
@@ -478,16 +485,7 @@ mod tests {
 
     #[test]
     fn warnings_preserve_the_resolved_film() {
-        let source = r#"<film><cues><cue id="unused" time="1s" /></cues></film>"#;
-        let parsed = compiler::parse(SourceId::new(0), source);
-        let (document, syntax_diagnostics) = parsed.into_parts();
-        assert!(syntax_diagnostics.is_empty());
-
-        let bound = compiler::bind(document);
-        let (film, binding_diagnostics) = bound.into_parts();
-        assert!(binding_diagnostics.is_empty());
-
-        let report = super::resolve(film.expect("the fixture has one film"));
+        let report = resolve_source(r#"<film><cues><cue id="unused" time="1s" /></cues></film>"#);
         let codes = report
             .diagnostics()
             .iter()
@@ -497,5 +495,26 @@ mod tests {
         assert_eq!(codes, [DiagnosticCode::UnusedCue]);
         assert!(!report.diagnostics().has_errors());
         assert!(report.film().is_some());
+    }
+
+    #[test]
+    fn missing_media_sources_remain_valid_for_static_analysis() {
+        let report =
+            resolve_source("<film><scene><shot><video/><vo>Narration</vo></shot></scene></film>");
+
+        assert!(report.diagnostics().is_empty());
+        assert!(report.film().is_some());
+    }
+
+    fn resolve_source(source: &str) -> super::ResolveReport {
+        let parsed = compiler::parse(SourceId::new(0), source);
+        let (document, syntax_diagnostics) = parsed.into_parts();
+        assert!(syntax_diagnostics.is_empty());
+
+        let bound = compiler::bind(document);
+        let (film, binding_diagnostics) = bound.into_parts();
+        assert!(binding_diagnostics.is_empty());
+
+        super::resolve(film.expect("the fixture has one film"))
     }
 }

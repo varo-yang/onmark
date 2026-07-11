@@ -4,6 +4,7 @@
 //! cloud IO. External facts enter through typed inputs.
 
 #![forbid(unsafe_code)]
+#![warn(missing_docs)]
 #![warn(clippy::pedantic)]
 #![deny(clippy::print_stderr, clippy::print_stdout, clippy::unwrap_used)]
 

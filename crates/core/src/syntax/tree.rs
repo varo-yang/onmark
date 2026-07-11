@@ -89,6 +89,10 @@ impl Element {
     pub const fn span(&self) -> SourceSpan {
         self.span
     }
+
+    pub(crate) fn into_parts(self) -> (ElementName, Vec<Attribute>, Vec<Node>, SourceSpan) {
+        (self.name, self.attributes, self.children, self.span)
+    }
 }
 
 /// Case-sensitive qualified name of an element.

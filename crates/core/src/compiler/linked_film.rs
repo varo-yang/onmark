@@ -101,21 +101,25 @@ impl LinkedFilm {
         }
     }
 
+    /// Returns the structurally bound film element.
     #[must_use]
     pub const fn element(&self) -> &LinkedElement {
         &self.element
     }
 
+    /// Returns the optional singleton cue container.
     #[must_use]
     pub const fn cues(&self) -> Option<&LinkedCues> {
         self.cues.as_ref()
     }
 
+    /// Returns sequential scenes in authored order.
     #[must_use]
     pub fn scenes(&self) -> &[LinkedScene] {
         &self.scenes
     }
 
+    /// Returns the deterministic film-wide ID index.
     #[must_use]
     pub fn ids(&self) -> impl ExactSizeIterator<Item = (&NodeId, &LinkedNode)> {
         self.ids.iter()
@@ -145,6 +149,7 @@ impl LinkedNode {
         Self { kind, declared_at }
     }
 
+    /// Returns the kind of the indexed element.
     #[must_use]
     pub const fn kind(&self) -> ElementKind {
         self.kind
@@ -169,11 +174,13 @@ impl LinkedCues {
         Self { element, cues }
     }
 
+    /// Returns the structurally bound cue-container element.
     #[must_use]
     pub const fn element(&self) -> &LinkedElement {
         &self.element
     }
 
+    /// Returns cue declarations in authored order.
     #[must_use]
     pub fn cues(&self) -> &[LinkedCue] {
         &self.cues
@@ -195,6 +202,7 @@ impl LinkedCue {
         Self { element }
     }
 
+    /// Returns the structurally bound cue element.
     #[must_use]
     pub const fn element(&self) -> &LinkedElement {
         &self.element
@@ -217,11 +225,13 @@ impl LinkedScene {
         Self { element, shots }
     }
 
+    /// Returns the structurally bound scene element.
     #[must_use]
     pub const fn element(&self) -> &LinkedElement {
         &self.element
     }
 
+    /// Returns sequential shots in authored order.
     #[must_use]
     pub fn shots(&self) -> &[LinkedShot] {
         &self.shots
@@ -244,11 +254,13 @@ impl LinkedShot {
         Self { element, content }
     }
 
+    /// Returns the structurally bound shot element.
     #[must_use]
     pub const fn element(&self) -> &LinkedElement {
         &self.element
     }
 
+    /// Returns recognized shot content in authored order.
     #[must_use]
     pub fn content(&self) -> &[LinkedShotContent] {
         &self.content
@@ -262,8 +274,11 @@ impl LinkedShot {
 /// Closed kinds of content that a shot may own during Gate one.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum LinkedShotContent {
+    /// Primary video content.
     Video(LinkedVideo),
+    /// Voice-over content and inscription.
     VoiceOver(LinkedVoiceOver),
+    /// A title or call-to-action overlay.
     Overlay(LinkedOverlay),
 }
 
@@ -278,6 +293,7 @@ impl LinkedVideo {
         Self { element }
     }
 
+    /// Returns the structurally bound video element.
     #[must_use]
     pub const fn element(&self) -> &LinkedElement {
         &self.element
@@ -300,6 +316,7 @@ impl LinkedVoiceOver {
         Self { element, text }
     }
 
+    /// Returns the structurally bound voice-over element.
     #[must_use]
     pub const fn element(&self) -> &LinkedElement {
         &self.element
@@ -322,6 +339,7 @@ impl LinkedOverlay {
         Self { element, text }
     }
 
+    /// Returns the structurally bound overlay element.
     #[must_use]
     pub const fn element(&self) -> &LinkedElement {
         &self.element

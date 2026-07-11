@@ -171,7 +171,7 @@ parse → bind structure → resolve attributes/references → validate semantic
 
 创作错误产生可聚合 diagnostics；机器故障返回 typed error。编译成功保证时间线唯一、自洽，但不意味着浏览器已经可执行。
 
-属性/引用 resolve 会在构建候选产物的同时聚合创作诊断。只要存在 error，相位报告就不公开 `ResolvedFilm`，避免恢复用默认值被后续时间求解误当成编译事实；warning 不阻塞产物。
+结构 bind 与属性/引用 resolve 都会在构建候选产物的同时聚合创作诊断。只要存在 error，相位报告就不公开对应阶段值，避免被拒结构或恢复默认值被下一阶段误当成编译事实；warning 不阻塞产物。
 
 诊断是语言产品的一部分，不是日志。每条创作诊断必须包含稳定 code、源码 span、直接原因、相关节点，并在存在确定修法时给出可执行建议。建议面向人和 LLM 使用源码词汇，例如“定义 `cue:offer`，或将该标题改为相对当前 shot 的 `delay`”，不能只暴露求解器术语。
 
@@ -329,14 +329,14 @@ onmark/
 └── docs/
 ```
 
-首期有四个 Rust crate：
+当前里程碑只有 `onmark-core`。Gate 一在对应行为首次被真实消费时再加入另外三个 Rust crate：
 
 - `onmark-core` 是纯内核，内部用 `syntax`、`diagnostics`、`model`、`compiler`、`timeline`、`protocol` 模块保持结构；
 - `onmark-media` 只负责素材探测和规范化 metadata，使服务端 compile/lint 修正循环能够使用 `core + media` 而不链接 Chromium；
 - `onmark-render` 是 Chromium、FFmpeg 编码和单机执行器的重型边界，它依赖 `core + media`；
 - `onmark-cli` 只负责参数、终端展示和进程组装。
 
-`onmark-media` 现在拆出而不是藏在 render feature 中，因为“无 Chromium 的素材探测服务”已经是明确消费者，同时满足依赖预算和独立消费两条判据。Feature 只表达同一包内正交能力，不能用来遮住已经存在的架构边界。
+`onmark-media` 必须独立而不能藏在 render feature 中，因为“无 Chromium 的素材探测服务”是明确消费者，同时满足依赖预算和独立消费两条判据。Feature 只表达同一包内正交能力，不能用来遮住真实存在的架构边界。
 
 Render Graph 和 planner 在第二关先作为 `onmark-core` 模块加入。只有出现独立消费者、编译成本或清晰发布边界后才考虑拆 crate。worker 状态机先属于 `onmark-render`；coordinator 是第三关的部署系统，不提前进入核心 workspace。
 
@@ -411,7 +411,7 @@ decode invocation
 - Timeline IR、Execution Plan、runtime message 属于跨进程 wire protocol；
 - components、props、hooks 属于手写的 authoring API。
 
-Rust wire types 是 source of truth。`cargo xtask schema` 从它们生成 versioned JSON Schema 和 TypeScript types/codecs。生成结果提交进仓库，供 npm package、diff review 和非 Rust 消费者直接使用；禁止手工修改。CI 重新生成并要求工作树零 diff，schema version 变化必须带 migration/conformance fixture。Rust 本身直接使用原始领域/wire types，不再从 schema 反向生成第二套 Rust 类型。
+Rust wire types 是 source of truth。protocol 开始实现后，`cargo xtask schema` 从它们生成 versioned JSON Schema 和 TypeScript types/codecs，CI 重新生成并要求工作树零 diff。生成结果提交进仓库，供 npm package、diff review 和非 Rust 消费者直接使用；禁止手工修改。schema version 变化必须带 migration/conformance fixture。Rust 本身直接使用原始领域/wire types，不再从 schema 反向生成第二套 Rust 类型。
 
 authoring API 可以追求浏览器端人体工程学，但不能复制求时语义。
 

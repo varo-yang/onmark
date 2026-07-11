@@ -24,7 +24,7 @@ fn the_gate_one_example_matches_canonical_binding() {
     let film = report.film().expect("the valid fixture must bind one film");
 
     assert!(report.diagnostics().is_empty());
-    assert_or_update(&expected_path, &render_film(film));
+    assert_or_update(&expected_path, &LinkedFilmRenderer::render(film));
 }
 
 #[test]
@@ -47,11 +47,8 @@ fn assert_invalid_fixture(name: &str) {
     assert!(syntax_diagnostics.is_empty());
 
     let report = compiler::bind(document);
+    assert!(report.film().is_none());
     assert_or_update(&expected_path, &render_diagnostics(report.diagnostics()));
-}
-
-fn render_film(film: &LinkedFilm) -> String {
-    LinkedFilmRenderer::render(film)
 }
 
 fn id(element: &LinkedElement) -> &str {

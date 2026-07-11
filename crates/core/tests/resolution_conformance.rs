@@ -41,7 +41,7 @@ fn assert_valid_fixture(name: &str) {
     assert!(report.diagnostics().is_empty());
     assert_or_update(
         &expected_path,
-        &render_film(report.film().expect("the valid fixture must resolve")),
+        &ResolvedFilmRenderer::render(report.film().expect("the valid fixture must resolve")),
     );
 }
 
@@ -56,10 +56,6 @@ fn resolve_fixture(path: &Path) -> compiler::ResolveReport {
     assert!(binding_diagnostics.is_empty());
 
     compiler::resolve(film.expect("the fixture has one structurally valid film"))
-}
-
-fn render_film(film: &ResolvedFilm) -> String {
-    ResolvedFilmRenderer::render(film)
 }
 
 fn id(element: &ResolvedElement) -> &str {

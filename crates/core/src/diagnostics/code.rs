@@ -147,53 +147,36 @@ mod tests {
 
     #[test]
     fn exposes_stable_code_and_severity() {
-        assert_eq!(DiagnosticCode::InvalidNodeId.as_str(), "ONM-ID-001");
-        assert_eq!(DiagnosticCode::InvalidNodeId.severity(), Severity::Error);
-        assert_eq!(DiagnosticCode::DuplicateNodeId.as_str(), "ONM-ID-002");
-        assert_eq!(DiagnosticCode::UnknownElement.as_str(), "ONM-STRUCT-001");
-        assert_eq!(DiagnosticCode::MissingFilmRoot.as_str(), "ONM-STRUCT-002");
-        assert_eq!(DiagnosticCode::MultipleFilmRoots.as_str(), "ONM-STRUCT-003");
-        assert_eq!(DiagnosticCode::MisplacedElement.as_str(), "ONM-STRUCT-004");
-        assert_eq!(DiagnosticCode::DuplicateCues.as_str(), "ONM-STRUCT-005");
-        assert_eq!(DiagnosticCode::UnexpectedText.as_str(), "ONM-STRUCT-006");
-        assert_eq!(DiagnosticCode::InvalidDuration.as_str(), "ONM-TIME-001");
-        assert_eq!(DiagnosticCode::UnknownCueReference.as_str(), "ONM-REF-001");
+        let errors = [
+            (DiagnosticCode::InvalidNodeId, "ONM-ID-001"),
+            (DiagnosticCode::DuplicateNodeId, "ONM-ID-002"),
+            (DiagnosticCode::UnknownElement, "ONM-STRUCT-001"),
+            (DiagnosticCode::MissingFilmRoot, "ONM-STRUCT-002"),
+            (DiagnosticCode::MultipleFilmRoots, "ONM-STRUCT-003"),
+            (DiagnosticCode::MisplacedElement, "ONM-STRUCT-004"),
+            (DiagnosticCode::DuplicateCues, "ONM-STRUCT-005"),
+            (DiagnosticCode::UnexpectedText, "ONM-STRUCT-006"),
+            (DiagnosticCode::InvalidDuration, "ONM-TIME-001"),
+            (DiagnosticCode::UnknownCueReference, "ONM-REF-001"),
+            (DiagnosticCode::UnknownAttribute, "ONM-ATTR-001"),
+            (DiagnosticCode::MissingRequiredAttribute, "ONM-ATTR-002"),
+            (DiagnosticCode::InvalidAttributeValue, "ONM-ATTR-003"),
+            (DiagnosticCode::ConflictingAttributes, "ONM-ATTR-004"),
+            (DiagnosticCode::MalformedSyntax, "ONM-SYNTAX-001"),
+            (DiagnosticCode::MismatchedClosingTag, "ONM-SYNTAX-002"),
+            (DiagnosticCode::DuplicateAttribute, "ONM-SYNTAX-003"),
+            (DiagnosticCode::InvalidCharacterReference, "ONM-SYNTAX-004"),
+            (DiagnosticCode::UnclosedElement, "ONM-SYNTAX-005"),
+            (DiagnosticCode::UnexpectedClosingTag, "ONM-SYNTAX-006"),
+            (DiagnosticCode::UnsupportedMarkupDirective, "ONM-SYNTAX-007"),
+        ];
+
+        for (code, stable) in errors {
+            assert_eq!(code.as_str(), stable);
+            assert_eq!(code.severity(), Severity::Error);
+        }
+
         assert_eq!(DiagnosticCode::UnusedCue.as_str(), "ONM-REF-002");
         assert_eq!(DiagnosticCode::UnusedCue.severity(), Severity::Warning);
-        assert_eq!(DiagnosticCode::UnknownAttribute.as_str(), "ONM-ATTR-001");
-        assert_eq!(
-            DiagnosticCode::MissingRequiredAttribute.as_str(),
-            "ONM-ATTR-002"
-        );
-        assert_eq!(
-            DiagnosticCode::InvalidAttributeValue.as_str(),
-            "ONM-ATTR-003"
-        );
-        assert_eq!(
-            DiagnosticCode::ConflictingAttributes.as_str(),
-            "ONM-ATTR-004"
-        );
-        assert_eq!(DiagnosticCode::MalformedSyntax.as_str(), "ONM-SYNTAX-001",);
-        assert_eq!(
-            DiagnosticCode::MismatchedClosingTag.as_str(),
-            "ONM-SYNTAX-002",
-        );
-        assert_eq!(
-            DiagnosticCode::DuplicateAttribute.as_str(),
-            "ONM-SYNTAX-003",
-        );
-        assert_eq!(
-            DiagnosticCode::InvalidCharacterReference.as_str(),
-            "ONM-SYNTAX-004",
-        );
-        assert_eq!(DiagnosticCode::UnclosedElement.as_str(), "ONM-SYNTAX-005");
-        assert_eq!(
-            DiagnosticCode::UnexpectedClosingTag.as_str(),
-            "ONM-SYNTAX-006",
-        );
-        assert_eq!(
-            DiagnosticCode::UnsupportedMarkupDirective.as_str(),
-            "ONM-SYNTAX-007",
-        );
     }
 }

@@ -54,7 +54,10 @@ pub(crate) enum SyntaxErrorKind {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum UnsupportedDirective {
+    /// An XML processing instruction such as `<?render now?>`.
     ProcessingInstruction,
+    /// An XML declaration such as `<?xml version="1.0"?>`.
     XmlDeclaration,
+    /// A document type declaration, including any internal subset.
     DocumentTypeDeclaration,
 }

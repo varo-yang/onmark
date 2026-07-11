@@ -4,12 +4,12 @@ use crate::diagnostics::{Diagnostic, DiagnosticCode, Diagnostics};
 use crate::model::{ElementKind, InvalidNodeId, NodeId, SourceSpan};
 use crate::syntax::{Attribute, Element, Node, SourceDocument, TextNode};
 
-use super::linked::{
+use super::linked_film::{
     LinkedCue, LinkedCues, LinkedElement, LinkedFilm, LinkedId, LinkedNode, LinkedOverlay,
     LinkedScene, LinkedShot, LinkedShotContent, LinkedVideo, LinkedVoiceOver,
 };
 
-/// A partial linked film and every independently recoverable binding error.
+/// Optional structurally linked output and every recoverable binding diagnostic.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BindReport {
     film: Option<LinkedFilm>,
@@ -17,16 +17,19 @@ pub struct BindReport {
 }
 
 impl BindReport {
+    /// Returns the linked film when binding produced no error diagnostic.
     #[must_use]
     pub const fn film(&self) -> Option<&LinkedFilm> {
         self.film.as_ref()
     }
 
+    /// Returns all authored diagnostics produced during structural binding.
     #[must_use]
     pub const fn diagnostics(&self) -> &Diagnostics {
         &self.diagnostics
     }
 
+    /// Returns the optional linked film and its authored diagnostics.
     #[must_use]
     pub fn into_parts(self) -> (Option<LinkedFilm>, Diagnostics) {
         (self.film, self.diagnostics)
@@ -34,6 +37,8 @@ impl BindReport {
 }
 
 /// Binds one parsed document into Gate-one screenplay structure.
+///
+/// Error diagnostics withhold the linked film from later compiler phases.
 #[must_use]
 pub fn bind(document: SourceDocument) -> BindReport {
     let mut diagnostics = Diagnostics::new();
@@ -52,24 +57,25 @@ pub fn bind(document: SourceDocument) -> BindReport {
         }
     }
 
-    match films.as_slice() {
-        [] => {
-            diagnostics.push(missing_film_root(document_span));
-        }
-        [film] => {
-            let (film, diagnostics) = Binder::new(diagnostics).bind_film(film);
-            return BindReport {
-                film: Some(film),
-                diagnostics,
-            };
-        }
-        [first, rest @ ..] => {
-            // No root is canonical once cardinality fails. Choosing the first
-            // would make an invalid authoring order change the linked film.
-            for film in rest {
-                diagnostics.push(multiple_film_roots(first, film));
-            }
-        }
+    let mut films = films.into_iter();
+    let Some(first) = films.next() else {
+        diagnostics.push(missing_film_root(document_span));
+        return BindReport {
+            film: None,
+            diagnostics,
+        };
+    };
+    let Some(duplicate) = films.next() else {
+        let (candidate, diagnostics) = Binder::new(diagnostics).bind_film(first);
+        let film = (!diagnostics.has_errors()).then_some(candidate);
+        return BindReport { film, diagnostics };
+    };
+
+    // No root is canonical once cardinality fails. Choosing the first would
+    // make an invalid authoring order change the linked film.
+    diagnostics.push(multiple_film_roots(&first, &duplicate));
+    for duplicate in films {
+        diagnostics.push(multiple_film_roots(&first, &duplicate));
     }
 
     BindReport {
@@ -91,29 +97,30 @@ impl Binder {
         }
     }
 
-    fn bind_film(mut self, element: &Element) -> (LinkedFilm, Diagnostics) {
-        let linked = self.bind_element(element, ElementKind::Film);
+    fn bind_film(mut self, element: Element) -> (LinkedFilm, Diagnostics) {
+        let (_, attributes, children, span) = element.into_parts();
+        let linked = self.bind_element(attributes, ElementKind::Film, span);
         let mut cues = None;
         let mut scenes = Vec::new();
 
-        for node in element.children() {
+        for node in children {
             let Some(child) = self.structural_child(node, ElementKind::Film) else {
                 continue;
             };
 
-            match self.recognize_or_report(child) {
+            match self.recognize_or_report(&child) {
                 Some(ElementKind::Cues) => match &cues {
                     None => cues = Some((child.name().span(), self.bind_cues(child))),
                     Some((first, _)) => {
                         // The rejected subtree must not contribute IDs or
                         // attributes to the canonical linked film.
-                        self.diagnostics.push(duplicate_cues(child, *first));
+                        self.diagnostics.push(duplicate_cues(&child, *first));
                     }
                 },
                 Some(ElementKind::Scene) => scenes.push(self.bind_scene(child)),
                 Some(kind) => {
                     self.diagnostics
-                        .push(misplaced_element(child, kind, Some(ElementKind::Film)));
+                        .push(misplaced_element(&child, kind, Some(ElementKind::Film)));
                 }
                 None => {}
             }
@@ -124,20 +131,21 @@ impl Binder {
         (film, self.diagnostics)
     }
 
-    fn bind_cues(&mut self, element: &Element) -> LinkedCues {
-        let linked = self.bind_element(element, ElementKind::Cues);
+    fn bind_cues(&mut self, element: Element) -> LinkedCues {
+        let (_, attributes, children, span) = element.into_parts();
+        let linked = self.bind_element(attributes, ElementKind::Cues, span);
         let mut cues = Vec::new();
 
-        for node in element.children() {
+        for node in children {
             let Some(child) = self.structural_child(node, ElementKind::Cues) else {
                 continue;
             };
 
-            match self.recognize_or_report(child) {
+            match self.recognize_or_report(&child) {
                 Some(ElementKind::Cue) => cues.push(self.bind_cue(child)),
                 Some(kind) => {
                     self.diagnostics
-                        .push(misplaced_element(child, kind, Some(ElementKind::Cues)));
+                        .push(misplaced_element(&child, kind, Some(ElementKind::Cues)));
                 }
                 None => {}
             }
@@ -146,26 +154,31 @@ impl Binder {
         LinkedCues::new(linked, cues)
     }
 
-    fn bind_cue(&mut self, element: &Element) -> LinkedCue {
-        let linked = self.bind_element(element, ElementKind::Cue);
-        self.reject_child_elements_and_text(element, ElementKind::Cue);
+    fn bind_cue(&mut self, element: Element) -> LinkedCue {
+        let (_, attributes, children, span) = element.into_parts();
+        let linked = self.bind_element(attributes, ElementKind::Cue, span);
+        self.reject_child_elements_and_text(children, ElementKind::Cue);
         LinkedCue::new(linked)
     }
 
-    fn bind_scene(&mut self, element: &Element) -> LinkedScene {
-        let linked = self.bind_element(element, ElementKind::Scene);
+    fn bind_scene(&mut self, element: Element) -> LinkedScene {
+        let (_, attributes, children, span) = element.into_parts();
+        let linked = self.bind_element(attributes, ElementKind::Scene, span);
         let mut shots = Vec::new();
 
-        for node in element.children() {
+        for node in children {
             let Some(child) = self.structural_child(node, ElementKind::Scene) else {
                 continue;
             };
 
-            match self.recognize_or_report(child) {
+            match self.recognize_or_report(&child) {
                 Some(ElementKind::Shot) => shots.push(self.bind_shot(child)),
                 Some(kind) => {
-                    self.diagnostics
-                        .push(misplaced_element(child, kind, Some(ElementKind::Scene)));
+                    self.diagnostics.push(misplaced_element(
+                        &child,
+                        kind,
+                        Some(ElementKind::Scene),
+                    ));
                 }
                 None => {}
             }
@@ -174,16 +187,17 @@ impl Binder {
         LinkedScene::new(linked, shots)
     }
 
-    fn bind_shot(&mut self, element: &Element) -> LinkedShot {
-        let linked = self.bind_element(element, ElementKind::Shot);
+    fn bind_shot(&mut self, element: Element) -> LinkedShot {
+        let (_, attributes, children, span) = element.into_parts();
+        let linked = self.bind_element(attributes, ElementKind::Shot, span);
         let mut content = Vec::new();
 
-        for node in element.children() {
+        for node in children {
             let Some(child) = self.structural_child(node, ElementKind::Shot) else {
                 continue;
             };
 
-            match self.recognize_or_report(child) {
+            match self.recognize_or_report(&child) {
                 Some(ElementKind::Video) => {
                     content.push(LinkedShotContent::Video(self.bind_video(child)));
                 }
@@ -195,7 +209,7 @@ impl Binder {
                 }
                 Some(kind) => {
                     self.diagnostics
-                        .push(misplaced_element(child, kind, Some(ElementKind::Shot)));
+                        .push(misplaced_element(&child, kind, Some(ElementKind::Shot)));
                 }
                 None => {}
             }
@@ -204,43 +218,46 @@ impl Binder {
         LinkedShot::new(linked, content)
     }
 
-    fn bind_video(&mut self, element: &Element) -> LinkedVideo {
-        let linked = self.bind_element(element, ElementKind::Video);
-        self.reject_child_elements_and_text(element, ElementKind::Video);
+    fn bind_video(&mut self, element: Element) -> LinkedVideo {
+        let (_, attributes, children, span) = element.into_parts();
+        let linked = self.bind_element(attributes, ElementKind::Video, span);
+        self.reject_child_elements_and_text(children, ElementKind::Video);
         LinkedVideo::new(linked)
     }
 
-    fn bind_voice_over(&mut self, element: &Element) -> LinkedVoiceOver {
-        let linked = self.bind_element(element, ElementKind::VoiceOver);
-        let text = self.bind_text(element, ElementKind::VoiceOver);
+    fn bind_voice_over(&mut self, element: Element) -> LinkedVoiceOver {
+        let (_, attributes, children, span) = element.into_parts();
+        let linked = self.bind_element(attributes, ElementKind::VoiceOver, span);
+        let text = self.bind_text(children, ElementKind::VoiceOver);
         LinkedVoiceOver::new(linked, text)
     }
 
-    fn bind_overlay(&mut self, element: &Element, kind: ElementKind) -> LinkedOverlay {
-        let linked = self.bind_element(element, kind);
-        let text = self.bind_text(element, kind);
+    fn bind_overlay(&mut self, element: Element, kind: ElementKind) -> LinkedOverlay {
+        let (_, attributes, children, span) = element.into_parts();
+        let linked = self.bind_element(attributes, kind, span);
+        let text = self.bind_text(children, kind);
         LinkedOverlay::new(linked, text)
     }
 
-    fn bind_text(&mut self, element: &Element, parent: ElementKind) -> Vec<TextNode> {
+    fn bind_text(&mut self, children: Vec<Node>, parent: ElementKind) -> Vec<TextNode> {
         let mut text = Vec::new();
 
-        for node in element.children() {
+        for node in children {
             match node {
-                Node::Text(node) => text.push(node.clone()),
-                Node::Element(child) => self.reject_child_element(child, parent),
+                Node::Text(node) => text.push(node),
+                Node::Element(child) => self.reject_child_element(&child, parent),
             }
         }
 
         text
     }
 
-    fn reject_child_elements_and_text(&mut self, element: &Element, parent: ElementKind) {
-        for node in element.children() {
+    fn reject_child_elements_and_text(&mut self, children: Vec<Node>, parent: ElementKind) {
+        for node in children {
             match node {
                 Node::Text(text) if text.text().trim().is_empty() => {}
-                Node::Text(text) => self.diagnostics.push(unexpected_text(text, parent)),
-                Node::Element(child) => self.reject_child_element(child, parent),
+                Node::Text(text) => self.diagnostics.push(unexpected_text(&text, parent)),
+                Node::Element(child) => self.reject_child_element(&child, parent),
             }
         }
     }
@@ -252,12 +269,12 @@ impl Binder {
         }
     }
 
-    fn structural_child<'a>(&mut self, node: &'a Node, parent: ElementKind) -> Option<&'a Element> {
+    fn structural_child(&mut self, node: Node, parent: ElementKind) -> Option<Element> {
         match node {
             Node::Element(element) => Some(element),
             Node::Text(text) if text.text().trim().is_empty() => None,
             Node::Text(text) => {
-                self.diagnostics.push(unexpected_text(text, parent));
+                self.diagnostics.push(unexpected_text(&text, parent));
                 None
             }
         }
@@ -271,22 +288,26 @@ impl Binder {
         kind
     }
 
-    fn bind_element(&mut self, element: &Element, kind: ElementKind) -> LinkedElement {
-        let id = self.bind_id(element, kind);
-        // Borrowing keeps the grammar walk rectangular. Clone only the small
-        // authored leaves that the next binding slice must still consume.
-        let attributes = element
-            .attributes()
+    fn bind_element(
+        &mut self,
+        mut attributes: Vec<Attribute>,
+        kind: ElementKind,
+        span: SourceSpan,
+    ) -> LinkedElement {
+        let id = attributes
             .iter()
-            .filter(|attribute| !is_id_attribute(attribute))
-            .cloned()
-            .collect();
+            .position(is_id_attribute)
+            .map(|index| attributes.remove(index));
+        // Syntax owns duplicate-attribute diagnostics. Binding consumes the
+        // first ID spelling and keeps no duplicate as a semantic attribute.
+        attributes.retain(|attribute| !is_id_attribute(attribute));
+        let id = self.bind_id(id.as_ref(), kind);
 
-        LinkedElement::new(kind, id, attributes, element.span())
+        LinkedElement::new(kind, id, attributes, span)
     }
 
-    fn bind_id(&mut self, element: &Element, kind: ElementKind) -> LinkedId {
-        let Some(attribute) = id_attribute(element) else {
+    fn bind_id(&mut self, attribute: Option<&Attribute>, kind: ElementKind) -> LinkedId {
+        let Some(attribute) = attribute else {
             return LinkedId::Missing;
         };
         let id = match NodeId::parse(attribute.value()) {
@@ -304,6 +325,8 @@ impl Binder {
             return LinkedId::Rejected;
         }
 
+        // The linked tree and lookup index independently own stable identity;
+        // neither structure borrows from the other.
         self.ids
             .insert(id.clone(), LinkedNode::new(kind, attribute.value_span()));
         LinkedId::Valid(id)
@@ -316,13 +339,6 @@ fn element_kind(element: &Element) -> Option<ElementKind> {
     }
 
     ElementKind::from_local_name(element.name().local())
-}
-
-fn id_attribute(element: &Element) -> Option<&Attribute> {
-    element
-        .attributes()
-        .iter()
-        .find(|attribute| is_id_attribute(attribute))
 }
 
 fn is_id_attribute(attribute: &Attribute) -> bool {
@@ -500,22 +516,23 @@ mod tests {
             .diagnostics()
             .iter()
             .find(|diagnostic| diagnostic.code() == DiagnosticCode::DuplicateNodeId);
-        let film = report.film().expect("the fixture has one film root");
 
         assert!(duplicate.is_some());
-        assert_eq!(film.ids().count(), 1);
+        assert!(report.film().is_none());
     }
 
     proptest! {
         #[test]
         fn linked_ids_and_the_film_index_describe_the_same_nodes(
-            ids in proptest::collection::vec("[a-z0-9 -]{0,8}", 9..=9),
+            ids in proptest::collection::btree_set("[a-z0-9-]{1,8}", 9..=9),
         ) {
+            let ids = ids.into_iter().collect::<Vec<_>>();
             let source = screenplay_with_ids(&ids);
             let first = bind_source(SourceId::new(0), &source);
             let second = bind_source(SourceId::new(0), &source);
             let film = first.film().expect("the generated screenplay has one film root");
 
+            prop_assert!(first.diagnostics().is_empty());
             prop_assert_eq!(&first, &second);
             prop_assert_eq!(linked_ids(film), expected_ids(&ids));
             prop_assert_eq!(indexed_ids(film), expected_ids(&ids));

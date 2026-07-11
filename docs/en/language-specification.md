@@ -20,7 +20,7 @@ The language is paired with the render architecture through one versioned contra
 
 ## Core model
 
-The Gate-one vocabulary is `film`, `cues`, `cue`, `scene`, `shot`, `video`, `vo`, `title`, and `cta`. A film may contain at most one direct `cues` child; that container owns only `cue` declarations and does not participate in scene sequencing. Scenes own sequential shots. A shot owns its `video`, `vo`, `title`, and `cta` content. Titles and CTAs are overlays and do not participate in sibling sequencing. `video` is Gate one's only media element and names its artifact with `src`; audio, image, and other media elements remain deferred. Structural binding retains `src` and other unparsed authored attributes for the attribute/reference binding slice rather than discarding them.
+The Gate-one vocabulary is `film`, `cues`, `cue`, `scene`, `shot`, `video`, `vo`, `title`, and `cta`. A film may contain at most one direct `cues` child; that container owns only `cue` declarations and does not participate in scene sequencing. Scenes own sequential shots. A shot owns its `video`, `vo`, `title`, and `cta` content. Titles and CTAs are overlays and do not participate in sibling sequencing. `video` is Gate one's only media element and names its artifact with `src`; audio, image, and other media elements remain deferred. Structural binding retains `src` and other unparsed authored attributes for the attribute/reference resolution phase rather than discarding them.
 
 Illustrative syntax:
 

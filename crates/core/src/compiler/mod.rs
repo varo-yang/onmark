@@ -9,7 +9,6 @@
 //! assert!(syntax_diagnostics.is_empty());
 //!
 //! let bound = compiler::bind(document);
-//! assert!(bound.diagnostics().is_empty());
 //! let (film, binding_diagnostics) = bound.into_parts();
 //! assert!(binding_diagnostics.is_empty());
 //!
@@ -19,13 +18,13 @@
 //! ```
 
 mod bind;
-mod linked;
+mod linked_film;
 mod parse;
 mod resolve;
 mod resolved_film;
 
 pub use bind::{BindReport, bind};
-pub use linked::{
+pub use linked_film::{
     LinkedCue, LinkedCues, LinkedElement, LinkedFilm, LinkedNode, LinkedOverlay, LinkedScene,
     LinkedShot, LinkedShotContent, LinkedVideo, LinkedVoiceOver,
 };

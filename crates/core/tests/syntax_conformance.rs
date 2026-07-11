@@ -37,7 +37,7 @@ fn a_doctype_internal_subset_produces_one_diagnostic() {
 }
 
 #[test]
-fn an_unclosed_doctype_cannot_hide_following_markup() {
+fn an_unclosed_doctype_reports_a_fatal_fragment_boundary() {
     assert_invalid_fixture("unclosed-doctype");
 }
 

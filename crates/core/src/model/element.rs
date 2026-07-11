@@ -3,14 +3,23 @@ use std::fmt;
 /// Closed Gate-one screenplay vocabulary.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum ElementKind {
+    /// Root time domain of one screenplay.
     Film,
+    /// Optional container for absolute cue declarations.
     Cues,
+    /// Named absolute time event.
     Cue,
+    /// Sequential narrative container.
     Scene,
+    /// Sequential unit with one local time origin.
     Shot,
+    /// Gate-one primary video content.
     Video,
+    /// Authored voice-over inscription and media reference.
     VoiceOver,
+    /// Title overlay owned by one shot.
     Title,
+    /// Call-to-action overlay owned by one shot.
     CallToAction,
 }
 
