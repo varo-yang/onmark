@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Onmark browser conformance</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body,
+      canvas {
+        height: 100%;
+        margin: 0;
+        width: 100%;
+      }
+
+      body {
+        overflow: hidden;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas aria-label="Deterministic frame fixture"></canvas>
+    <script type="module">
+      import { installRuntimeHost } from "../../packages/runtime/dist/src/index.js";
+
+      const canvas = document.querySelector("canvas");
+      const context = canvas.getContext("2d", { alpha: false });
+
+      function draw(frame) {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        context.fillStyle = `rgb(${frame.index % 256}, 32, 96)`;
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        context.fillStyle = "white";
+        context.font = "48px sans-serif";
+        context.fillText(`frame ${frame.index}`, 48, 80);
+        document.body.dataset.frame = String(frame.index);
+      }
+
+      installRuntimeHost({
+        async load() {},
+        async prepare(frame) {
+          draw(frame);
+        },
+        async seek(frame) {
+          draw(frame);
+        },
+        async dispose() {},
+      });
+    </script>
+  </body>
+</html>

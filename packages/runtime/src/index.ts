@@ -11,6 +11,11 @@ export type { BrowserResponse } from "./generated/browser-response.js";
 export type { BrowserPlan } from "./generated/browser-request.js";
 export { runtimeFrameAt, type RuntimeFrame } from "./clock.js";
 export {
+  RUNTIME_HOST_NAME,
+  installRuntimeHost,
+  type RuntimeHost,
+} from "./host.js";
+export {
   RuntimeAdapterError,
   RuntimeSession,
   type RuntimeAdapter,

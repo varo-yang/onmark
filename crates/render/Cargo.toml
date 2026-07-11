@@ -1,0 +1,22 @@
+[package]
+name = "onmark-render"
+description = "Bounded Chromium and FFmpeg execution for Onmark"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+chromiumoxide = { version = "0.9.1", default-features = false }
+futures = "0.3"
+onmark-core = { path = "../core" }
+serde_json = "1.0"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+
+[dev-dependencies]
+url = "2.5"
+
+[lints]
+workspace = true

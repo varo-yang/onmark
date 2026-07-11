@@ -378,6 +378,8 @@ protocol    → diagnostics + timeline + model
 
 `onmark-media` 只依赖 core，以及用于私有 ffprobe response 边界的 `serde`/`serde_json`。它使用参数数组直接启动配置的 ffprobe executable，绝不经过 shell；退出后仍让派生进程持有输出 pipe 的 wrapper 不属于该 executable contract。在这条 direct-child 契约下，进程寿命和保留的 stdout/stderr 字节数都有显式上限，两条 pipe 并发排空；显式 shutdown 会报告 process-control failure，`Drop` 只作 best-effort termination fallback。私有 ffprobe response type 只在此边界翻译一次并产出 core-owned `AssetMetadata`；JSON value 与第三方 error type 不定义稳定 API，但底层 error 会通过标准 source chain 保留，供调试使用。
 
+`onmark-render` 拥有 Chromium 的重型依赖预算。它只把 `chromiumoxide` 用作 CDP transport 与进程启动器，`tokio` 和 `futures` 也只存在于这条异步执行边界。crate 显式提供 executable path、viewport、request deadline、capture byte ceiling 与 shutdown，并把 Chromium/CDP 类型翻译成 render 自己拥有的稳定错误。浏览器导航会分别等待 document load 与 runtime host；不能把 transport 的 navigation 返回误当成完整生命周期屏障。Gate 一 conformance 会启动本机已安装的 Chrome，加载构建后的 runtime，走过类型化 `Load`/`Prepare`/`Seek` 握手，并验证重复捕获的字节完全一致。在 CI 拥有固定 Chromium image 前，这条真实浏览器 smoke 保持 opt-in。
+
 校验失败原因保留为局部领域值。syntax 提供源码上下文后，由 `compiler` 模块唯一负责把 `InvalidNodeId` 等原因翻译成带源码位置的 `Diagnostic`，包括各阶段特有的 message 和 help；`diagnostics` 只拥有通用诊断表示与稳定 code。`model` 和 `syntax` 都不依赖 diagnostics，调用方也不得重复实现这层翻译。
 
 ### TypeScript package 方向
@@ -388,7 +390,7 @@ protocol    → diagnostics + timeline + model
        └──────────  @onmark/bundler
 ```
 
-`runtime` 是浏览器底座和长期稳定扩展点，拥有当前帧 hook、FrameReady 协议、`stateless/warmup/sequential` 能力声明以及 adapter contract。`authoring` 只通过 runtime 的 types-only entrypoint 使用这些公开类型，不能依赖 runtime 的副作用入口。`bundler` 注入固定 runtime artifact 并生成 manifest；runtime 永不依赖 authoring 或 bundler。Gate 一的 `RuntimeSession` 拥有 protocol 顺序、evaluation 边界检查、精确帧投影与 terminal disposal；并发 command 直接拒绝，不暗中增长队列。浏览器具体工作只通过一个窄 adapter 进入，其等待必须有界，预期失败必须类型化。session 与确定性帧投影当前已经存在；真实 DOM/media/Chromium adapter 仍是 Gate 一待实现工作。
+`runtime` 是浏览器底座和长期稳定扩展点，拥有当前帧 hook、FrameReady 协议、`stateless/warmup/sequential` 能力声明以及 adapter contract。`authoring` 只通过 runtime 的 types-only entrypoint 使用这些公开类型，不能依赖 runtime 的副作用入口。`bundler` 注入固定 runtime artifact 并生成 manifest；runtime 永不依赖 authoring 或 bundler。Gate 一的 `RuntimeSession` 拥有 protocol 顺序、evaluation 边界检查、精确帧投影与 terminal disposal；并发 command 直接拒绝，不暗中增长队列。浏览器具体工作只通过一个窄 adapter 进入，其等待必须有界，预期失败必须类型化。session、确定性帧投影、不可变 browser host 与 native Chromium handshake 当前已经存在；真实媒体稳定化与 production DOM/media adapter 仍是 Gate 一待实现工作。
 
 ### AWS Lambda 是适配器，不是第二套引擎
 

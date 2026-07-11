@@ -20,3 +20,13 @@ ONMARK_UPDATE_GOLDENS=1 cargo test -p onmark-core --test protocol_conformance
 
 Review the resulting diff before committing it. Normal test runs compare
 current behavior with the checked-in artifacts and never rewrite them.
+
+`browser/gate-one.html` is a real Chromium fixture, not a golden file. Build
+`@onmark/runtime`, set `ONMARK_CHROME` to an explicit Chrome executable, and run:
+
+```bash
+ONMARK_CHROME=/path/to/chrome cargo test -p onmark-render --test chromium -- --ignored
+```
+
+The smoke crosses the versioned browser protocol, captures two distinct frames,
+and requires a repeated capture of the same frame to produce identical PNG bytes.
