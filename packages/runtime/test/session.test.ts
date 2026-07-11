@@ -11,6 +11,7 @@ import {
   type BrowserRequest,
   type BrowserResponse,
   type RuntimeAdapter,
+  type RuntimeFrame,
 } from "../src/index.js";
 
 const plan: BrowserPlan = {
@@ -60,6 +61,8 @@ test("executes the Gate-one protocol in order", async () => {
     "seek:15",
     "dispose",
   ]);
+  assert.deepEqual(adapter.preparedFrame, { index: 10, timeSeconds: 1 / 3 });
+  assert.deepEqual(adapter.seekFrames, [{ index: 15, timeSeconds: 0.5 }]);
 });
 
 test("rejects commands that violate session state or evaluation bounds", async () => {
@@ -203,6 +206,8 @@ class RecordingAdapter implements RuntimeAdapter {
   prepareError: Error | undefined;
   seekError: Error | undefined;
   disposeError: Error | undefined;
+  preparedFrame: RuntimeFrame | undefined;
+  readonly seekFrames: RuntimeFrame[] = [];
 
   async load(plan: BrowserPlan): Promise<void> {
     this.operations.push("load");
@@ -215,15 +220,17 @@ class RecordingAdapter implements RuntimeAdapter {
     }
   }
 
-  async prepare(evaluationStart: number): Promise<void> {
-    this.operations.push(`prepare:${evaluationStart}`);
+  async prepare(frame: RuntimeFrame): Promise<void> {
+    this.operations.push(`prepare:${frame.index}`);
+    this.preparedFrame = frame;
     if (this.prepareError !== undefined) {
       throw this.prepareError;
     }
   }
 
-  async seek(frame: number): Promise<void> {
-    this.operations.push(`seek:${frame}`);
+  async seek(frame: RuntimeFrame): Promise<void> {
+    this.operations.push(`seek:${frame.index}`);
+    this.seekFrames.push(frame);
     if (this.seekError !== undefined) {
       throw this.seekError;
     }

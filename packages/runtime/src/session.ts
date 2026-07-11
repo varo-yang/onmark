@@ -8,6 +8,7 @@ import type {
   BrowserRequest,
 } from "./generated/browser-request.js";
 import type { BrowserResponse } from "./generated/browser-response.js";
+import { runtimeFrameAt, type RuntimeFrame } from "./clock.js";
 
 // ── Browser adapter boundary ──
 
@@ -21,9 +22,9 @@ export interface RuntimeAdapter {
   /** Installs one owned snapshot of the immutable browser plan. */
   load(plan: BrowserPlan): Promise<void>;
   /** Resolves only after resources at the evaluation start are stable. */
-  prepare(evaluationStart: number): Promise<void>;
+  prepare(frame: RuntimeFrame): Promise<void>;
   /** Resolves only after one exact frame is stable for native capture. */
-  seek(frame: number): Promise<void>;
+  seek(frame: RuntimeFrame): Promise<void>;
   /** Releases all resources owned by this adapter. */
   dispose(): Promise<void>;
 }
@@ -114,6 +115,7 @@ export class RuntimeSession {
       kind: "loaded",
       evaluationStart,
       evaluationEnd,
+      frameRate: ownedPlan.frameRate,
     };
     return response(requestId, { type: "loaded" });
   }
@@ -136,7 +138,9 @@ export class RuntimeSession {
     }
 
     try {
-      await this.#adapter.prepare(evaluationStart);
+      await this.#adapter.prepare(
+        runtimeFrameAt(evaluationStart, this.#state.frameRate),
+      );
     } catch (error) {
       return readinessFailure(requestId, "prepareFailed", error);
     }
@@ -163,7 +167,7 @@ export class RuntimeSession {
     }
 
     try {
-      await this.#adapter.seek(frame);
+      await this.#adapter.seek(runtimeFrameAt(frame, this.#state.frameRate));
       return response(requestId, { type: "frameReady", frame });
     } catch (error) {
       return readinessFailure(requestId, "seekFailed", error);
@@ -199,12 +203,14 @@ interface LoadedState {
   readonly kind: "loaded";
   readonly evaluationStart: number;
   readonly evaluationEnd: number;
+  readonly frameRate: BrowserPlan["frameRate"];
 }
 
 interface ReadyState {
   readonly kind: "ready";
   readonly evaluationStart: number;
   readonly evaluationEnd: number;
+  readonly frameRate: BrowserPlan["frameRate"];
 }
 
 type BrowserEvent = BrowserResponse["event"];

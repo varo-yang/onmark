@@ -233,7 +233,7 @@ FrameReady(frame_index)
 Dispose
 ```
 
-`FrameReady(frame)` 只表示稳定屏障，只能在 DOM update、layout、字体、图片 decode、视频 seek、WebGL submission 和框架 microtask 稳定后返回。native executor 收到它以后再捕获画面，并对实际消费的 raw RGBA bytes 做 hash；runtime 不发布另一份自行定义的 state hash。超时要指出未稳定资源，不能只报 `page timeout`。
+`FrameReady(frame)` 只表示稳定屏障，只能在 DOM update、layout、字体、图片 decode、视频 seek、WebGL submission 和框架 microtask 稳定后返回。native executor 收到它以后再捕获画面，并对实际消费的 raw RGBA bytes 做 hash；runtime 不发布另一份自行定义的 state hash。runtime 内部的 `RuntimeFrame` 保留精确整数帧身份，只在调用浏览器 API 时从 Rust 给出的有理帧率推导浮点秒数；这个秒数永远不成为调度或协议事实。超时要指出未稳定资源，不能只报 `page timeout`。
 
 组件声明时间能力：
 
@@ -388,7 +388,7 @@ protocol    → diagnostics + timeline + model
        └──────────  @onmark/bundler
 ```
 
-`runtime` 是浏览器底座和长期稳定扩展点，拥有当前帧 hook、FrameReady 协议、`stateless/warmup/sequential` 能力声明以及 adapter contract。`authoring` 只通过 runtime 的 types-only entrypoint 使用这些公开类型，不能依赖 runtime 的副作用入口。`bundler` 注入固定 runtime artifact 并生成 manifest；runtime 永不依赖 authoring 或 bundler。Gate 一的 `RuntimeSession` 拥有 protocol 顺序、evaluation 边界检查与 terminal disposal；并发 command 直接拒绝，不暗中增长队列。浏览器具体工作只通过一个窄 adapter 进入，其等待必须有界，预期失败必须类型化。session contract 当前已经存在；确定性 clock 和真实 DOM/media/Chromium adapter 仍是 Gate 一待实现工作。
+`runtime` 是浏览器底座和长期稳定扩展点，拥有当前帧 hook、FrameReady 协议、`stateless/warmup/sequential` 能力声明以及 adapter contract。`authoring` 只通过 runtime 的 types-only entrypoint 使用这些公开类型，不能依赖 runtime 的副作用入口。`bundler` 注入固定 runtime artifact 并生成 manifest；runtime 永不依赖 authoring 或 bundler。Gate 一的 `RuntimeSession` 拥有 protocol 顺序、evaluation 边界检查、精确帧投影与 terminal disposal；并发 command 直接拒绝，不暗中增长队列。浏览器具体工作只通过一个窄 adapter 进入，其等待必须有界，预期失败必须类型化。session 与确定性帧投影当前已经存在；真实 DOM/media/Chromium adapter 仍是 Gate 一待实现工作。
 
 ### AWS Lambda 是适配器，不是第二套引擎
 
