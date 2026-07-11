@@ -1,0 +1,7 @@
+# onmark syntax test rendering; not a wire format
+document
+  element film @0:0..53
+    attribute id="demo" @0:6..15 value@0:10..14
+    element title @0:16..46
+      text "Tom & Jerry" @0:23..38
+  text "\n" @0:53..54

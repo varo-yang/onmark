@@ -9,8 +9,12 @@ authors.workspace = true
 repository.workspace = true
 publish = false
 
+[dependencies]
+xmlparser = { version = "0.13.6", default-features = false }
+
 [lints]
 workspace = true
 
 [dev-dependencies]
 proptest = { version = "1.11.0", default-features = false, features = ["std"] }
+syn = { version = "2.0.118", default-features = false, features = ["full", "parsing", "visit"] }

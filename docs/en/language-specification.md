@@ -42,6 +42,14 @@ Illustrative syntax:
 
 The semantic commitment is alignment to a named cue. The final attribute spelling remains provisional until generation experiments validate it. Free-form `begin/end` expressions are not part of the default language.
 
+## Markup syntax
+
+Screenplays use XML-compatible fragment markup. Syntax preserves a sequence of top-level nodes and validates tokens, element nesting, closing-tag matches, duplicate attributes, and character references. Binding later requires exactly one top-level `film`; root cardinality, known element names, legal containment, required attributes, IDs, and references are language semantics rather than markup well-formedness.
+
+Element and attribute names are case-sensitive qualified names. The syntax tree owns decoded text and attribute values together with byte-accurate source spans. Comments are ignored, CDATA becomes ordinary text, and XML declarations, processing instructions, and document type declarations are not part of the screenplay surface.
+
+Text and attribute values support the five predefined XML entities (`amp`, `lt`, `gt`, `quot`, and `apos`) plus decimal and hexadecimal references to characters allowed by XML 1.0. Other named entities, malformed references, surrogate values, out-of-range Unicode values, and XML-forbidden characters are syntax errors. Onmark does not process DTDs, custom entities, or external entities.
+
 ## Time
 
 A shot obtains duration from probed media, probed voice-over, a restricted explicit duration when content provides none, or an ending event. Multiple primary content sources extend the shot to the longest source. Overlay elements do not silently extend their shot.
@@ -66,6 +74,20 @@ Explicit IDs are non-empty, case-sensitive, and unique within one film. In keepi
 ## Diagnostics
 
 Diagnostics contain a stable code, severity, source span, message, actionable help, and related spans. They use screenplay vocabulary rather than solver internals and aggregate independent authored errors when safe.
+
+Initial markup diagnostics are:
+
+| Code | Meaning |
+| --- | --- |
+| `ONM-SYNTAX-001` | malformed markup that cannot produce another trustworthy token |
+| `ONM-SYNTAX-002` | a closing tag does not match the open element |
+| `ONM-SYNTAX-003` | an element repeats an attribute name |
+| `ONM-SYNTAX-004` | an invalid character or entity reference appears in text or an attribute |
+| `ONM-SYNTAX-005` | the source ends before an open element is closed |
+| `ONM-SYNTAX-006` | a closing tag appears without an open element |
+| `ONM-SYNTAX-007` | an XML declaration, processing instruction, or document type is unsupported |
+
+The tokenizer stops after a fatal lexical error, so lexical recovery may produce one diagnostic. Onmark continues to aggregate independent nesting, binding, and semantic diagnostics whenever the remaining structure is trustworthy. At end of input, every still-open element receives one diagnostic whose primary span is its opening name and whose related span marks the end of the screenplay. A document type declaration produces one diagnostic even when the tokenizer exposes its internal subset as several tokens.
 
 Good:
 
