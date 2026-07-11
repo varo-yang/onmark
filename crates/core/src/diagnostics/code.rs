@@ -27,6 +27,16 @@ pub enum DiagnosticCode {
     UnexpectedText,
     /// An authored duration violates the exact duration grammar or range.
     InvalidDuration,
+    /// A shot has no rule that determines its duration.
+    MissingDurationSource,
+    /// Explicit and content-derived shot durations compete.
+    ConflictingDurationSources,
+    /// Resolved content starts outside its owning shot.
+    TimingOutsideShot,
+    /// Exact time cannot fit in the selected frame domain.
+    FrameConversionOverflow,
+    /// Renderable media omits its frozen artifact reference.
+    MissingMediaSource,
     /// A cue reference does not name a resolved cue.
     UnknownCueReference,
     /// A resolved cue is never referenced.
@@ -69,6 +79,11 @@ impl DiagnosticCode {
             Self::DuplicateCues => "ONM-STRUCT-005",
             Self::UnexpectedText => "ONM-STRUCT-006",
             Self::InvalidDuration => "ONM-TIME-001",
+            Self::MissingDurationSource => "ONM-TIME-002",
+            Self::ConflictingDurationSources => "ONM-TIME-003",
+            Self::TimingOutsideShot => "ONM-TIME-004",
+            Self::FrameConversionOverflow => "ONM-TIME-005",
+            Self::MissingMediaSource => "ONM-ASSET-001",
             Self::UnknownCueReference => "ONM-REF-001",
             Self::UnusedCue => "ONM-REF-002",
             Self::UnknownAttribute => "ONM-ATTR-001",
@@ -98,6 +113,11 @@ impl DiagnosticCode {
             | Self::DuplicateCues
             | Self::UnexpectedText
             | Self::InvalidDuration
+            | Self::MissingDurationSource
+            | Self::ConflictingDurationSources
+            | Self::TimingOutsideShot
+            | Self::FrameConversionOverflow
+            | Self::MissingMediaSource
             | Self::UnknownCueReference
             | Self::UnknownAttribute
             | Self::MissingRequiredAttribute
@@ -157,6 +177,11 @@ mod tests {
             (DiagnosticCode::DuplicateCues, "ONM-STRUCT-005"),
             (DiagnosticCode::UnexpectedText, "ONM-STRUCT-006"),
             (DiagnosticCode::InvalidDuration, "ONM-TIME-001"),
+            (DiagnosticCode::MissingDurationSource, "ONM-TIME-002"),
+            (DiagnosticCode::ConflictingDurationSources, "ONM-TIME-003"),
+            (DiagnosticCode::TimingOutsideShot, "ONM-TIME-004"),
+            (DiagnosticCode::FrameConversionOverflow, "ONM-TIME-005"),
+            (DiagnosticCode::MissingMediaSource, "ONM-ASSET-001"),
             (DiagnosticCode::UnknownCueReference, "ONM-REF-001"),
             (DiagnosticCode::UnknownAttribute, "ONM-ATTR-001"),
             (DiagnosticCode::MissingRequiredAttribute, "ONM-ATTR-002"),

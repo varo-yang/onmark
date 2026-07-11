@@ -52,6 +52,8 @@ The compiler performs parse, structural bind, attribute/reference resolve, valid
 
 Structural binding and attribute/reference resolution aggregate authored diagnostics while building candidate outputs. An error withholds the phase value from its report so rejected structure or recovery defaults cannot enter the next phase as compiler facts; warnings remain non-blocking.
 
+Timeline solving consumes normalized `AssetMetadata` owned by `onmark-core`; Gate one initially requires exact artifact duration. `onmark-media` produces these facts through probing, while ffprobe-specific structures and failures remain outside core. A referenced asset missing from the supplied metadata map is a typed integration failure rather than an authored diagnostic. A media element with no authored frozen artifact remains valid through static resolution but cannot produce renderable Timeline IR and receives an authored asset diagnostic during solving.
+
 Each worker executes one state machine:
 
 ```text

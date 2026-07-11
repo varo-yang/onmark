@@ -25,6 +25,10 @@ impl<T> Authored<T> {
     pub const fn span(&self) -> SourceSpan {
         self.span
     }
+
+    pub(super) fn into_parts(self) -> (T, SourceSpan) {
+        (self.value, self.span)
+    }
 }
 
 /// Shared facts retained after every authored attribute is resolved.
@@ -56,6 +60,10 @@ impl ResolvedElement {
     #[must_use]
     pub const fn span(&self) -> SourceSpan {
         self.span
+    }
+
+    pub(super) fn into_parts(self) -> (ElementKind, Option<NodeId>, SourceSpan) {
+        (self.kind, self.id, self.span)
     }
 }
 
@@ -131,6 +139,17 @@ impl ResolvedFilm {
     pub fn ids(&self) -> impl ExactSizeIterator<Item = (&NodeId, &ResolvedNode)> {
         self.ids.iter()
     }
+
+    pub(super) fn into_parts(
+        self,
+    ) -> (
+        ResolvedElement,
+        Option<ResolvedCues>,
+        Vec<ResolvedScene>,
+        BTreeMap<NodeId, ResolvedNode>,
+    ) {
+        (self.element, self.cues, self.scenes, self.ids)
+    }
 }
 
 /// The optional singleton cue container after cue resolution.
@@ -155,6 +174,10 @@ impl ResolvedCues {
     #[must_use]
     pub fn cues(&self) -> &[ResolvedCue] {
         &self.cues
+    }
+
+    pub(super) fn into_parts(self) -> (ResolvedElement, Vec<ResolvedCue>) {
+        (self.element, self.cues)
     }
 }
 
@@ -192,6 +215,10 @@ impl ResolvedCue {
     pub const fn span(&self) -> SourceSpan {
         self.span
     }
+
+    pub(super) fn into_parts(self) -> (Authored<CueId>, Authored<Duration>, SourceSpan) {
+        (self.id, self.time, self.span)
+    }
 }
 
 /// One resolved sequential scene.
@@ -216,6 +243,10 @@ impl ResolvedScene {
     #[must_use]
     pub fn shots(&self) -> &[ResolvedShot] {
         &self.shots
+    }
+
+    pub(super) fn into_parts(self) -> (ResolvedElement, Vec<ResolvedShot>) {
+        (self.element, self.shots)
     }
 }
 
@@ -257,6 +288,16 @@ impl ResolvedShot {
     pub fn content(&self) -> &[ResolvedShotContent] {
         &self.content
     }
+
+    pub(super) fn into_parts(
+        self,
+    ) -> (
+        ResolvedElement,
+        Option<Authored<Duration>>,
+        Vec<ResolvedShotContent>,
+    ) {
+        (self.element, self.duration, self.content)
+    }
 }
 
 /// Closed Gate-one content owned by a resolved shot.
@@ -273,9 +314,7 @@ pub enum ResolvedShotContent {
 /// Video content with optional artifact and local delay.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ResolvedVideo {
-    element: ResolvedElement,
-    src: Option<Authored<AssetRef>>,
-    delay: Option<Authored<Duration>>,
+    media: ResolvedMedia,
 }
 
 impl ResolvedVideo {
@@ -285,37 +324,37 @@ impl ResolvedVideo {
         delay: Option<Authored<Duration>>,
     ) -> Self {
         Self {
-            element,
-            src,
-            delay,
+            media: ResolvedMedia::new(element, src, delay),
         }
     }
 
     /// Returns the resolved video element.
     #[must_use]
     pub const fn element(&self) -> &ResolvedElement {
-        &self.element
+        self.media.element()
     }
 
     /// Returns the optional authored media reference.
     #[must_use]
     pub const fn src(&self) -> Option<&Authored<AssetRef>> {
-        self.src.as_ref()
+        self.media.src()
     }
 
     /// Returns the optional delay from the owning shot start.
     #[must_use]
     pub const fn delay(&self) -> Option<&Authored<Duration>> {
-        self.delay.as_ref()
+        self.media.delay()
+    }
+
+    pub(super) fn into_media(self) -> ResolvedMedia {
+        self.media
     }
 }
 
 /// Voice-over content with typed media facts and authored inscription.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ResolvedVoiceOver {
-    element: ResolvedElement,
-    src: Option<Authored<AssetRef>>,
-    delay: Option<Authored<Duration>>,
+    media: ResolvedMedia,
     text: Vec<ResolvedText>,
 }
 
@@ -327,9 +366,7 @@ impl ResolvedVoiceOver {
         text: Vec<ResolvedText>,
     ) -> Self {
         Self {
-            element,
-            src,
-            delay,
+            media: ResolvedMedia::new(element, src, delay),
             text,
         }
     }
@@ -337,25 +374,72 @@ impl ResolvedVoiceOver {
     /// Returns the resolved voice-over element.
     #[must_use]
     pub const fn element(&self) -> &ResolvedElement {
-        &self.element
+        self.media.element()
     }
 
     /// Returns the optional authored audio reference.
     #[must_use]
     pub const fn src(&self) -> Option<&Authored<AssetRef>> {
-        self.src.as_ref()
+        self.media.src()
     }
 
     /// Returns the optional delay from the owning shot start.
     #[must_use]
     pub const fn delay(&self) -> Option<&Authored<Duration>> {
-        self.delay.as_ref()
+        self.media.delay()
     }
 
     /// Returns decoded authored inscription in source order.
     #[must_use]
     pub fn text(&self) -> &[ResolvedText] {
         &self.text
+    }
+
+    pub(super) fn into_parts(self) -> (ResolvedMedia, Vec<ResolvedText>) {
+        (self.media, self.text)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct ResolvedMedia {
+    element: ResolvedElement,
+    src: Option<Authored<AssetRef>>,
+    delay: Option<Authored<Duration>>,
+}
+
+impl ResolvedMedia {
+    const fn new(
+        element: ResolvedElement,
+        src: Option<Authored<AssetRef>>,
+        delay: Option<Authored<Duration>>,
+    ) -> Self {
+        Self {
+            element,
+            src,
+            delay,
+        }
+    }
+
+    const fn element(&self) -> &ResolvedElement {
+        &self.element
+    }
+
+    const fn src(&self) -> Option<&Authored<AssetRef>> {
+        self.src.as_ref()
+    }
+
+    const fn delay(&self) -> Option<&Authored<Duration>> {
+        self.delay.as_ref()
+    }
+
+    pub(super) fn into_parts(
+        self,
+    ) -> (
+        ResolvedElement,
+        Option<Authored<AssetRef>>,
+        Option<Authored<Duration>>,
+    ) {
+        (self.element, self.src, self.delay)
     }
 }
 
@@ -397,6 +481,10 @@ impl ResolvedOverlay {
     pub fn text(&self) -> &[ResolvedText] {
         &self.text
     }
+
+    pub(super) fn into_parts(self) -> (ResolvedElement, ResolvedStart, Vec<ResolvedText>) {
+        (self.element, self.start, self.text)
+    }
 }
 
 /// Resolved start rule for an overlay.
@@ -433,5 +521,9 @@ impl ResolvedText {
     #[must_use]
     pub const fn span(&self) -> SourceSpan {
         self.span
+    }
+
+    pub(super) fn into_parts(self) -> (Box<str>, SourceSpan) {
+        (self.text, self.span)
     }
 }

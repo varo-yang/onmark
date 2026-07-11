@@ -1,0 +1,11 @@
+# onmark timeline test rendering; not a wire format
+timeline v=1 fps=30/1 film=<film> id=demo interval=0..91
+  event offer=15f
+  scene <scene> id=opening interval=0..91 start=film-start end=children
+    shot <shot> id=first interval=0..60 start=film-start end=explicit-duration
+      overlay <title> id=- interval=15..60 start=event:offer end=shot-end text="Offer"
+      overlay <cta> id=- interval=45..60 start=authored-delay end=shot-end text="Act now"
+    shot <shot> id=second interval=60..90 start=sequential end=explicit-duration
+      overlay <title> id=- interval=60..90 start=shot-start end=shot-end text="Closing"
+    shot <shot> id=subframe interval=90..91 start=sequential end=explicit-duration
+      overlay <cta> id=- interval=90..91 start=shot-start end=shot-end text="One frame"

@@ -84,11 +84,13 @@ shot 是最小的默认顺序单元。它拥有一个局部时间原点，并拥
 
 ### Overlay
 
-title、cta 等 overlay 属于 shot，但不参与兄弟 shot 的顺序排列。默认被所属 shot 裁剪，不能通过自身延迟静默延长整部影片。
+title、cta 等 overlay 属于 shot，但不参与兄弟 shot 的顺序排列。overlay 从已解析的 `cue`、`delay` 起点开始；没有显式关系时从所属 shot 起点开始，并持续到该 shot 的 exclusive end。Gate 一不给 overlay 设置独立的默认时长。因此 overlay 不能延长所属 shot，解析后的起点落在 shot 外时必须报告 authored timing error。
 
 ## 5. 时间来源
 
 作者时长采用精确文法 `整数[.小数](s|ms)`，不允许空白或正负号。秒最多九位小数，毫秒最多六位小数，因此每个合法值都能精确表示为无符号整数纳秒；语言不接受帧单位或浮点近似。
+
+编译器使用整数运算把精确纳秒映射到有理数帧网格。每次换算都必须在调用点明确选择向下或向上取整；隐式 cast 或环境默认值不得决定帧边界。Gate 一的 authored 起点、delay、cue time 和 duration 都选择不早于精确值的第一个帧边界（`Ceil`），因此正的亚帧值不会被静默压成零帧。`Floor` 只保留给明确要求归属到更早边界的规则。
 
 每个 shot 的持续时间必须来自一种可溯源规则。v0 允许：
 
@@ -207,7 +209,7 @@ ONM-TIME-004 标题“立即购买”从第 13 秒开始，但所属 shot 在第
 | `ONM-SYNTAX-006` | 结束标签没有对应的打开元素 |
 | `ONM-SYNTAX-007` | 不支持 XML declaration、processing instruction 或 document type |
 
-首批 bind 与 resolve 诊断为：
+首批 bind、resolve 与 timing 诊断为：
 
 | Code | 含义 |
 | --- | --- |
@@ -220,6 +222,11 @@ ONM-TIME-004 标题“立即购买”从第 13 秒开始，但所属 shot 在第
 | `ONM-STRUCT-005` | film 包含多个 `cues` 容器 |
 | `ONM-STRUCT-006` | 结构元素或空元素中出现了文本 |
 | `ONM-TIME-001` | 时长格式非法、精度过高或超出精确范围 |
+| `ONM-TIME-002` | shot 没有媒体推导或显式的时长来源 |
+| `ONM-TIME-003` | 显式 shot duration 与媒体推导时长互相竞争 |
+| `ONM-TIME-004` | 已解析内容的起点落在所属 shot 外 |
+| `ONM-TIME-005` | 精确时间无法装入所选帧域 |
+| `ONM-ASSET-001` | 可渲染媒体没有冻结素材引用 |
 | `ONM-REF-001` | 格式良好的 overlay cue 引用没有指向已解析 cue |
 | `ONM-REF-002` | 已解析 cue 从未被引用 |
 | `ONM-ATTR-001` | 元素包含未知属性 |
@@ -227,7 +234,7 @@ ONM-TIME-004 标题“立即购买”从第 13 秒开始，但所属 shot 在第
 | `ONM-ATTR-003` | 属性值非法，包括格式错误的 cue ID |
 | `ONM-ATTR-004` | 两个属性定义了互相冲突的规则 |
 
-`ONM-REF-002` 的 severity 是 warning；其余首批 bind 与 resolve 诊断均为 error。
+`ONM-REF-002` 的 severity 是 warning；其余首批 bind、resolve 与 timing 诊断均为 error。
 
 tokenizer 遇到致命词法错误后停止，因此词法恢复可能只能产生一条诊断；只要剩余结构可信，Onmark 仍继续聚合彼此独立的嵌套、绑定和语义诊断。输入结束时，每个仍处于打开状态的元素各产生一条诊断：primary span 指向元素的打开名称，related span 指向剧本末尾。即使 tokenizer 将 document type 的内部子集拆成多个 token，整段声明也只产生一条诊断。
 

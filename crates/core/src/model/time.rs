@@ -1,6 +1,9 @@
 use std::error::Error;
 use std::fmt;
 
+use super::Duration;
+use super::duration::NANOS_PER_SECOND;
+
 /// Zero-based position of one frame on a timeline.
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct FrameIndex(u64);
@@ -49,6 +52,15 @@ impl FrameCount {
     #[must_use]
     pub const fn get(self) -> u64 {
         self.0
+    }
+
+    /// Adds two frame counts without implicit overflow behavior.
+    #[must_use]
+    pub const fn checked_add(self, other: Self) -> Option<Self> {
+        match self.0.checked_add(other.0) {
+            Some(value) => Some(Self(value)),
+            None => None,
+        }
     }
 }
 
@@ -119,6 +131,118 @@ impl fmt::Display for InvalidFrameRate {
 }
 
 impl Error for InvalidFrameRate {}
+
+/// Explicit policy for placing a time value on the discrete frame grid.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum Rounding {
+    /// Select the frame boundary at or before the exact time.
+    Floor,
+    /// Select the frame boundary at or after the exact time.
+    Ceil,
+}
+
+/// Exact conversion between nanosecond time and a rational frame grid.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct Timebase {
+    frame_rate: FrameRate,
+}
+
+impl Timebase {
+    /// Creates a timebase from an already validated rational frame rate.
+    #[must_use]
+    pub const fn new(frame_rate: FrameRate) -> Self {
+        Self { frame_rate }
+    }
+
+    /// Returns the rational frame rate that defines this grid.
+    #[must_use]
+    pub const fn frame_rate(self) -> FrameRate {
+        self.frame_rate
+    }
+
+    /// Places an absolute non-negative time on the frame grid.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FrameConversionOverflow`] when the resulting index does not
+    /// fit in the timeline's `u64` frame domain.
+    pub fn frame_at(
+        self,
+        time: Duration,
+        rounding: Rounding,
+    ) -> Result<FrameIndex, FrameConversionOverflow> {
+        self.frame_number(time, rounding).map(FrameIndex::new)
+    }
+
+    /// Converts an elapsed duration into a frame count.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FrameConversionOverflow`] when the resulting count does not
+    /// fit in the timeline's `u64` frame domain.
+    pub fn frames_for(
+        self,
+        duration: Duration,
+        rounding: Rounding,
+    ) -> Result<FrameCount, FrameConversionOverflow> {
+        self.frame_number(duration, rounding).map(FrameCount::new)
+    }
+
+    fn frame_number(
+        self,
+        duration: Duration,
+        rounding: Rounding,
+    ) -> Result<u64, FrameConversionOverflow> {
+        let numerator = u128::from(duration.as_nanos()) * u128::from(self.frame_rate.numerator());
+        let denominator = u128::from(NANOS_PER_SECOND) * u128::from(self.frame_rate.denominator());
+        let quotient = numerator / denominator;
+        let remainder = numerator % denominator;
+        let frames = match rounding {
+            Rounding::Floor => quotient,
+            Rounding::Ceil => quotient + u128::from(remainder != 0),
+        };
+
+        u64::try_from(frames).map_err(|_| FrameConversionOverflow {
+            duration,
+            frame_rate: self.frame_rate,
+        })
+    }
+}
+
+/// A time value whose frame-grid representation exceeds the timeline domain.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FrameConversionOverflow {
+    duration: Duration,
+    frame_rate: FrameRate,
+}
+
+impl FrameConversionOverflow {
+    /// Returns the duration that could not be represented.
+    #[must_use]
+    pub const fn duration(self) -> Duration {
+        self.duration
+    }
+
+    /// Returns the frame rate used for the rejected conversion.
+    #[must_use]
+    pub const fn frame_rate(self) -> FrameRate {
+        self.frame_rate
+    }
+}
+
+impl fmt::Display for FrameConversionOverflow {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "duration {} at {}/{} fps exceeds the frame domain",
+            self.duration,
+            self.frame_rate.numerator(),
+            self.frame_rate.denominator(),
+        )
+    }
+}
+
+impl Error for FrameConversionOverflow {}
 
 /// Half-open frame interval `[start, end)`.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -219,8 +343,9 @@ mod tests {
 
     use super::{
         FrameCount, FrameIndex, FrameInterval, FrameRate, InvalidFrameInterval, InvalidFrameRate,
-        greatest_common_divisor,
+        Rounding, Timebase, greatest_common_divisor,
     };
+    use crate::model::Duration;
 
     proptest! {
         #[test]
@@ -263,6 +388,29 @@ mod tests {
 
             prop_assert_eq!(start.checked_advance(interval.len()), Some(end));
         }
+
+        #[test]
+        fn rounding_brackets_the_exact_frame_boundary(
+            nanoseconds in any::<u64>(),
+            numerator in 1_u32..=240,
+            denominator in 1_u32..=1_001,
+        ) {
+            let rate = FrameRate::new(numerator, denominator)
+                .expect("positive parts form a valid frame rate");
+            let timebase = Timebase::new(rate);
+            let duration = Duration::from_nanos(nanoseconds);
+            let floor = timebase.frames_for(duration, Rounding::Floor)
+                .expect("the generated rate keeps the frame count in range");
+            let ceil = timebase.frames_for(duration, Rounding::Ceil)
+                .expect("the generated rate keeps the frame count in range");
+
+            prop_assert!(floor <= ceil);
+            prop_assert!(ceil.get() - floor.get() <= 1);
+            prop_assert_eq!(
+                timebase.frame_at(duration, Rounding::Floor).map(FrameIndex::get),
+                Ok(floor.get()),
+            );
+        }
     }
 
     #[test]
@@ -275,6 +423,65 @@ mod tests {
             FrameIndex::new(u64::MAX).checked_advance(FrameCount::new(1)),
             None,
         );
+    }
+
+    #[test]
+    fn adds_frame_counts_without_hiding_overflow() {
+        assert_eq!(
+            FrameCount::new(90).checked_add(FrameCount::new(60)),
+            Some(FrameCount::new(150)),
+        );
+        assert_eq!(
+            FrameCount::new(u64::MAX).checked_add(FrameCount::new(1)),
+            None,
+        );
+    }
+
+    #[test]
+    fn converts_exact_and_fractional_frame_boundaries() {
+        let timebase = Timebase::new(FrameRate::new(30, 1).expect("30 fps is valid"));
+
+        assert_eq!(
+            timebase.frame_at(Duration::from_nanos(2_000_000_000), Rounding::Floor),
+            Ok(FrameIndex::new(60)),
+        );
+        assert_eq!(
+            timebase.frames_for(Duration::from_nanos(1), Rounding::Floor),
+            Ok(FrameCount::ZERO),
+        );
+        assert_eq!(
+            timebase.frames_for(Duration::from_nanos(1), Rounding::Ceil),
+            Ok(FrameCount::new(1)),
+        );
+    }
+
+    #[test]
+    fn converts_ntsc_boundaries_without_floating_point() {
+        let rate = FrameRate::new(30_000, 1_001).expect("the NTSC-derived rate is valid");
+        let timebase = Timebase::new(rate);
+        let second = Duration::from_nanos(1_000_000_000);
+
+        assert_eq!(
+            timebase.frames_for(second, Rounding::Floor),
+            Ok(FrameCount::new(29)),
+        );
+        assert_eq!(
+            timebase.frames_for(second, Rounding::Ceil),
+            Ok(FrameCount::new(30)),
+        );
+    }
+
+    #[test]
+    fn reports_frame_domain_overflow() {
+        let rate = FrameRate::new(u32::MAX, 1).expect("the maximum numerator is valid");
+        let timebase = Timebase::new(rate);
+        let duration = Duration::from_nanos(u64::MAX);
+        let error = timebase
+            .frames_for(duration, Rounding::Ceil)
+            .expect_err("the converted frame count exceeds u64");
+
+        assert_eq!(error.duration(), duration);
+        assert_eq!(error.frame_rate(), rate);
     }
 
     #[test]

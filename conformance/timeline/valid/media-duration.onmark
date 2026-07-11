@@ -1,0 +1,9 @@
+<film>
+  <scene id="media">
+    <shot id="mixed">
+      <video src="clip.mp4" delay="500ms" />
+      <vo src="voice.mp3">Narration</vo>
+      <title>Visible throughout</title>
+    </shot>
+  </scene>
+</film>

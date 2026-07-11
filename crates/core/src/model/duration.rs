@@ -1,7 +1,7 @@
 use std::error::Error;
 use std::fmt;
 
-const NANOS_PER_SECOND: u64 = 1_000_000_000;
+pub(super) const NANOS_PER_SECOND: u64 = 1_000_000_000;
 const NANOS_PER_MILLISECOND: u64 = 1_000_000;
 
 /// Exact non-negative authored duration measured in nanoseconds.

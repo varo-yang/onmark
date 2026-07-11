@@ -54,12 +54,16 @@ Text and attribute values support the five predefined XML entities (`amp`, `lt`,
 
 Authored durations use the exact grammar `integer[.fraction](s|ms)` with no whitespace or sign. Seconds admit at most nine fractional digits and milliseconds at most six, so every accepted value has an exact unsigned nanosecond representation. Frame units and floating-point approximations are not part of the language.
 
+The compiler maps exact nanosecond values onto a rational frame grid with integer arithmetic. Every conversion names either floor or ceiling rounding at its call site; no implicit cast or ambient default may choose a frame boundary. Gate-one authored starts, delays, cue times, and durations select the first frame boundary that is not earlier than the exact value (`Ceil`), so a positive sub-frame value never silently becomes zero frames. `Floor` remains available only for rules that explicitly require attribution to an earlier boundary.
+
 A shot obtains duration from probed media, probed voice-over, a restricted explicit duration when content provides none, or an ending event. Multiple primary content sources extend the shot to the longest source. Overlay elements do not silently extend their shot.
 
 Two explicit relationships exist initially:
 
 - `delay` is relative to the owning shot's start;
 - a named cue aligns an element to an authored event.
+
+An overlay starts at its resolved relationship, or at the owning shot's start when none is authored, and remains active until that shot's exclusive end. Gate one gives overlays no independent default duration. An overlay therefore cannot extend its shot, and a resolved start outside the owning shot is an authored timing error.
 
 Initial cues use absolute film time. Later cue sources may include beats, media markers, semantic node boundaries, or a frozen upstream event table while sharing the same internal `EventRef` model.
 
@@ -93,7 +97,7 @@ Initial markup diagnostics are:
 | `ONM-SYNTAX-006` | a closing tag appears without an open element |
 | `ONM-SYNTAX-007` | an XML declaration, processing instruction, or document type is unsupported |
 
-Initial binding and resolution diagnostics are:
+Initial binding, resolution, and timing diagnostics are:
 
 | Code | Meaning |
 | --- | --- |
@@ -106,6 +110,11 @@ Initial binding and resolution diagnostics are:
 | `ONM-STRUCT-005` | a film contains more than one `cues` container |
 | `ONM-STRUCT-006` | authored text appears in a structural or empty element |
 | `ONM-TIME-001` | an authored duration is invalid or outside the exact range |
+| `ONM-TIME-002` | a shot has no media-derived or explicit duration source |
+| `ONM-TIME-003` | explicit and media-derived shot durations compete |
+| `ONM-TIME-004` | resolved content starts outside its owning shot |
+| `ONM-TIME-005` | an exact time does not fit in the selected frame domain |
+| `ONM-ASSET-001` | renderable media has no frozen artifact reference |
 | `ONM-REF-001` | a well-formed overlay cue reference does not name a resolved cue |
 | `ONM-REF-002` | a resolved cue is never referenced |
 | `ONM-ATTR-001` | an element contains an unknown attribute |
@@ -113,7 +122,7 @@ Initial binding and resolution diagnostics are:
 | `ONM-ATTR-003` | an authored attribute value, including a malformed cue ID, is invalid |
 | `ONM-ATTR-004` | two authored attributes define conflicting rules |
 
-`ONM-REF-002` is a warning; the other initial binding and resolution diagnostics are errors.
+`ONM-REF-002` is a warning; the other initial binding, resolution, and timing diagnostics are errors.
 
 The tokenizer stops after a fatal lexical error, so lexical recovery may produce one diagnostic. Onmark continues to aggregate independent nesting, binding, and semantic diagnostics whenever the remaining structure is trustworthy. At end of input, every still-open element receives one diagnostic whose primary span is its opening name and whose related span marks the end of the screenplay. A document type declaration produces one diagnostic even when the tokenizer exposes its internal subset as several tokens.
 
