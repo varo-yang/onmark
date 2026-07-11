@@ -34,6 +34,11 @@ fn a_doctype_internal_subset_produces_one_diagnostic() {
     assert_invalid_fixture("doctype-internal-subset");
 }
 
+#[test]
+fn an_unclosed_doctype_cannot_hide_following_markup() {
+    assert_invalid_fixture("unclosed-doctype");
+}
+
 fn assert_invalid_fixture(name: &str) {
     let source_path = fixture(&format!("invalid/{name}.onmark"));
     let expected_path = fixture(&format!("invalid/{name}.diagnostics.txt"));

@@ -458,11 +458,15 @@ fn unexpected_text(text: &TextNode, parent: ElementKind) -> Diagnostic {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
+    use proptest::prelude::*;
+
     use crate::compiler::parse;
     use crate::diagnostics::DiagnosticCode;
-    use crate::model::SourceId;
+    use crate::model::{ElementKind, NodeId, SourceId};
 
-    use super::{BindReport, bind};
+    use super::{BindReport, LinkedCue, LinkedElement, LinkedFilm, LinkedShotContent, bind};
 
     fn bind_source(source: SourceId, text: &str) -> BindReport {
         let parsed = parse(source, text);
@@ -498,5 +502,99 @@ mod tests {
 
         assert!(duplicate.is_some());
         assert_eq!(film.ids().count(), 1);
+    }
+
+    proptest! {
+        #[test]
+        fn linked_ids_and_the_film_index_describe_the_same_nodes(
+            ids in proptest::collection::vec("[a-z0-9 -]{0,8}", 9..=9),
+        ) {
+            let source = screenplay_with_ids(&ids);
+            let first = bind_source(SourceId::new(0), &source);
+            let second = bind_source(SourceId::new(0), &source);
+            let film = first.film().expect("the generated screenplay has one film root");
+
+            prop_assert_eq!(&first, &second);
+            prop_assert_eq!(linked_ids(film), expected_ids(&ids));
+            prop_assert_eq!(indexed_ids(film), expected_ids(&ids));
+        }
+    }
+
+    fn screenplay_with_ids(ids: &[String]) -> String {
+        format!(
+            concat!(
+                "<film id=\"{}\">",
+                "<cues id=\"{}\"><cue id=\"{}\"/></cues>",
+                "<scene id=\"{}\"><shot id=\"{}\">",
+                "<video id=\"{}\"/>",
+                "<vo id=\"{}\">voice</vo>",
+                "<title id=\"{}\">title</title>",
+                "<cta id=\"{}\">action</cta>",
+                "</shot></scene></film>",
+            ),
+            ids[0], ids[1], ids[2], ids[3], ids[4], ids[5], ids[6], ids[7], ids[8],
+        )
+    }
+
+    fn expected_ids(ids: &[String]) -> BTreeMap<NodeId, ElementKind> {
+        let kinds = [
+            ElementKind::Film,
+            ElementKind::Cues,
+            ElementKind::Cue,
+            ElementKind::Scene,
+            ElementKind::Shot,
+            ElementKind::Video,
+            ElementKind::VoiceOver,
+            ElementKind::Title,
+            ElementKind::CallToAction,
+        ];
+        let mut expected = BTreeMap::new();
+
+        for (authored, kind) in ids.iter().zip(kinds) {
+            if let Ok(id) = NodeId::parse(authored.as_str()) {
+                expected.entry(id).or_insert(kind);
+            }
+        }
+
+        expected
+    }
+
+    fn linked_ids(film: &LinkedFilm) -> BTreeMap<NodeId, ElementKind> {
+        linked_elements(film)
+            .into_iter()
+            .filter_map(|element| element.id().cloned().map(|id| (id, element.kind())))
+            .collect()
+    }
+
+    fn indexed_ids(film: &LinkedFilm) -> BTreeMap<NodeId, ElementKind> {
+        film.ids()
+            .map(|(id, node)| (id.clone(), node.kind()))
+            .collect()
+    }
+
+    fn linked_elements(film: &LinkedFilm) -> Vec<&LinkedElement> {
+        let mut elements = vec![film.element()];
+
+        if let Some(cues) = film.cues() {
+            elements.push(cues.element());
+            elements.extend(cues.cues().iter().map(LinkedCue::element));
+        }
+
+        for scene in film.scenes() {
+            elements.push(scene.element());
+            for shot in scene.shots() {
+                elements.push(shot.element());
+                for content in shot.content() {
+                    let element = match content {
+                        LinkedShotContent::Video(video) => video.element(),
+                        LinkedShotContent::VoiceOver(voice_over) => voice_over.element(),
+                        LinkedShotContent::Overlay(overlay) => overlay.element(),
+                    };
+                    elements.push(element);
+                }
+            }
+        }
+
+        elements
     }
 }
