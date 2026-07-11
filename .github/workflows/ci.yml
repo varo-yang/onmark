@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    name: Rust
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install pinned Rust toolchain
+        run: rustup show active-toolchain
+
+      - name: Verify toolchain pins
+        run: |
+          rustup_version=$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)
+          mise_version=$(sed -n 's/^rust = "\(.*\)"/\1/p' mise.toml)
+          test "$rustup_version" = "$mise_version"
+
+      - name: Cache Cargo artifacts
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Check compiler diagnostics
+        env:
+          CARGO_BUILD_WARNINGS: deny
+        run: cargo check --locked --workspace --all-targets --all-features --keep-going
+
+      - name: Run Clippy
+        run: cargo clippy --locked --workspace --all-targets --all-features
+
+      - name: Run tests
+        run: cargo test --locked --workspace --all-features
+
+      - name: Build documentation
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --locked --workspace --no-deps
