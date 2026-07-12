@@ -1,0 +1,35 @@
+#!/bin/sh
+
+for argument do
+  output=$argument
+done
+
+: > "$output"
+
+case "${output##*/}" in
+  failed.mp4)
+    cat >/dev/null
+    printf 'encoder rejected the stream' >&2
+    exit 7
+    ;;
+  failed-tail.mp4)
+    cat >/dev/null
+    index=0
+    while [ "$index" -lt 1024 ]; do
+      printf '0123456789abcdef' >&2
+      index=$((index + 1))
+    done
+    printf 'final encoder failure' >&2
+    exit 7
+    ;;
+  slow.mp4)
+    cat >/dev/null
+    while :; do
+      :
+    done
+    ;;
+  *)
+    printf 'unexpected fixture output: %s\n' "$output" >&2
+    exit 2
+    ;;
+esac

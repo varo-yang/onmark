@@ -11,7 +11,8 @@ use onmark_core::protocol::{
     BrowserCommand, BrowserEvent, BrowserPlan, BrowserRequest, RequestId, WireFrame,
 };
 use onmark_render::{
-    BrowserLimits, BrowserSession, EncodeLimits, EncodedPng, Ffmpeg, RenderExecutor,
+    BrowserErrorKind, BrowserLimits, BrowserSession, EncodeLimits, EncodedPng, Ffmpeg,
+    RenderExecutor,
 };
 use serde::Deserialize;
 use tempfile::tempdir;
@@ -24,9 +25,55 @@ const HEIGHT: u32 = 180;
 const FRAME_COUNT: u64 = 75;
 
 #[tokio::test]
+#[ignore = "requires ONMARK_CHROME"]
+async fn rejects_a_page_that_never_installs_the_runtime_host() {
+    let session = BrowserSession::launch(chrome(), browser_limits(Duration::from_secs(5)))
+        .await
+        .expect("Chrome must launch");
+    let fixture = render_fixture("missing-runtime.html");
+
+    let error = session
+        .navigate(fixture.as_str())
+        .await
+        .expect_err("the missing host must miss its readiness deadline");
+    let shutdown = session.shutdown().await;
+
+    assert_eq!(error.kind(), BrowserErrorKind::RuntimeHost);
+    shutdown.expect("Chrome must shut down after a readiness failure");
+}
+
+#[tokio::test]
+#[ignore = "requires ONMARK_CHROME and a built @onmark/runtime package"]
+async fn bounds_a_runtime_adapter_that_never_finishes_loading() {
+    let session = BrowserSession::launch(chrome(), browser_limits(Duration::from_secs(5)))
+        .await
+        .expect("Chrome must launch");
+    let fixture = render_fixture("stalled-runtime.html");
+    session
+        .navigate(fixture.as_str())
+        .await
+        .expect("the stalled fixture must install its runtime host");
+
+    let request = BrowserRequest::new(
+        RequestId::new(1),
+        BrowserCommand::Load {
+            plan: gate_one_plan(),
+        },
+    );
+    let error = session
+        .dispatch(&request)
+        .await
+        .expect_err("the stalled adapter must miss its protocol deadline");
+    let shutdown = session.shutdown().await;
+
+    assert_eq!(error.kind(), BrowserErrorKind::Protocol);
+    shutdown.expect("Chrome must shut down after a protocol timeout");
+}
+
+#[tokio::test]
 #[ignore = "requires ONMARK_CHROME and a built @onmark/runtime package"]
 async fn captures_stable_frames_across_the_real_browser_protocol() {
-    let session = BrowserSession::launch(chrome(), browser_limits())
+    let session = BrowserSession::launch(chrome(), browser_limits(Duration::from_secs(10)))
         .await
         .expect("Chrome must launch");
     let fixture = browser_fixture();
@@ -47,7 +94,7 @@ async fn renders_the_gate_one_plan_to_a_verified_mp4() {
         .expect("the fixture encoding limits are bounded");
     let ffmpeg = Ffmpeg::new(required_path("ONMARK_FFMPEG"), limits)
         .expect("the FFmpeg executable path is present");
-    let executor = RenderExecutor::new(chrome(), browser_limits(), ffmpeg);
+    let executor = RenderExecutor::new(chrome(), browser_limits(Duration::from_secs(10)), ffmpeg);
 
     let video = executor
         .render(gate_one_plan(), browser_fixture().as_str(), &output)
@@ -190,8 +237,8 @@ fn required_path(variable: &str) -> PathBuf {
         .unwrap_or_else(|| panic!("{variable} must name an executable"))
 }
 
-fn browser_limits() -> BrowserLimits {
-    BrowserLimits::new(WIDTH, HEIGHT, Duration::from_secs(10), 8 * 1024 * 1024)
+fn browser_limits(deadline: Duration) -> BrowserLimits {
+    BrowserLimits::new(WIDTH, HEIGHT, deadline, 8 * 1024 * 1024)
         .expect("the fixture browser limits are bounded")
 }
 
@@ -200,6 +247,13 @@ fn browser_fixture() -> Url {
     let fixture = repository.join("conformance/browser/gate-one.html");
     let runtime = repository.join("packages/runtime/dist/src/index.js");
     assert!(runtime.is_file(), "run `pnpm --dir packages/runtime build`");
+    Url::from_file_path(fixture).expect("the fixture path is absolute")
+}
+
+fn render_fixture(name: &str) -> Url {
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures")
+        .join(name);
     Url::from_file_path(fixture).expect("the fixture path is absolute")
 }
 

@@ -4,7 +4,7 @@ use std::fmt;
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize};
 
-use crate::model::{FrameIndex, FrameInterval};
+use crate::model::{FrameIndex, FrameInterval, FrameRate};
 use crate::timeline::TimelineIr;
 
 /// Largest integer represented exactly by every JavaScript implementation.
@@ -57,10 +57,7 @@ impl TryFrom<&TimelineIr> for BrowserPlan {
 
         Ok(Self {
             timeline_version: timeline.version().get(),
-            frame_rate: WireFrameRate {
-                numerator: rate.numerator(),
-                denominator: rate.denominator(),
-            },
+            frame_rate: rate.into(),
             evaluation: interval,
             output: interval,
         })
@@ -89,6 +86,15 @@ impl WireFrameRate {
     #[must_use]
     pub const fn denominator(self) -> u32 {
         self.denominator
+    }
+}
+
+impl From<FrameRate> for WireFrameRate {
+    fn from(rate: FrameRate) -> Self {
+        Self {
+            numerator: rate.numerator(),
+            denominator: rate.denominator(),
+        }
     }
 }
 

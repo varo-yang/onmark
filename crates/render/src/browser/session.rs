@@ -23,6 +23,10 @@ const READINESS_POLL_INTERVAL: Duration = Duration::from_millis(10);
 pub struct EncodedPng(Vec<u8>);
 
 impl EncodedPng {
+    pub(crate) fn new(bytes: Vec<u8>) -> Self {
+        Self(bytes)
+    }
+
     /// Returns the encoded PNG bytes.
     #[must_use]
     pub fn as_bytes(&self) -> &[u8] {
@@ -110,8 +114,8 @@ impl BrowserSession {
     ///
     /// # Errors
     ///
-    /// Returns [`BrowserError`] when serialization, JavaScript evaluation, or
-    /// response decoding fails.
+    /// Returns [`BrowserError`] when serialization, JavaScript evaluation,
+    /// response decoding, or the configured request deadline fails.
     pub async fn dispatch(
         &self,
         request: &BrowserRequest,
@@ -119,10 +123,10 @@ impl BrowserSession {
         let request = serde_json::to_string(request)
             .map_err(|source| BrowserError::json(BrowserErrorKind::Protocol, source))?;
         let expression = format!("globalThis.{RUNTIME_HOST}.dispatch({request})");
-        let result = self
-            .page
-            .evaluate_expression(expression)
+        let evaluation = self.page.evaluate_expression(expression);
+        let result = timeout(self.limits.deadline(), evaluation)
             .await
+            .map_err(|_| BrowserError::without_source(BrowserErrorKind::Protocol))?
             .map_err(|source| BrowserError::cdp(BrowserErrorKind::Protocol, source))?;
         result
             .into_value()
@@ -153,7 +157,7 @@ impl BrowserSession {
                 BrowserErrorKind::CaptureTooLarge,
             ));
         }
-        Ok(EncodedPng(bytes))
+        Ok(EncodedPng::new(bytes))
     }
 
     /// Closes Chromium and waits for both the process and CDP handler to exit.

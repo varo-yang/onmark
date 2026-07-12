@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Stalled Onmark runtime fixture</title>
+  </head>
+  <body>
+    <script type="module">
+      import { installRuntimeHost } from "../../../../packages/runtime/dist/src/index.js";
+
+      installRuntimeHost({
+        async load() {
+          await new Promise(() => {});
+        },
+        async prepare() {},
+        async seek() {},
+        async dispose() {},
+      });
+    </script>
+  </body>
+</html>

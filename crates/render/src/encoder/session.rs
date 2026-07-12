@@ -314,3 +314,94 @@ impl EncodedVideo {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::path::{Path, PathBuf};
+    use std::time::Duration;
+
+    use onmark_core::model::FrameRate;
+    use onmark_core::protocol::WireFrameRate;
+    use tempfile::{TempDir, tempdir};
+
+    use super::{EncodeError, EncodeErrorKind, EncodeLimits, Ffmpeg};
+    use crate::EncodedPng;
+
+    #[tokio::test]
+    async fn translates_a_failed_encoder_and_removes_its_partial_output() {
+        let fixture = EncoderFixture::new("failed.mp4", Duration::from_secs(1), 4_096);
+        let error = fixture.finish().await;
+
+        assert_eq!(error.kind(), EncodeErrorKind::Failed);
+        assert!(error.to_string().contains("encoder rejected the stream"));
+        assert!(!fixture.output().exists());
+    }
+
+    #[tokio::test]
+    async fn retains_only_the_bounded_encoder_diagnostic_tail() {
+        let fixture = EncoderFixture::new("failed-tail.mp4", Duration::from_secs(1), 64);
+        let error = fixture.finish().await;
+        let message = error.to_string();
+
+        assert_eq!(error.kind(), EncodeErrorKind::Failed);
+        assert!(message.contains("final encoder failure"));
+        assert!(message.contains("[truncated]"));
+        assert!(!fixture.output().exists());
+    }
+
+    #[tokio::test]
+    async fn terminates_an_encoder_that_misses_its_deadline() {
+        let fixture = EncoderFixture::new("slow.mp4", Duration::from_millis(30), 4_096);
+        let error = fixture.finish().await;
+
+        assert_eq!(error.kind(), EncodeErrorKind::Timeout);
+        assert!(!fixture.output().exists());
+    }
+
+    struct EncoderFixture {
+        directory: TempDir,
+        output_name: &'static str,
+        ffmpeg: Ffmpeg,
+    }
+
+    impl EncoderFixture {
+        fn new(output_name: &'static str, deadline: Duration, stderr_limit: usize) -> Self {
+            let directory = tempdir().expect("the fixture directory must be available");
+            let limits = EncodeLimits::new(deadline, 1, 1, stderr_limit)
+                .expect("the fixture limits are bounded");
+            let ffmpeg = Ffmpeg::new(fixture_executable(), limits)
+                .expect("the fixture executable path is present");
+
+            Self {
+                directory,
+                output_name,
+                ffmpeg,
+            }
+        }
+
+        async fn finish(&self) -> EncodeError {
+            let rate = FrameRate::new(30, 1).expect("the fixture frame rate is valid");
+            let output = self.output();
+            let mut session = self
+                .ffmpeg
+                .start(output, WireFrameRate::from(rate))
+                .expect("the fixture encoder must start");
+            session
+                .write_frame(&EncodedPng::new(vec![0]))
+                .await
+                .expect("the fixture encoder must accept one byte");
+            session
+                .finish()
+                .await
+                .expect_err("the fixture encoder must fail")
+        }
+
+        fn output(&self) -> PathBuf {
+            self.directory.path().join(self.output_name)
+        }
+    }
+
+    fn fixture_executable() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/ffmpeg")
+    }
+}
