@@ -11,6 +11,8 @@ use tokio::task::JoinError;
 pub enum BrowserErrorKind {
     /// The executable or browser configuration is invalid.
     Configuration,
+    /// A private Chromium profile could not be created.
+    Profile,
     /// Chromium could not launch or expose CDP.
     Launch,
     /// The initial page target could not be created.
@@ -116,6 +118,7 @@ impl fmt::Display for BrowserErrorKind {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
             Self::Configuration => "invalid browser configuration",
+            Self::Profile => "failed to create a private Chromium profile",
             Self::Launch => "failed to launch Chromium",
             Self::PageCreation => "failed to create the render page",
             Self::Navigation => "failed to navigate the render page",

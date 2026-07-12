@@ -8,7 +8,13 @@
 //! types are translated at this boundary and never enter `onmark-core`.
 
 mod browser;
+mod encoder;
+mod executor;
 
 pub use browser::{
     BrowserError, BrowserErrorKind, BrowserLimits, BrowserSession, EncodedPng, InvalidBrowserLimits,
 };
+pub use encoder::{
+    EncodeError, EncodeErrorKind, EncodeLimits, EncodedVideo, Ffmpeg, FfmpegSession, InvalidFfmpeg,
+};
+pub use executor::{RenderError, RenderErrorKind, RenderExecutor};

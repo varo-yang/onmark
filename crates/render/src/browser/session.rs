@@ -8,6 +8,7 @@ use chromiumoxide::handler::viewport::Viewport;
 use chromiumoxide::page::{Page, ScreenshotParams};
 use futures::StreamExt as _;
 use onmark_core::protocol::{BrowserRequest, BrowserResponse};
+use tempfile::TempDir;
 use tokio::task::JoinHandle;
 use tokio::time::{Instant, sleep, timeout, timeout_at};
 
@@ -42,6 +43,8 @@ pub struct BrowserSession {
     page: Page,
     handler: JoinHandle<Result<(), CdpError>>,
     limits: BrowserLimits,
+    // Retained so Chrome's private profile outlives the process.
+    _profile: TempDir,
 }
 
 impl BrowserSession {
@@ -55,7 +58,8 @@ impl BrowserSession {
         executable: impl AsRef<Path>,
         limits: BrowserLimits,
     ) -> Result<Self, BrowserError> {
-        let config = browser_config(executable.as_ref(), limits)?;
+        let profile = browser_profile()?;
+        let config = browser_config(executable.as_ref(), profile.path(), limits)?;
         let (mut browser, mut handler) = Browser::launch(config)
             .await
             .map_err(|source| BrowserError::cdp(BrowserErrorKind::Launch, source))?;
@@ -79,6 +83,7 @@ impl BrowserSession {
             page,
             handler,
             limits,
+            _profile: profile,
         })
     }
 
@@ -199,9 +204,21 @@ async fn wait_for_next_poll(deadline: Instant) -> Result<(), BrowserError> {
         .map_err(|_| BrowserError::without_source(BrowserErrorKind::RuntimeHost))
 }
 
-fn browser_config(executable: &Path, limits: BrowserLimits) -> Result<BrowserConfig, BrowserError> {
+fn browser_profile() -> Result<TempDir, BrowserError> {
+    tempfile::Builder::new()
+        .prefix("onmark-chromium-")
+        .tempdir()
+        .map_err(|source| BrowserError::io(BrowserErrorKind::Profile, source))
+}
+
+fn browser_config(
+    executable: &Path,
+    profile: &Path,
+    limits: BrowserLimits,
+) -> Result<BrowserConfig, BrowserError> {
     BrowserConfig::builder()
         .chrome_executable(executable)
+        .user_data_dir(profile)
         .new_headless_mode()
         .window_size(limits.width(), limits.height())
         .viewport(Viewport {

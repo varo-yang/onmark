@@ -25,8 +25,20 @@ current behavior with the checked-in artifacts and never rewrite them.
 `@onmark/runtime`, set `ONMARK_CHROME` to an explicit Chrome executable, and run:
 
 ```bash
-ONMARK_CHROME=/path/to/chrome cargo test -p onmark-render --test chromium -- --ignored
+ONMARK_CHROME=/path/to/chrome cargo test -p onmark-render --test render \
+  captures_stable_frames_across_the_real_browser_protocol -- --ignored
 ```
 
 The smoke crosses the versioned browser protocol, captures two distinct frames,
 and requires a repeated capture of the same frame to produce identical PNG bytes.
+
+The full local-render smoke additionally streams every output frame through
+`FFmpeg`, probes the published MP4, and decodes it again:
+
+```bash
+ONMARK_CHROME=/path/to/chrome \
+ONMARK_FFMPEG=/path/to/ffmpeg \
+ONMARK_FFPROBE=/path/to/ffprobe \
+cargo test -p onmark-render --test render \
+  renders_the_gate_one_plan_to_a_verified_mp4 -- --ignored
+```
