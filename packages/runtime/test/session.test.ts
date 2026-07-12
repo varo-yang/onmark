@@ -20,6 +20,14 @@ const plan: BrowserPlan = {
   frameRate: { numerator: 30, denominator: 1 },
   evaluation: { start: 10, end: 20 },
   output: { start: 10, end: 20 },
+  videos: [
+    {
+      assetId:
+        "sha256:0101010101010101010101010101010101010101010101010101010101010101",
+      interval: { start: 12, end: 18 },
+      sourceFrameRate: { numerator: 24, denominator: 1 },
+    },
+  ],
 };
 
 // ── Protocol progression ──
@@ -202,6 +210,24 @@ test("rejects interval relationships outside the browser plan contract", async (
   }
 });
 
+test("rejects invalid browser video facts before adapter loading", async () => {
+  const emptyVideo = structuredClone(plan);
+  firstVideo(emptyVideo).interval = { start: 12, end: 12 };
+  const escapedVideo = structuredClone(plan);
+  firstVideo(escapedVideo).interval = { start: 9, end: 18 };
+
+  for (const invalidPlan of [emptyVideo, escapedVideo]) {
+    const adapter = new RecordingAdapter();
+    const session = new RuntimeSession(adapter);
+    const rejected = await session.dispatch(
+      request(1, { type: "load", plan: invalidPlan }),
+    );
+
+    assertFailure(rejected, "invalidRequest");
+    assert.deepEqual(adapter.operations, []);
+  }
+});
+
 test("keeps the owned plan immutable after passing it to the adapter", async () => {
   const adapter = new RecordingAdapter();
   const session = new RuntimeSession(adapter);
@@ -210,6 +236,7 @@ test("keeps the owned plan immutable after passing it to the adapter", async () 
   const loadedPlan = adapter.loadedPlan;
   assert.ok(loadedPlan);
   assert.equal(Reflect.set(loadedPlan.frameRate, "numerator", 60), false);
+  assert.equal(Reflect.set(firstVideo(loadedPlan).interval, "start", 0), false);
 
   await session.dispatch(request(2, { type: "prepare", evaluationStart: 10 }));
   await session.dispatch(request(3, { type: "seek", frame: 15 }));
@@ -223,6 +250,12 @@ function request(
   command: BrowserRequest["command"],
 ): BrowserRequest {
   return { version: 1, requestId, command };
+}
+
+function firstVideo<Video>(plan: { readonly videos: readonly Video[] }): Video {
+  const video = plan.videos[0];
+  assert.ok(video);
+  return video;
 }
 
 function assertFailure(response: BrowserResponse, code: FailureCode): void {

@@ -652,6 +652,7 @@ dependencies = [
  "chromiumoxide",
  "futures",
  "onmark-core",
+ "onmark-media",
  "serde",
  "serde_json",
  "tempfile",

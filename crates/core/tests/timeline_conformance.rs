@@ -7,7 +7,7 @@ use std::fs;
 use onmark_core::compiler;
 use onmark_core::model::{
     AssetMetadata, AssetRef, Duration, EventRef, FrameInterval, FrameRate, FrozenAsset,
-    FrozenAssetId, SourceId, Timebase,
+    FrozenAssetId, SourceId, Timebase, VideoMetadata, VideoTiming,
 };
 use onmark_core::timeline::{
     TimelineContent, TimelineElement, TimelineIr, TimelineTiming, TimingReason,
@@ -46,6 +46,19 @@ fn missing_frozen_asset_is_a_typed_failure() {
     let asset = AssetRef::parse("clip.mp4").expect("the fixture asset reference is valid");
 
     assert_eq!(error, compiler::SolveError::MissingFrozenAsset(asset));
+}
+
+#[test]
+fn missing_selected_video_metadata_is_a_typed_failure() {
+    let source_path = fixture("timeline", "valid/media-duration.onmark");
+    let asset = AssetRef::parse("clip.mp4").expect("the fixture asset reference is valid");
+    let metadata = AssetMetadata::audio(Duration::parse("2s").expect("the duration is valid"));
+    let frozen = FrozenAsset::new(FrozenAssetId::from_sha256([1; 32]), metadata);
+    let assets = BTreeMap::from([(asset.clone(), frozen)]);
+    let error = solve_fixture(&source_path, &assets)
+        .expect_err("a video element requires selected visual-stream metadata");
+
+    assert_eq!(error, compiler::SolveError::MissingVideoMetadata(asset));
 }
 
 #[test]
@@ -109,9 +122,21 @@ fn frozen_assets<const N: usize>(entries: [(&str, &str); N]) -> BTreeMap<AssetRe
             let duration = Duration::parse(duration).expect("the fixture duration is valid");
             let digest_byte = u8::try_from(index + 1).expect("the fixture catalog is small");
             let id = FrozenAssetId::from_sha256([digest_byte; 32]);
-            (asset, FrozenAsset::new(id, AssetMetadata::new(duration)))
+            let metadata = if asset.as_str().ends_with(".mp3") {
+                AssetMetadata::audio(duration)
+            } else {
+                fixture_video_metadata(duration)
+            };
+            (asset, FrozenAsset::new(id, metadata))
         })
         .collect()
+}
+
+fn fixture_video_metadata(duration: Duration) -> AssetMetadata {
+    let rate = FrameRate::new(30, 1).expect("the fixture frame rate is valid");
+    let video = VideoMetadata::new(duration, "h264", "yuv420p", VideoTiming::Constant(rate))
+        .expect("the fixture video metadata is normalized");
+    AssetMetadata::video(duration, video)
 }
 
 struct TimelineRenderer {

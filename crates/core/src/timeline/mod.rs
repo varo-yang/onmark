@@ -89,6 +89,23 @@ impl TimelineIr {
     pub fn scenes(&self) -> &[TimelineScene] {
         &self.scenes
     }
+
+    /// Returns primary videos in screenplay order without exposing tree walks.
+    pub fn videos(&self) -> impl Iterator<Item = &TimelineVideo> {
+        self.contents().filter_map(TimelineContent::as_video)
+    }
+
+    /// Returns voice-over tracks in screenplay order.
+    pub fn voice_overs(&self) -> impl Iterator<Item = &TimelineVoiceOver> {
+        self.contents().filter_map(TimelineContent::as_voice_over)
+    }
+
+    fn contents(&self) -> impl Iterator<Item = &TimelineContent> {
+        self.scenes
+            .iter()
+            .flat_map(|scene| &scene.shots)
+            .flat_map(|shot| &shot.content)
+    }
 }
 
 /// One absolute named event retained for timing provenance.
@@ -237,6 +254,22 @@ pub enum TimelineContent {
     VoiceOver(TimelineVoiceOver),
     /// A title or call-to-action overlay.
     Overlay(TimelineOverlay),
+}
+
+impl TimelineContent {
+    fn as_video(&self) -> Option<&TimelineVideo> {
+        match self {
+            Self::Video(video) => Some(video),
+            Self::VoiceOver(_) | Self::Overlay(_) => None,
+        }
+    }
+
+    fn as_voice_over(&self) -> Option<&TimelineVoiceOver> {
+        match self {
+            Self::VoiceOver(voice_over) => Some(voice_over),
+            Self::Video(_) | Self::Overlay(_) => None,
+        }
+    }
 }
 
 /// Solved primary video content.

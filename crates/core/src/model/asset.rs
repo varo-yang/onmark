@@ -1,6 +1,7 @@
+use std::error::Error;
 use std::fmt;
 
-use super::Duration;
+use super::{Duration, FrameRate};
 
 /// Byte width of the Gate-one SHA-256 asset digest.
 const SHA256_BYTES: usize = 32;
@@ -39,27 +40,150 @@ impl fmt::Display for FrozenAssetId {
 }
 
 /// Normalized facts probed from one media artifact.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AssetMetadata {
     duration: Duration,
+    video: Option<VideoMetadata>,
 }
 
 impl AssetMetadata {
-    /// Creates the Gate-one metadata consumed by timeline solving.
+    /// Creates metadata for an artifact without a visual stream.
     #[must_use]
-    pub const fn new(duration: Duration) -> Self {
-        Self { duration }
+    pub const fn audio(duration: Duration) -> Self {
+        Self {
+            duration,
+            video: None,
+        }
+    }
+
+    /// Creates metadata for an artifact with one selected visual stream.
+    #[must_use]
+    pub const fn video(duration: Duration, video: VideoMetadata) -> Self {
+        Self {
+            duration,
+            video: Some(video),
+        }
     }
 
     /// Returns the exact probed artifact duration.
     #[must_use]
-    pub const fn duration(self) -> Duration {
+    pub const fn duration(&self) -> Duration {
         self.duration
+    }
+
+    /// Returns normalized facts for the selected visual stream, when present.
+    #[must_use]
+    pub const fn video_metadata(&self) -> Option<&VideoMetadata> {
+        self.video.as_ref()
     }
 }
 
-/// One frozen artifact and the normalized facts probed from those same bytes.
+/// Normalized facts for the visual stream selected during probing.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VideoMetadata {
+    duration: Duration,
+    codec: Box<str>,
+    pixel_format: Box<str>,
+    timing: VideoTiming,
+}
+
+impl VideoMetadata {
+    /// Creates video metadata from normalized ffprobe names and exact timing.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InvalidVideoMetadata`] when a name is empty or contains ASCII
+    /// whitespace. The media boundary translates this local validation reason
+    /// once; downstream code receives trusted format names.
+    pub fn new(
+        duration: Duration,
+        codec: impl Into<Box<str>>,
+        pixel_format: impl Into<Box<str>>,
+        timing: VideoTiming,
+    ) -> Result<Self, InvalidVideoMetadata> {
+        let codec = codec.into();
+        validate_format_name(&codec, InvalidVideoMetadata::InvalidCodec)?;
+
+        let pixel_format = pixel_format.into();
+        validate_format_name(&pixel_format, InvalidVideoMetadata::InvalidPixelFormat)?;
+
+        Ok(Self {
+            duration,
+            codec,
+            pixel_format,
+            timing,
+        })
+    }
+
+    /// Returns the exact selected-stream duration.
+    #[must_use]
+    pub const fn duration(&self) -> Duration {
+        self.duration
+    }
+
+    /// Returns the normalized ffprobe codec name.
+    #[must_use]
+    pub fn codec(&self) -> &str {
+        &self.codec
+    }
+
+    /// Returns the normalized ffprobe pixel-format name.
+    #[must_use]
+    pub fn pixel_format(&self) -> &str {
+        &self.pixel_format
+    }
+
+    /// Returns the observed source-frame timing shape.
+    #[must_use]
+    pub const fn timing(&self) -> VideoTiming {
+        self.timing
+    }
+}
+
+/// Exact timing shape observed across every reported source frame.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum VideoTiming {
+    /// Every consecutive presentation timestamp has the same interval.
+    Constant(FrameRate),
+    /// At least two consecutive presentation intervals differ.
+    Variable,
+    /// The stream contains one frame and therefore has no observable rate.
+    Still,
+}
+
+/// Reason normalized video metadata cannot be constructed.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum InvalidVideoMetadata {
+    /// The codec name is empty or contains ASCII whitespace.
+    InvalidCodec,
+    /// The pixel-format name is empty or contains ASCII whitespace.
+    InvalidPixelFormat,
+}
+
+impl fmt::Display for InvalidVideoMetadata {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let message = match self {
+            Self::InvalidCodec => "video codec name is invalid",
+            Self::InvalidPixelFormat => "video pixel-format name is invalid",
+        };
+        formatter.write_str(message)
+    }
+}
+
+impl Error for InvalidVideoMetadata {}
+
+fn validate_format_name(
+    name: &str,
+    invalid: InvalidVideoMetadata,
+) -> Result<(), InvalidVideoMetadata> {
+    if name.is_empty() || name.bytes().any(|byte| byte.is_ascii_whitespace()) {
+        return Err(invalid);
+    }
+    Ok(())
+}
+
+/// One frozen artifact and the normalized facts probed from those same bytes.
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FrozenAsset {
     id: FrozenAssetId,
     metadata: AssetMetadata,
@@ -78,20 +202,21 @@ impl FrozenAsset {
 
     /// Returns the immutable artifact identity.
     #[must_use]
-    pub const fn id(self) -> FrozenAssetId {
+    pub const fn id(&self) -> FrozenAssetId {
         self.id
     }
 
     /// Returns normalized probe facts for the immutable artifact.
     #[must_use]
-    pub const fn metadata(self) -> AssetMetadata {
-        self.metadata
+    pub const fn metadata(&self) -> &AssetMetadata {
+        &self.metadata
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::FrozenAssetId;
+    use super::{FrozenAssetId, InvalidVideoMetadata, VideoMetadata, VideoTiming};
+    use crate::model::{Duration, FrameRate};
 
     #[test]
     fn frozen_identity_has_an_algorithm_named_canonical_spelling() {
@@ -102,5 +227,29 @@ mod tests {
             "sha256:abababababababababababababababababababababababababababababababab",
         );
         assert_eq!(id.as_sha256(), &[0xab; 32]);
+    }
+
+    #[test]
+    fn video_metadata_rejects_names_that_are_not_normalized_tokens() {
+        let rate = FrameRate::new(30, 1).expect("30 fps is valid");
+
+        assert_eq!(
+            VideoMetadata::new(
+                Duration::from_nanos(1),
+                "",
+                "yuv420p",
+                VideoTiming::Constant(rate),
+            ),
+            Err(InvalidVideoMetadata::InvalidCodec),
+        );
+        assert_eq!(
+            VideoMetadata::new(
+                Duration::from_nanos(1),
+                "h264",
+                "yuv 420p",
+                VideoTiming::Constant(rate),
+            ),
+            Err(InvalidVideoMetadata::InvalidPixelFormat),
+        );
     }
 }

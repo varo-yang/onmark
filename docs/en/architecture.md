@@ -88,9 +88,14 @@ Input freezing separates three identities that must never be conflated:
   bytes.
 
 Timeline solving consumes a catalog from `AssetRef` to `FrozenAssetId` plus
-normalized `AssetMetadata`, all owned by `onmark-core`; Gate one initially
-requires only exact artifact duration. `onmark-media` produces metadata through
-probing, while a loader or composition root hashes and freezes the same bytes.
+normalized `AssetMetadata`, all owned by `onmark-core`. Metadata records exact
+artifact duration and, when a selected visual stream exists, its exact stream
+duration, codec, pixel format, and either one exact rational frame rate or
+variable timing.
+Single-frame streams are represented separately because no source rate can be
+observed from one presentation timestamp.
+`onmark-media` produces metadata through probing, while a loader or composition
+root hashes and freezes the same bytes.
 ffprobe-specific structures, source paths, and browser URLs remain outside
 core. Timeline IR records `FrozenAssetId`, never the authored spelling or a
 mutable path. A missing catalog entry is a typed integration failure rather
@@ -108,6 +113,12 @@ presentation artifact and its entry point, runtime version, fonts, static
 dependencies, and declared temporal capabilities. It does not contain timing
 rules. Materialization turns frozen bundle and asset identities into local
 paths or browser URLs immediately before execution and verifies their digests.
+Gate one assembles one content-addressed unit root: required assets appear at
+`assets/sha256/<lowercase digest>` beneath the presentation entry. The browser
+derives that relative location from the frozen identity already present in
+`BrowserPlan`; native paths and browser URLs therefore need no second wire
+protocol. The unit retains worker-local source paths only until assembly has
+verified or linked the exact bytes into that root.
 The presentation entry owns layout and installs the runtime adapter; the
 runtime supplies deterministic clock, readiness, and media primitives. Onmark
 does not synthesize an implicit full-screen DOM from Timeline IR.
@@ -175,7 +186,7 @@ Core's internal dependency DAG is CI-enforced: `model` depends on nothing; `synt
 
 The `protocol` module uses `serde` for the stable JSON boundary. Its optional `schema` feature exposes `schemars` only to repository generation; product binaries do not enable it. All repository-only automation lives under `scripts/`; it is not a product package or a miscellaneous application layer. Its Cargo manifest exists solely to give the Rust schema generator a pinned build-only dependency budget and a stable `cargo xtask` entry point. That binary is consumed only by developers and CI and may depend on core with the `schema` feature, `schemars`, and `serde_json`; product crates and packages never depend on it. The adjacent Node generator may use the pinned schema-to-TypeScript and validation toolchain. `cargo xtask schema` writes the versioned schemas, then invokes that generator. `json-schema-to-typescript` emits reviewable types, Ajv emits standalone validation code at build time, and TypeScript checks the generated package. Oxlint, a narrow repository-shape check, and Prettier are repository-only development gates and never enter the browser artifact. The browser runtime does not compile schemas dynamically. Exact tool versions are pinned in the lockfiles and `mise.toml`, and CI rejects stale generated artifacts.
 
-`onmark-media` depends on core plus `serde` and `serde_json` for a private ffprobe response boundary. It starts the configured ffprobe executable directly with an argument array, never through a shell; wrappers that leave descendant processes holding the output pipes are outside this executable contract. Process lifetime and retained stdout/stderr bytes are explicitly bounded under that direct-child contract, both pipes are drained concurrently, and explicit shutdown reports process-control failures while `Drop` remains a best-effort termination fallback. Private ffprobe response types are translated once into core-owned `AssetMetadata`; JSON values and third-party error types do not define the stable API, while underlying errors remain available through the standard error source chain for debugging.
+`onmark-media` depends on core plus `serde` and `serde_json` for a private ffprobe response boundary. It starts the configured ffprobe executable directly with an argument array, never through a shell; wrappers that leave descendant processes holding the output pipes are outside this executable contract. Process lifetime and retained stdout/stderr bytes are explicitly bounded under that direct-child contract, both pipes are drained concurrently, and explicit shutdown reports process-control failures while `Drop` remains a best-effort termination fallback. Private ffprobe response types are translated once into core-owned `AssetMetadata`; JSON values and third-party error types do not define the stable API, while underlying errors remain available through the standard error source chain for debugging. Gate-one probing requests every presentation timestamp from the selected video stream and proves CFR from exact integer timestamp deltas and the stream time base. The existing one-MiB stdout ceiling also bounds this proof: an artifact whose complete timing evidence does not fit is rejected rather than partially classified.
 
 `onmark-render` owns the heavy Chromium and `FFmpeg` dependency budget. It uses `chromiumoxide` only as a CDP transport and process launcher, with `tokio` and `futures` confined to this asynchronous execution boundary. `tempfile` gives every browser session an isolated profile and owns a private same-filesystem output staging directory, so parallel sessions do not share Chrome locks and a completed MP4 is published with a no-clobber hard link only after both processes finish cleanly. The crate supplies executable paths, viewport, process and request deadlines, frame/input/capture-byte ceilings, bounded retained stderr, and explicit shutdown; Chromium, CDP, and subprocess types are translated into stable render-owned errors. Browser navigation waits separately for document load and the runtime host because the transport's navigation call does not itself establish that lifecycle barrier. Gate one captures one PNG at a time and writes it directly to `FFmpeg`'s `image2pipe`; there is no frame queue or whole-video buffer. The fixed H.264 `yuv420p` profile rejects odd viewport dimensions before either process starts. Conformance launches installed Chrome and `FFmpeg` against the built runtime, crosses the typed `Load`/`Prepare`/`Seek` handshake, verifies byte-identical repeat capture, probes the resulting H.264 MP4, and decodes it again. These real-process tests are opt-in until CI owns a pinned Chromium/FFmpeg image.
 
@@ -183,7 +194,7 @@ Validation reasons remain local domain values. Once syntax has supplied source c
 
 On the TypeScript side, runtime is the foundation. Authoring consumes runtime's types-only public hook and capability contract; bundler injects the pinned runtime artifact. Runtime never depends on authoring or bundler. Temporal capability declarations belong to runtime as the stable third-party adapter extension point. The Gate-one `RuntimeSession` owns protocol ordering, interval-relationship checks, exact-frame projection, and terminal disposal. It rejects concurrent commands instead of growing a hidden queue and gives the adapter a recursively frozen snapshot of accepted plan facts. Browser-specific work enters through one narrow adapter whose waits must be bounded and whose expected failures are typed. The session, deterministic frame projection, immutable browser host, native Chromium handshake, and synthetic-frame MP4 path exist today; real media stabilization and the production DOM/media adapter remain Gate-one implementation work.
 
-Rust wire types are the source of truth. `cargo xtask schema` generates checked-in versioned JSON Schema and TypeScript types/codecs, and CI requires regeneration to produce no diff. Generated files are never hand-edited, and Rust does not regenerate a second Rust model from its own schema. Before the first external Gate-one release, v1 is refined in place so the initial public contract does not preserve experimental fields; after publication, an incompatible wire change requires a new protocol version and migration fixture. The Gate-one `BrowserPlan` currently carries only the frame rate and evaluation/output intervals consumed by the browser clock and is therefore a temporary clock projection of Timeline IR. Once the production presentation adapter consumes visual facts, `BrowserPlan` becomes the browser-facing projection of one Render Unit. It may contain only facts consumed in the browser; output paths, cache keys, `FFmpeg` arguments, materialization policy, and source-level timing remain outside it. Component and render-graph facts are added only when the runtime consumes them.
+Rust wire types are the source of truth. `cargo xtask schema` generates checked-in versioned JSON Schema and TypeScript types/codecs, and CI requires regeneration to produce no diff. Generated files are never hand-edited, and Rust does not regenerate a second Rust model from its own schema. Before the first external Gate-one release, v1 is refined in place so the initial public contract does not preserve experimental fields; after publication, an incompatible wire change requires a new protocol version and migration fixture. The Gate-one `BrowserPlan` carries the output frame rate, evaluation/output intervals, and primary-video placements now consumed by the runtime and decoded-media adapter. Each placement identifies immutable bytes, an absolute visible interval, and the admitted CFR source rate needed to verify decoded-frame selection; materialized URLs remain render-owned facts. This is the first browser-facing projection of the whole-film Render Unit, not a Render Graph or partition contract. It may contain only facts consumed in the browser; output paths, cache keys, `FFmpeg` arguments, and materialization policy remain outside it. VFR timestamp maps, overlays, and component facts are added only when the production adapter consumes them.
 
 AWS Lambda is an adapter, not another engine. A later independently published `@onmark/aws-lambda` surface owns invocation types, infrastructure definitions, the thin handler, and a container image with the pinned Rust binary, Chromium, FFmpeg, and fonts. The handler materializes a Render Unit, calls the same `onmark-render` executor, uploads an immutable artifact, and returns a structured result. AWS SDK types may not enter core. Other backends such as ECS or Kubernetes follow the same adapter rule.
 
@@ -202,3 +213,45 @@ Every gate uses the final-direction contracts but implements only fields consume
 CDP versus WebDriver BiDi, capture mechanism, layered alpha caching, wire encoding, coordinator storage, adapter seekability, and environment-locking granularity require prototypes and measurements. The pure compiler boundary, deterministic protocol, dependency-driven partitioning, and local/distributed symmetry are foundational decisions.
 
 The first Gate-one capture spike gives positive but deliberately narrow evidence for application-controlled `FrameReady` followed by CDP `Page.captureScreenshot`: repeated DOM, CSS, and Canvas frames produced identical raw RGBA hashes across independent Chrome processes on one locked machine. This selects the next experiment, not the final transport contract; decoded media, WebGL, asynchronous components, cross-environment equality, and production lifecycle remain unproven.
+
+The decoded-media experiment covers 30 fps CFR, `30000/1001` CFR, and an
+alternating-frame-interval VFR H.264 fixture, each with a 30-frame GOP and three
+B-frames. Native `<video>` seeking across the non-monotonic sequence
+`17 → 3 → 29 → 17` produced byte-identical PNG captures in two independent
+Chromium sessions once `requestVideoFrameCallback.mediaTime` confirmed the
+source frame selected at each output-frame midpoint. VFR expectations come
+from the probed source-frame timestamps rather than assuming source and output
+frames align. Independent `FFmpeg` extraction at the selected source-frame
+timestamps was also byte-stable across repeated runs. Seeking to an exact CFR
+frame-boundary second selected the preceding frame; sampling inside the
+Rust-selected frame produced the intended decoded frame.
+
+The two decode paths are not pixel-interchangeable. Across four 320×180 RGBA
+frames, Chromium canvas output differed from `FFmpeg` raw extraction in roughly
+229,000–232,000 of 921,600 channels, with mean absolute channel error
+2.13–2.18 and isolated maxima 173–178 on the measured machine. Browser
+seek/readiness/screenshot averaged 51–81 ms per frame; process-per-frame native
+extraction averaged 18–19 ms but excluded browser injection, composition, and
+final capture, so the figures are not an end-to-end speed comparison. Gate one
+therefore keeps one decode/color path authoritative for a render and treats it
+as part of the locked environment. Codec and color diversity, longer random
+sequences, persistent native-decoder cost, and injection overhead remain open
+measurements.
+
+Gate one therefore admits CFR H.264 visual assets only and uses the locked
+Chromium decoder as the authoritative visual decode/color path. The adapter
+seeks inside the Rust-selected frame and does not report readiness until
+`requestVideoFrameCallback.mediaTime` identifies the expected source frame.
+Unsupported codec or variable-frame-rate input is rejected before rendering,
+not silently approximated. VFR becomes admissible only after frozen metadata
+and the browser plan carry a complete timestamp map rather than one CFR rate.
+`FFmpeg` exact-frame extraction remains an alternative experiment rather than
+a hidden fallback that would change pixels within one render.
+
+This policy is represented by render-owned `AdmittedVideo` proof over
+core-owned metadata. It borrows the normalized facts instead of introducing a
+second media model, and proves both H.264 codec support and one exact source
+frame rate. The whole-film Render Unit retains that rate and lowers it into the
+browser placement exactly once. The decoded-media conformance obtains the proof from the
+production bounded ffprobe boundary for both accepted CFR fixtures and the
+rejected VFR fixture; the synthetic executor cannot accept video placements.

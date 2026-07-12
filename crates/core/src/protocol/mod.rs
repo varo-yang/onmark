@@ -12,4 +12,7 @@ pub use message::{
     BrowserCommand, BrowserEvent, BrowserRequest, BrowserResponse, InvalidProtocolFailure,
     ProtocolFailure, ProtocolFailureCode, ProtocolVersion, RequestId,
 };
-pub use plan::{BrowserPlan, InvalidWireFrame, WireFrame, WireFrameRate, WireInterval};
+pub use plan::{
+    BrowserPlan, BrowserVideo, InvalidBrowserPlan, InvalidWireFrame, WireFrame, WireFrameRate,
+    WireInterval,
+};

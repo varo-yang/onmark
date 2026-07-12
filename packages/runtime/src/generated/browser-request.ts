@@ -54,6 +54,7 @@ export interface BrowserPlan {
   frameRate: WireFrameRate;
   output: WireInterval;
   timelineVersion: 1;
+  videos: BrowserVideo[];
 }
 /**
  * One half-open browser frame interval.
@@ -68,4 +69,12 @@ export interface WireInterval {
 export interface WireFrameRate {
   denominator: number;
   numerator: number;
+}
+/**
+ * One primary video placement consumed by the browser presentation adapter.
+ */
+export interface BrowserVideo {
+  assetId: string;
+  interval: WireInterval;
+  sourceFrameRate: WireFrameRate;
 }

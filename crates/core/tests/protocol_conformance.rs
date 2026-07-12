@@ -6,11 +6,13 @@ use std::fmt::Write as _;
 use onmark_core::compiler;
 use onmark_core::model::{
     AssetMetadata, AssetRef, Duration, FrameRate, FrozenAsset, FrozenAssetId, SourceId, Timebase,
+    VideoMetadata, VideoTiming,
 };
 use onmark_core::protocol::{
-    BrowserCommand, BrowserEvent, BrowserPlan, BrowserRequest, BrowserResponse, ProtocolFailure,
-    ProtocolFailureCode, RequestId, WireFrame,
+    BrowserCommand, BrowserEvent, BrowserPlan, BrowserRequest, BrowserResponse, InvalidBrowserPlan,
+    ProtocolFailure, ProtocolFailureCode, RequestId, WireFrame,
 };
+use onmark_core::timeline::TimelineIr;
 
 use conformance::{assert_or_update, fixture};
 
@@ -62,6 +64,16 @@ fn gate_one_browser_responses_match_the_versioned_wire_contract() {
     );
 }
 
+#[test]
+fn browser_plan_requires_an_admitted_rate_for_every_video() {
+    let (timeline, asset_id, _rate) = gate_one_timeline();
+
+    assert_eq!(
+        BrowserPlan::from_timeline(&timeline, &BTreeMap::new()),
+        Err(InvalidBrowserPlan::MissingSourceFrameRate(asset_id)),
+    );
+}
+
 fn request(request_id: u32, command: BrowserCommand) -> BrowserRequest {
     BrowserRequest::new(RequestId::new(request_id), command)
 }
@@ -75,13 +87,23 @@ fn frame(index: u64) -> WireFrame {
 }
 
 fn gate_one_plan() -> BrowserPlan {
+    let (timeline, asset_id, rate) = gate_one_timeline();
+    let source_frame_rates = BTreeMap::from([(asset_id, rate)]);
+
+    BrowserPlan::from_timeline(&timeline, &source_frame_rates)
+        .expect("the fixture timeline fits the browser frame domain")
+}
+
+fn gate_one_timeline() -> (TimelineIr, FrozenAssetId, FrameRate) {
+    let rate = FrameRate::new(30, 1).expect("the fixture frame rate is valid");
+    let asset_id = FrozenAssetId::from_sha256([1; 32]);
+    let duration = Duration::from_nanos(2_500_000_000);
+    let video = VideoMetadata::new(duration, "h264", "yuv420p", VideoTiming::Constant(rate))
+        .expect("the fixture video metadata is normalized");
     let asset = AssetRef::parse("opening.mp4").expect("the fixture asset is valid");
     let assets = BTreeMap::from([(
         asset,
-        FrozenAsset::new(
-            FrozenAssetId::from_sha256([1; 32]),
-            AssetMetadata::new(Duration::from_nanos(2_500_000_000)),
-        ),
+        FrozenAsset::new(asset_id, AssetMetadata::video(duration, video)),
     )]);
     let parsed = compiler::parse(
         SourceId::new(0),
@@ -93,17 +115,16 @@ fn gate_one_plan() -> BrowserPlan {
     assert!(diagnostics.is_empty());
     let (film, diagnostics) = compiler::resolve(film.expect("the fixture binds")).into_parts();
     assert!(diagnostics.is_empty());
-    let rate = FrameRate::new(30, 1).expect("the fixture frame rate is valid");
     let solved = compiler::solve(
         film.expect("the fixture resolves"),
         &assets,
         Timebase::new(rate),
     )
     .expect("the fixture metadata is complete");
-    assert!(solved.diagnostics().is_empty());
+    let (timeline, diagnostics) = solved.into_parts();
+    assert!(diagnostics.is_empty());
 
-    BrowserPlan::try_from(solved.timeline().expect("the fixture solves"))
-        .expect("the fixture timeline fits the browser frame domain")
+    (timeline.expect("the fixture solves"), asset_id, rate)
 }
 
 fn render_json_lines(values: &[impl serde::Serialize]) -> String {

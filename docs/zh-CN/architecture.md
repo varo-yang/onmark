@@ -193,7 +193,7 @@ parse → bind structure → resolve attributes/references → solve Timeline IR
 
 结构 bind 与属性/引用 resolve 都会在构建候选产物的同时聚合创作诊断。只要存在 error，相位报告就不公开对应阶段值，避免被拒结构或恢复默认值被下一阶段误当成编译事实；warning 不阻塞产物。
 
-Timeline solve 消费由 `onmark-core` 拥有的 `AssetRef → FrozenAsset` catalog；其中 `FrozenAsset` 绑定不可变身份与同一字节产生的规范化 `AssetMetadata`，Gate 一首先只要求精确素材时长。`onmark-media` 通过探测生产 metadata，loader 或 composition root 负责冻结同一份字节；ffprobe 专属结构、路径与失败不得进入 core。引用素材若不在 catalog 中，属于 typed integration failure，而不是 authored diagnostic。媒体元素缺少 authored source 时仍可通过静态 resolve，但无法产出可渲染 Timeline IR，并在 solve 阶段收到 authored asset diagnostic。
+Timeline solve 消费由 `onmark-core` 拥有的 `AssetRef → FrozenAsset` catalog；其中 `FrozenAsset` 绑定不可变身份与同一字节产生的规范化 `AssetMetadata`。metadata 记录精确素材时长；若存在选中的视觉流，还会记录精确 stream duration、codec、pixel format，以及一个精确有理帧率或 variable timing。单帧流会单独建模，因为一个 presentation timestamp 无法证明 source rate。`onmark-media` 通过探测生产 metadata，loader 或 composition root 负责冻结同一份字节；ffprobe 专属结构、路径与失败不得进入 core。引用素材若不在 catalog 中，属于 typed integration failure，而不是 authored diagnostic。媒体元素缺少 authored source 时仍可通过静态 resolve，但无法产出可渲染 Timeline IR，并在 solve 阶段收到 authored asset diagnostic。
 
 诊断是语言产品的一部分，不是日志。每条创作诊断必须包含稳定 code、源码 span、直接原因、相关节点，并在存在确定修法时给出可执行建议。建议面向人和 LLM 使用源码词汇，例如“定义 `cue:offer`，或将该标题改为相对当前 shot 的 `delay`”，不能只暴露求解器术语。
 
@@ -202,6 +202,8 @@ Timeline solve 消费由 `onmark-core` 拥有的 `AssetRef → FrozenAsset` cata
 Bundler 把用户组件、Onmark runtime、CSS 和静态依赖打成不可变 bundle。bundle 只包含绘制能力，不包含时间求解逻辑。manifest 记录 chunk、字体、外部素材、runtime 版本和能力声明，并进入缓存键。
 
 Presentation entry 拥有 DOM 结构、CSS/layout 与 runtime adapter 的安装；runtime 只提供确定性时钟、readiness 与媒体原语。Rust 不根据 Timeline IR 偷偷生成一套默认全屏 DOM。Bundle manifest 标识不可变 presentation artifact 及其 entry point、runtime 版本、字体、静态依赖和时间能力，但不携带求时规则。
+
+Gate 一组装一个 content-addressed unit root：所需素材位于 presentation entry 下的 `assets/sha256/<lowercase digest>`。browser 直接从 `BrowserPlan` 已携带的 frozen identity 推导这个相对位置，因此不需要第二套 native-path/browser-URL wire protocol。unit 只在 assembly 前保留 worker-local source path，用于校验或链接精确字节进入该 root。
 
 第一关不提前实现 Render Graph。它直接把整部 Timeline IR、冻结素材 catalog、bundle manifest 与 render profile 组合成一个 whole-film Render Unit：
 
@@ -408,7 +410,7 @@ protocol    → diagnostics + timeline + model
 
 `protocol` 模块使用 `serde` 定义稳定 JSON 边界。其可选的 `schema` feature 只为仓库生成工作暴露 `schemars`，产品 binary 不启用它。所有仓库专用自动化统一放在 `scripts/`；它既不是产品 package，也不是杂项应用层。其中的 Cargo manifest 只用于给 Rust schema generator 一份固定的 build-only 依赖预算和稳定的 `cargo xtask` 入口。这个 binary 只由开发者与 CI 消费，只允许依赖启用 `schema` feature 的 core、`schemars` 与 `serde_json`；任何产品 crate/package 都不得反向依赖它。相邻的 Node generator 可使用固定版本的 schema-to-TypeScript 与验证工具链。`cargo xtask schema` 先写 versioned schema，再调用该 generator；`json-schema-to-typescript` 生成可审阅类型，Ajv 在构建期生成 standalone validator，TypeScript 检查生成后的 package。Oxlint、窄范围 repository-shape check 与 Prettier 只作为仓库开发门禁，绝不进入 browser artifact。浏览器 runtime 不在运行期动态编译 schema。精确工具版本由 lockfile 与 `mise.toml` 固定，CI 会拒绝过期生成物。
 
-`onmark-media` 只依赖 core，以及用于私有 ffprobe response 边界的 `serde`/`serde_json`。它使用参数数组直接启动配置的 ffprobe executable，绝不经过 shell；退出后仍让派生进程持有输出 pipe 的 wrapper 不属于该 executable contract。在这条 direct-child 契约下，进程寿命和保留的 stdout/stderr 字节数都有显式上限，两条 pipe 并发排空；显式 shutdown 会报告 process-control failure，`Drop` 只作 best-effort termination fallback。私有 ffprobe response type 只在此边界翻译一次并产出 core-owned `AssetMetadata`；JSON value 与第三方 error type 不定义稳定 API，但底层 error 会通过标准 source chain 保留，供调试使用。
+`onmark-media` 只依赖 core，以及用于私有 ffprobe response 边界的 `serde`/`serde_json`。它使用参数数组直接启动配置的 ffprobe executable，绝不经过 shell；退出后仍让派生进程持有输出 pipe 的 wrapper 不属于该 executable contract。在这条 direct-child 契约下，进程寿命和保留的 stdout/stderr 字节数都有显式上限，两条 pipe 并发排空；显式 shutdown 会报告 process-control failure，`Drop` 只作 best-effort termination fallback。私有 ffprobe response type 只在此边界翻译一次并产出 core-owned `AssetMetadata`；JSON value 与第三方 error type 不定义稳定 API，但底层 error 会通过标准 source chain 保留，供调试使用。Gate 一会请求所选视觉流的全部 presentation timestamp，用精确整数 timestamp 差值与 stream time base 证明 CFR。既有的一 MiB stdout ceiling 同时约束这份证明：完整 timing evidence 放不下的素材会被拒绝，而不是只采样一部分后猜测分类。
 
 `onmark-render` 拥有 Chromium 与 `FFmpeg` 的重型依赖预算。它只把 `chromiumoxide` 用作 CDP transport 与进程启动器，`tokio` 和 `futures` 也只存在于这条异步执行边界；`tempfile` 为每个 browser session 提供隔离 profile，并创建同文件系统的私有输出暂存目录，因此并行 session 不共享 Chrome lock，且只有 Chromium 与 `FFmpeg` 都干净结束后，才用 no-clobber hard link 发布完整 MP4。crate 显式提供 executable path、viewport、process/request deadline、frame/input/capture byte ceiling、有界 stderr 保留与 shutdown，并把 Chromium、CDP、subprocess 类型翻译成 render 自己拥有的稳定错误。浏览器导航会分别等待 document load 与 runtime host；不能把 transport 的 navigation 返回误当成完整生命周期屏障。Gate 一每次只拥有一张 PNG，捕获后直接写入 `FFmpeg image2pipe`，不存在 frame queue 或整段视频 buffer；固定的 H.264 `yuv420p` profile 会在进程启动前拒绝奇数 viewport 尺寸。conformance 会启动本机 Chrome 与 `FFmpeg`，加载构建后的 runtime，走过类型化 `Load`/`Prepare`/`Seek` 握手，验证重复捕获字节一致，再 probe 并完整 decode H.264 MP4。在 CI 拥有固定 Chromium/FFmpeg image 前，这些真实进程 smoke 保持 opt-in。
 
@@ -457,7 +459,7 @@ decode invocation
 
 Rust wire types 是 source of truth。`cargo xtask schema` 从它们生成 versioned JSON Schema 和 TypeScript types/codecs，CI 重新生成并要求工作树零 diff。生成结果提交进仓库，供 npm package、diff review 和非 Rust 消费者直接使用；禁止手工修改。Gate 一首次对外发布之前，v1 可以原地收口，避免初始公开契约背负实验字段；一旦发布，任何不兼容 wire 变化都必须使用新 protocol version 并带 migration/conformance fixture。Rust 本身直接使用原始领域/wire types，不再从 schema 反向生成第二套 Rust 类型。
 
-Gate 一的 `BrowserPlan` 目前只携带 browser clock 已真实消费的 frame rate 与 evaluation/output interval，因此只是 Timeline IR 的临时时钟投影。production presentation adapter 开始消费视觉事实后，`BrowserPlan` 改为一个 Render Unit 的 browser-facing projection。它只能包含浏览器真实消费的事实；output path、cache key、FFmpeg 参数、materialization policy 与 source-level timing 都不得进入。component 与 Render Graph 事实等 runtime 真正消费时再加入，不提前把后续 gate 塞进协议。
+Gate 一的 `BrowserPlan` 现在携带 runtime 与 decoded-media adapter 已真实消费的 output frame rate、evaluation/output interval 和 primary-video placement。每个 placement 记录 immutable asset identity、绝对可见区间，以及验证 decoded-frame selection 所需的 admitted CFR source rate；materialized URL 仍是 render-owned fact。这是 whole-film Render Unit 的第一份 browser-facing projection，不是 Render Graph 或 partition contract。它只能包含浏览器真实消费的事实；output path、cache key、FFmpeg 参数和 materialization policy 都不得进入。VFR timestamp map、overlay 与 component 事实等 production adapter 真正消费时再加入，不提前把后续 gate 塞进协议。
 
 authoring API 可以追求浏览器端人体工程学，但不能复制求时语义。
 
@@ -514,6 +516,14 @@ Screenplay → Timeline IR → Browser Runtime → Chromium → FFmpeg → MP4
 ## 13. 待实验决策
 
 Gate 一首轮 capture spike 已得到正向但刻意收窄的证据：页面自行控制 `FrameReady`，随后调用 CDP `Page.captureScreenshot`，DOM/CSS/Canvas 帧在同一锁定机器的独立 Chrome 进程间得到一致的 raw RGBA hash。这只决定下一轮实验路线，不等于最终 transport contract；decoded media、WebGL、异步组件、跨环境一致性与生产级 lifecycle 仍未证明。
+
+decoded-media 实验现已覆盖 30 fps CFR、`30000/1001` CFR 与交替帧间隔 VFR H.264；三者都使用 30 帧 GOP、3 个 B-frame，并按 `17 → 3 → 29 → 17` 乱序 seek。只有在 `requestVideoFrameCallback.mediaTime` 确认 output-frame 中点实际选中的 source frame 后才返回 FrameReady；VFR 期望来自 ffprobe 的真实 source-frame timestamp，不假设 source/output frame 对齐。两个独立 Chromium session 的 PNG capture byte-identical，同一 source-frame timestamp 的独立 FFmpeg extraction 也在重复执行间 byte-stable。实验同时发现：把精确 CFR 帧边界秒数直接写入 `video.currentTime` 会选中前一帧，必须采样 Rust 已选帧内部。
+
+两条 decode path 并非 pixel-interchangeable。四张 320×180 RGBA 帧共 921,600 个 channel，Chromium canvas 与 FFmpeg raw extraction 约有 229k–232k 个 channel 不同，mean absolute delta 为 2.13–2.18，孤立最大值为 173–178。当前机器上 browser seek/readiness/screenshot 平均 51–81ms/帧；每帧单独启动 FFmpeg 的 native extraction 为 18–19ms，但后者尚未包含 browser injection、composition 与最终 capture，因此不能当成端到端速度胜负。Gate 一的一次 render 必须只认一条 decode/color path，并把它纳入锁定环境；多 codec/色彩、更长随机序列、persistent native decoder 成本与 injection overhead 仍需测量。
+
+因此 Gate 一只接纳 CFR H.264 视觉素材，并把锁定 Chromium decoder 作为唯一权威 decode/color path。adapter 在 Rust 已选帧内部采样，且只有 `requestVideoFrameCallback.mediaTime` 指向期望 source frame 时才返回 ready。不支持的 codec 或 VFR 必须在 render 前显式拒绝，不能近似执行。只有 frozen metadata 与 Browser Plan 将来携带完整 timestamp map、而非单一 CFR rate 后，VFR 才能转为正式能力。FFmpeg exact-frame extraction 保持备选实验，不作为会在同一次 render 中改变像素的隐藏 fallback。
+
+这条策略由 render-owned `AdmittedVideo` proof 对 core-owned metadata 执行 admission 来表达。它借用规范化事实，不再复制一套 render 媒体模型，并证明 H.264 codec 与唯一精确 source frame rate。whole-film Render Unit 保留该 rate，并只向 browser placement lower 一次。decoded-media conformance 通过生产用的有界 ffprobe 边界，为两个被接纳的 CFR fixture 和一个被拒绝的 VFR fixture 生成 proof；synthetic executor 无法接收 video placement。
 
 - Chromium 控制选择 CDP、WebDriver BiDi 还是极薄现有库；
 - 捕获选择 BeginFrame、screenshot、surface copy 还是编码流；

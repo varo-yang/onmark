@@ -125,8 +125,14 @@ impl Ffprobe {
             .args([
                 OsStr::new("-v"),
                 OsStr::new("error"),
+                OsStr::new("-select_streams"),
+                OsStr::new("v:0"),
+                OsStr::new("-show_frames"),
                 OsStr::new("-show_entries"),
-                OsStr::new("format=duration"),
+                OsStr::new(
+                    "format=duration:stream=codec_name,pix_fmt,time_base,duration:\
+                     frame=best_effort_timestamp",
+                ),
                 OsStr::new("-of"),
                 OsStr::new("json"),
                 OsStr::new("--"),

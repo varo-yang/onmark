@@ -65,6 +65,8 @@ pub fn solve(
 pub enum SolveError {
     /// A logical source has no frozen identity and normalized probe facts.
     MissingFrozenAsset(AssetRef),
+    /// A video source has no selected visual-stream metadata.
+    MissingVideoMetadata(AssetRef),
 }
 
 impl fmt::Display for SolveError {
@@ -72,6 +74,9 @@ impl fmt::Display for SolveError {
         match self {
             Self::MissingFrozenAsset(asset) => {
                 write!(formatter, "frozen asset is missing for \"{asset}\"")
+            }
+            Self::MissingVideoMetadata(asset) => {
+                write!(formatter, "video metadata is missing for \"{asset}\"")
             }
         }
     }
@@ -271,7 +276,7 @@ impl<'a> Solver<'a> {
         &mut self,
         video: ResolvedVideo,
     ) -> Result<Option<PreparedContent>, SolveError> {
-        let media = self.prepare_media(video.into_media())?;
+        let media = self.prepare_media(video.into_media(), MediaTrack::Video)?;
         Ok(media.map(PreparedContent::Video))
     }
 
@@ -280,14 +285,18 @@ impl<'a> Solver<'a> {
         voice_over: ResolvedVoiceOver,
     ) -> Result<Option<PreparedContent>, SolveError> {
         let (media, text) = voice_over.into_parts();
-        let Some(media) = self.prepare_media(media)? else {
+        let Some(media) = self.prepare_media(media, MediaTrack::Audio)? else {
             return Ok(None);
         };
 
         Ok(Some(PreparedContent::VoiceOver { media, text }))
     }
 
-    fn prepare_media(&mut self, media: ResolvedMedia) -> Result<Option<PreparedMedia>, SolveError> {
+    fn prepare_media(
+        &mut self,
+        media: ResolvedMedia,
+        track: MediaTrack,
+    ) -> Result<Option<PreparedMedia>, SolveError> {
         let (element, source, delay) = media.into_parts();
         let Some(source) = source else {
             self.diagnostics.push(missing_media_source(&element));
@@ -297,17 +306,20 @@ impl<'a> Solver<'a> {
         let frozen = self
             .assets
             .get(&asset_ref)
-            .copied()
             .ok_or_else(|| SolveError::MissingFrozenAsset(asset_ref.clone()))?;
+        let duration = match track {
+            MediaTrack::Audio => frozen.metadata().duration(),
+            MediaTrack::Video => frozen
+                .metadata()
+                .video_metadata()
+                .ok_or_else(|| SolveError::MissingVideoMetadata(asset_ref.clone()))?
+                .duration(),
+        };
         let Some((start, start_reason)) = self.prepare_delay(delay) else {
             return Ok(None);
         };
-        let Some(duration) = frames_for(
-            self.timebase,
-            frozen.metadata().duration(),
-            asset_span,
-            &mut self.diagnostics,
-        ) else {
+        let Some(duration) = frames_for(self.timebase, duration, asset_span, &mut self.diagnostics)
+        else {
             return Ok(None);
         };
         let Some(end) = start.checked_add(duration) else {
@@ -461,6 +473,12 @@ impl<'a> Solver<'a> {
             }
         }
     }
+}
+
+#[derive(Clone, Copy)]
+enum MediaTrack {
+    Audio,
+    Video,
 }
 
 struct ExplicitDuration {

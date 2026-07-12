@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Onmark decoded-video seek experiment</title>
+    <style>
+      html,
+      body,
+      canvas {
+        height: 100%;
+        margin: 0;
+        width: 100%;
+      }
+
+      body {
+        overflow: hidden;
+      }
+
+      canvas {
+        inset: 0;
+        position: fixed;
+        z-index: 1;
+      }
+
+      video {
+        height: 1px;
+        opacity: 0.01;
+        position: fixed;
+        width: 1px;
+        z-index: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas aria-label="Decoded video frame"></canvas>
+    <video muted playsinline></video>
+    <script type="module">
+      // Disposable experiment for measuring native browser media seeking. It
+      // deliberately uses only the public runtime adapter boundary.
+      import {
+        RuntimeAdapterError,
+        installRuntimeHost,
+        videoFrameSelection,
+      } from "../../../../packages/runtime/dist/src/index.js";
+
+      const FRAME_TOLERANCE_SECONDS = 0.000001;
+      const READINESS_DEADLINE_MS = 5_000;
+      const canvas = requiredElement("canvas", HTMLCanvasElement);
+      const video = requiredElement("video", HTMLVideoElement);
+      const context = canvas.getContext("2d", { alpha: false });
+      if (context === null) {
+        throw new TypeError(
+          "the video experiment requires a 2D canvas context",
+        );
+      }
+
+      const media = requiredParameter("media");
+      const expected = parseExpectedFrames(
+        new URL(location.href).searchParams.get("expected"),
+      );
+      const materializedAsset = requiredParameter("asset");
+
+      let frameRate;
+      let placement;
+      installRuntimeHost({
+        async load(plan) {
+          placement = onlyVideo(plan.videos);
+          if (placement.assetId !== materializedAsset) {
+            throw new RuntimeAdapterError(
+              "operation",
+              "materialized video does not match the browser plan",
+            );
+          }
+          frameRate = plan.frameRate;
+          const loaded = waitForVideoEvent(
+            "loadeddata",
+            "video data did not load",
+          );
+          video.src = media;
+          video.load();
+          await loaded;
+        },
+        async prepare(frame) {
+          await present(frame);
+        },
+        async seek(frame) {
+          await present(frame);
+        },
+        async dispose() {
+          video.removeAttribute("src");
+          video.load();
+        },
+      });
+
+      async function present(frame) {
+        // Chrome selected the preceding decoded frame at exact boundaries;
+        // seeking inside the selected source frame preserves its identity.
+        const selection = videoFrameSelection(frame, placement, frameRate);
+        if (selection === undefined) {
+          throw new RuntimeAdapterError(
+            "operation",
+            `frame ${frame.index} falls outside the video placement`,
+          );
+        }
+        const expectedMediaTime = expected.get(frame.index);
+        if (expectedMediaTime === undefined) {
+          throw new RuntimeAdapterError(
+            "operation",
+            `frame ${frame.index} has no native reference timestamp`,
+          );
+        }
+        if (
+          Math.abs(selection.mediaTimeSeconds - expectedMediaTime) >
+          FRAME_TOLERANCE_SECONDS
+        ) {
+          throw new RuntimeAdapterError(
+            "operation",
+            `source frame plan selected ${selection.mediaTimeSeconds}, expected ${expectedMediaTime}`,
+          );
+        }
+
+        const presented = waitForPresentedFrame(expectedMediaTime);
+        const seeked = waitForVideoEvent("seeked", "video seek did not finish");
+        video.currentTime = selection.seekTimeSeconds;
+        await Promise.all([seeked, presented]);
+      }
+
+      function waitForPresentedFrame(timeSeconds) {
+        return new Promise((resolve, reject) => {
+          let active = true;
+          let observedMediaTime = "none";
+          const deadline = window.setTimeout(() => {
+            active = false;
+            reject(
+              new RuntimeAdapterError(
+                "readinessTimeout",
+                `decoded frame ${timeSeconds} did not become visible; last media time was ${observedMediaTime}`,
+                ["video-frame"],
+              ),
+            );
+          }, READINESS_DEADLINE_MS);
+          const inspect = (_now, metadata) => {
+            if (!active) {
+              return;
+            }
+            observedMediaTime = String(metadata.mediaTime);
+            if (
+              Math.abs(metadata.mediaTime - timeSeconds) <=
+              FRAME_TOLERANCE_SECONDS
+            ) {
+              active = false;
+              window.clearTimeout(deadline);
+              canvas.width = window.innerWidth;
+              canvas.height = window.innerHeight;
+              context.drawImage(video, 0, 0, canvas.width, canvas.height);
+              resolve();
+              return;
+            }
+
+            video.requestVideoFrameCallback(inspect);
+          };
+
+          video.requestVideoFrameCallback(inspect);
+        });
+      }
+
+      function waitForVideoEvent(eventName, failureMessage) {
+        return new Promise((resolve, reject) => {
+          const deadline = window.setTimeout(() => {
+            cleanup();
+            reject(
+              new RuntimeAdapterError("readinessTimeout", failureMessage, [
+                `video:${eventName}`,
+              ]),
+            );
+          }, READINESS_DEADLINE_MS);
+          const complete = () => {
+            cleanup();
+            resolve();
+          };
+          const fail = () => {
+            cleanup();
+            reject(new RuntimeAdapterError("operation", failureMessage));
+          };
+          const cleanup = () => {
+            window.clearTimeout(deadline);
+            video.removeEventListener(eventName, complete);
+            video.removeEventListener("error", fail);
+          };
+
+          video.addEventListener(eventName, complete, { once: true });
+          video.addEventListener("error", fail, { once: true });
+        });
+      }
+
+      function requiredElement(selector, constructor) {
+        const element = document.querySelector(selector);
+        if (!(element instanceof constructor)) {
+          throw new TypeError(`the video experiment requires one ${selector}`);
+        }
+        return element;
+      }
+
+      function requiredParameter(name) {
+        const value = new URL(location.href).searchParams.get(name);
+        if (value === null || value.length === 0) {
+          throw new TypeError(`the video experiment requires ${name}`);
+        }
+        return value;
+      }
+
+      function onlyVideo(videos) {
+        if (videos.length !== 1) {
+          throw new RuntimeAdapterError(
+            "operation",
+            "the video experiment requires exactly one video placement",
+          );
+        }
+        return videos[0];
+      }
+
+      function parseExpectedFrames(value) {
+        if (value === null) {
+          throw new TypeError("the video experiment requires expected frames");
+        }
+        const decoded = JSON.parse(value);
+        if (typeof decoded !== "object" || decoded === null) {
+          throw new TypeError("expected frames must be an object");
+        }
+
+        const frames = new Map();
+        for (const [index, mediaTime] of Object.entries(decoded)) {
+          const frame = Number(index);
+          if (!Number.isSafeInteger(frame) || typeof mediaTime !== "number") {
+            throw new TypeError("expected frames must map integers to seconds");
+          }
+          frames.set(frame, mediaTime);
+        }
+        return frames;
+      }
+    </script>
+  </body>
+</html>

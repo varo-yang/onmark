@@ -33,6 +33,26 @@ test("rejects values outside the versioned browser contract", () => {
     { version: 1, requestId: 1, command: { type: "seek", frame: 2 ** 53 } },
     { version: 1, requestId: 2 ** 32, command: { type: "dispose" } },
     { version: 1, requestId: 1, command: { type: "dispose", surprise: true } },
+    {
+      version: 1,
+      requestId: 1,
+      command: {
+        type: "load",
+        plan: {
+          timelineVersion: 1,
+          frameRate: { numerator: 30, denominator: 1 },
+          evaluation: { start: 0, end: 1 },
+          output: { start: 0, end: 1 },
+          videos: [
+            {
+              assetId: "opening.mp4",
+              interval: { start: 0, end: 1 },
+              sourceFrameRate: { numerator: 30, denominator: 1 },
+            },
+          ],
+        },
+      },
+    },
   ];
 
   for (const request of invalidRequests) {

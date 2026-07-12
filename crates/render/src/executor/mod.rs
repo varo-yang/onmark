@@ -40,7 +40,7 @@ impl RenderExecutor {
         }
     }
 
-    /// Renders every output frame into one H.264 MP4 artifact.
+    /// Renders a media-free browser plan into one H.264 MP4 artifact.
     ///
     /// Frame capture and encoder input are sequential: at most one encoded PNG
     /// is owned between Chromium and `FFmpeg` at any time.
@@ -51,21 +51,21 @@ impl RenderExecutor {
     /// supported limits, the browser protocol deviates from its expected phase,
     /// or either process boundary fails. Chromium shutdown is still attempted
     /// after render work fails.
-    pub async fn render(
+    pub async fn render_synthetic(
         &self,
         plan: BrowserPlan,
         bundle_url: &str,
         output: &Path,
     ) -> Result<EncodedVideo, RenderError> {
         validate_output_dimensions(self.browser_limits, output)?;
-        self.validate_plan(plan, output)?;
+        self.validate_plan(&plan, output)?;
         let staging = StagedOutput::new(output)?;
         let browser = BrowserSession::launch(&self.browser_executable, self.browser_limits)
             .await
             .map_err(|source| RenderError::browser(output, source))?;
 
         let render_result = self
-            .render_session(&browser, plan, bundle_url, staging.path(), output)
+            .render_session(&browser, &plan, bundle_url, staging.path(), output)
             .await;
         let shutdown_result = browser
             .shutdown()
@@ -77,7 +77,13 @@ impl RenderExecutor {
         staging.publish(video, output)
     }
 
-    fn validate_plan(&self, plan: BrowserPlan, output: &Path) -> Result<(), RenderError> {
+    fn validate_plan(&self, plan: &BrowserPlan, output: &Path) -> Result<(), RenderError> {
+        if !plan.videos().is_empty() {
+            return Err(invalid_plan(
+                output,
+                "synthetic rendering cannot consume video placements",
+            ));
+        }
         let Some(frame_count) = output_frame_count(plan) else {
             return Err(invalid_plan(output, "browser output interval is reversed"));
         };
@@ -100,7 +106,7 @@ impl RenderExecutor {
     async fn render_session(
         &self,
         browser: &BrowserSession,
-        plan: BrowserPlan,
+        plan: &BrowserPlan,
         bundle_url: &str,
         staging: &Path,
         output: &Path,
@@ -140,16 +146,16 @@ fn validate_output_dimensions(limits: BrowserLimits, output: &Path) -> Result<()
 
 async fn load_runtime(
     browser: &BrowserSession,
-    plan: BrowserPlan,
+    plan: &BrowserPlan,
     output: &Path,
 ) -> Result<(), RenderError> {
-    let request = BrowserRequest::new(LOAD_REQUEST, BrowserCommand::Load { plan });
+    let request = BrowserRequest::new(LOAD_REQUEST, BrowserCommand::Load { plan: plan.clone() });
     dispatch_expected(browser, request, BrowserEvent::Loaded, output).await
 }
 
 async fn prepare_runtime(
     browser: &BrowserSession,
-    plan: BrowserPlan,
+    plan: &BrowserPlan,
     output: &Path,
 ) -> Result<(), RenderError> {
     let evaluation_start = plan.evaluation().start();
@@ -164,7 +170,7 @@ async fn prepare_runtime(
 
 async fn dispose_runtime(
     browser: &BrowserSession,
-    plan: BrowserPlan,
+    plan: &BrowserPlan,
     output: &Path,
 ) -> Result<(), RenderError> {
     let request = BrowserRequest::new(next_request_id(plan), BrowserCommand::Dispose);
@@ -174,7 +180,7 @@ async fn dispose_runtime(
 async fn render_frames(
     browser: &BrowserSession,
     encoder: &mut FfmpegSession,
-    plan: BrowserPlan,
+    plan: &BrowserPlan,
     output: &Path,
 ) -> Result<(), RenderError> {
     let start = plan.output().start().get();
@@ -243,7 +249,7 @@ fn unexpected_event(output: &Path, response: &BrowserResponse) -> RenderError {
     RenderError::protocol(output, message)
 }
 
-fn output_frame_count(plan: BrowserPlan) -> Option<u64> {
+fn output_frame_count(plan: &BrowserPlan) -> Option<u64> {
     plan.output()
         .end()
         .get()
@@ -258,7 +264,7 @@ fn frame_request_id(offset: usize, output: &Path) -> Result<RequestId, RenderErr
     Ok(RequestId::new(request_id))
 }
 
-fn next_request_id(plan: BrowserPlan) -> RequestId {
+fn next_request_id(plan: &BrowserPlan) -> RequestId {
     let count = output_frame_count(plan).expect("a validated browser plan has an ordered interval");
     let count = u32::try_from(count).expect("a validated browser plan fits the request domain");
     let request_id = FIRST_FRAME_REQUEST

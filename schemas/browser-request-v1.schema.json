@@ -78,7 +78,7 @@
     },
     "BrowserPlan": {
       "additionalProperties": false,
-      "description": "Timeline facts needed to initialize the Gate-one browser clock.",
+      "description": "Timeline facts consumed by the Gate-one browser clock and presentation.",
       "properties": {
         "evaluation": {
           "$ref": "#/$defs/WireInterval"
@@ -95,13 +95,42 @@
           "maximum": 65535,
           "minimum": 0,
           "type": "integer"
+        },
+        "videos": {
+          "items": {
+            "$ref": "#/$defs/BrowserVideo"
+          },
+          "type": "array"
         }
       },
       "required": [
         "timelineVersion",
         "frameRate",
         "evaluation",
-        "output"
+        "output",
+        "videos"
+      ],
+      "type": "object"
+    },
+    "BrowserVideo": {
+      "additionalProperties": false,
+      "description": "One primary video placement consumed by the browser presentation adapter.",
+      "properties": {
+        "assetId": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "interval": {
+          "$ref": "#/$defs/WireInterval"
+        },
+        "sourceFrameRate": {
+          "$ref": "#/$defs/WireFrameRate"
+        }
+      },
+      "required": [
+        "assetId",
+        "interval",
+        "sourceFrameRate"
       ],
       "type": "object"
     },

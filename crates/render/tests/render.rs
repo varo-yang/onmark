@@ -5,9 +5,6 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use onmark_core::compiler;
-use onmark_core::model::{
-    AssetMetadata, AssetRef, Duration as MediaDuration, FrozenAsset, FrozenAssetId,
-};
 use onmark_core::model::{FrameRate, SourceId, Timebase};
 use onmark_core::protocol::{
     BrowserCommand, BrowserEvent, BrowserPlan, BrowserRequest, RequestId, WireFrame,
@@ -99,7 +96,7 @@ async fn renders_the_gate_one_plan_to_a_verified_mp4() {
     let executor = RenderExecutor::new(chrome(), browser_limits(Duration::from_secs(10)), ffmpeg);
 
     let video = executor
-        .render(gate_one_plan(), browser_fixture().as_str(), &output)
+        .render_synthetic(gate_one_plan(), browser_fixture().as_str(), &output)
         .await
         .expect("the real local renderer must produce an MP4");
 
@@ -111,31 +108,7 @@ async fn renders_the_gate_one_plan_to_a_verified_mp4() {
 }
 
 async fn exercise_protocol(session: &BrowserSession, fixture: &Url) -> Result<(), Box<dyn Error>> {
-    session.navigate(fixture.as_str()).await?;
-    let plan = gate_one_plan();
-
-    let loaded = session
-        .dispatch(&BrowserRequest::new(
-            RequestId::new(1),
-            BrowserCommand::Load { plan },
-        ))
-        .await?;
-    assert_eq!(loaded.event(), &BrowserEvent::Loaded);
-
-    let prepared = session
-        .dispatch(&BrowserRequest::new(
-            RequestId::new(2),
-            BrowserCommand::Prepare {
-                evaluation_start: frame(0),
-            },
-        ))
-        .await?;
-    assert_eq!(
-        prepared.event(),
-        &BrowserEvent::Prepared {
-            evaluation_start: frame(0),
-        },
-    );
+    load_and_prepare(session, fixture).await?;
     let first = session.capture_png().await?;
 
     seek(session, 3, 15).await?;
@@ -146,6 +119,31 @@ async fn exercise_protocol(session: &BrowserSession, fixture: &Url) -> Result<()
     assert_png(&first);
     assert_ne!(first, selected);
     assert_eq!(selected, repeated);
+    Ok(())
+}
+
+async fn load_and_prepare(session: &BrowserSession, fixture: &Url) -> Result<(), Box<dyn Error>> {
+    session.navigate(fixture.as_str()).await?;
+    let plan = gate_one_plan();
+    let loaded = session
+        .dispatch(&BrowserRequest::new(
+            RequestId::new(1),
+            BrowserCommand::Load { plan },
+        ))
+        .await?;
+    assert_eq!(loaded.event(), &BrowserEvent::Loaded);
+
+    let evaluation_start = frame(0);
+    let prepared = session
+        .dispatch(&BrowserRequest::new(
+            RequestId::new(2),
+            BrowserCommand::Prepare { evaluation_start },
+        ))
+        .await?;
+    assert_eq!(
+        prepared.event(),
+        &BrowserEvent::Prepared { evaluation_start },
+    );
     Ok(())
 }
 
@@ -268,17 +266,10 @@ fn repository() -> PathBuf {
 }
 
 fn gate_one_plan() -> BrowserPlan {
-    let asset = AssetRef::parse("opening.mp4").expect("the fixture asset is valid");
-    let assets = BTreeMap::from([(
-        asset,
-        FrozenAsset::new(
-            FrozenAssetId::from_sha256([1; 32]),
-            AssetMetadata::new(MediaDuration::from_nanos(2_500_000_000)),
-        ),
-    )]);
+    let rate = FrameRate::new(30, 1).expect("the fixture frame rate is valid");
     let parsed = compiler::parse(
         SourceId::new(0),
-        r#"<film><scene><shot><video src="opening.mp4" /></shot></scene></film>"#,
+        r#"<film><scene><shot duration="2.5s"><title>Opening</title></shot></scene></film>"#,
     );
     let (document, diagnostics) = parsed.into_parts();
     assert!(diagnostics.is_empty());
@@ -286,17 +277,19 @@ fn gate_one_plan() -> BrowserPlan {
     assert!(diagnostics.is_empty());
     let (film, diagnostics) = compiler::resolve(film.expect("the fixture binds")).into_parts();
     assert!(diagnostics.is_empty());
-    let rate = FrameRate::new(30, 1).expect("the fixture frame rate is valid");
     let solved = compiler::solve(
         film.expect("the fixture resolves"),
-        &assets,
+        &BTreeMap::new(),
         Timebase::new(rate),
     )
     .expect("the fixture metadata is complete");
     assert!(solved.diagnostics().is_empty());
 
-    BrowserPlan::try_from(solved.timeline().expect("the fixture solves"))
-        .expect("the fixture timeline fits the browser frame domain")
+    BrowserPlan::from_timeline(
+        solved.timeline().expect("the fixture solves"),
+        &BTreeMap::new(),
+    )
+    .expect("the fixture timeline fits the browser frame domain")
 }
 
 #[derive(Debug, Deserialize)]

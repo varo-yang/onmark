@@ -59,6 +59,8 @@ pub enum ProbeError {
     MissingDuration(ProbeFailure),
     /// The reported duration was not an exact supported decimal.
     InvalidDuration(ProbeFailure),
+    /// The selected video stream lacks normalized format or timing facts.
+    InvalidVideo(ProbeFailure),
 }
 
 impl ProbeError {
@@ -157,6 +159,25 @@ impl ProbeError {
         ))
     }
 
+    pub(crate) fn invalid_video(path: &Path, detail: impl fmt::Display) -> Self {
+        Self::InvalidVideo(ProbeFailure::new(
+            path,
+            format!("ffprobe video metadata is invalid: {detail}"),
+        ))
+    }
+
+    pub(crate) fn invalid_video_duration(
+        path: &Path,
+        duration: &str,
+        source: InvalidDuration,
+    ) -> Self {
+        Self::InvalidVideo(ProbeFailure::with_source(
+            path,
+            format!("ffprobe video stream duration {duration:?} is invalid"),
+            ProbeErrorSource::Duration(source),
+        ))
+    }
+
     const fn failure(&self) -> &ProbeFailure {
         match self {
             Self::Spawn(failure)
@@ -167,7 +188,8 @@ impl ProbeError {
             | Self::Failed(failure)
             | Self::InvalidResponse(failure)
             | Self::MissingDuration(failure)
-            | Self::InvalidDuration(failure) => failure,
+            | Self::InvalidDuration(failure)
+            | Self::InvalidVideo(failure) => failure,
         }
     }
 }

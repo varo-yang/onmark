@@ -6,6 +6,7 @@ use std::time::Duration;
 use onmark_core::compiler;
 use onmark_core::model::{
     AssetRef, Duration as MediaDuration, FrameRate, FrozenAsset, FrozenAssetId, SourceId, Timebase,
+    VideoTiming,
 };
 use onmark_media::{Ffprobe, InvalidFfprobe, ProbeError};
 
@@ -19,6 +20,46 @@ fn normalizes_exact_duration_from_ffprobe() {
     assert_eq!(
         metadata.duration(),
         MediaDuration::from_nanos(2_500_000_000)
+    );
+    let video = metadata
+        .video_metadata()
+        .expect("the fixture contains a video stream");
+    assert_eq!(video.codec(), "h264");
+    assert_eq!(video.pixel_format(), "yuv420p");
+    assert_eq!(video.duration(), MediaDuration::from_nanos(2_000_000_000));
+    assert_eq!(
+        video.timing(),
+        VideoTiming::Constant(FrameRate::new(30, 1).expect("30 fps is valid")),
+    );
+}
+
+#[test]
+fn distinguishes_audio_only_and_variable_frame_rate_assets() {
+    let ffprobe = fixture_probe(Duration::from_secs(1), 4_096);
+    let audio = ffprobe
+        .probe(Path::new("audio.mp3"))
+        .expect("the fixture contains no video stream");
+    let variable = ffprobe
+        .probe(Path::new("variable.mp4"))
+        .expect("the fixture contains variable frame intervals");
+    let still = ffprobe
+        .probe(Path::new("still.mp4"))
+        .expect("the fixture contains one video frame");
+
+    assert!(audio.video_metadata().is_none());
+    assert_eq!(
+        variable
+            .video_metadata()
+            .expect("the fixture has video")
+            .timing(),
+        VideoTiming::Variable,
+    );
+    assert_eq!(
+        still
+            .video_metadata()
+            .expect("the fixture has video")
+            .timing(),
+        VideoTiming::Still,
     );
 }
 
@@ -59,7 +100,7 @@ fn frozen_identity_and_probed_metadata_drive_timeline_solving() {
             .interval()
             .end()
             .get(),
-        75,
+        60,
     );
 }
 
@@ -116,6 +157,14 @@ fn translates_process_and_response_failures() {
     assert!(matches!(
         probe_error(&ffprobe, "invalid-duration.mp4"),
         ProbeError::InvalidDuration(_)
+    ));
+    assert!(matches!(
+        probe_error(&ffprobe, "empty-video.mp4"),
+        ProbeError::InvalidVideo(_)
+    ));
+    assert!(matches!(
+        probe_error(&ffprobe, "invalid-video-duration.mp4"),
+        ProbeError::InvalidVideo(_)
     ));
 }
 

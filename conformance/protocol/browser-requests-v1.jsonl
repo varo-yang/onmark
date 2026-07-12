@@ -1,4 +1,4 @@
-{"version":1,"requestId":1,"command":{"type":"load","plan":{"timelineVersion":1,"frameRate":{"numerator":30,"denominator":1},"evaluation":{"start":0,"end":75},"output":{"start":0,"end":75}}}}
+{"version":1,"requestId":1,"command":{"type":"load","plan":{"timelineVersion":1,"frameRate":{"numerator":30,"denominator":1},"evaluation":{"start":0,"end":75},"output":{"start":0,"end":75},"videos":[{"assetId":"sha256:0101010101010101010101010101010101010101010101010101010101010101","interval":{"start":0,"end":75},"sourceFrameRate":{"numerator":30,"denominator":1}}]}}}
 {"version":1,"requestId":2,"command":{"type":"prepare","evaluationStart":0}}
 {"version":1,"requestId":3,"command":{"type":"seek","frame":15}}
 {"version":1,"requestId":4,"command":{"type":"dispose"}}

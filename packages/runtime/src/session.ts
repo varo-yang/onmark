@@ -294,6 +294,18 @@ function planViolation(plan: BrowserPlan): string | undefined {
   ) {
     return "plan output interval falls outside evaluation";
   }
+
+  for (const video of plan.videos) {
+    if (video.interval.start >= video.interval.end) {
+      return "plan video interval is empty or reversed";
+    }
+    if (
+      video.interval.start < plan.evaluation.start ||
+      video.interval.end > plan.evaluation.end
+    ) {
+      return "plan video interval falls outside evaluation";
+    }
+  }
   return undefined;
 }
 
@@ -303,12 +315,22 @@ function snapshotPlan(plan: BrowserPlan): RuntimePlan {
   const frameRate = Object.freeze({ ...plan.frameRate });
   const evaluation = Object.freeze({ ...plan.evaluation });
   const output = Object.freeze({ ...plan.output });
+  const videos = Object.freeze(
+    plan.videos.map((video) =>
+      Object.freeze({
+        assetId: video.assetId,
+        interval: Object.freeze({ ...video.interval }),
+        sourceFrameRate: Object.freeze({ ...video.sourceFrameRate }),
+      }),
+    ),
+  );
 
   return Object.freeze({
     timelineVersion: plan.timelineVersion,
     frameRate,
     evaluation,
     output,
+    videos,
   });
 }
 
