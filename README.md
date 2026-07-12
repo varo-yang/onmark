@@ -6,12 +6,12 @@ Onmark is a screenplay-first video compiler and rendering engine for people and 
 screenplay → deterministic Timeline IR → browser frames → encoded video
 ```
 
-The project is currently in design and delivery gate one: rendering one real video reliably through the final-direction compiler and browser protocol. The implemented foundation includes the pure domain model, structured authored diagnostics, span-preserving screenplay syntax, binding, typed resolution, timeline solving, and versioned browser wire types in `onmark-core`; bounded ffprobe metadata normalization in `onmark-media`; deterministic frame projection and the browser protocol session in `@onmark/runtime`; and a synthetic-frame Chromium-to-FFmpeg MP4 path in `onmark-render`. Real media stabilization and the production DOM/media adapter remain Gate-one work.
+The project is currently in design and delivery gate one: rendering one real video reliably through the final-direction compiler and browser protocol. The implemented foundation includes the pure domain model, structured authored diagnostics, span-preserving screenplay syntax, binding, typed resolution, timeline solving, and versioned browser wire types in `onmark-core`; bounded ffprobe metadata normalization in `onmark-media`; deterministic frame projection and the browser protocol session in `@onmark/runtime`; deterministic presentation artifacts in `@onmark/bundler`; and a Chromium-to-FFmpeg MP4 path in `onmark-render`. Production presentation authoring and the CLI composition root remain Gate-one work.
 
 ## Repository map
 
 - `crates/` contains Rust product code.
-- `packages/` contains browser and authoring TypeScript packages.
+- `packages/` contains browser and Node product packages.
 - `conformance/` contains behavior examples shared across implementations.
 - `schemas/` contains generated, versioned wire contracts.
 - `scripts/` contains repository-only generation and quality checks.

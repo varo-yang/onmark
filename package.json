@@ -7,7 +7,7 @@
     "generate:check": "cargo xtask schema --check",
     "format": "prettier --write \"packages/**/*.{ts,js,mjs,json}\" \"scripts/**/*.{js,mjs,json}\" \"*.{js,mjs,json}\" \".github/workflows/*.{yml,yaml}\" pnpm-workspace.yaml",
     "format:check": "prettier --check \"packages/**/*.{ts,js,mjs,json}\" \"scripts/**/*.{js,mjs,json}\" \"*.{js,mjs,json}\" \".github/workflows/*.{yml,yaml}\" pnpm-workspace.yaml",
-    "lint": "oxlint packages scripts --ignore-pattern \"packages/runtime/src/generated/**\" --deny-warnings && node scripts/check-typescript-style.mjs",
+    "lint": "oxlint packages scripts --ignore-pattern \"**/node_modules/**\" --ignore-pattern \"packages/runtime/src/generated/**\" --deny-warnings && node scripts/check-typescript-style.mjs",
     "test": "pnpm --recursive test",
     "typecheck": "pnpm --recursive typecheck"
   },
