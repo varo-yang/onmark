@@ -4,7 +4,9 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
 use onmark_core::compiler;
-use onmark_core::model::{AssetMetadata, AssetRef, Duration, FrameRate, SourceId, Timebase};
+use onmark_core::model::{
+    AssetMetadata, AssetRef, Duration, FrameRate, FrozenAsset, FrozenAssetId, SourceId, Timebase,
+};
 use onmark_core::protocol::{
     BrowserCommand, BrowserEvent, BrowserPlan, BrowserRequest, BrowserResponse, ProtocolFailure,
     ProtocolFailureCode, RequestId, WireFrame,
@@ -76,7 +78,10 @@ fn gate_one_plan() -> BrowserPlan {
     let asset = AssetRef::parse("opening.mp4").expect("the fixture asset is valid");
     let assets = BTreeMap::from([(
         asset,
-        AssetMetadata::new(Duration::from_nanos(2_500_000_000)),
+        FrozenAsset::new(
+            FrozenAssetId::from_sha256([1; 32]),
+            AssetMetadata::new(Duration::from_nanos(2_500_000_000)),
+        ),
     )]);
     let parsed = compiler::parse(
         SourceId::new(0),

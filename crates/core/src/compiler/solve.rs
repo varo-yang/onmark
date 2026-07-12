@@ -4,8 +4,8 @@ use std::fmt;
 
 use crate::diagnostics::{Diagnostic, DiagnosticCode, Diagnostics};
 use crate::model::{
-    AssetMetadata, AssetRef, CueId, Duration, EventRef, FrameCount, FrameIndex, FrameInterval,
-    Rounding, SourceSpan, Timebase,
+    AssetRef, CueId, Duration, EventRef, FrameCount, FrameIndex, FrameInterval, FrozenAsset,
+    FrozenAssetId, Rounding, SourceSpan, Timebase,
 };
 use crate::timeline::{
     TimelineContent, TimelineElement, TimelineEvent, TimelineIr, TimelineOverlay, TimelineScene,
@@ -45,7 +45,7 @@ impl SolveReport {
     }
 }
 
-/// Solves exact frame facts from a resolved film and frozen asset metadata.
+/// Solves exact frame facts from a resolved film and frozen assets.
 ///
 /// # Errors
 ///
@@ -53,7 +53,7 @@ impl SolveReport {
 /// timing mistakes remain accumulated diagnostics in [`SolveReport`].
 pub fn solve(
     film: ResolvedFilm,
-    assets: &BTreeMap<AssetRef, AssetMetadata>,
+    assets: &BTreeMap<AssetRef, FrozenAsset>,
     timebase: Timebase,
 ) -> Result<SolveReport, SolveError> {
     Solver::new(assets, timebase).solve(film)
@@ -63,15 +63,15 @@ pub fn solve(
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum SolveError {
-    /// A referenced frozen artifact has no normalized probe result.
-    MissingAssetMetadata(AssetRef),
+    /// A logical source has no frozen identity and normalized probe facts.
+    MissingFrozenAsset(AssetRef),
 }
 
 impl fmt::Display for SolveError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::MissingAssetMetadata(asset) => {
-                write!(formatter, "asset metadata is missing for \"{asset}\"")
+            Self::MissingFrozenAsset(asset) => {
+                write!(formatter, "frozen asset is missing for \"{asset}\"")
             }
         }
     }
@@ -80,7 +80,7 @@ impl fmt::Display for SolveError {
 impl Error for SolveError {}
 
 struct Solver<'a> {
-    assets: &'a BTreeMap<AssetRef, AssetMetadata>,
+    assets: &'a BTreeMap<AssetRef, FrozenAsset>,
     timebase: Timebase,
     events: BTreeMap<CueId, TimelineEvent>,
     diagnostics: Diagnostics,
@@ -90,7 +90,7 @@ struct Solver<'a> {
 }
 
 impl<'a> Solver<'a> {
-    fn new(assets: &'a BTreeMap<AssetRef, AssetMetadata>, timebase: Timebase) -> Self {
+    fn new(assets: &'a BTreeMap<AssetRef, FrozenAsset>, timebase: Timebase) -> Self {
         Self {
             assets,
             timebase,
@@ -288,23 +288,23 @@ impl<'a> Solver<'a> {
     }
 
     fn prepare_media(&mut self, media: ResolvedMedia) -> Result<Option<PreparedMedia>, SolveError> {
-        let (element, asset, delay) = media.into_parts();
-        let Some(asset) = asset else {
+        let (element, source, delay) = media.into_parts();
+        let Some(source) = source else {
             self.diagnostics.push(missing_media_source(&element));
             return Ok(None);
         };
-        let (asset, asset_span) = asset.into_parts();
-        let metadata = self
+        let (asset_ref, asset_span) = source.into_parts();
+        let frozen = self
             .assets
-            .get(&asset)
+            .get(&asset_ref)
             .copied()
-            .ok_or_else(|| SolveError::MissingAssetMetadata(asset.clone()))?;
+            .ok_or_else(|| SolveError::MissingFrozenAsset(asset_ref.clone()))?;
         let Some((start, start_reason)) = self.prepare_delay(delay) else {
             return Ok(None);
         };
         let Some(duration) = frames_for(
             self.timebase,
-            metadata.duration(),
+            frozen.metadata().duration(),
             asset_span,
             &mut self.diagnostics,
         ) else {
@@ -317,7 +317,7 @@ impl<'a> Solver<'a> {
 
         Ok(Some(PreparedMedia {
             element,
-            asset,
+            asset_id: frozen.id(),
             start,
             end,
             start_reason,
@@ -529,21 +529,23 @@ fn longest_primary(content: &[PreparedContent]) -> Option<PrimaryEnd> {
     longest
 }
 
+/// Media with shot-relative bounds, before its owning shot is placed.
 struct PreparedMedia {
     element: ResolvedElement,
-    asset: AssetRef,
+    asset_id: FrozenAssetId,
     start: FrameCount,
     end: FrameCount,
     start_reason: TimingReason,
 }
 
-struct LoweredMedia {
+/// Media placed at absolute Timeline IR bounds.
+struct PlacedMedia {
     element: TimelineElement,
     timing: TimelineTiming,
-    asset: AssetRef,
+    asset_id: FrozenAssetId,
 }
 
-fn lower_media(media: PreparedMedia, shot: FrameInterval) -> LoweredMedia {
+fn place_media(media: PreparedMedia, shot: FrameInterval) -> PlacedMedia {
     let start = shot
         .start()
         .checked_advance(media.start)
@@ -558,16 +560,16 @@ fn lower_media(media: PreparedMedia, shot: FrameInterval) -> LoweredMedia {
         TimingReason::AssetDuration,
     );
 
-    LoweredMedia {
+    PlacedMedia {
         element: timeline_element(media.element),
         timing,
-        asset: media.asset,
+        asset_id: media.asset_id,
     }
 }
 
 fn lower_video(media: PreparedMedia, shot: FrameInterval) -> TimelineContent {
-    let media = lower_media(media, shot);
-    let video = TimelineVideo::new(media.element, media.timing, media.asset);
+    let media = place_media(media, shot);
+    let video = TimelineVideo::new(media.element, media.timing, media.asset_id);
 
     TimelineContent::Video(video)
 }
@@ -577,9 +579,9 @@ fn lower_voice_over(
     text: Vec<ResolvedText>,
     shot: FrameInterval,
 ) -> TimelineContent {
-    let media = lower_media(media, shot);
+    let media = place_media(media, shot);
     let text = timeline_text(text);
-    let voice_over = TimelineVoiceOver::new(media.element, media.timing, media.asset, text);
+    let voice_over = TimelineVoiceOver::new(media.element, media.timing, media.asset_id, text);
 
     TimelineContent::VoiceOver(voice_over)
 }

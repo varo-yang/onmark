@@ -5,7 +5,9 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use onmark_core::compiler;
-use onmark_core::model::{AssetMetadata, AssetRef, Duration as MediaDuration};
+use onmark_core::model::{
+    AssetMetadata, AssetRef, Duration as MediaDuration, FrozenAsset, FrozenAssetId,
+};
 use onmark_core::model::{FrameRate, SourceId, Timebase};
 use onmark_core::protocol::{
     BrowserCommand, BrowserEvent, BrowserPlan, BrowserRequest, RequestId, WireFrame,
@@ -269,7 +271,10 @@ fn gate_one_plan() -> BrowserPlan {
     let asset = AssetRef::parse("opening.mp4").expect("the fixture asset is valid");
     let assets = BTreeMap::from([(
         asset,
-        AssetMetadata::new(MediaDuration::from_nanos(2_500_000_000)),
+        FrozenAsset::new(
+            FrozenAssetId::from_sha256([1; 32]),
+            AssetMetadata::new(MediaDuration::from_nanos(2_500_000_000)),
+        ),
     )]);
     let parsed = compiler::parse(
         SourceId::new(0),

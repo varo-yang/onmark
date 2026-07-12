@@ -4,7 +4,9 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use onmark_core::compiler;
-use onmark_core::model::{AssetRef, Duration as MediaDuration, FrameRate, SourceId, Timebase};
+use onmark_core::model::{
+    AssetRef, Duration as MediaDuration, FrameRate, FrozenAsset, FrozenAssetId, SourceId, Timebase,
+};
 use onmark_media::{Ffprobe, InvalidFfprobe, ProbeError};
 
 #[test]
@@ -21,13 +23,14 @@ fn normalizes_exact_duration_from_ffprobe() {
 }
 
 #[test]
-fn probed_metadata_drives_timeline_solving() {
+fn frozen_identity_and_probed_metadata_drive_timeline_solving() {
     let ffprobe = fixture_probe(Duration::from_secs(1), 4_096);
     let metadata = ffprobe
         .probe(Path::new("valid.mp4"))
         .expect("the fixture response is valid");
     let asset = AssetRef::parse("valid.mp4").expect("the fixture asset reference is valid");
-    let assets = BTreeMap::from([(asset, metadata)]);
+    let frozen = FrozenAsset::new(FrozenAssetId::from_sha256([1; 32]), metadata);
+    let assets = BTreeMap::from([(asset, frozen)]);
     let parsed = compiler::parse(
         SourceId::new(0),
         r#"<film><scene><shot><video src="valid.mp4" /></shot></scene></film>"#,

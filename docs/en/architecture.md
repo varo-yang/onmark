@@ -4,12 +4,12 @@
 
 This document is paired with the Onmark Language Specification. The language defines authored meaning; this document defines execution. Their only contract is the versioned Timeline IR.
 
-Onmark is a screenplay-first, browser-rendered video compiler and execution engine. It compiles authored intent and frozen asset metadata into deterministic timeline and render graphs, then executes the resulting plan locally or across stateless workers.
+Onmark is a screenplay-first, browser-rendered video compiler and execution engine. It compiles authored intent and a frozen asset catalog into deterministic timeline and render graphs, then executes the resulting plan locally or across stateless workers.
 
 ## Architectural axioms
 
 1. Source expresses intent; IR records facts.
-2. The compiler is a pure function of source, asset metadata, options, and version.
+2. The compiler is a pure function of source, frozen asset catalog, options, and version.
 3. Local and distributed rendering execute the same `ExecutionPlan` and worker state machine.
 4. Partitions follow pixel and temporal dependencies, not blindly chosen shot boundaries.
 5. Chromium draws resolved frames; it does not solve time or discover work.
@@ -41,18 +41,76 @@ Source AST
 
 A render unit has separate `evaluation` and `output` intervals. Evaluation may include transition preroll, animation warm-up, or history frames; only output frames are published.
 
+The compiler pipeline ends at Timeline IR. Execution begins at a separate
+composition boundary:
+
+```text
+Timeline IR + Frozen Asset Catalog + Bundle Manifest + Render Profile
+  → Render Unit
+    → Browser Plan + Audio Plan + materialization requirements
+```
+
+This join is intentionally not another compiler phase. Timeline IR says what
+the film is and when each fact holds; a presentation bundle owns how those
+facts become DOM, CSS, Canvas, or WebGL; a Render Unit says which immutable
+inputs one executor invocation consumes. Gate one has exactly one whole-film
+unit. Gate two introduces the Render Graph and may derive several units of the
+same type; it does not replace the executor contract.
+
 ## End-to-end pipeline
 
 ```text
-freeze inputs → probe media → compile → bundle → render graph
-  → partition → capture/encode → mix audio → verify/assemble
+freeze inputs ─┬→ probe media ─→ compile ───────────────┐
+               └→ bundle presentation ─────────────────┤
+                                                       ▼
+                         compose one whole-film Render Unit
+                           → capture/encode → mix audio → verify
+
+Gate two inserts: Timeline IR → Render Graph → partition → Render Units
 ```
 
-The compiler performs parse, structural bind, attribute/reference resolve, validate, solve, and lower without IO. The planner computes dependency closure before partitioning. Simple films naturally partition around shots; transitions, persistent elements, global effects, and historical shaders widen or merge units for correctness.
+The compiler performs parse, structural bind, attribute/reference resolve, and
+timeline solve without IO. Validation belongs to the phase that first has
+enough information to decide; solve constructs Timeline IR directly. Onmark
+does not add ceremonial `validate` or `lower` phases without a representation
+that proves a new invariant. At Gate two, the planner computes dependency
+closure before partitioning. Simple films naturally partition around shots;
+transitions, persistent elements, global effects, and historical shaders widen
+or merge units for correctness.
 
 Structural binding and attribute/reference resolution aggregate authored diagnostics while building candidate outputs. An error withholds the phase value from its report so rejected structure or recovery defaults cannot enter the next phase as compiler facts; warnings remain non-blocking.
 
-Timeline solving consumes normalized `AssetMetadata` owned by `onmark-core`; Gate one initially requires exact artifact duration. `onmark-media` produces these facts through probing, while ffprobe-specific structures and failures remain outside core. A referenced asset missing from the supplied metadata map is a typed integration failure rather than an authored diagnostic. A media element with no authored frozen artifact remains valid through static resolution but cannot produce renderable Timeline IR and receives an authored asset diagnostic during solving.
+Input freezing separates three identities that must never be conflated:
+
+- `AssetRef` is the logical spelling authored in the screenplay;
+- `FrozenAssetId` identifies the immutable bytes that were probed and compiled;
+- a materialized asset is a worker-local path or browser URL for those exact
+  bytes.
+
+Timeline solving consumes a catalog from `AssetRef` to `FrozenAssetId` plus
+normalized `AssetMetadata`, all owned by `onmark-core`; Gate one initially
+requires only exact artifact duration. `onmark-media` produces metadata through
+probing, while a loader or composition root hashes and freezes the same bytes.
+ffprobe-specific structures, source paths, and browser URLs remain outside
+core. Timeline IR records `FrozenAssetId`, never the authored spelling or a
+mutable path. A missing catalog entry is a typed integration failure rather
+than an authored diagnostic. A media element with no authored source remains
+valid through static resolution but cannot produce renderable Timeline IR and
+receives an authored asset diagnostic during solving.
+
+Gate-one `FrozenAssetId` uses SHA-256 and the canonical
+`sha256:<lowercase-hex>` spelling. The hashing operation belongs at the IO
+freezing boundary; core owns only the validated identity and deterministic
+mapping.
+
+The bundle manifest has the same separation. It identifies an immutable
+presentation artifact and its entry point, runtime version, fonts, static
+dependencies, and declared temporal capabilities. It does not contain timing
+rules. Materialization turns frozen bundle and asset identities into local
+paths or browser URLs immediately before execution and verifies their digests.
+The presentation entry owns layout and installs the runtime adapter; the
+runtime supplies deterministic clock, readiness, and media primitives. Onmark
+does not synthesize an implicit full-screen DOM from Timeline IR.
 
 Each worker executes one state machine:
 
@@ -68,7 +126,15 @@ The sole clock derives from frame index and rational timebase. Wall time and fre
 
 The runtime protocol includes `Load`, `Prepare`, `Seek`, `FrameReady`, and `Dispose`. `FrameReady(frame)` is only a stability barrier: after receiving it, the native executor captures the frame and hashes the exact raw RGBA bytes it consumed. The runtime does not publish an independently invented state hash. Inside the runtime, `RuntimeFrame` retains the exact integral frame identity and derives floating-point seconds from the Rust-owned rational frame rate only for browser API calls; those seconds never become scheduling or protocol truth. Components declare temporal behavior such as `stateless`, `warmup(n)`, `sequential`, `global`, or `neighbor(radius)`. Unknown components default to `sequential`: parallel seekability must be proven, not guessed. Native APIs and audited adapters may safely provide stronger declarations. Detection may recommend an adapter but may not silently relax correctness.
 
-Determinism is layered. Timeline IR and Execution Plans must be byte-identical. Raw frames target identical hashes inside a locked browser/font/render environment. Encoded containers are validated by timestamps, frame counts, codec configuration, and decoded content; byte-identical MP4 output is an experimental property, not a blanket promise.
+Determinism is layered. Canonically encoded Timeline IR and Execution Plans
+must be byte-identical once those encodings exist. The current in-memory
+Timeline IR is structurally deterministic but does not yet claim canonical wire
+bytes. Raw frames target identical hashes inside a locked browser/font/render
+environment. The current Gate-one executor captures PNG bytes and has not yet
+implemented the specified raw-RGBA hashing boundary. Encoded containers are
+validated by timestamps, frame counts, codec configuration, and decoded
+content; byte-identical MP4 output is an experimental property, not a blanket
+promise.
 
 ## Distributed execution (production target)
 
@@ -99,7 +165,7 @@ onmark/
 ├── schemas/ conformance/ evals/ examples/ docs/
 ```
 
-The current milestone contains `onmark-core`, `onmark-media`, `onmark-render`, and `@onmark/runtime`'s generated protocol boundary and sequential session state machine. Gate one adds `onmark-cli` when it first composes probing, compilation, and rendering into a user-facing command. Media is a separate crate because server-side compile/lint loops need probing without Chromium; this is both a distinct dependency budget and a real consumer. Runtime is a separate package because it executes inside the browser and is consumed by authoring and bundling. Render depends only on core-owned execution facts; the CLI composition root combines it with media probing. Syntax, diagnostics, model, compiler, timeline, and protocol remain rectangular modules inside core. Render graph and planning initially join core at gate two. Worker execution belongs to render. A coordinator appears only at gate three.
+The current milestone contains `onmark-core`, `onmark-media`, `onmark-render`, and `@onmark/runtime`'s generated protocol boundary and sequential session state machine. Gate one adds `onmark-cli` when it first composes input freezing, probing, compilation, bundling, and rendering into a user-facing command. Media is a separate crate because server-side compile/lint loops need probing without Chromium; this is both a distinct dependency budget and a real consumer. Runtime is a separate package because it executes inside the browser and is consumed by authoring and bundling. Render depends only on core-owned execution facts and render-owned materialized locations; the CLI composition root combines it with media probing and bundling. Syntax, diagnostics, model, compiler, timeline, and protocol remain rectangular modules inside core. Render graph and planning initially join core at gate two. Worker execution belongs to render. A coordinator appears only at gate three.
 
 `evals/` is checked-in language-product evidence, not a runtime package or a live-model CI service. It owns frozen cases, prompts, grader rules, raw outputs, model settings, and comparison baselines. Those assets are added only from real experiments; the repository does not create an empty framework or invent a historical baseline when the source material is unavailable.
 
@@ -117,13 +183,13 @@ Validation reasons remain local domain values. Once syntax has supplied source c
 
 On the TypeScript side, runtime is the foundation. Authoring consumes runtime's types-only public hook and capability contract; bundler injects the pinned runtime artifact. Runtime never depends on authoring or bundler. Temporal capability declarations belong to runtime as the stable third-party adapter extension point. The Gate-one `RuntimeSession` owns protocol ordering, interval-relationship checks, exact-frame projection, and terminal disposal. It rejects concurrent commands instead of growing a hidden queue and gives the adapter a recursively frozen snapshot of accepted plan facts. Browser-specific work enters through one narrow adapter whose waits must be bounded and whose expected failures are typed. The session, deterministic frame projection, immutable browser host, native Chromium handshake, and synthetic-frame MP4 path exist today; real media stabilization and the production DOM/media adapter remain Gate-one implementation work.
 
-Rust wire types are the source of truth. `cargo xtask schema` generates checked-in versioned JSON Schema and TypeScript types/codecs, and CI requires regeneration to produce no diff. Generated files are never hand-edited, and Rust does not regenerate a second Rust model from its own schema. Before the first external Gate-one release, v1 is refined in place so the initial public contract does not preserve experimental fields; after publication, an incompatible wire change requires a new protocol version and migration fixture. The Gate-one `BrowserPlan` currently carries only the frame rate and evaluation/output intervals consumed by the browser clock; component and render-graph facts are added only when the runtime consumes them.
+Rust wire types are the source of truth. `cargo xtask schema` generates checked-in versioned JSON Schema and TypeScript types/codecs, and CI requires regeneration to produce no diff. Generated files are never hand-edited, and Rust does not regenerate a second Rust model from its own schema. Before the first external Gate-one release, v1 is refined in place so the initial public contract does not preserve experimental fields; after publication, an incompatible wire change requires a new protocol version and migration fixture. The Gate-one `BrowserPlan` currently carries only the frame rate and evaluation/output intervals consumed by the browser clock and is therefore a temporary clock projection of Timeline IR. Once the production presentation adapter consumes visual facts, `BrowserPlan` becomes the browser-facing projection of one Render Unit. It may contain only facts consumed in the browser; output paths, cache keys, `FFmpeg` arguments, materialization policy, and source-level timing remain outside it. Component and render-graph facts are added only when the runtime consumes them.
 
 AWS Lambda is an adapter, not another engine. A later independently published `@onmark/aws-lambda` surface owns invocation types, infrastructure definitions, the thin handler, and a container image with the pinned Rust binary, Chromium, FFmpeg, and fonts. The handler materializes a Render Unit, calls the same `onmark-render` executor, uploads an immutable artifact, and returns a structured result. AWS SDK types may not enter core. Other backends such as ECS or Kubernetes follow the same adapter rule.
 
 ## Delivery gates
 
-**Gate one: render one real video reliably.** Implement the minimal language, media probing, Rust timing, versioned Timeline IR, deterministic browser clock, frame handshake, and a single-process single-unit Chromium/FFmpeg path. Do not build distributed control-plane machinery.
+**Gate one: render one real video reliably.** Implement the minimal language, frozen asset catalog, media probing, Rust timing, versioned Timeline IR, immutable presentation bundle, deterministic browser clock, frame handshake, and a single-process whole-film Render Unit through Chromium/FFmpeg. The Gate-one audio contract must either be executed and muxed or explicitly rejected before rendering; silently dropping authored voice-over is not acceptable. Do not build distributed control-plane machinery.
 
 **Gate two: partition correctly.** Render two independent local units and assemble them. Introduce the Render Graph, evaluation/output intervals, preroll, unit caching, and dependency-based invalidation.
 

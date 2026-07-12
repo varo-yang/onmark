@@ -10,7 +10,7 @@ mod reference;
 mod source;
 mod time;
 
-pub use asset::AssetMetadata;
+pub use asset::{AssetMetadata, FrozenAsset, FrozenAssetId};
 pub use duration::{Duration, InvalidDuration};
 pub use element::ElementKind;
 pub use id::{InvalidNodeId, NodeId};

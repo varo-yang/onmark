@@ -6,7 +6,8 @@
 use std::collections::BTreeMap;
 
 use crate::model::{
-    AssetRef, CueId, ElementKind, EventRef, FrameIndex, FrameInterval, NodeId, SourceSpan, Timebase,
+    CueId, ElementKind, EventRef, FrameIndex, FrameInterval, FrozenAssetId, NodeId, SourceSpan,
+    Timebase,
 };
 
 /// Version of the Timeline IR contract.
@@ -243,19 +244,19 @@ pub enum TimelineContent {
 pub struct TimelineVideo {
     element: TimelineElement,
     timing: TimelineTiming,
-    asset: AssetRef,
+    asset_id: FrozenAssetId,
 }
 
 impl TimelineVideo {
     pub(crate) const fn new(
         element: TimelineElement,
         timing: TimelineTiming,
-        asset: AssetRef,
+        asset_id: FrozenAssetId,
     ) -> Self {
         Self {
             element,
             timing,
-            asset,
+            asset_id,
         }
     }
 
@@ -271,10 +272,10 @@ impl TimelineVideo {
         &self.timing
     }
 
-    /// Returns the frozen media artifact.
+    /// Returns the frozen media artifact identity.
     #[must_use]
-    pub const fn asset(&self) -> &AssetRef {
-        &self.asset
+    pub const fn asset_id(&self) -> FrozenAssetId {
+        self.asset_id
     }
 }
 
@@ -283,7 +284,7 @@ impl TimelineVideo {
 pub struct TimelineVoiceOver {
     element: TimelineElement,
     timing: TimelineTiming,
-    asset: AssetRef,
+    asset_id: FrozenAssetId,
     text: Vec<TimelineText>,
 }
 
@@ -291,13 +292,13 @@ impl TimelineVoiceOver {
     pub(crate) const fn new(
         element: TimelineElement,
         timing: TimelineTiming,
-        asset: AssetRef,
+        asset_id: FrozenAssetId,
         text: Vec<TimelineText>,
     ) -> Self {
         Self {
             element,
             timing,
-            asset,
+            asset_id,
             text,
         }
     }
@@ -314,10 +315,10 @@ impl TimelineVoiceOver {
         &self.timing
     }
 
-    /// Returns the frozen voice-over artifact.
+    /// Returns the frozen voice-over artifact identity.
     #[must_use]
-    pub const fn asset(&self) -> &AssetRef {
-        &self.asset
+    pub const fn asset_id(&self) -> FrozenAssetId {
+        self.asset_id
     }
 
     /// Returns authored inscription runs in source order.

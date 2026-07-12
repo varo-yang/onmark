@@ -6,7 +6,8 @@ use std::fs;
 
 use onmark_core::compiler;
 use onmark_core::model::{
-    AssetMetadata, AssetRef, Duration, EventRef, FrameInterval, FrameRate, SourceId, Timebase,
+    AssetMetadata, AssetRef, Duration, EventRef, FrameInterval, FrameRate, FrozenAsset,
+    FrozenAssetId, SourceId, Timebase,
 };
 use onmark_core::timeline::{
     TimelineContent, TimelineElement, TimelineIr, TimelineTiming, TimingReason,
@@ -21,7 +22,7 @@ fn explicit_duration_and_overlays_match_canonical_timeline() {
 
 #[test]
 fn media_duration_and_longest_content_match_canonical_timeline() {
-    let assets = asset_metadata([("clip.mp4", "2s"), ("voice.mp3", "1s")]);
+    let assets = frozen_assets([("clip.mp4", "2s"), ("voice.mp3", "1s")]);
 
     assert_valid_fixture("media-duration", assets);
 }
@@ -30,7 +31,7 @@ fn media_duration_and_longest_content_match_canonical_timeline() {
 fn timing_errors_match_stable_diagnostics() {
     let source_path = fixture("timeline", "invalid/timing-errors.onmark");
     let expected_path = fixture("timeline", "invalid/timing-errors.diagnostics.txt");
-    let assets = asset_metadata([("clip.mp4", "2s")]);
+    let assets = frozen_assets([("clip.mp4", "2s")]);
     let report = solve_fixture(&source_path, &assets).expect("all referenced assets were probed");
 
     assert!(report.timeline().is_none());
@@ -38,13 +39,13 @@ fn timing_errors_match_stable_diagnostics() {
 }
 
 #[test]
-fn missing_asset_metadata_is_a_typed_failure() {
+fn missing_frozen_asset_is_a_typed_failure() {
     let source_path = fixture("timeline", "valid/media-duration.onmark");
     let error = solve_fixture(&source_path, &BTreeMap::new())
         .expect_err("the fixture references assets absent from the catalog");
     let asset = AssetRef::parse("clip.mp4").expect("the fixture asset reference is valid");
 
-    assert_eq!(error, compiler::SolveError::MissingAssetMetadata(asset));
+    assert_eq!(error, compiler::SolveError::MissingFrozenAsset(asset));
 }
 
 #[test]
@@ -59,7 +60,7 @@ fn frame_domain_overflow_matches_stable_diagnostics() {
     assert_or_update(&expected_path, &render_diagnostics(report.diagnostics()));
 }
 
-fn assert_valid_fixture(name: &str, assets: BTreeMap<AssetRef, AssetMetadata>) {
+fn assert_valid_fixture(name: &str, assets: BTreeMap<AssetRef, FrozenAsset>) {
     let source_path = fixture("timeline", &format!("valid/{name}.onmark"));
     let expected_path = fixture("timeline", &format!("valid/{name}.timeline.txt"));
     let solved = solve_fixture(&source_path, &assets).expect("all fixture assets were probed");
@@ -71,7 +72,7 @@ fn assert_valid_fixture(name: &str, assets: BTreeMap<AssetRef, AssetMetadata>) {
 
 fn solve_fixture(
     source_path: &std::path::Path,
-    assets: &BTreeMap<AssetRef, AssetMetadata>,
+    assets: &BTreeMap<AssetRef, FrozenAsset>,
 ) -> Result<compiler::SolveReport, compiler::SolveError> {
     let rate = FrameRate::new(30, 1).expect("the fixture frame rate is valid");
     solve_fixture_at(source_path, assets, rate)
@@ -79,7 +80,7 @@ fn solve_fixture(
 
 fn solve_fixture_at(
     source_path: &std::path::Path,
-    assets: &BTreeMap<AssetRef, AssetMetadata>,
+    assets: &BTreeMap<AssetRef, FrozenAsset>,
     rate: FrameRate,
 ) -> Result<compiler::SolveReport, compiler::SolveError> {
     let source = fs::read_to_string(source_path).expect("the timeline fixture must be readable");
@@ -99,13 +100,16 @@ fn solve_fixture_at(
     )
 }
 
-fn asset_metadata<const N: usize>(entries: [(&str, &str); N]) -> BTreeMap<AssetRef, AssetMetadata> {
+fn frozen_assets<const N: usize>(entries: [(&str, &str); N]) -> BTreeMap<AssetRef, FrozenAsset> {
     entries
         .into_iter()
-        .map(|(asset, duration)| {
+        .enumerate()
+        .map(|(index, (asset, duration))| {
             let asset = AssetRef::parse(asset).expect("the fixture asset reference is valid");
             let duration = Duration::parse(duration).expect("the fixture duration is valid");
-            (asset, AssetMetadata::new(duration))
+            let digest_byte = u8::try_from(index + 1).expect("the fixture catalog is small");
+            let id = FrozenAssetId::from_sha256([digest_byte; 32]);
+            (asset, FrozenAsset::new(id, AssetMetadata::new(duration)))
         })
         .collect()
 }
@@ -173,14 +177,14 @@ impl TimelineRenderer {
                 "      video {} {} asset={}",
                 element(video.element()),
                 timing(video.timing()),
-                video.asset(),
+                video.asset_id(),
             ),
             TimelineContent::VoiceOver(voice_over) => writeln!(
                 self.output,
                 "      vo {} {} asset={} text={:?}",
                 element(voice_over.element()),
                 timing(voice_over.timing()),
-                voice_over.asset(),
+                voice_over.asset_id(),
                 text(voice_over.text()),
             ),
             TimelineContent::Overlay(overlay) => writeln!(
