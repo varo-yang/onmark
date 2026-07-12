@@ -93,8 +93,9 @@ impl RunningProbe {
     fn reap(&mut self) -> Result<(), ProbeError> {
         self.child
             .wait()
-            .map(|_| self.reaped = true)
-            .map_err(|source| ProbeError::process_control(&self.path, "reap", source))
+            .map_err(|source| ProbeError::process_control(&self.path, "reap", source))?;
+        self.reaped = true;
+        Ok(())
     }
 }
 
@@ -209,10 +210,10 @@ fn join_output(
     path: &Path,
     stream: Stream,
 ) -> Result<Captured, ProbeError> {
-    reader
+    let capture_result = reader
         .join()
-        .map_err(|_| ProbeError::output_join(path, stream))?
-        .map_err(|source| ProbeError::output_io(path, stream, source))
+        .map_err(|_| ProbeError::output_join(path, stream))?;
+    capture_result.map_err(|source| ProbeError::output_io(path, stream, source))
 }
 
 #[derive(Clone, Copy)]

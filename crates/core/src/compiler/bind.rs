@@ -46,15 +46,24 @@ pub fn bind(document: SourceDocument) -> BindReport {
     let (nodes, document_span) = document.into_parts();
 
     for node in nodes {
-        match node {
-            Node::Text(text) if text.text().trim().is_empty() => {}
-            Node::Text(text) => diagnostics.push(unexpected_top_level_text(&text)),
-            Node::Element(element) => match element_kind(&element) {
-                Some(ElementKind::Film) => films.push(element),
-                Some(kind) => diagnostics.push(misplaced_element(&element, kind, None)),
-                None => diagnostics.push(unknown_element(&element)),
-            },
+        let element = match node {
+            Node::Text(text) if text.text().trim().is_empty() => continue,
+            Node::Text(text) => {
+                diagnostics.push(unexpected_top_level_text(&text));
+                continue;
+            }
+            Node::Element(element) => element,
+        };
+        let Some(kind) = element_kind(&element) else {
+            diagnostics.push(unknown_element(&element));
+            continue;
+        };
+        if kind != ElementKind::Film {
+            diagnostics.push(misplaced_element(&element, kind, None));
+            continue;
         }
+
+        films.push(element);
     }
 
     let mut films = films.into_iter();
@@ -109,14 +118,7 @@ impl Binder {
             };
 
             match self.recognize_or_report(&child) {
-                Some(ElementKind::Cues) => match &cues {
-                    None => cues = Some((child.name().span(), self.bind_cues(child))),
-                    Some((first, _)) => {
-                        // The rejected subtree must not contribute IDs or
-                        // attributes to the canonical linked film.
-                        self.diagnostics.push(duplicate_cues(&child, *first));
-                    }
-                },
+                Some(ElementKind::Cues) => self.bind_cues_container(child, &mut cues),
                 Some(ElementKind::Scene) => scenes.push(self.bind_scene(child)),
                 Some(kind) => {
                     self.diagnostics
@@ -129,6 +131,17 @@ impl Binder {
         let cues = cues.map(|(_, cues)| cues);
         let film = LinkedFilm::new(linked, cues, scenes, self.ids);
         (film, self.diagnostics)
+    }
+
+    fn bind_cues_container(&mut self, child: Element, cues: &mut Option<(SourceSpan, LinkedCues)>) {
+        let Some((first, _)) = cues else {
+            *cues = Some((child.name().span(), self.bind_cues(child)));
+            return;
+        };
+
+        // The rejected subtree must not contribute IDs or attributes to the
+        // canonical linked film.
+        self.diagnostics.push(duplicate_cues(&child, *first));
     }
 
     fn bind_cues(&mut self, element: Element) -> LinkedCues {

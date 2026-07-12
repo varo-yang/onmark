@@ -47,16 +47,17 @@ impl RenderExecutor {
     ///
     /// # Errors
     ///
-    /// Returns [`RenderError`] when the plan exceeds configured limits, the
-    /// browser protocol deviates from its expected phase, or either process
-    /// boundary fails. Chromium shutdown is still attempted after render work
-    /// fails.
+    /// Returns [`RenderError`] when the selected configuration or plan exceeds
+    /// supported limits, the browser protocol deviates from its expected phase,
+    /// or either process boundary fails. Chromium shutdown is still attempted
+    /// after render work fails.
     pub async fn render(
         &self,
         plan: BrowserPlan,
         bundle_url: &str,
         output: &Path,
     ) -> Result<EncodedVideo, RenderError> {
+        validate_output_dimensions(self.browser_limits, output)?;
         self.validate_plan(plan, output)?;
         let staging = StagedOutput::new(output)?;
         let browser = BrowserSession::launch(&self.browser_executable, self.browser_limits)
@@ -77,22 +78,14 @@ impl RenderExecutor {
     }
 
     fn validate_plan(&self, plan: BrowserPlan, output: &Path) -> Result<(), RenderError> {
-        let frame_count = output_frame_count(plan).ok_or_else(|| {
-            RenderError::new(
-                RenderErrorKind::InvalidPlan,
-                output,
-                "browser output interval is reversed",
-            )
-        })?;
+        let Some(frame_count) = output_frame_count(plan) else {
+            return Err(invalid_plan(output, "browser output interval is reversed"));
+        };
         let request_limit = u64::from(u32::MAX - FIRST_FRAME_REQUEST);
         let max_frames = self.ffmpeg.max_frames().min(request_limit);
 
         if frame_count == 0 {
-            return Err(RenderError::new(
-                RenderErrorKind::InvalidPlan,
-                output,
-                "browser output interval is empty",
-            ));
+            return Err(invalid_plan(output, "browser output interval is empty"));
         }
         if frame_count > max_frames {
             return Err(RenderError::new(
@@ -116,46 +109,66 @@ impl RenderExecutor {
             .navigate(bundle_url)
             .await
             .map_err(|source| RenderError::browser(output, source))?;
-        dispatch_expected(
-            browser,
-            BrowserRequest::new(LOAD_REQUEST, BrowserCommand::Load { plan }),
-            BrowserEvent::Loaded,
-            output,
-        )
-        .await?;
-        dispatch_expected(
-            browser,
-            BrowserRequest::new(
-                PREPARE_REQUEST,
-                BrowserCommand::Prepare {
-                    evaluation_start: plan.evaluation().start(),
-                },
-            ),
-            BrowserEvent::Prepared {
-                evaluation_start: plan.evaluation().start(),
-            },
-            output,
-        )
-        .await?;
+        load_runtime(browser, plan, output).await?;
+        prepare_runtime(browser, plan, output).await?;
 
         let mut encoder = self
             .ffmpeg
             .start(staging, plan.frame_rate())
             .map_err(|source| RenderError::encoder(output, source))?;
         render_frames(browser, &mut encoder, plan, output).await?;
-        dispatch_expected(
-            browser,
-            BrowserRequest::new(next_request_id(plan), BrowserCommand::Dispose),
-            BrowserEvent::Disposed,
-            output,
-        )
-        .await?;
+        dispose_runtime(browser, plan, output).await?;
 
         encoder
             .finish()
             .await
             .map_err(|source| RenderError::encoder(output, source))
     }
+}
+
+fn validate_output_dimensions(limits: BrowserLimits, output: &Path) -> Result<(), RenderError> {
+    if limits.width().is_multiple_of(2) && limits.height().is_multiple_of(2) {
+        return Ok(());
+    }
+
+    Err(RenderError::new(
+        RenderErrorKind::InvalidConfiguration,
+        output,
+        "H.264 yuv420p output requires even viewport dimensions",
+    ))
+}
+
+async fn load_runtime(
+    browser: &BrowserSession,
+    plan: BrowserPlan,
+    output: &Path,
+) -> Result<(), RenderError> {
+    let request = BrowserRequest::new(LOAD_REQUEST, BrowserCommand::Load { plan });
+    dispatch_expected(browser, request, BrowserEvent::Loaded, output).await
+}
+
+async fn prepare_runtime(
+    browser: &BrowserSession,
+    plan: BrowserPlan,
+    output: &Path,
+) -> Result<(), RenderError> {
+    let evaluation_start = plan.evaluation().start();
+    let request = BrowserRequest::new(
+        PREPARE_REQUEST,
+        BrowserCommand::Prepare { evaluation_start },
+    );
+    let expected = BrowserEvent::Prepared { evaluation_start };
+
+    dispatch_expected(browser, request, expected, output).await
+}
+
+async fn dispose_runtime(
+    browser: &BrowserSession,
+    plan: BrowserPlan,
+    output: &Path,
+) -> Result<(), RenderError> {
+    let request = BrowserRequest::new(next_request_id(plan), BrowserCommand::Dispose);
+    dispatch_expected(browser, request, BrowserEvent::Disposed, output).await
 }
 
 async fn render_frames(
@@ -168,21 +181,10 @@ async fn render_frames(
     let end = plan.output().end().get();
 
     for (offset, index) in (start..end).enumerate() {
-        let frame = WireFrame::new(index).map_err(|_| {
-            RenderError::new(
-                RenderErrorKind::InvalidPlan,
-                output,
-                "browser output frame exceeds the wire domain",
-            )
-        })?;
+        let frame = WireFrame::new(index)
+            .map_err(|_| invalid_plan(output, "browser output frame exceeds the wire domain"))?;
         let request_id = frame_request_id(offset, output)?;
-        dispatch_expected(
-            browser,
-            BrowserRequest::new(request_id, BrowserCommand::Seek { frame }),
-            BrowserEvent::FrameReady { frame },
-            output,
-        )
-        .await?;
+        seek_frame(browser, request_id, frame, output).await?;
         let captured = browser
             .capture_png()
             .await
@@ -193,6 +195,18 @@ async fn render_frames(
             .map_err(|source| RenderError::encoder(output, source))?;
     }
     Ok(())
+}
+
+async fn seek_frame(
+    browser: &BrowserSession,
+    request_id: RequestId,
+    frame: WireFrame,
+    output: &Path,
+) -> Result<(), RenderError> {
+    let request = BrowserRequest::new(request_id, BrowserCommand::Seek { frame });
+    let expected = BrowserEvent::FrameReady { frame };
+
+    dispatch_expected(browser, request, expected, output).await
 }
 
 async fn dispatch_expected(
@@ -237,29 +251,52 @@ fn output_frame_count(plan: BrowserPlan) -> Option<u64> {
 }
 
 fn frame_request_id(offset: usize, output: &Path) -> Result<RequestId, RenderError> {
-    let offset = u32::try_from(offset).map_err(|_| {
-        RenderError::new(
-            RenderErrorKind::PlanTooLarge,
-            output,
-            "frame request identity exceeds the protocol domain",
-        )
-    })?;
-    let request_id = FIRST_FRAME_REQUEST.checked_add(offset).ok_or_else(|| {
-        RenderError::new(
-            RenderErrorKind::PlanTooLarge,
-            output,
-            "frame request identity exceeds the protocol domain",
-        )
-    })?;
+    let offset = u32::try_from(offset).map_err(|_| request_identity_overflow(output))?;
+    let request_id = FIRST_FRAME_REQUEST
+        .checked_add(offset)
+        .ok_or_else(|| request_identity_overflow(output))?;
     Ok(RequestId::new(request_id))
 }
 
 fn next_request_id(plan: BrowserPlan) -> RequestId {
     let count = output_frame_count(plan).expect("a validated browser plan has an ordered interval");
     let count = u32::try_from(count).expect("a validated browser plan fits the request domain");
-    RequestId::new(
-        FIRST_FRAME_REQUEST
-            .checked_add(count)
-            .expect("a validated browser plan leaves one disposal request identity"),
+    let request_id = FIRST_FRAME_REQUEST
+        .checked_add(count)
+        .expect("a validated browser plan leaves one disposal request identity");
+
+    RequestId::new(request_id)
+}
+
+fn invalid_plan(output: &Path, message: &'static str) -> RenderError {
+    RenderError::new(RenderErrorKind::InvalidPlan, output, message)
+}
+
+fn request_identity_overflow(output: &Path) -> RenderError {
+    RenderError::new(
+        RenderErrorKind::PlanTooLarge,
+        output,
+        "frame request identity exceeds the protocol domain",
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+    use std::time::Duration;
+
+    use crate::BrowserLimits;
+
+    use super::{RenderErrorKind, validate_output_dimensions};
+
+    #[test]
+    fn rejects_dimensions_that_yuv420p_cannot_encode() {
+        let limits = BrowserLimits::new(321, 181, Duration::from_secs(1), 1)
+            .expect("odd browser dimensions remain valid for capture");
+
+        let error = validate_output_dimensions(limits, Path::new("video.mp4"))
+            .expect_err("the fixed Gate-one encoder requires even dimensions");
+
+        assert_eq!(error.kind(), RenderErrorKind::InvalidConfiguration);
+    }
 }

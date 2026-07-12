@@ -26,11 +26,16 @@ function sourceFiles() {
 function collect(directory) {
   const files = [];
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
-    if (entry.isDirectory() && IGNORED_DIRECTORIES.has(entry.name)) continue;
+    if (entry.isDirectory() && IGNORED_DIRECTORIES.has(entry.name)) {
+      continue;
+    }
+
     const path = join(directory, entry.name);
     if (entry.isDirectory()) {
       files.push(...collect(path));
-    } else if (SOURCE_EXTENSIONS.has(extname(entry.name))) {
+      continue;
+    }
+    if (SOURCE_EXTENSIONS.has(extname(entry.name))) {
       files.push(path);
     }
   }

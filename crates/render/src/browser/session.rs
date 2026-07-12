@@ -98,9 +98,10 @@ impl BrowserSession {
             .goto(url)
             .await
             .map_err(|source| BrowserError::cdp(BrowserErrorKind::Navigation, source))?;
-        timeout(self.limits.deadline(), self.page.wait_for_navigation())
+        let navigation_result = timeout(self.limits.deadline(), self.page.wait_for_navigation())
             .await
-            .map_err(|_| BrowserError::without_source(BrowserErrorKind::Navigation))?
+            .map_err(|_| BrowserError::without_source(BrowserErrorKind::Navigation))?;
+        navigation_result
             .map_err(|source| BrowserError::cdp(BrowserErrorKind::Navigation, source))?;
         self.wait_for_runtime_host().await
     }
@@ -188,11 +189,12 @@ impl BrowserSession {
         expression: &str,
     ) -> Result<bool, BrowserError> {
         let evaluation = self.page.evaluate_expression(expression);
-        let result = timeout_at(deadline, evaluation)
+        let evaluation_result = timeout_at(deadline, evaluation)
             .await
-            .map_err(|_| BrowserError::without_source(BrowserErrorKind::RuntimeHost))?
+            .map_err(|_| BrowserError::without_source(BrowserErrorKind::RuntimeHost))?;
+        let remote = evaluation_result
             .map_err(|source| BrowserError::cdp(BrowserErrorKind::RuntimeHost, source))?;
-        result
+        remote
             .into_value()
             .map_err(|source| BrowserError::json(BrowserErrorKind::RuntimeHost, source))
     }
@@ -275,9 +277,10 @@ async fn finish_graceful_shutdown(
 }
 
 async fn wait_for_browser(browser: &mut Browser, deadline: Duration) -> Result<(), BrowserError> {
-    timeout(deadline, browser.wait())
+    let waited = timeout(deadline, browser.wait())
         .await
-        .map_err(|_| BrowserError::without_source(BrowserErrorKind::Shutdown))?
+        .map_err(|_| BrowserError::without_source(BrowserErrorKind::Shutdown))?;
+    waited
         .map(|_| ())
         .map_err(|source| BrowserError::io(BrowserErrorKind::Shutdown, source))
 }
@@ -291,16 +294,14 @@ async fn shutdown_handler(
     mut handler: JoinHandle<Result<(), CdpError>>,
     deadline: Duration,
 ) -> Result<(), BrowserError> {
-    match timeout(deadline, &mut handler).await {
-        Ok(Ok(Ok(()))) => Ok(()),
-        Ok(Ok(Err(source))) => Err(BrowserError::cdp(BrowserErrorKind::Handler, source)),
-        Ok(Err(source)) => Err(BrowserError::join(BrowserErrorKind::Handler, source)),
-        Err(_) => {
-            handler.abort();
-            let _ = handler.await;
-            Err(BrowserError::without_source(
-                BrowserErrorKind::HandlerTimeout,
-            ))
-        }
-    }
+    let Ok(joined) = timeout(deadline, &mut handler).await else {
+        handler.abort();
+        let _ = handler.await;
+        return Err(BrowserError::without_source(
+            BrowserErrorKind::HandlerTimeout,
+        ));
+    };
+    let handler_result =
+        joined.map_err(|source| BrowserError::join(BrowserErrorKind::Handler, source))?;
+    handler_result.map_err(|source| BrowserError::cdp(BrowserErrorKind::Handler, source))
 }

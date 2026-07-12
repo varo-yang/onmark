@@ -121,7 +121,10 @@ fn rust_files(directory: &Path) -> Vec<PathBuf> {
 
         if path.is_dir() {
             files.extend(rust_files(&path));
-        } else if path.extension().is_some_and(|extension| extension == "rs") {
+            continue;
+        }
+
+        if path.extension().is_some_and(|extension| extension == "rs") {
             files.push(path);
         }
     }

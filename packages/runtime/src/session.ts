@@ -12,6 +12,13 @@ import { runtimeFrameAt, type RuntimeFrame } from "./clock.js";
 
 // ── Browser adapter boundary ──
 
+type Immutable<T> = T extends object
+  ? { readonly [Key in keyof T]: Immutable<T[Key]> }
+  : T;
+
+/** Immutable browser-plan view owned by one runtime session. */
+export type RuntimePlan = Immutable<BrowserPlan>;
+
 /**
  * Browser-owned operations sequenced by one runtime session.
  *
@@ -20,7 +27,7 @@ import { runtimeFrameAt, type RuntimeFrame } from "./clock.js";
  */
 export interface RuntimeAdapter {
   /** Installs one owned snapshot of the immutable browser plan. */
-  load(plan: BrowserPlan): Promise<void>;
+  load(plan: RuntimePlan): Promise<void>;
   /** Resolves only after resources at the evaluation start are stable. */
   prepare(frame: RuntimeFrame): Promise<void>;
   /** Resolves only after one exact frame is stable for native capture. */
@@ -103,20 +110,20 @@ export class RuntimeSession {
       );
     }
 
-    const ownedPlan = copyPlan(plan);
-    const { start: evaluationStart, end: evaluationEnd } = ownedPlan.evaluation;
+    const violation = planViolation(plan);
+    if (violation !== undefined) {
+      return invalidRequest(requestId, violation);
+    }
+
+    const ownedPlan = snapshotPlan(plan);
+    const nextState = loadedState(ownedPlan);
     try {
       await this.#adapter.load(ownedPlan);
     } catch (error) {
       return operationFailure(requestId, "loadFailed", error);
     }
 
-    this.#state = {
-      kind: "loaded",
-      evaluationStart,
-      evaluationEnd,
-      frameRate: ownedPlan.frameRate,
-    };
+    this.#state = nextState;
     return response(requestId, { type: "loaded" });
   }
 
@@ -203,14 +210,14 @@ interface LoadedState {
   readonly kind: "loaded";
   readonly evaluationStart: number;
   readonly evaluationEnd: number;
-  readonly frameRate: BrowserPlan["frameRate"];
+  readonly frameRate: RuntimePlan["frameRate"];
 }
 
 interface ReadyState {
   readonly kind: "ready";
   readonly evaluationStart: number;
   readonly evaluationEnd: number;
-  readonly frameRate: BrowserPlan["frameRate"];
+  readonly frameRate: RuntimePlan["frameRate"];
 }
 
 type BrowserEvent = BrowserResponse["event"];
@@ -274,14 +281,43 @@ function readinessFailure(
   return operationFailure(requestId, operationCode, error);
 }
 
-function copyPlan(plan: BrowserPlan): BrowserPlan {
+function planViolation(plan: BrowserPlan): string | undefined {
+  if (plan.evaluation.start > plan.evaluation.end) {
+    return "plan evaluation interval is reversed";
+  }
+  if (plan.output.start > plan.output.end) {
+    return "plan output interval is reversed";
+  }
+  if (
+    plan.output.start < plan.evaluation.start ||
+    plan.output.end > plan.evaluation.end
+  ) {
+    return "plan output interval falls outside evaluation";
+  }
+  return undefined;
+}
+
+function snapshotPlan(plan: BrowserPlan): RuntimePlan {
   // Listing every generated field makes a schema addition fail compilation
-  // instead of silently falling outside the owned snapshot.
-  return {
+  // instead of silently falling outside the immutable adapter snapshot.
+  const frameRate = Object.freeze({ ...plan.frameRate });
+  const evaluation = Object.freeze({ ...plan.evaluation });
+  const output = Object.freeze({ ...plan.output });
+
+  return Object.freeze({
     timelineVersion: plan.timelineVersion,
-    frameRate: { ...plan.frameRate },
-    evaluation: { ...plan.evaluation },
-    output: { ...plan.output },
+    frameRate,
+    evaluation,
+    output,
+  });
+}
+
+function loadedState(plan: RuntimePlan): LoadedState {
+  return {
+    kind: "loaded",
+    evaluationStart: plan.evaluation.start,
+    evaluationEnd: plan.evaluation.end,
+    frameRate: plan.frameRate,
   };
 }
 

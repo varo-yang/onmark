@@ -16,20 +16,15 @@ use conformance::{assert_or_update, fixture};
 fn gate_one_browser_requests_match_the_versioned_wire_contract() {
     let plan = gate_one_plan();
     let requests = [
-        BrowserRequest::new(RequestId::new(1), BrowserCommand::Load { plan }),
-        BrowserRequest::new(
-            RequestId::new(2),
+        request(1, BrowserCommand::Load { plan }),
+        request(
+            2,
             BrowserCommand::Prepare {
-                evaluation_start: WireFrame::new(0).expect("zero is browser-safe"),
+                evaluation_start: frame(0),
             },
         ),
-        BrowserRequest::new(
-            RequestId::new(3),
-            BrowserCommand::Seek {
-                frame: WireFrame::new(15).expect("the fixture frame is browser-safe"),
-            },
-        ),
-        BrowserRequest::new(RequestId::new(4), BrowserCommand::Dispose),
+        request(3, BrowserCommand::Seek { frame: frame(15) }),
+        request(4, BrowserCommand::Dispose),
     ];
 
     assert_or_update(
@@ -40,34 +35,41 @@ fn gate_one_browser_requests_match_the_versioned_wire_contract() {
 
 #[test]
 fn gate_one_browser_responses_match_the_versioned_wire_contract() {
-    let frame = WireFrame::new(15).expect("the fixture frame is browser-safe");
+    let timeout = ProtocolFailure::new(
+        ProtocolFailureCode::ReadinessTimeout,
+        "frame 15 did not become ready",
+        vec![Box::from("font:Inter")],
+    )
+    .expect("the fixture failure is actionable");
     let responses = [
-        BrowserResponse::new(RequestId::new(1), BrowserEvent::Loaded),
-        BrowserResponse::new(
-            RequestId::new(2),
+        response(1, BrowserEvent::Loaded),
+        response(
+            2,
             BrowserEvent::Prepared {
-                evaluation_start: WireFrame::new(0).expect("zero is browser-safe"),
+                evaluation_start: frame(0),
             },
         ),
-        BrowserResponse::new(RequestId::new(3), BrowserEvent::FrameReady { frame }),
-        BrowserResponse::new(
-            RequestId::new(3),
-            BrowserEvent::Failed(
-                ProtocolFailure::new(
-                    ProtocolFailureCode::ReadinessTimeout,
-                    "frame 15 did not become ready",
-                    vec![Box::from("font:Inter")],
-                )
-                .expect("the fixture failure is actionable"),
-            ),
-        ),
-        BrowserResponse::new(RequestId::new(4), BrowserEvent::Disposed),
+        response(3, BrowserEvent::FrameReady { frame: frame(15) }),
+        response(3, BrowserEvent::Failed(timeout)),
+        response(4, BrowserEvent::Disposed),
     ];
 
     assert_or_update(
         &fixture("protocol", "browser-responses-v1.jsonl"),
         &render_json_lines(&responses),
     );
+}
+
+fn request(request_id: u32, command: BrowserCommand) -> BrowserRequest {
+    BrowserRequest::new(RequestId::new(request_id), command)
+}
+
+fn response(request_id: u32, event: BrowserEvent) -> BrowserResponse {
+    BrowserResponse::new(RequestId::new(request_id), event)
+}
+
+fn frame(index: u64) -> WireFrame {
+    WireFrame::new(index).expect("fixture frames are browser-safe")
 }
 
 fn gate_one_plan() -> BrowserPlan {

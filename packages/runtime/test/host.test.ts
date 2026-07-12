@@ -8,13 +8,13 @@ import {
   ProtocolDecodeError,
   RUNTIME_HOST_NAME,
   installRuntimeHost,
-  type BrowserPlan,
   type RuntimeAdapter,
   type RuntimeFrame,
+  type RuntimePlan,
 } from "../src/index.js";
 
 const adapter: RuntimeAdapter = {
-  async load(_plan: BrowserPlan): Promise<void> {},
+  async load(_plan: RuntimePlan): Promise<void> {},
   async prepare(_frame: RuntimeFrame): Promise<void> {},
   async seek(_frame: RuntimeFrame): Promise<void> {},
   async dispose(): Promise<void> {},

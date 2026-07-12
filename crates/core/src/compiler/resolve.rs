@@ -74,10 +74,10 @@ impl Resolver {
         let mut resolver = Self::new(ids);
         let element = resolver.resolve_id_only_element(element);
         let cues = cues.map(|cues| resolver.resolve_cues(cues));
-        let scenes = scenes
-            .into_iter()
-            .map(|scene| resolver.resolve_scene(scene))
-            .collect();
+        let mut resolved_scenes = Vec::with_capacity(scenes.len());
+        for scene in scenes {
+            resolved_scenes.push(resolver.resolve_scene(scene));
+        }
 
         resolver.report_unused_cues();
 
@@ -92,7 +92,7 @@ impl Resolver {
             .filter(|(id, _)| !rejected_ids.contains(id))
             .map(|(id, node)| (id, resolved_node(node)))
             .collect();
-        let candidate = ResolvedFilm::new(element, cues, scenes, ids);
+        let candidate = ResolvedFilm::new(element, cues, resolved_scenes, ids);
         let film = (!diagnostics.has_errors()).then_some(candidate);
 
         ResolveReport { film, diagnostics }
@@ -101,11 +101,15 @@ impl Resolver {
     fn resolve_cues(&mut self, cues: LinkedCues) -> ResolvedCues {
         let (element, cues) = cues.into_parts();
         let element = self.resolve_id_only_element(element);
-        let cues = cues
-            .into_iter()
-            .filter_map(|cue| self.resolve_cue(cue))
-            .collect();
-        ResolvedCues::new(element, cues)
+        let mut resolved_cues = Vec::with_capacity(cues.len());
+
+        for cue in cues {
+            if let Some(cue) = self.resolve_cue(cue) {
+                resolved_cues.push(cue);
+            }
+        }
+
+        ResolvedCues::new(element, resolved_cues)
     }
 
     fn resolve_cue(&mut self, cue: LinkedCue) -> Option<ResolvedCue> {
@@ -163,26 +167,28 @@ impl Resolver {
     fn resolve_scene(&mut self, scene: LinkedScene) -> ResolvedScene {
         let (element, shots) = scene.into_parts();
         let element = self.resolve_id_only_element(element);
-        let shots = shots
-            .into_iter()
-            .map(|shot| self.resolve_shot(shot))
-            .collect();
-        ResolvedScene::new(element, shots)
+        let mut resolved_shots = Vec::with_capacity(shots.len());
+
+        for shot in shots {
+            resolved_shots.push(self.resolve_shot(shot));
+        }
+
+        ResolvedScene::new(element, resolved_shots)
     }
 
     fn resolve_shot(&mut self, shot: LinkedShot) -> ResolvedShot {
         let (element, content) = shot.into_parts();
         let input = ElementInput::new(element);
         let (element, mut attributes) = input.into_resolved_parts();
-        let duration = attributes
-            .take("duration")
-            .and_then(|attribute| self.resolve_duration(&attribute));
+        let duration = self.take_duration(&mut attributes, "duration");
         attributes.reject_unknown(element.kind(), &mut self.diagnostics);
-        let content = content
-            .into_iter()
-            .map(|content| self.resolve_content(content))
-            .collect();
-        ResolvedShot::new(element, duration, content)
+        let mut resolved_content = Vec::with_capacity(content.len());
+
+        for content in content {
+            resolved_content.push(self.resolve_content(content));
+        }
+
+        ResolvedShot::new(element, duration, resolved_content)
     }
 
     fn resolve_content(&mut self, content: LinkedShotContent) -> ResolvedShotContent {
@@ -213,12 +219,8 @@ impl Resolver {
     fn resolve_media_attributes(&mut self, element: LinkedElement) -> MediaAttributes {
         let input = ElementInput::new(element);
         let (element, mut attributes) = input.into_resolved_parts();
-        let src = attributes
-            .take("src")
-            .and_then(|attribute| self.resolve_asset(&attribute));
-        let delay = attributes
-            .take("delay")
-            .and_then(|attribute| self.resolve_duration(&attribute));
+        let src = self.take_asset(&mut attributes, "src");
+        let delay = self.take_duration(&mut attributes, "delay");
         attributes.reject_unknown(element.kind(), &mut self.diagnostics);
         MediaAttributes {
             element,
@@ -234,14 +236,28 @@ impl Resolver {
         let cue = attributes.take("cue");
         let delay = attributes.take("delay");
         attributes.reject_unknown(element.kind(), &mut self.diagnostics);
+        let start = self.resolve_overlay_start(cue, delay);
 
-        let cue_value = cue
-            .as_ref()
-            .and_then(|attribute| self.resolve_cue_reference(attribute));
-        let delay_value = delay
-            .as_ref()
-            .and_then(|attribute| self.resolve_duration(attribute));
-        let start = match (cue, delay) {
+        ResolvedOverlay::new(element, start, resolve_text(text))
+    }
+
+    fn resolve_overlay_start(
+        &mut self,
+        cue: Option<Attribute>,
+        delay: Option<Attribute>,
+    ) -> ResolvedStart {
+        // Resolve both spellings before rejecting the competing rule so an
+        // independent invalid value is not hidden behind the conflict.
+        let cue_value = match cue.as_ref() {
+            Some(attribute) => self.resolve_cue_reference(attribute),
+            None => None,
+        };
+        let delay_value = match delay.as_ref() {
+            Some(attribute) => self.resolve_duration(attribute),
+            None => None,
+        };
+
+        match (cue, delay) {
             (Some(cue), Some(delay)) => {
                 self.diagnostics.push(conflicting_attributes(&cue, &delay));
                 ResolvedStart::ShotStart
@@ -249,9 +265,7 @@ impl Resolver {
             (Some(_), None) => cue_value.map_or(ResolvedStart::ShotStart, ResolvedStart::Cue),
             (None, Some(_)) => delay_value.map_or(ResolvedStart::ShotStart, ResolvedStart::Delayed),
             (None, None) => ResolvedStart::ShotStart,
-        };
-
-        ResolvedOverlay::new(element, start, resolve_text(text))
+        }
     }
 
     fn resolve_id_only_element(&mut self, element: LinkedElement) -> ResolvedElement {
@@ -271,6 +285,15 @@ impl Resolver {
         }
     }
 
+    fn take_duration(
+        &mut self,
+        attributes: &mut Attributes,
+        name: &str,
+    ) -> Option<Authored<Duration>> {
+        let attribute = attributes.take(name)?;
+        self.resolve_duration(&attribute)
+    }
+
     fn resolve_asset(&mut self, attribute: &Attribute) -> Option<Authored<AssetRef>> {
         match AssetRef::parse(attribute.value()) {
             Ok(asset) => Some(Authored::new(asset, attribute.value_span())),
@@ -280,6 +303,15 @@ impl Resolver {
                 None
             }
         }
+    }
+
+    fn take_asset(
+        &mut self,
+        attributes: &mut Attributes,
+        name: &str,
+    ) -> Option<Authored<AssetRef>> {
+        let attribute = attributes.take(name)?;
+        self.resolve_asset(&attribute)
     }
 
     fn resolve_cue_reference(&mut self, attribute: &Attribute) -> Option<Authored<EventRef>> {

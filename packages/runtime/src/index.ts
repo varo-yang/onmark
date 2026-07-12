@@ -20,4 +20,5 @@ export {
   RuntimeSession,
   type RuntimeAdapter,
   type RuntimeAdapterFailureKind,
+  type RuntimePlan,
 } from "./session.js";

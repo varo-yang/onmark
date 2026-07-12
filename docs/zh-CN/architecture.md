@@ -332,12 +332,12 @@ onmark/
 └── docs/
 ```
 
-当前里程碑包含 `onmark-core`、`onmark-media`，以及 `@onmark/runtime` 已生成的 protocol 边界与顺序 session 状态机。Gate 一在对应行为首次被真实消费时再加入 `onmark-render` 与 `onmark-cli`：
+当前里程碑包含 `onmark-core`、`onmark-media`、`onmark-render`，以及 `@onmark/runtime` 已生成的 protocol 边界与顺序 session 状态机。Gate 一在首次把 probe、compile、render 组装成用户命令时再加入 `onmark-cli`：
 
 - `onmark-core` 是纯内核，内部用 `syntax`、`diagnostics`、`model`、`compiler`、`timeline`、`protocol` 模块保持结构；
 - `onmark-media` 只负责素材探测和规范化 metadata，使服务端 compile/lint 修正循环能够使用 `core + media` 而不链接 Chromium；
 - `@onmark/runtime` 因为运行在浏览器中、并被 authoring 与 bundler 消费而保持独立 package；
-- `onmark-render` 是 Chromium、FFmpeg 编码和单机执行器的重型边界，它依赖 `core + media`；
+- `onmark-render` 是 Chromium、FFmpeg 编码和单机执行器的重型边界，只依赖 core-owned execution facts；未来 CLI composition root 再把它与 media probe 组装；
 - `onmark-cli` 只负责参数、终端展示和进程组装。
 
 `evals/` 是 checked-in 的语言产品证据，不是 runtime package，也不是 CI 中调用在线模型的服务。它拥有冻结的题目、prompt、grader 规则、原始输出、模型参数和对照 baseline。只有真实实验材料可用时才加入这些资产；仓库不创建空框架，也不凭记忆伪造历史 baseline。
@@ -378,7 +378,7 @@ protocol    → diagnostics + timeline + model
 
 `onmark-media` 只依赖 core，以及用于私有 ffprobe response 边界的 `serde`/`serde_json`。它使用参数数组直接启动配置的 ffprobe executable，绝不经过 shell；退出后仍让派生进程持有输出 pipe 的 wrapper 不属于该 executable contract。在这条 direct-child 契约下，进程寿命和保留的 stdout/stderr 字节数都有显式上限，两条 pipe 并发排空；显式 shutdown 会报告 process-control failure，`Drop` 只作 best-effort termination fallback。私有 ffprobe response type 只在此边界翻译一次并产出 core-owned `AssetMetadata`；JSON value 与第三方 error type 不定义稳定 API，但底层 error 会通过标准 source chain 保留，供调试使用。
 
-`onmark-render` 拥有 Chromium 与 `FFmpeg` 的重型依赖预算。它只把 `chromiumoxide` 用作 CDP transport 与进程启动器，`tokio` 和 `futures` 也只存在于这条异步执行边界；`tempfile` 为每个 browser session 提供隔离 profile，并创建同文件系统的私有输出暂存目录，因此并行 session 不共享 Chrome lock，且只有 Chromium 与 `FFmpeg` 都干净结束后，才用 no-clobber hard link 发布完整 MP4。crate 显式提供 executable path、viewport、process/request deadline、frame/input/capture byte ceiling、有界 stderr 保留与 shutdown，并把 Chromium、CDP、subprocess 类型翻译成 render 自己拥有的稳定错误。浏览器导航会分别等待 document load 与 runtime host；不能把 transport 的 navigation 返回误当成完整生命周期屏障。Gate 一每次只拥有一张 PNG，捕获后直接写入 `FFmpeg image2pipe`，不存在 frame queue 或整段视频 buffer。conformance 会启动本机 Chrome 与 `FFmpeg`，加载构建后的 runtime，走过类型化 `Load`/`Prepare`/`Seek` 握手，验证重复捕获字节一致，再 probe 并完整 decode H.264 MP4。在 CI 拥有固定 Chromium/FFmpeg image 前，这些真实进程 smoke 保持 opt-in。
+`onmark-render` 拥有 Chromium 与 `FFmpeg` 的重型依赖预算。它只把 `chromiumoxide` 用作 CDP transport 与进程启动器，`tokio` 和 `futures` 也只存在于这条异步执行边界；`tempfile` 为每个 browser session 提供隔离 profile，并创建同文件系统的私有输出暂存目录，因此并行 session 不共享 Chrome lock，且只有 Chromium 与 `FFmpeg` 都干净结束后，才用 no-clobber hard link 发布完整 MP4。crate 显式提供 executable path、viewport、process/request deadline、frame/input/capture byte ceiling、有界 stderr 保留与 shutdown，并把 Chromium、CDP、subprocess 类型翻译成 render 自己拥有的稳定错误。浏览器导航会分别等待 document load 与 runtime host；不能把 transport 的 navigation 返回误当成完整生命周期屏障。Gate 一每次只拥有一张 PNG，捕获后直接写入 `FFmpeg image2pipe`，不存在 frame queue 或整段视频 buffer；固定的 H.264 `yuv420p` profile 会在进程启动前拒绝奇数 viewport 尺寸。conformance 会启动本机 Chrome 与 `FFmpeg`，加载构建后的 runtime，走过类型化 `Load`/`Prepare`/`Seek` 握手，验证重复捕获字节一致，再 probe 并完整 decode H.264 MP4。在 CI 拥有固定 Chromium/FFmpeg image 前，这些真实进程 smoke 保持 opt-in。
 
 校验失败原因保留为局部领域值。syntax 提供源码上下文后，由 `compiler` 模块唯一负责把 `InvalidNodeId` 等原因翻译成带源码位置的 `Diagnostic`，包括各阶段特有的 message 和 help；`diagnostics` 只拥有通用诊断表示与稳定 code。`model` 和 `syntax` 都不依赖 diagnostics，调用方也不得重复实现这层翻译。
 
@@ -390,7 +390,7 @@ protocol    → diagnostics + timeline + model
        └──────────  @onmark/bundler
 ```
 
-`runtime` 是浏览器底座和长期稳定扩展点，拥有当前帧 hook、FrameReady 协议、`stateless/warmup/sequential` 能力声明以及 adapter contract。`authoring` 只通过 runtime 的 types-only entrypoint 使用这些公开类型，不能依赖 runtime 的副作用入口。`bundler` 注入固定 runtime artifact 并生成 manifest；runtime 永不依赖 authoring 或 bundler。Gate 一的 `RuntimeSession` 拥有 protocol 顺序、evaluation 边界检查、精确帧投影与 terminal disposal；并发 command 直接拒绝，不暗中增长队列。浏览器具体工作只通过一个窄 adapter 进入，其等待必须有界，预期失败必须类型化。session、确定性帧投影、不可变 browser host、native Chromium handshake 与 synthetic-frame MP4 链路当前已经存在；真实媒体稳定化与 production DOM/media adapter 仍是 Gate 一待实现工作。
+`runtime` 是浏览器底座和长期稳定扩展点，拥有当前帧 hook、FrameReady 协议、`stateless/warmup/sequential` 能力声明以及 adapter contract。`authoring` 只通过 runtime 的 types-only entrypoint 使用这些公开类型，不能依赖 runtime 的副作用入口。`bundler` 注入固定 runtime artifact 并生成 manifest；runtime 永不依赖 authoring 或 bundler。Gate 一的 `RuntimeSession` 拥有 protocol 顺序、interval 关系检查、精确帧投影与 terminal disposal；并发 command 直接拒绝，不暗中增长队列，adapter 只会收到递归冻结的 plan snapshot。浏览器具体工作只通过一个窄 adapter 进入，其等待必须有界，预期失败必须类型化。session、确定性帧投影、不可变 browser host、native Chromium handshake 与 synthetic-frame MP4 链路当前已经存在；真实媒体稳定化与 production DOM/media adapter 仍是 Gate 一待实现工作。
 
 ### AWS Lambda 是适配器，不是第二套引擎
 

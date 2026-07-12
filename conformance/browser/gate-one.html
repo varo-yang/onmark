@@ -28,7 +28,13 @@
       import { installRuntimeHost } from "../../packages/runtime/dist/src/index.js";
 
       const canvas = document.querySelector("canvas");
+      if (!(canvas instanceof HTMLCanvasElement)) {
+        throw new TypeError("the browser fixture requires one canvas");
+      }
       const context = canvas.getContext("2d", { alpha: false });
+      if (context === null) {
+        throw new TypeError("the browser fixture requires a 2D canvas context");
+      }
 
       function draw(frame) {
         canvas.width = window.innerWidth;

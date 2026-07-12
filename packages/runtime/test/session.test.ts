@@ -12,6 +12,7 @@ import {
   type BrowserResponse,
   type RuntimeAdapter,
   type RuntimeFrame,
+  type RuntimePlan,
 } from "../src/index.js";
 
 const plan: BrowserPlan = {
@@ -177,6 +178,44 @@ test("takes ownership of plan facts and makes disposal terminal", async () => {
   assert.deepEqual(adapter.loadedPlan, plan);
 });
 
+test("rejects interval relationships outside the browser plan contract", async () => {
+  const reversedEvaluation = structuredClone(plan);
+  reversedEvaluation.evaluation = { start: 20, end: 10 };
+  const reversedOutput = structuredClone(plan);
+  reversedOutput.output = { start: 20, end: 10 };
+  const escapedOutput = structuredClone(plan);
+  escapedOutput.output = { start: 9, end: 20 };
+
+  for (const invalidPlan of [
+    reversedEvaluation,
+    reversedOutput,
+    escapedOutput,
+  ]) {
+    const adapter = new RecordingAdapter();
+    const session = new RuntimeSession(adapter);
+    const rejected = await session.dispatch(
+      request(1, { type: "load", plan: invalidPlan }),
+    );
+
+    assertFailure(rejected, "invalidRequest");
+    assert.deepEqual(adapter.operations, []);
+  }
+});
+
+test("keeps the owned plan immutable after passing it to the adapter", async () => {
+  const adapter = new RecordingAdapter();
+  const session = new RuntimeSession(adapter);
+
+  await session.dispatch(request(1, { type: "load", plan }));
+  const loadedPlan = adapter.loadedPlan;
+  assert.ok(loadedPlan);
+  assert.equal(Reflect.set(loadedPlan.frameRate, "numerator", 60), false);
+
+  await session.dispatch(request(2, { type: "prepare", evaluationStart: 10 }));
+  await session.dispatch(request(3, { type: "seek", frame: 15 }));
+  assert.deepEqual(adapter.seekFrames, [{ index: 15, timeSeconds: 0.5 }]);
+});
+
 // ── Test support ──
 
 function request(
@@ -200,7 +239,7 @@ type FailureCode = Extract<
 
 class RecordingAdapter implements RuntimeAdapter {
   readonly operations: string[] = [];
-  loadedPlan: BrowserPlan | undefined;
+  loadedPlan: RuntimePlan | undefined;
   loadBarrier: Promise<void> | undefined;
   loadError: Error | undefined;
   prepareError: Error | undefined;
@@ -209,7 +248,7 @@ class RecordingAdapter implements RuntimeAdapter {
   preparedFrame: RuntimeFrame | undefined;
   readonly seekFrames: RuntimeFrame[] = [];
 
-  async load(plan: BrowserPlan): Promise<void> {
+  async load(plan: RuntimePlan): Promise<void> {
     this.operations.push("load");
     this.loadedPlan = plan;
     if (this.loadError !== undefined) {

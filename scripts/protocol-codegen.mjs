@@ -56,8 +56,12 @@ async function readJson(relative) {
 }
 
 function generationMode(arguments_) {
-  if (arguments_.length === 0) return "write";
-  if (arguments_.length === 1 && arguments_[0] === "--check") return "check";
+  if (arguments_.length === 0) {
+    return "write";
+  }
+  if (arguments_.length === 1 && arguments_[0] === "--check") {
+    return "check";
+  }
   throw new Error("usage: node scripts/protocol-codegen.mjs [--check]");
 }
 

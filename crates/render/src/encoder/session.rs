@@ -156,17 +156,17 @@ impl FfmpegSession {
                 "FFmpeg input is already closed",
             ));
         };
-        timeout_at(self.deadline, stdin.write_all(frame.as_bytes()))
+        let write_result = timeout_at(self.deadline, stdin.write_all(frame.as_bytes()))
             .await
-            .map_err(|_| self.error(EncodeErrorKind::Timeout, "FFmpeg exceeded its deadline"))?
-            .map_err(|source| {
-                EncodeError::io(
-                    EncodeErrorKind::InputWrite,
-                    &self.output,
-                    "failed to write a frame to FFmpeg",
-                    source,
-                )
-            })?;
+            .map_err(|_| self.error(EncodeErrorKind::Timeout, "FFmpeg exceeded its deadline"))?;
+        write_result.map_err(|source| {
+            EncodeError::io(
+                EncodeErrorKind::InputWrite,
+                &self.output,
+                "failed to write a frame to FFmpeg",
+                source,
+            )
+        })?;
 
         self.frames = next_frame;
         self.input_bytes = next_input_bytes;
@@ -241,24 +241,23 @@ impl FfmpegSession {
                 "FFmpeg stderr reader is already closed",
             ));
         };
-        match timeout(CLEANUP_TIMEOUT, &mut stderr).await {
-            Ok(Ok(Ok(captured))) => Ok(captured),
-            Ok(Ok(Err(source))) => Err(EncodeError::io(
+        let Ok(joined) = timeout(CLEANUP_TIMEOUT, &mut stderr).await else {
+            stderr.abort();
+            let _ = stderr.await;
+            return Err(self.error(
+                EncodeErrorKind::StderrRead,
+                "FFmpeg stderr reader missed its cleanup deadline",
+            ));
+        };
+        let capture_result = joined.map_err(|source| EncodeError::join(&self.output, source))?;
+        capture_result.map_err(|source| {
+            EncodeError::io(
                 EncodeErrorKind::StderrRead,
                 &self.output,
                 "failed to read FFmpeg stderr",
                 source,
-            )),
-            Ok(Err(source)) => Err(EncodeError::join(&self.output, source)),
-            Err(_) => {
-                stderr.abort();
-                let _ = stderr.await;
-                Err(self.error(
-                    EncodeErrorKind::StderrRead,
-                    "FFmpeg stderr reader missed its cleanup deadline",
-                ))
-            }
-        }
+            )
+        })
     }
 
     async fn terminate(&mut self) {

@@ -167,12 +167,9 @@ impl<'a> Solver<'a> {
             start_reason,
             TimingReason::Children,
         );
+        let element = timeline_element(element);
 
-        Ok(TimelineScene::new(
-            timeline_element(element),
-            timing,
-            timeline_shots,
-        ))
+        Ok(TimelineScene::new(element, timing, timeline_shots))
     }
 
     fn solve_shot(&mut self, shot: ResolvedShot) -> Result<Option<TimelineShot>, SolveError> {
@@ -180,19 +177,20 @@ impl<'a> Solver<'a> {
         let source = element.span();
         let has_duration_source = duration.is_some() || has_primary_content(&content);
         let prepared = self.prepare_contents(content)?;
-        let explicit = duration.and_then(|duration| self.explicit_duration(duration));
+        let explicit = match duration {
+            Some(duration) => self.explicit_duration(duration),
+            None => None,
+        };
         let primary_end = longest_primary(&prepared);
         let duration = self.shot_duration(explicit, primary_end, has_duration_source, source);
         let Some(timing) = self.place_shot(duration, source) else {
             return Ok(None);
         };
         let content = self.lower_contents(prepared, timing.interval());
+        let element = timeline_element(element);
+        let shot = TimelineShot::new(element, timing, content);
 
-        Ok(Some(TimelineShot::new(
-            timeline_element(element),
-            timing,
-            content,
-        )))
+        Ok(Some(shot))
     }
 
     fn prepare_contents(
@@ -282,9 +280,11 @@ impl<'a> Solver<'a> {
         voice_over: ResolvedVoiceOver,
     ) -> Result<Option<PreparedContent>, SolveError> {
         let (media, text) = voice_over.into_parts();
-        let media = self.prepare_media(media)?;
+        let Some(media) = self.prepare_media(media)? else {
+            return Ok(None);
+        };
 
-        Ok(media.map(|media| PreparedContent::VoiceOver { media, text }))
+        Ok(Some(PreparedContent::VoiceOver { media, text }))
     }
 
     fn prepare_media(&mut self, media: ResolvedMedia) -> Result<Option<PreparedMedia>, SolveError> {
@@ -343,63 +343,9 @@ impl<'a> Solver<'a> {
         shot: FrameInterval,
     ) -> Option<TimelineContent> {
         match content {
-            PreparedContent::Video(video) => Some(self.lower_video(video, shot)),
-            PreparedContent::VoiceOver { media, text } => {
-                Some(self.lower_voice_over(media, text, shot))
-            }
+            PreparedContent::Video(video) => Some(lower_video(video, shot)),
+            PreparedContent::VoiceOver { media, text } => Some(lower_voice_over(media, text, shot)),
             PreparedContent::Overlay(overlay) => self.lower_overlay(overlay, shot),
-        }
-    }
-
-    fn lower_video(&mut self, media: PreparedMedia, shot: FrameInterval) -> TimelineContent {
-        let media = self.lower_media(media, shot);
-        let video = TimelineVideo::new(media.element, media.timing, media.asset);
-
-        TimelineContent::Video(video)
-    }
-
-    fn lower_voice_over(
-        &mut self,
-        media: PreparedMedia,
-        text: Vec<ResolvedText>,
-        shot: FrameInterval,
-    ) -> TimelineContent {
-        let media = self.lower_media(media, shot);
-        let voice_over = TimelineVoiceOver::new(
-            media.element,
-            media.timing,
-            media.asset,
-            timeline_text(text),
-        );
-
-        TimelineContent::VoiceOver(voice_over)
-    }
-
-    fn lower_media(&mut self, media: PreparedMedia, shot: FrameInterval) -> LoweredMedia {
-        let start = advance(
-            shot.start(),
-            media.start,
-            media.element.span(),
-            &mut self.diagnostics,
-        )
-        .unwrap_or(shot.start());
-        let end = advance(
-            shot.start(),
-            media.end,
-            media.element.span(),
-            &mut self.diagnostics,
-        )
-        .unwrap_or(shot.start());
-        let timing = TimelineTiming::new(
-            interval(start, end),
-            media.start_reason,
-            TimingReason::AssetDuration,
-        );
-
-        LoweredMedia {
-            element: timeline_element(media.element),
-            timing,
-            asset: media.asset,
         }
     }
 
@@ -409,7 +355,7 @@ impl<'a> Solver<'a> {
         shot: FrameInterval,
     ) -> Option<TimelineContent> {
         let (element, start, text) = overlay.into_parts();
-        let start = self.overlay_start(start, shot, element.span());
+        let start = self.overlay_start(start, shot, element.span())?;
 
         if start.at < shot.start() || start.at >= shot.end() {
             self.diagnostics
@@ -432,51 +378,53 @@ impl<'a> Solver<'a> {
         start: ResolvedStart,
         shot: FrameInterval,
         default_span: SourceSpan,
-    ) -> OverlayStart {
+    ) -> Option<OverlayStart> {
         match start {
-            ResolvedStart::ShotStart => OverlayStart {
+            ResolvedStart::ShotStart => Some(OverlayStart {
                 at: shot.start(),
                 reason: TimingReason::ShotStart,
                 authored_at: default_span,
-            },
+            }),
             ResolvedStart::Delayed(delay) => self.delayed_start(delay, shot.start()),
-            ResolvedStart::Cue(event) => self.event_start(event, shot.start()),
+            ResolvedStart::Cue(event) => self.event_start(event),
         }
     }
 
-    fn delayed_start(&mut self, delay: Authored<Duration>, shot_start: FrameIndex) -> OverlayStart {
+    fn delayed_start(
+        &mut self,
+        delay: Authored<Duration>,
+        shot_start: FrameIndex,
+    ) -> Option<OverlayStart> {
         let (delay, authored_at) = delay.into_parts();
-        let frames = frames_for(self.timebase, delay, authored_at, &mut self.diagnostics)
-            .unwrap_or(FrameCount::ZERO);
-        let at =
-            advance(shot_start, frames, authored_at, &mut self.diagnostics).unwrap_or(shot_start);
+        let frames = frames_for(self.timebase, delay, authored_at, &mut self.diagnostics)?;
+        let at = advance(shot_start, frames, authored_at, &mut self.diagnostics)?;
 
-        OverlayStart {
+        Some(OverlayStart {
             at,
             reason: TimingReason::AuthoredDelay(authored_at),
             authored_at,
-        }
+        })
     }
 
-    fn event_start(&self, event: Authored<EventRef>, shot_start: FrameIndex) -> OverlayStart {
+    fn event_start(&self, event: Authored<EventRef>) -> Option<OverlayStart> {
         let (event, authored_at) = event.into_parts();
         let EventRef::Cue(id) = &event;
-        let at = self.events.get(id).map_or(shot_start, |event| event.at());
+        let at = self.events.get(id)?.at();
 
-        OverlayStart {
+        Some(OverlayStart {
             at,
             reason: TimingReason::Event { event, authored_at },
             authored_at,
-        }
+        })
     }
 
     fn explicit_duration(&mut self, duration: Authored<Duration>) -> Option<ExplicitDuration> {
         let (duration, authored_at) = duration.into_parts();
-        frames_for(self.timebase, duration, authored_at, &mut self.diagnostics).map(|frames| {
-            ExplicitDuration {
-                frames,
-                authored_at,
-            }
+        let frames = frames_for(self.timebase, duration, authored_at, &mut self.diagnostics)?;
+
+        Some(ExplicitDuration {
+            frames,
+            authored_at,
         })
     }
 
@@ -593,6 +541,47 @@ struct LoweredMedia {
     element: TimelineElement,
     timing: TimelineTiming,
     asset: AssetRef,
+}
+
+fn lower_media(media: PreparedMedia, shot: FrameInterval) -> LoweredMedia {
+    let start = shot
+        .start()
+        .checked_advance(media.start)
+        .expect("a placed shot bounds every prepared media start");
+    let end = shot
+        .start()
+        .checked_advance(media.end)
+        .expect("a placed shot bounds every prepared media end");
+    let timing = TimelineTiming::new(
+        interval(start, end),
+        media.start_reason,
+        TimingReason::AssetDuration,
+    );
+
+    LoweredMedia {
+        element: timeline_element(media.element),
+        timing,
+        asset: media.asset,
+    }
+}
+
+fn lower_video(media: PreparedMedia, shot: FrameInterval) -> TimelineContent {
+    let media = lower_media(media, shot);
+    let video = TimelineVideo::new(media.element, media.timing, media.asset);
+
+    TimelineContent::Video(video)
+}
+
+fn lower_voice_over(
+    media: PreparedMedia,
+    text: Vec<ResolvedText>,
+    shot: FrameInterval,
+) -> TimelineContent {
+    let media = lower_media(media, shot);
+    let text = timeline_text(text);
+    let voice_over = TimelineVoiceOver::new(media.element, media.timing, media.asset, text);
+
+    TimelineContent::VoiceOver(voice_over)
 }
 
 struct OverlayStart {
