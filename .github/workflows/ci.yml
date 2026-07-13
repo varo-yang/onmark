@@ -126,6 +126,11 @@ jobs:
           chrome-version: 149.0.7827.55
           install-dependencies: true
 
+      - name: Configure CI Chrome launcher
+        run: |
+          printf '%s\n' '#!/bin/sh' 'exec "$ONMARK_CHROME_BINARY" --no-sandbox "$@"' > "$RUNNER_TEMP/onmark-chrome"
+          chmod +x "$RUNNER_TEMP/onmark-chrome"
+
       - name: Install pinned FFmpeg
         run: |
           sudo apt-get update
@@ -154,7 +159,8 @@ jobs:
 
       - name: Run native render conformance
         env:
-          ONMARK_CHROME: ${{ steps.chrome.outputs.chrome-path }}
+          ONMARK_CHROME: ${{ runner.temp }}/onmark-chrome
+          ONMARK_CHROME_BINARY: ${{ steps.chrome.outputs.chrome-path }}
           ONMARK_BUNDLER: ${{ github.workspace }}/packages/bundler/dist/src/command.js
           ONMARK_FFMPEG: /usr/bin/ffmpeg
           ONMARK_FFPROBE: /usr/bin/ffprobe

@@ -453,6 +453,11 @@ CLI conformance 会启动两次独立的 whole-film session，比较完整的 de
 raw-frame hash 序列，再验证 no-clobber 发布。CI 显式拥有这些测试使用的 browser
 与 media-tool 版本；本机运行仍保持 opt-in，因为它需要这些外部进程。
 
+GitHub-hosted Ubuntu 无法向安装的 Chrome for Testing binary 提供可用的 Chromium
+sandbox。因此 real-process job 会提供一个 runner-local launcher 来追加
+`--no-sandbox`；这个例外只属于一次性的 CI worker。产品与本地 browser launch
+默认仍然启用 Chromium sandbox。
+
 Gate 一的 native browser operation 与 decoded-video wait 最多接受一天 deadline，使所有平台 timer 都处于显式支持的时间范围内。
 
 校验失败原因保留为局部领域值。syntax 提供源码上下文后，由 `compiler` 模块唯一负责把 `InvalidNodeId` 等原因翻译成带源码位置的 `Diagnostic`，包括各阶段特有的 message 和 help；`diagnostics` 只拥有通用诊断表示与稳定 code。`model` 和 `syntax` 都不依赖 diagnostics，调用方也不得重复实现这层翻译。

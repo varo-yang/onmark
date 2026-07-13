@@ -240,8 +240,8 @@ Gate one captures one PNG at a time and writes it directly to `FFmpeg`'s
 `image2pipe`; there is no frame queue or whole-video buffer. The fixed H.264
 `yuv420p` profile rejects odd viewport dimensions before either process starts.
 Conformance launches Chrome for Testing and `FFmpeg` against the production
-presentation adapter, crosses the typed `Load`/`Prepare`/`Seek` handshake, probes the
-resulting H.264 MP4, and verifies decoded motion. The checked-in bundle fixture
+presentation adapter, crosses the typed `Load`/`Prepare`/`Seek` handshake,
+probes the resulting H.264 MP4, and verifies decoded motion. The checked-in bundle fixture
 carries real payload bytes, is rebuilt byte-for-byte in the bundler test, and
 crosses the generated Node/native manifest contract through native
 materialization. The outermost CLI conformance starts two independent
@@ -249,6 +249,12 @@ whole-film sessions and compares their complete decoded raw-frame hash
 sequences before checking no-clobber publication. CI owns explicit browser and
 media-tool versions for these tests; local execution remains opt-in because it
 requires those external processes.
+
+GitHub-hosted Ubuntu does not expose a usable Chromium sandbox to the installed
+Chrome for Testing binary. The real-process job therefore supplies a
+runner-local launcher that adds `--no-sandbox`; this exception belongs only to
+the disposable CI worker. Product and local browser launches keep Chromium's
+sandbox enabled by default.
 
 Gate-one native browser operations and decoded-video waits accept at most a one-day deadline, keeping every platform timer inside an explicit supported horizon.
 
