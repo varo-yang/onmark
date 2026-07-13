@@ -137,7 +137,9 @@ protocol. The unit retains worker-local source paths only until assembly has
 verified or linked the exact bytes into that root.
 The presentation entry owns layout and installs the runtime adapter; the
 runtime supplies deterministic clock, readiness, and media primitives. Onmark
-does not synthesize an implicit full-screen DOM from Timeline IR.
+does not synthesize an implicit full-screen DOM from Timeline IR. The public
+rules for author-owned browser code live in the
+[presentation contract](presentation-contract.md).
 
 Each worker executes one state machine:
 

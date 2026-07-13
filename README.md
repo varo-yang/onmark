@@ -48,6 +48,7 @@ cargo xtask schema --check
 
 - [Architecture](docs/en/architecture.md)
 - [Language specification](docs/en/language-specification.md)
+- [Presentation contract](docs/en/presentation-contract.md)
 - [Rust style guide](docs/en/rust-style-guide.md)
 - [TypeScript style guide](docs/en/typescript-style-guide.md)
 - [中文文档](docs/zh-CN/)

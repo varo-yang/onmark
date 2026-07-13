@@ -8,6 +8,8 @@ English and Chinese documents share the same decisions. Chinese architecture doc
 | [`zh-CN/rust-style-guide.md`](zh-CN/rust-style-guide.md) | Chinese mirror |
 | [`en/typescript-style-guide.md`](en/typescript-style-guide.md) | The code constitution for TypeScript and JavaScript |
 | [`zh-CN/typescript-style-guide.md`](zh-CN/typescript-style-guide.md) | 中文 TypeScript/JavaScript 代码宪法 |
+| [`en/presentation-contract.md`](en/presentation-contract.md) | Browser presentation authoring contract |
+| [`zh-CN/presentation-contract.md`](zh-CN/presentation-contract.md) | 浏览器 presentation authoring 合约 |
 | [`en/architecture.md`](en/architecture.md) | Target architecture and execution model |
 | [`zh-CN/architecture.md`](zh-CN/architecture.md) | 中文架构设计与完整渲染链路 |
 | [`en/language-specification.md`](en/language-specification.md) | Screenplay language semantics and diagnostics |

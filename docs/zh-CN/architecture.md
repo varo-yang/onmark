@@ -201,7 +201,7 @@ Timeline solve 消费由 `onmark-core` 拥有的 `AssetRef → FrozenAsset` cata
 
 Bundler 把用户组件、Onmark runtime、CSS 和静态依赖打成不可变 bundle。bundle 只包含绘制能力，不包含时间求解逻辑。目标 manifest 会记录 chunk、字体、外部素材、runtime 版本和能力声明，并进入缓存键。Gate 一当前 manifest 只记录固定 entry document 与实际保留文件；这些文件的 hash 已经绑定注入的 runtime 与编译后 CSS。`bundleId` 是紧凑 UTF-8 JSON identity `{version,entryPoint,files}` 的 SHA-256；file 按 portable path 排序，每个 identity entry 的字段顺序固定为 `{bytes,path,sha256}`。这是 versioned contract，不是 pretty-printed manifest 的偶然表现。V1 包含一到 99,999 个 payload file；path 只能使用小写 portable ASCII，最长 1,024 bytes，不能进入 unit-owned namespace，也不能让一个 file 成为另一个 file 的目录祖先。其余字段只在 authoring 或 execution 真正消费时加入。
 
-Presentation entry 拥有 DOM 结构、CSS/layout 与 runtime adapter 的安装；runtime 只提供确定性时钟、readiness 与媒体原语。Rust 不根据 Timeline IR 偷偷生成一套默认全屏 DOM。
+Presentation entry 拥有 DOM 结构、CSS/layout 与 runtime adapter 的安装；runtime 只提供确定性时钟、readiness 与媒体原语。Rust 不根据 Timeline IR 偷偷生成一套默认全屏 DOM。作者侧浏览器代码的公开规则写在 [presentation contract](presentation-contract.md)。
 
 Gate 一组装一个 content-addressed unit root：所需素材位于 presentation entry 下的 `assets/sha256/<lowercase digest>`。browser 直接从 `BrowserPlan` 已携带的 frozen identity 推导这个相对位置，因此不需要第二套 native-path/browser-URL wire protocol。unit 只在 assembly 前保留 worker-local source path；materializer 复核精确字节后复制进私有 root，不用 link 把后续 source-path 变化带入执行。`RenderProfile` 拥有 viewport dimension 等会改变 pixel 的事实；process deadline 与 retained-memory ceiling 仍是 executor limit。materialization 会消费 `RenderUnit` 并产出同时拥有 `BrowserPlan` 与已验证私有 root 的 `ExecutableUnit`，executor 因而不可能把 plan 与无关 URL 或 asset root 拼在一起。
 
