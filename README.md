@@ -6,7 +6,19 @@ Onmark is a screenplay-first video compiler and rendering engine for people and 
 screenplay → deterministic Timeline IR → browser frames → encoded video
 ```
 
-The project is currently in design and delivery gate one: rendering one real video reliably through the final-direction compiler and browser protocol. The implemented foundation includes the pure domain model, structured authored diagnostics, span-preserving screenplay syntax, binding, typed resolution, timeline solving, and versioned browser and bundle wire types in `onmark-core`; bounded ffprobe metadata normalization in `onmark-media`; deterministic frame projection, the browser protocol session, and bounded decoded-video readiness in `@onmark/runtime`; deterministic presentation artifacts in `@onmark/bundler`; and a typed `RenderUnit → ExecutableUnit` materialization boundary plus a real-video Chromium-to-FFmpeg MP4 path in `onmark-render`. Production presentation authoring and the CLI composition root remain Gate-one work.
+The project is currently in design and delivery gate one: rendering one real video reliably through the final-direction compiler and browser protocol. The implemented foundation includes the pure compiler and versioned wire types in `onmark-core`; bounded ffprobe normalization in `onmark-media`; deterministic browser execution in `@onmark/runtime`; immutable presentation artifacts in `@onmark/bundler`; the typed Chromium-to-FFmpeg executor in `onmark-render`; and the first whole-film `onmark-cli` composition root. Production presentation authoring remains Gate-one work.
+
+## Render
+
+The native command discovers `presentation.ts` beside the screenplay and writes a no-clobber `renders/<name>.mp4` by default:
+
+```bash
+onmark render film.onmark
+onmark render film.onmark --presentation browser.ts --output review.mp4
+onmark render film.onmark --fps 30000/1001 --width 1920 --height 1080
+```
+
+Gate one requires `onmark-bundle`, Chromium or Google Chrome, `ffmpeg`, and `ffprobe` to be installed. Use the execution override flags shown by `onmark render --help` when they are not on the default paths.
 
 ## Repository map
 

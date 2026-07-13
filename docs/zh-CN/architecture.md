@@ -367,14 +367,18 @@ onmark/
 └── docs/
 ```
 
-当前里程碑包含 `onmark-core`、`onmark-media`、`onmark-render`、`@onmark/runtime` 的浏览器 session，以及 `@onmark/bundler` 的 presentation artifact 边界。Gate 一在首次把输入冻结、probe、compile、bundle、render 组装成用户命令时再加入 `onmark-cli`：
+当前里程碑包含 `onmark-core`、`onmark-media`、`onmark-render`、`@onmark/runtime` 的浏览器 session、`@onmark/bundler` 的 presentation artifact 边界，以及第一条 `onmark-cli` whole-film composition root：
 
 - `onmark-core` 是纯内核，内部用 `syntax`、`diagnostics`、`model`、`compiler`、`timeline`、`protocol` 模块保持结构；
 - `onmark-media` 只负责素材探测和规范化 metadata，使服务端 compile/lint 修正循环能够使用 `core + media` 而不链接 Chromium；
 - `@onmark/runtime` 因为运行在浏览器中、并被 authoring 与 bundler 消费而保持独立 package；
 - `@onmark/bundler` 因为运行在 Node、独占 esbuild 与文件系统依赖预算、并产出供 native renderer 独立消费的 presentation directory 而保持独立 package；
-- `onmark-render` 是 Chromium、FFmpeg 编码和单机执行器的重型边界，只依赖 core-owned execution facts 与 render-owned materialized locations；未来 CLI composition root 再把它与 media probe、bundler 组装；
-- `onmark-cli` 只负责参数、终端展示和进程组装。
+- `onmark-render` 是 Chromium、FFmpeg 编码和单机执行器的重型边界，只依赖 core-owned execution facts 与 render-owned materialized locations；
+- `onmark-cli` 是独立发布产物，只负责参数、终端展示，以及 core compile、media probe、bundler process 和 native render 的组装，不把它们的实现揉进一个 crate。
+
+Gate 一的 native 命令刻意保持很窄：`onmark render <screenplay>`。若未传 `--presentation`，它发现 screenplay 同目录的 `presentation.ts`；若未传 `--output`，它使用稳定且 no-clobber 的 `renders/<screenplay-stem>.mp4`。普通 render control 只有精确帧率和 viewport dimension，process path 只是 execution override，不是 screenplay fact。作者诊断先于 executable preflight 输出，因此解释一份无效剧本不要求机器先装好 Chromium、Node 或 FFmpeg。
+
+`onmark-cli` 在启动外部工作前一次性解析全部 executable，然后按线性路径执行：read/compile → freeze/probe referenced assets → solve Timeline IR → bundle presentation → compose/materialize whole-film unit → render → atomic publish。冻结过程一边把每个引用源流式复制进私有临时文件一边计算 SHA-256，之后只 probe 这份私有副本，因此 identity 与 metadata 对应同一份 retained bytes。hash/probe 在显式 blocking work 中执行，不占用 Tokio worker。CLI 以 core、media、render 为真实 composition input；`clap` 只负责参数解析，`sha2` 只负责流式 SHA-256，`tempfile` 只负责私有生命周期，`serde_json` 只解码 Rust-owned manifest，Tokio 只负责有界 process/render async work。这些依赖都不能进入纯 core。
 
 `evals/` 是 checked-in 的语言产品证据，不是 runtime package，也不是 CI 中调用在线模型的服务。它拥有冻结的题目、prompt、grader 规则、原始输出、模型参数和对照 baseline。只有真实实验材料可用时才加入这些资产；仓库不创建空框架，也不凭记忆伪造历史 baseline。
 
@@ -430,7 +434,7 @@ Gate 一的 native browser operation 与 decoded-video wait 最多接受一天 d
 
 `runtime` 是浏览器底座和长期稳定扩展点，拥有当前帧 hook、FrameReady 协议、`stateless/warmup/sequential` 能力声明以及 adapter contract。`authoring` 只通过 runtime 的 types-only entrypoint 使用这些公开类型，不能依赖 runtime 的副作用入口。`bundler` 注入固定 runtime artifact 并生成 manifest；runtime 永不依赖 authoring 或 bundler。Gate 一的 `RuntimeSession` 拥有 protocol 顺序、interval 关系检查、精确帧投影与 terminal disposal；并发 command 直接拒绝，不暗中增长队列，adapter 只会收到递归冻结的 plan snapshot。浏览器具体工作只通过一个窄 adapter 进入，其等待必须有界，预期失败必须类型化。production video adapter 接收 presentation-owned element、source 与 visibility effect；它负责有界媒体加载、精确 source-frame selection、decoded-frame readiness 与 terminal cleanup，但不创建 layout 或 canvas state。adapter 与 bundler 使用的 materialized asset directory 同样由 Rust bundle schema 生成。
 
-`@onmark/bundler` 是 Node-only 的产品构建边界，不是仓库自动化。它只允许依赖 Node built-in、`@onmark/runtime` 的公开入口和固定版本的生产依赖 `esbuild`；浏览器 package 不得反向依赖它。Gate 一只编译单个 ESM presentation、替换为固定 runtime 入口、生成固定 document shell，并以稳定 SHA-256 manifest 记录每个 presentation payload 文件；manifest shape 与 layout constants 都来自 Rust protocol contract 的生成结果，不在 TypeScript 手写第二份。构建显式限制最终保留字节数，经输出目录同级的私有 staging directory 写入，并拒绝构建前或发布前已存在的输出路径。最后一次 directory rename 能防止读者看到正常完成过程中的半成品，但 Node 的可移植文件系统 API 无法把此前的 absent check 变成跨进程 no-clobber transaction。当前边界刻意不提供 watch、plugin API、cache、development server 或 asset materialization policy。Esbuild 内部工作内存仍由固定的第三方实现管理，不受 retained-output ceiling 约束。
+`@onmark/bundler` 是 Node-only 的产品构建边界，不是仓库自动化。它只允许依赖 Node built-in、`@onmark/runtime` 的公开入口和固定版本的生产依赖 `esbuild`；浏览器 package 不得反向依赖它。Gate 一只编译单个 ESM presentation、替换为固定 runtime 入口、生成固定 document shell，并以稳定 SHA-256 manifest 记录每个 presentation payload 文件。package 通过窄 `onmark-bundle` executable 暴露同一个操作，native CLI 因而不 import Node 或 esbuild type。child process 只接收显式 entry、output 和 retained-byte-limit 参数，成功时不向 stdout 写 payload，失败时向 stderr 写稳定类别；native caller 自己施加 process deadline，持续排空诊断但只保留有界 tail，并把产出的 manifest 重新交给 Rust-owned wire type 解析。manifest shape 与 layout constants 都来自 Rust protocol contract 的生成结果，不在 TypeScript 手写第二份。构建显式限制最终保留字节数，经输出目录同级的私有 staging directory 写入，并拒绝构建前或发布前已存在的输出路径。最后一次 directory rename 能防止读者看到正常完成过程中的半成品，但 Node 的可移植文件系统 API 无法把此前的 absent check 变成跨进程 no-clobber transaction。当前边界刻意不提供 watch、plugin API、cache、development server 或 asset materialization policy。Esbuild 内部工作内存仍由固定的第三方实现管理，不受 retained-output ceiling 约束。
 
 ### AWS Lambda 是适配器，不是第二套引擎
 
@@ -479,13 +483,13 @@ handwritten TypeScript authoring API → screenplay source → Rust compiler
 
 ## 10. 产品表面与可观测性
 
+Gate 一当前唯一承诺的命令是：
+
 ```text
-onmark check film.html
-onmark compile film.html --emit plan.json
-onmark inspect plan.json --timeline
-onmark render film.html -o film.mp4
-onmark worker --coordinator ...
+onmark render film.onmark -o film.mp4
 ```
+
+`check`、`compile`、`inspect` 属于后续可能从真实使用中长出的产品表面；`worker` 只会在 Gate 三作为同一执行器的部署适配器出现。它们都不是当前 CLI 合约，也不能提前生成空命令或 coordinator 脚手架。
 
 Rust API 用于嵌入服务端；TS API 用于 authoring；跨进程使用 versioned schema，不直接暴露内部领域对象。CLI 输出、诊断码和 Execution Plan 都是稳定产品协议。
 
