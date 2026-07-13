@@ -49,16 +49,20 @@ fn missing_frozen_asset_is_a_typed_failure() {
 }
 
 #[test]
-fn missing_selected_video_metadata_is_a_typed_failure() {
-    let source_path = fixture("timeline", "valid/media-duration.onmark");
-    let asset = AssetRef::parse("clip.mp4").expect("the fixture asset reference is valid");
+fn incompatible_video_source_matches_stable_diagnostics() {
+    let source_path = fixture("timeline", "invalid/incompatible-video-source.onmark");
+    let expected_path = fixture(
+        "timeline",
+        "invalid/incompatible-video-source.diagnostics.txt",
+    );
+    let asset = AssetRef::parse("voice.mp3").expect("the fixture asset reference is valid");
     let metadata = AssetMetadata::audio(Duration::parse("2s").expect("the duration is valid"));
     let frozen = FrozenAsset::new(FrozenAssetId::from_sha256([1; 32]), metadata);
-    let assets = BTreeMap::from([(asset.clone(), frozen)]);
-    let error = solve_fixture(&source_path, &assets)
-        .expect_err("a video element requires selected visual-stream metadata");
+    let assets = BTreeMap::from([(asset, frozen)]);
+    let report = solve_fixture(&source_path, &assets).expect("the referenced asset was probed");
 
-    assert_eq!(error, compiler::SolveError::MissingVideoMetadata(asset));
+    assert!(report.timeline().is_none());
+    assert_or_update(&expected_path, &render_diagnostics(report.diagnostics()));
 }
 
 #[test]

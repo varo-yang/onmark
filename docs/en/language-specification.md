@@ -115,6 +115,7 @@ Initial binding, resolution, and timing diagnostics are:
 | `ONM-TIME-004` | resolved content starts outside its owning shot |
 | `ONM-TIME-005` | an exact time does not fit in the selected frame domain |
 | `ONM-ASSET-001` | renderable media has no frozen artifact reference |
+| `ONM-ASSET-002` | a media element references an artifact without its required track |
 | `ONM-REF-001` | a well-formed overlay cue reference does not name a resolved cue |
 | `ONM-REF-002` | a resolved cue is never referenced |
 | `ONM-ATTR-001` | an element contains an unknown attribute |

@@ -37,6 +37,8 @@ pub enum DiagnosticCode {
     FrameConversionOverflow,
     /// Renderable media omits its frozen artifact reference.
     MissingMediaSource,
+    /// A media element references an artifact without its required track.
+    IncompatibleMediaSource,
     /// A cue reference does not name a resolved cue.
     UnknownCueReference,
     /// A resolved cue is never referenced.
@@ -84,6 +86,7 @@ impl DiagnosticCode {
             Self::TimingOutsideShot => "ONM-TIME-004",
             Self::FrameConversionOverflow => "ONM-TIME-005",
             Self::MissingMediaSource => "ONM-ASSET-001",
+            Self::IncompatibleMediaSource => "ONM-ASSET-002",
             Self::UnknownCueReference => "ONM-REF-001",
             Self::UnusedCue => "ONM-REF-002",
             Self::UnknownAttribute => "ONM-ATTR-001",
@@ -118,6 +121,7 @@ impl DiagnosticCode {
             | Self::TimingOutsideShot
             | Self::FrameConversionOverflow
             | Self::MissingMediaSource
+            | Self::IncompatibleMediaSource
             | Self::UnknownCueReference
             | Self::UnknownAttribute
             | Self::MissingRequiredAttribute
@@ -182,6 +186,7 @@ mod tests {
             (DiagnosticCode::TimingOutsideShot, "ONM-TIME-004"),
             (DiagnosticCode::FrameConversionOverflow, "ONM-TIME-005"),
             (DiagnosticCode::MissingMediaSource, "ONM-ASSET-001"),
+            (DiagnosticCode::IncompatibleMediaSource, "ONM-ASSET-002"),
             (DiagnosticCode::UnknownCueReference, "ONM-REF-001"),
             (DiagnosticCode::UnknownAttribute, "ONM-ATTR-001"),
             (DiagnosticCode::MissingRequiredAttribute, "ONM-ATTR-002"),

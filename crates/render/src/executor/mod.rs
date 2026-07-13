@@ -58,14 +58,22 @@ impl RenderExecutor {
         output: &Path,
     ) -> Result<EncodedVideo, RenderError> {
         validate_output_dimensions(self.browser_limits, output)?;
-        self.validate_plan(&plan, output)?;
+        let frame_count = self.validate_plan(&plan, output)?;
+        let disposal_request = disposal_request_id(frame_count, output)?;
         let staging = StagedOutput::new(output)?;
         let browser = BrowserSession::launch(&self.browser_executable, self.browser_limits)
             .await
             .map_err(|source| RenderError::browser(output, source))?;
 
         let render_result = self
-            .render_session(&browser, &plan, bundle_url, staging.path(), output)
+            .render_session(
+                &browser,
+                &plan,
+                disposal_request,
+                bundle_url,
+                staging.path(),
+                output,
+            )
             .await;
         let shutdown_result = browser
             .shutdown()
@@ -77,7 +85,7 @@ impl RenderExecutor {
         staging.publish(video, output)
     }
 
-    fn validate_plan(&self, plan: &BrowserPlan, output: &Path) -> Result<(), RenderError> {
+    fn validate_plan(&self, plan: &BrowserPlan, output: &Path) -> Result<u64, RenderError> {
         if !plan.videos().is_empty() {
             return Err(invalid_plan(
                 output,
@@ -100,13 +108,14 @@ impl RenderExecutor {
                 "browser output interval exceeds the configured frame limit",
             ));
         }
-        Ok(())
+        Ok(frame_count)
     }
 
     async fn render_session(
         &self,
         browser: &BrowserSession,
         plan: &BrowserPlan,
+        disposal_request: RequestId,
         bundle_url: &str,
         staging: &Path,
         output: &Path,
@@ -123,7 +132,7 @@ impl RenderExecutor {
             .start(staging, plan.frame_rate())
             .map_err(|source| RenderError::encoder(output, source))?;
         render_frames(browser, &mut encoder, plan, output).await?;
-        dispose_runtime(browser, plan, output).await?;
+        dispose_runtime(browser, disposal_request, output).await?;
 
         encoder
             .finish()
@@ -170,10 +179,10 @@ async fn prepare_runtime(
 
 async fn dispose_runtime(
     browser: &BrowserSession,
-    plan: &BrowserPlan,
+    request_id: RequestId,
     output: &Path,
 ) -> Result<(), RenderError> {
-    let request = BrowserRequest::new(next_request_id(plan), BrowserCommand::Dispose);
+    let request = BrowserRequest::new(request_id, BrowserCommand::Dispose);
     dispatch_expected(browser, request, BrowserEvent::Disposed, output).await
 }
 
@@ -264,14 +273,13 @@ fn frame_request_id(offset: usize, output: &Path) -> Result<RequestId, RenderErr
     Ok(RequestId::new(request_id))
 }
 
-fn next_request_id(plan: &BrowserPlan) -> RequestId {
-    let count = output_frame_count(plan).expect("a validated browser plan has an ordered interval");
-    let count = u32::try_from(count).expect("a validated browser plan fits the request domain");
+fn disposal_request_id(frame_count: u64, output: &Path) -> Result<RequestId, RenderError> {
+    let count = u32::try_from(frame_count).map_err(|_| request_identity_overflow(output))?;
     let request_id = FIRST_FRAME_REQUEST
         .checked_add(count)
-        .expect("a validated browser plan leaves one disposal request identity");
+        .ok_or_else(|| request_identity_overflow(output))?;
 
-    RequestId::new(request_id)
+    Ok(RequestId::new(request_id))
 }
 
 fn invalid_plan(output: &Path, message: &'static str) -> RenderError {

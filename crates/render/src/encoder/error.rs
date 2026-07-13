@@ -21,7 +21,7 @@ pub enum EncodeErrorKind {
     NoFrames,
     /// A frame could not be written to `FFmpeg`.
     InputWrite,
-    /// The encoding process exceeded its deadline.
+    /// An encoding operation exceeded its inactivity timeout.
     Timeout,
     /// `FFmpeg` exited unsuccessfully.
     Failed,

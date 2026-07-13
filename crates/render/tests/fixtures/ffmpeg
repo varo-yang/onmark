@@ -7,6 +7,10 @@ done
 : > "$output"
 
 case "${output##*/}" in
+  write-failed.mp4)
+    printf 'decoder rejected the PNG frame' >&2
+    exit 9
+    ;;
   failed.mp4)
     cat >/dev/null
     printf 'encoder rejected the stream' >&2

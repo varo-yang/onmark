@@ -2,15 +2,15 @@ use std::error::Error;
 use std::fmt;
 use std::time::Duration;
 
-const MAX_DEADLINE: Duration = Duration::from_hours(24);
+const MAX_INACTIVITY_TIMEOUT: Duration = Duration::from_hours(24);
 const MAX_FRAMES: u64 = 10_000_000;
 const MAX_INPUT_BYTES: u64 = 1 << 40;
 const MAX_STDERR_BYTES: usize = 1 << 20;
 
-/// Explicit resource limits for one `FFmpeg` encoding process.
+/// Explicit resource limits for one `FFmpeg` encoding session.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct EncodeLimits {
-    deadline: Duration,
+    inactivity_timeout: Duration,
     max_frames: u64,
     max_input_bytes: u64,
     max_stderr_bytes: usize,
@@ -24,16 +24,16 @@ impl EncodeLimits {
     /// Returns [`InvalidFfmpeg`] when a bound is zero or exceeds the fixed
     /// local-render safety envelope.
     pub fn new(
-        deadline: Duration,
+        inactivity_timeout: Duration,
         max_frames: u64,
         max_input_bytes: u64,
         max_stderr_bytes: usize,
     ) -> Result<Self, InvalidFfmpeg> {
-        if deadline.is_zero() {
-            return Err(InvalidFfmpeg::ZeroDeadline);
+        if inactivity_timeout.is_zero() {
+            return Err(InvalidFfmpeg::ZeroInactivityTimeout);
         }
-        if deadline > MAX_DEADLINE {
-            return Err(InvalidFfmpeg::DeadlineTooLong);
+        if inactivity_timeout > MAX_INACTIVITY_TIMEOUT {
+            return Err(InvalidFfmpeg::InactivityTimeoutTooLong);
         }
         if max_frames == 0 {
             return Err(InvalidFfmpeg::EmptyFrameLimit);
@@ -55,7 +55,7 @@ impl EncodeLimits {
         }
 
         Ok(Self {
-            deadline,
+            inactivity_timeout,
             max_frames,
             max_input_bytes,
             max_stderr_bytes,
@@ -63,8 +63,8 @@ impl EncodeLimits {
     }
 
     #[must_use]
-    pub(super) const fn deadline(self) -> Duration {
-        self.deadline
+    pub(super) const fn inactivity_timeout(self) -> Duration {
+        self.inactivity_timeout
     }
 
     #[must_use]
@@ -88,10 +88,10 @@ impl EncodeLimits {
 pub enum InvalidFfmpeg {
     /// No executable path was supplied.
     EmptyExecutable,
-    /// A zero deadline cannot bound process lifetime.
-    ZeroDeadline,
-    /// The requested deadline exceeds one day.
-    DeadlineTooLong,
+    /// A zero timeout cannot bound encoder inactivity.
+    ZeroInactivityTimeout,
+    /// The requested inactivity timeout exceeds one day.
+    InactivityTimeoutTooLong,
     /// No frames may be written.
     EmptyFrameLimit,
     /// The frame count exceeds the fixed local-render ceiling.
@@ -110,8 +110,8 @@ impl fmt::Display for InvalidFfmpeg {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
             Self::EmptyExecutable => "FFmpeg executable cannot be empty",
-            Self::ZeroDeadline => "FFmpeg requires a positive deadline",
-            Self::DeadlineTooLong => "FFmpeg deadline cannot exceed one day",
+            Self::ZeroInactivityTimeout => "FFmpeg requires a positive inactivity timeout",
+            Self::InactivityTimeoutTooLong => "FFmpeg inactivity timeout cannot exceed one day",
             Self::EmptyFrameLimit => "FFmpeg frame limit must be positive",
             Self::FrameLimitTooLarge => "FFmpeg frame limit exceeds the safety ceiling",
             Self::EmptyInputBudget => "FFmpeg input budget must be positive",
@@ -127,7 +127,8 @@ impl Error for InvalidFfmpeg {}
 #[cfg(test)]
 mod tests {
     use super::{
-        EncodeLimits, InvalidFfmpeg, MAX_DEADLINE, MAX_FRAMES, MAX_INPUT_BYTES, MAX_STDERR_BYTES,
+        EncodeLimits, InvalidFfmpeg, MAX_FRAMES, MAX_INACTIVITY_TIMEOUT, MAX_INPUT_BYTES,
+        MAX_STDERR_BYTES,
     };
     use std::time::Duration;
 
@@ -136,7 +137,7 @@ mod tests {
         let limits = EncodeLimits::new(Duration::from_mins(1), 300, 64 << 20, 64 << 10)
             .expect("the fixture limits are bounded");
 
-        assert_eq!(limits.deadline(), Duration::from_mins(1));
+        assert_eq!(limits.inactivity_timeout(), Duration::from_mins(1));
         assert_eq!(limits.max_frames(), 300);
         assert_eq!(limits.max_input_bytes(), 64 << 20);
         assert_eq!(limits.max_stderr_bytes(), 64 << 10);
@@ -145,14 +146,15 @@ mod tests {
     #[test]
     fn rejects_empty_or_unbounded_limits() {
         let valid = || EncodeLimits::new(Duration::from_secs(1), 1, 1, 1);
+        let excessive_timeout = MAX_INACTIVITY_TIMEOUT + Duration::from_nanos(1);
         assert!(valid().is_ok());
         assert_eq!(
             EncodeLimits::new(Duration::ZERO, 1, 1, 1),
-            Err(InvalidFfmpeg::ZeroDeadline),
+            Err(InvalidFfmpeg::ZeroInactivityTimeout),
         );
         assert_eq!(
-            EncodeLimits::new(MAX_DEADLINE + Duration::from_nanos(1), 1, 1, 1),
-            Err(InvalidFfmpeg::DeadlineTooLong),
+            EncodeLimits::new(excessive_timeout, 1, 1, 1),
+            Err(InvalidFfmpeg::InactivityTimeoutTooLong),
         );
         assert_eq!(
             EncodeLimits::new(Duration::from_secs(1), 0, 1, 1),

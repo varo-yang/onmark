@@ -6,7 +6,7 @@ use tokio::io::AsyncWriteExt as _;
 use tokio::process::{Child, ChildStdin};
 use tokio::runtime::Handle;
 use tokio::task::JoinHandle;
-use tokio::time::{Instant, timeout, timeout_at};
+use tokio::time::timeout;
 
 use super::error::{EncodeError, EncodeErrorKind};
 use super::limits::{EncodeLimits, InvalidFfmpeg};
@@ -94,7 +94,6 @@ impl Ffmpeg {
             stderr: Some(stderr),
             output,
             limits: self.limits,
-            deadline: Instant::now() + self.limits.deadline(),
             frames: 0,
             input_bytes: 0,
             reaped: false,
@@ -111,7 +110,6 @@ pub struct FfmpegSession {
     stderr: Option<JoinHandle<std::io::Result<CapturedStderr>>>,
     output: PathBuf,
     limits: EncodeLimits,
-    deadline: Instant,
     frames: u64,
     input_bytes: u64,
     reaped: bool,
@@ -124,7 +122,7 @@ impl FfmpegSession {
     /// # Errors
     ///
     /// Returns [`EncodeError`] when a configured bound is exceeded, the
-    /// process deadline expires, or `FFmpeg` closes its input pipe.
+    /// encoder inactivity timeout expires, or `FFmpeg` closes its input pipe.
     pub async fn write_frame(&mut self, frame: &EncodedPng) -> Result<(), EncodeError> {
         let next_frame = self.frames.saturating_add(1);
         if next_frame > self.limits.max_frames() {
@@ -156,17 +154,24 @@ impl FfmpegSession {
                 "FFmpeg input is already closed",
             ));
         };
-        let write_result = timeout_at(self.deadline, stdin.write_all(frame.as_bytes()))
-            .await
-            .map_err(|_| self.error(EncodeErrorKind::Timeout, "FFmpeg exceeded its deadline"))?;
-        write_result.map_err(|source| {
-            EncodeError::io(
-                EncodeErrorKind::InputWrite,
-                &self.output,
-                "failed to write a frame to FFmpeg",
-                source,
-            )
-        })?;
+        let write_result = timeout(
+            self.limits.inactivity_timeout(),
+            stdin.write_all(frame.as_bytes()),
+        )
+        .await;
+        match write_result {
+            Ok(Ok(())) => {}
+            Ok(Err(source)) => return Err(self.input_write_failure(source).await),
+            Err(_) => {
+                // A cancelled write may have transferred a PNG prefix. Make
+                // the session terminal before that partial frame can be reused.
+                self.terminate().await;
+                return Err(self.error(
+                    EncodeErrorKind::Timeout,
+                    "FFmpeg input made no progress before its inactivity timeout",
+                ));
+            }
+        }
 
         self.frames = next_frame;
         self.input_bytes = next_input_bytes;
@@ -178,7 +183,8 @@ impl FfmpegSession {
     /// # Errors
     ///
     /// Returns [`EncodeError`] when no frames were supplied, the process or
-    /// stderr reader fails, the deadline expires, or `FFmpeg` exits unsuccessfully.
+    /// stderr reader fails, the inactivity timeout expires, or `FFmpeg` exits
+    /// unsuccessfully.
     pub async fn finish(mut self) -> Result<EncodedVideo, EncodeError> {
         if self.frames == 0 {
             self.terminate().await;
@@ -186,7 +192,7 @@ impl FfmpegSession {
         }
 
         self.stdin.take();
-        let status = match timeout_at(self.deadline, self.child.wait()).await {
+        let status = match timeout(self.limits.inactivity_timeout(), self.child.wait()).await {
             Ok(Ok(status)) => {
                 self.reaped = true;
                 status
@@ -202,7 +208,10 @@ impl FfmpegSession {
             }
             Err(_) => {
                 self.terminate().await;
-                return Err(self.error(EncodeErrorKind::Timeout, "FFmpeg exceeded its deadline"));
+                return Err(self.error(
+                    EncodeErrorKind::Timeout,
+                    "FFmpeg finalization made no progress before its inactivity timeout",
+                ));
             }
         };
         let stderr = self.finish_stderr().await?;
@@ -223,15 +232,21 @@ impl FfmpegSession {
     }
 
     fn failed(&self, status: &str, stderr: &CapturedStderr) -> EncodeError {
-        let suffix = if stderr.truncated { " [truncated]" } else { "" };
-        let stderr = String::from_utf8_lossy(&stderr.bytes);
-        let stderr = stderr.trim_ascii_end();
-        let message = if stderr.is_empty() {
-            format!("FFmpeg exited with {status}{suffix}")
-        } else {
-            format!("FFmpeg exited with {status}: {stderr}{suffix}")
-        };
+        let message = with_stderr(&format!("FFmpeg exited with {status}"), stderr);
         EncodeError::new(EncodeErrorKind::Failed, &self.output, message)
+    }
+
+    async fn input_write_failure(&mut self, source: std::io::Error) -> EncodeError {
+        // The input pipe is unusable. Reaping the child closes stderr so the
+        // bounded reader can return the encoder's actual rejection reason.
+        self.stop_child().await;
+        let message = match self.finish_stderr().await {
+            Ok(stderr) => with_stderr("failed to write a frame to FFmpeg", &stderr),
+            Err(stderr_error) => format!(
+                "failed to write a frame to FFmpeg; diagnostics unavailable: {stderr_error}"
+            ),
+        };
+        EncodeError::io(EncodeErrorKind::InputWrite, &self.output, message, source)
     }
 
     async fn finish_stderr(&mut self) -> Result<CapturedStderr, EncodeError> {
@@ -261,15 +276,30 @@ impl FfmpegSession {
     }
 
     async fn terminate(&mut self) {
+        self.stop_child().await;
+        if let Some(stderr) = self.stderr.take() {
+            stderr.abort();
+            let _ = stderr.await;
+        }
+    }
+
+    async fn stop_child(&mut self) {
         self.stdin.take();
         let _ = self.child.start_kill();
         if matches!(timeout(CLEANUP_TIMEOUT, self.child.wait()).await, Ok(Ok(_))) {
             self.reaped = true;
         }
-        if let Some(stderr) = self.stderr.take() {
-            stderr.abort();
-            let _ = stderr.await;
-        }
+    }
+}
+
+fn with_stderr(message: &str, stderr: &CapturedStderr) -> String {
+    let suffix = if stderr.truncated { " [truncated]" } else { "" };
+    let stderr = String::from_utf8_lossy(&stderr.bytes);
+    let stderr = stderr.trim_ascii_end();
+    if stderr.is_empty() {
+        format!("{message}{suffix}")
+    } else {
+        format!("{message}: {stderr}{suffix}")
     }
 }
 
@@ -323,8 +353,9 @@ mod tests {
     use onmark_core::model::FrameRate;
     use onmark_core::protocol::WireFrameRate;
     use tempfile::{TempDir, tempdir};
+    use tokio::time::sleep;
 
-    use super::{EncodeError, EncodeErrorKind, EncodeLimits, Ffmpeg};
+    use super::{EncodeError, EncodeErrorKind, EncodeLimits, Ffmpeg, FfmpegSession};
     use crate::EncodedPng;
 
     #[tokio::test]
@@ -350,7 +381,47 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn terminates_an_encoder_that_misses_its_deadline() {
+    async fn retains_encoder_diagnostics_when_frame_input_breaks() {
+        let fixture = EncoderFixture::new("write-failed.mp4", Duration::from_secs(1), 4_096);
+        let mut session = fixture.start();
+        session
+            .write_frame(&EncodedPng::new(vec![0]))
+            .await
+            .expect("the pipe may accept one frame while the fixture exits");
+        sleep(Duration::from_millis(30)).await;
+
+        let error = session
+            .write_frame(&EncodedPng::new(vec![0]))
+            .await
+            .expect_err("the exited fixture must close its input pipe");
+
+        assert_eq!(error.kind(), EncodeErrorKind::InputWrite);
+        assert!(error.to_string().contains("decoder rejected the PNG frame"));
+        drop(session);
+        assert!(!fixture.output().exists());
+    }
+
+    #[tokio::test]
+    async fn browser_time_does_not_consume_encoder_inactivity_budget() {
+        let fixture = EncoderFixture::new("failed.mp4", Duration::from_millis(20), 4_096);
+        let mut session = fixture.start();
+        sleep(Duration::from_millis(40)).await;
+
+        session
+            .write_frame(&EncodedPng::new(vec![0]))
+            .await
+            .expect("an immediately accepted write gets a fresh inactivity budget");
+        let error = session
+            .finish()
+            .await
+            .expect_err("the fixture must report its intentional failure");
+
+        assert_eq!(error.kind(), EncodeErrorKind::Failed);
+        assert!(error.to_string().contains("encoder rejected the stream"));
+    }
+
+    #[tokio::test]
+    async fn terminates_an_encoder_that_misses_its_inactivity_timeout() {
         let fixture = EncoderFixture::new("slow.mp4", Duration::from_millis(30), 4_096);
         let error = fixture.finish().await;
 
@@ -365,9 +436,13 @@ mod tests {
     }
 
     impl EncoderFixture {
-        fn new(output_name: &'static str, deadline: Duration, stderr_limit: usize) -> Self {
+        fn new(
+            output_name: &'static str,
+            inactivity_timeout: Duration,
+            stderr_limit: usize,
+        ) -> Self {
             let directory = tempdir().expect("the fixture directory must be available");
-            let limits = EncodeLimits::new(deadline, 1, 1, stderr_limit)
+            let limits = EncodeLimits::new(inactivity_timeout, 2, 2, stderr_limit)
                 .expect("the fixture limits are bounded");
             let ffmpeg = Ffmpeg::new(fixture_executable(), limits)
                 .expect("the fixture executable path is present");
@@ -380,12 +455,7 @@ mod tests {
         }
 
         async fn finish(&self) -> EncodeError {
-            let rate = FrameRate::new(30, 1).expect("the fixture frame rate is valid");
-            let output = self.output();
-            let mut session = self
-                .ffmpeg
-                .start(output, WireFrameRate::from(rate))
-                .expect("the fixture encoder must start");
+            let mut session = self.start();
             session
                 .write_frame(&EncodedPng::new(vec![0]))
                 .await
@@ -394,6 +464,13 @@ mod tests {
                 .finish()
                 .await
                 .expect_err("the fixture encoder must fail")
+        }
+
+        fn start(&self) -> FfmpegSession {
+            let rate = FrameRate::new(30, 1).expect("the fixture frame rate is valid");
+            self.ffmpeg
+                .start(self.output(), WireFrameRate::from(rate))
+                .expect("the fixture encoder must start")
         }
 
         fn output(&self) -> PathBuf {

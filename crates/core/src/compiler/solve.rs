@@ -65,8 +65,6 @@ pub fn solve(
 pub enum SolveError {
     /// A logical source has no frozen identity and normalized probe facts.
     MissingFrozenAsset(AssetRef),
-    /// A video source has no selected visual-stream metadata.
-    MissingVideoMetadata(AssetRef),
 }
 
 impl fmt::Display for SolveError {
@@ -74,9 +72,6 @@ impl fmt::Display for SolveError {
         match self {
             Self::MissingFrozenAsset(asset) => {
                 write!(formatter, "frozen asset is missing for \"{asset}\"")
-            }
-            Self::MissingVideoMetadata(asset) => {
-                write!(formatter, "video metadata is missing for \"{asset}\"")
             }
         }
     }
@@ -309,11 +304,14 @@ impl<'a> Solver<'a> {
             .ok_or_else(|| SolveError::MissingFrozenAsset(asset_ref.clone()))?;
         let duration = match track {
             MediaTrack::Audio => frozen.metadata().duration(),
-            MediaTrack::Video => frozen
-                .metadata()
-                .video_metadata()
-                .ok_or_else(|| SolveError::MissingVideoMetadata(asset_ref.clone()))?
-                .duration(),
+            MediaTrack::Video => {
+                let Some(video) = frozen.metadata().video_metadata() else {
+                    self.diagnostics
+                        .push(incompatible_video_source(asset_span, &asset_ref));
+                    return Ok(None);
+                };
+                video.duration()
+            }
         };
         let Some((start, start_reason)) = self.prepare_delay(delay) else {
             return Ok(None);
@@ -682,6 +680,17 @@ fn missing_media_source(element: &ResolvedElement) -> Diagnostic {
     .expect("a formatted media-source message is non-blank")
     .with_help(format!("add src=\"...\" to <{}>", element.kind()))
     .expect("a formatted media-source help is non-blank")
+}
+
+fn incompatible_video_source(primary: SourceSpan, asset: &AssetRef) -> Diagnostic {
+    Diagnostic::new(
+        DiagnosticCode::IncompatibleMediaSource,
+        primary,
+        format!("<video> source \"{asset}\" has no visual stream"),
+    )
+    .expect("a formatted media-track message is non-blank")
+    .with_help("choose a video asset for <video>")
+    .expect("a formatted media-track help is non-blank")
 }
 
 fn missing_duration_source(primary: SourceSpan) -> Diagnostic {
