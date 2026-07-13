@@ -16,7 +16,7 @@ const FRAME_COUNT: usize = 30;
 const PROCESS_DEADLINE: Duration = Duration::from_mins(3);
 
 #[tokio::test]
-#[ignore = "requires ONMARK_CHROME, ONMARK_BUNDLER, ONMARK_FFMPEG, and ONMARK_FFPROBE"]
+#[ignore = "requires ONMARK_CLI, ONMARK_FFMPEG, ONMARK_FFPROBE, and Gate-one tools on PATH"]
 async fn renders_one_screenplay_deterministically_across_real_processes() {
     let directory = tempdir().expect("the conformance workspace is available");
     let fixture = Fixture::materialize(directory.path());
@@ -44,16 +44,18 @@ async fn renders_one_screenplay_deterministically_across_real_processes() {
 struct Fixture {
     root: PathBuf,
     screenplay: PathBuf,
-    presentation: PathBuf,
 }
 
 impl Fixture {
     fn materialize(root: &Path) -> Self {
         let repository = repository();
         let screenplay = root.join("gate-one.onmark");
-        let presentation = root.join("presentation.ts");
         copy_fixture(&repository, "cli/gate-one.onmark", &screenplay);
-        copy_fixture(&repository, "browser/video-presentation.ts", &presentation);
+        copy_fixture(
+            &repository,
+            "browser/video-presentation.ts",
+            &root.join("presentation.ts"),
+        );
         copy_fixture(
             &repository,
             "browser/video-presentation.css",
@@ -63,7 +65,6 @@ impl Fixture {
         Self {
             root: root.to_owned(),
             screenplay,
-            presentation,
         }
     }
 
@@ -99,26 +100,16 @@ impl Fixture {
     }
 
     async fn render_to(&self, output: &Path) -> Output {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_onmark"));
+        let mut command = Command::new(required_path("ONMARK_CLI"));
         command
             .arg("render")
             .arg(&self.screenplay)
-            .arg("--presentation")
-            .arg(&self.presentation)
             .arg("--output")
             .arg(output)
             .arg("--width")
             .arg(WIDTH.to_string())
             .arg("--height")
-            .arg(HEIGHT.to_string())
-            .arg("--browser")
-            .arg(required_path("ONMARK_CHROME"))
-            .arg("--bundler")
-            .arg(required_path("ONMARK_BUNDLER"))
-            .arg("--ffmpeg")
-            .arg(required_path("ONMARK_FFMPEG"))
-            .arg("--ffprobe")
-            .arg(required_path("ONMARK_FFPROBE"));
+            .arg(HEIGHT.to_string());
         run_process(&mut command).await
     }
 }

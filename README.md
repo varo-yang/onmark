@@ -18,7 +18,7 @@ onmark render film.onmark --presentation browser.ts --output review.mp4
 onmark render film.onmark --fps 30000/1001 --width 1920 --height 1080
 ```
 
-Gate one requires `onmark-bundle`, Chromium or Google Chrome, `ffmpeg`, and `ffprobe` to be installed. Use the execution override flags shown by `onmark render --help` when they are not on the default paths.
+Gate one requires `onmark-bundle` and its Node.js runtime, Chromium or Google Chrome, `ffmpeg`, and `ffprobe` to be installed. Use the execution override flags shown by `onmark render --help` when they are not on the default paths.
 
 ## Repository map
 

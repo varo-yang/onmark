@@ -126,11 +126,6 @@ jobs:
           chrome-version: 149.0.7827.55
           install-dependencies: true
 
-      - name: Configure CI Chrome launcher
-        run: |
-          printf '%s\n' '#!/bin/sh' 'exec "$ONMARK_CHROME_BINARY" --no-sandbox "$@"' > "$RUNNER_TEMP/onmark-chrome"
-          chmod +x "$RUNNER_TEMP/onmark-chrome"
-
       - name: Install pinned FFmpeg
         run: |
           sudo apt-get update
@@ -147,6 +142,19 @@ jobs:
           pnpm --filter @onmark/bundler build
           chmod +x packages/bundler/dist/src/command.js
 
+      - name: Configure Gate-one tool path
+        env:
+          ONMARK_CHROME_BINARY: ${{ steps.chrome.outputs.chrome-path }}
+        run: |
+          tools="$RUNNER_TEMP/onmark-tools"
+          mkdir -p "$tools"
+          printf '%s\n' '#!/bin/sh' 'exec "$ONMARK_CHROME_BINARY" --no-sandbox "$@"' > "$tools/google-chrome"
+          chmod +x "$tools/google-chrome"
+          ln -s /usr/bin/ffmpeg "$tools/ffmpeg"
+          ln -s /usr/bin/ffprobe "$tools/ffprobe"
+          ln -s "$GITHUB_WORKSPACE/packages/bundler/dist/src/command.js" "$tools/onmark-bundle"
+          printf '%s\n' "$tools" >> "$GITHUB_PATH"
+
       - name: Cache Cargo artifacts
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
@@ -158,11 +166,14 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
-      - name: Run native render conformance
+      - name: Build release CLI candidate
+        run: cargo build --locked --release -p onmark-cli
+
+      - name: Run native and release-CLI conformance
         env:
-          ONMARK_CHROME: ${{ runner.temp }}/onmark-chrome
+          ONMARK_CLI: ${{ github.workspace }}/target/release/onmark
+          ONMARK_CHROME: ${{ runner.temp }}/onmark-tools/google-chrome
           ONMARK_CHROME_BINARY: ${{ steps.chrome.outputs.chrome-path }}
-          ONMARK_BUNDLER: ${{ github.workspace }}/packages/bundler/dist/src/command.js
           ONMARK_FFMPEG: /usr/bin/ffmpeg
           ONMARK_FFPROBE: /usr/bin/ffprobe
         run: |
