@@ -10,7 +10,8 @@ import standaloneCode from "ajv/dist/standalone/index.js";
 import { compile } from "json-schema-to-typescript";
 
 const repository = resolve(fileURLToPath(new URL("..", import.meta.url)));
-const generated = resolve(repository, "packages/runtime/src/generated");
+const runtimeGenerated = resolve(repository, "packages/runtime/src/generated");
+const bundlerGenerated = resolve(repository, "packages/bundler/src/generated");
 
 await main(process.argv.slice(2)).catch(reportFailure);
 
@@ -22,6 +23,7 @@ async function main(arguments_) {
   const responseSchema = await readJson(
     "schemas/browser-response-v1.schema.json",
   );
+  const bundleSchema = await readJson("schemas/bundle-manifest-v1.schema.json");
 
   const requestTypes = await compile(
     requestSchema,
@@ -33,16 +35,28 @@ async function main(arguments_) {
     "BrowserResponse",
     typeOptions(),
   );
+  const bundleTypes = await compile(
+    bundleSchema,
+    "BundleManifest",
+    typeOptions(),
+  );
   const validators = compileValidators(requestSchema, responseSchema);
 
   if (mode === "write") {
-    await mkdir(generated, { recursive: true });
+    await mkdir(runtimeGenerated, { recursive: true });
+    await mkdir(bundlerGenerated, { recursive: true });
   }
-  await publish(mode, "browser-request.ts", requestTypes);
-  await publish(mode, "browser-response.ts", responseTypes);
-  await publish(mode, "validators.js", validators);
-  await publish(mode, "validators.d.ts", validatorDeclarations());
-  await publish(mode, "codec.ts", codecSource());
+  await publish(mode, runtimeGenerated, "browser-request.ts", requestTypes);
+  await publish(mode, runtimeGenerated, "browser-response.ts", responseTypes);
+  await publish(mode, runtimeGenerated, "validators.js", validators);
+  await publish(
+    mode,
+    runtimeGenerated,
+    "validators.d.ts",
+    validatorDeclarations(),
+  );
+  await publish(mode, runtimeGenerated, "codec.ts", codecSource());
+  await publish(mode, bundlerGenerated, "bundle-manifest.ts", bundleTypes);
 }
 
 function reportFailure(error) {
@@ -162,8 +176,8 @@ function decode<T>(value: unknown, validator: ProtocolValidator, role: string): 
 `;
 }
 
-async function publish(mode, filename, contents) {
-  const path = resolve(generated, filename);
+async function publish(mode, directory, filename, contents) {
+  const path = resolve(directory, filename);
   if (mode === "check") {
     let current;
     try {

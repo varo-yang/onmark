@@ -9,8 +9,8 @@ use onmark_core::model::{
     VideoMetadata, VideoTiming,
 };
 use onmark_core::protocol::{
-    BrowserCommand, BrowserEvent, BrowserPlan, BrowserRequest, BrowserResponse, InvalidBrowserPlan,
-    ProtocolFailure, ProtocolFailureCode, RequestId, WireFrame,
+    BrowserCommand, BrowserEvent, BrowserPlan, BrowserRequest, BrowserResponse, BundleManifest,
+    InvalidBrowserPlan, ProtocolFailure, ProtocolFailureCode, RequestId, WireFrame,
 };
 use onmark_core::timeline::TimelineIr;
 
@@ -72,6 +72,19 @@ fn browser_plan_requires_an_admitted_rate_for_every_video() {
         BrowserPlan::from_timeline(&timeline, &BTreeMap::new()),
         Err(InvalidBrowserPlan::MissingSourceFrameRate(asset_id)),
     );
+}
+
+#[test]
+fn bundle_manifest_matches_the_versioned_wire_contract() {
+    let path = fixture("protocol", "bundle-manifest-v1.json");
+    let source = std::fs::read_to_string(&path).expect("the bundle fixture must be readable");
+    let manifest = serde_json::from_str::<BundleManifest>(&source)
+        .expect("the bundle fixture must satisfy the Rust wire contract");
+    let mut encoded = serde_json::to_string_pretty(&manifest)
+        .expect("the bundle manifest must serialize deterministically");
+    encoded.push('\n');
+
+    assert_or_update(&path, &encoded);
 }
 
 fn request(request_id: u32, command: BrowserCommand) -> BrowserRequest {

@@ -11,6 +11,7 @@ mod browser;
 mod encoder;
 mod executor;
 mod unit;
+mod unit_root;
 mod video;
 
 pub use browser::{
@@ -22,5 +23,8 @@ pub use encoder::{
 pub use executor::{RenderError, RenderErrorKind, RenderExecutor};
 pub use unit::{
     InvalidMaterializedAsset, InvalidRenderUnit, MaterializedAsset, RenderUnit, RenderVideo,
+};
+pub use unit_root::{
+    InvalidUnitRootLimits, UnitRoot, UnitRootError, UnitRootErrorKind, UnitRootLimits,
 };
 pub use video::{AdmittedVideo, UnsupportedVideo};

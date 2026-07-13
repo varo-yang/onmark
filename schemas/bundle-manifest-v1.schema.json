@@ -1,0 +1,69 @@
+{
+  "$defs": {
+    "BundleFile": {
+      "additionalProperties": false,
+      "description": "One content-addressed presentation payload file.",
+      "properties": {
+        "bytes": {
+          "format": "uint64",
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "path": {
+          "pattern": "^[a-z0-9._-]+(?:/[a-z0-9._-]+)*$",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "bytes",
+        "path",
+        "sha256"
+      ],
+      "type": "object"
+    },
+    "BundleVersion": {
+      "const": 1,
+      "description": "Version of the immutable presentation-bundle contract.",
+      "format": "uint16",
+      "maximum": 65535,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "$id": "https://onmark.dev/schemas/bundle-manifest-v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Stable description of one immutable presentation artifact.",
+  "properties": {
+    "bundleId": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "entryPoint": {
+      "const": "index.html",
+      "type": "string"
+    },
+    "files": {
+      "items": {
+        "$ref": "#/$defs/BundleFile"
+      },
+      "type": "array"
+    },
+    "version": {
+      "$ref": "#/$defs/BundleVersion"
+    }
+  },
+  "required": [
+    "version",
+    "bundleId",
+    "entryPoint",
+    "files"
+  ],
+  "title": "BundleManifest",
+  "type": "object"
+}

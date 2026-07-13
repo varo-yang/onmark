@@ -8,6 +8,11 @@ import { fileURLToPath } from "node:url";
 
 import { build, type OutputFile } from "esbuild";
 
+import type {
+  BundleFile as WireBundleFile,
+  BundleManifest as WireBundleManifest,
+} from "./generated/bundle-manifest.js";
+
 const BUNDLE_VERSION = 1;
 const ENTRY_DOCUMENT = "index.html";
 const MANIFEST_FILE = "manifest.json";
@@ -15,26 +20,21 @@ const RUNTIME_ENTRY = fileURLToPath(import.meta.resolve("@onmark/runtime"));
 
 // ── Public contract
 
+type Immutable<T> = T extends object
+  ? { readonly [Key in keyof T]: Immutable<T[Key]> }
+  : T;
+
+/** Immutable view of one Rust-owned bundle payload entry. */
+export type BundleFile = Immutable<WireBundleFile>;
+
+/** Immutable view of the versioned Rust-owned bundle manifest. */
+export type BundleManifest = Immutable<WireBundleManifest>;
+
 /** Explicit inputs and retained-output bound for one presentation build. */
 export interface BundleOptions {
   readonly entryPoint: string;
   readonly outputDirectory: string;
   readonly maxOutputBytes: number;
-}
-
-/** One content-addressed file in deterministic manifest order. */
-export interface BundleFile {
-  readonly bytes: number;
-  readonly path: string;
-  readonly sha256: string;
-}
-
-/** Stable description of one immutable presentation artifact. */
-export interface BundleManifest {
-  readonly version: 1;
-  readonly bundleId: string;
-  readonly entryPoint: "index.html";
-  readonly files: readonly BundleFile[];
 }
 
 /** Published directory and its owned immutable manifest snapshot. */

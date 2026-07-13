@@ -13,14 +13,15 @@ publish = false
 chromiumoxide = { version = "0.9.1", default-features = false }
 futures = "0.3"
 onmark-core = { path = "../core" }
+serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+sha2 = "0.11.0"
 tempfile = "3.27"
 tokio = { version = "1", features = ["io-util", "macros", "process", "rt-multi-thread", "time"] }
+url = "2.5"
 
 [dev-dependencies]
 onmark-media = { path = "../media" }
-serde = { version = "1.0", features = ["derive"] }
-url = "2.5"
 
 [lints]
 workspace = true

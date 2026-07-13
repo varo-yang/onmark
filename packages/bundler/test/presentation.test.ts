@@ -1,12 +1,17 @@
 // Public behavior tests for deterministic, staged presentation artifacts.
 
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { BundleError, bundlePresentation } from "../src/index.js";
+import {
+  BundleError,
+  bundlePresentation,
+  type BundleManifest,
+} from "../src/index.js";
 
 const ENTRY_SOURCE = `
   import "./presentation.css";
@@ -42,7 +47,7 @@ test("builds a deterministic immutable presentation artifact", async () => {
     });
 
     assert.deepEqual(first.manifest, second.manifest);
-    assert.match(first.manifest.bundleId, /^sha256:[0-9a-f]{64}$/u);
+    assert.equal(first.manifest.bundleId, bundleIdentity(first.manifest));
     assert.deepEqual(
       first.manifest.files.map((file) => file.path),
       ["index.html", "presentation.css", "presentation.js"],
@@ -63,6 +68,16 @@ test("builds a deterministic immutable presentation artifact", async () => {
     await rm(workspace, { force: true, recursive: true });
   }
 });
+
+function bundleIdentity(manifest: BundleManifest): string {
+  const identity = JSON.stringify({
+    version: manifest.version,
+    entryPoint: manifest.entryPoint,
+    files: manifest.files,
+  });
+  const digest = createHash("sha256").update(identity).digest("hex");
+  return `sha256:${digest}`;
+}
 
 test("does not publish an oversized or pre-existing artifact", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "onmark-bundler-test-"));

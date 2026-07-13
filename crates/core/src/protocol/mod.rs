@@ -1,12 +1,17 @@
-//! Versioned wire values shared by native execution and the browser runtime.
+//! Versioned wire values shared across execution-process boundaries.
 //!
 //! Domain values remain owned by `model` and `timeline`. This module lowers
 //! only the facts consumed across the Gate-one browser boundary.
 //! Native execution constructs and serializes requests; it deserializes and
 //! validates responses returned by the browser.
 
+mod bundle;
 mod message;
 mod plan;
+
+pub use bundle::{
+    BundleFile, BundleManifest, BundleVersion, InvalidBundleFile, InvalidBundleManifest,
+};
 
 pub use message::{
     BrowserCommand, BrowserEvent, BrowserRequest, BrowserResponse, InvalidProtocolFailure,

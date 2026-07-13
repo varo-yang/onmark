@@ -5,7 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command as ProcessCommand, ExitCode};
 
-use onmark_core::protocol::{BrowserRequest, BrowserResponse};
+use onmark_core::protocol::{BrowserRequest, BrowserResponse, BundleManifest};
 use schemars::{JsonSchema, schema_for};
 use serde_json::Value;
 
@@ -39,6 +39,10 @@ fn generate_protocol(repository: &Path, mode: GenerationMode) -> Result<(), Box<
         SchemaArtifact::new::<BrowserResponse>(
             "https://onmark.dev/schemas/browser-response-v1.schema.json",
             "browser-response-v1.schema.json",
+        )?,
+        SchemaArtifact::new::<BundleManifest>(
+            "https://onmark.dev/schemas/bundle-manifest-v1.schema.json",
+            "bundle-manifest-v1.schema.json",
         )?,
     ];
     let directory = repository.join("schemas");

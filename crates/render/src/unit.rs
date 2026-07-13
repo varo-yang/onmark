@@ -22,9 +22,9 @@ impl MaterializedAsset {
     ///
     /// # Errors
     ///
-    /// Returns [`InvalidMaterializedAsset`] when the path is empty. The input
-    /// freezer remains responsible for verifying that these bytes match the
-    /// frozen identity.
+    /// Returns [`InvalidMaterializedAsset`] when the path is empty. This value
+    /// records the claimed join; [`crate::UnitRoot`] verifies the bytes while
+    /// copying them into the private execution root.
     pub fn new(
         frozen: FrozenAsset,
         local_path: impl Into<PathBuf>,
