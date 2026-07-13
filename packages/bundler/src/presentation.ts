@@ -8,14 +8,14 @@ import { fileURLToPath } from "node:url";
 
 import { build, type OutputFile } from "esbuild";
 
-import type {
-  BundleFile as WireBundleFile,
-  BundleManifest as WireBundleManifest,
+import {
+  BUNDLE_ENTRY_POINT,
+  BUNDLE_MANIFEST_FILE,
+  BUNDLE_VERSION,
+  type BundleFile as WireBundleFile,
+  type BundleManifest as WireBundleManifest,
 } from "./generated/bundle-manifest.js";
 
-const BUNDLE_VERSION = 1;
-const ENTRY_DOCUMENT = "index.html";
-const MANIFEST_FILE = "manifest.json";
 const RUNTIME_ENTRY = fileURLToPath(import.meta.resolve("@onmark/runtime"));
 
 // ── Public contract
@@ -62,6 +62,8 @@ interface PendingFile {
   readonly path: string;
 }
 
+type NonEmpty<T> = readonly [T, ...T[]];
+
 // ── Build pipeline
 
 /** Builds one immutable presentation through a private staging directory. */
@@ -95,7 +97,7 @@ async function buildArtifact(
   enforceOutputLimit(pending, manifestBytes, input.maxOutputBytes);
 
   await writePendingFiles(staging, pending);
-  await writeFile(join(staging, MANIFEST_FILE), manifestBytes);
+  await writeFile(join(staging, BUNDLE_MANIFEST_FILE), manifestBytes);
   await requireAbsent(input.outputDirectory);
   await rename(staging, input.outputDirectory);
 
@@ -158,7 +160,7 @@ async function compilePresentation(
 function presentationFiles(
   outputFiles: readonly OutputFile[],
   staging: string,
-): readonly PendingFile[] {
+): NonEmpty<PendingFile> {
   const generated = outputFiles.map((file) => ({
     contents: file.contents,
     path: artifactPath(staging, file.path),
@@ -175,12 +177,13 @@ function presentationFiles(
     .map((file) => file.path)
     .sort();
   const document = new TextEncoder().encode(entryDocument(styles));
-  const files = [{ contents: document, path: ENTRY_DOCUMENT }, ...generated];
+  const files = [
+    { contents: document, path: BUNDLE_ENTRY_POINT },
+    ...generated,
+  ];
   requireDistinctPaths(files);
 
-  return Object.freeze(
-    files.sort((left, right) => comparePaths(left.path, right.path)),
-  );
+  return canonicalFiles(files);
 }
 
 function entryDocument(styles: readonly string[]): string {
@@ -200,25 +203,32 @@ function entryDocument(styles: readonly string[]): string {
   return `${lines.join("\n")}\n`;
 }
 
-function createManifest(files: readonly PendingFile[]): BundleManifest {
-  const entries = files.map((file) =>
-    Object.freeze({
-      bytes: file.contents.byteLength,
-      path: file.path,
-      sha256: sha256(file.contents),
-    }),
-  );
+function createManifest(files: NonEmpty<PendingFile>): BundleManifest {
+  const entries = manifestFiles(files);
   const identity = JSON.stringify({
     version: BUNDLE_VERSION,
-    entryPoint: ENTRY_DOCUMENT,
+    entryPoint: BUNDLE_ENTRY_POINT,
     files: entries,
   });
 
   return Object.freeze({
     version: BUNDLE_VERSION,
     bundleId: sha256(new TextEncoder().encode(identity)),
-    entryPoint: ENTRY_DOCUMENT,
-    files: Object.freeze(entries),
+    entryPoint: BUNDLE_ENTRY_POINT,
+    files: entries,
+  });
+}
+
+function manifestFiles(files: NonEmpty<PendingFile>): NonEmpty<BundleFile> {
+  const [first, ...rest] = files;
+  return Object.freeze([manifestFile(first), ...rest.map(manifestFile)]);
+}
+
+function manifestFile(file: PendingFile): BundleFile {
+  return Object.freeze({
+    bytes: file.contents.byteLength,
+    path: file.path,
+    sha256: sha256(file.contents),
   });
 }
 
@@ -344,6 +354,16 @@ function comparePaths(left: string, right: string): number {
     return 1;
   }
   return 0;
+}
+
+function canonicalFiles(files: PendingFile[]): NonEmpty<PendingFile> {
+  const [first, ...rest] = files.sort((left, right) =>
+    comparePaths(left.path, right.path),
+  );
+  if (first === undefined) {
+    throw new BundleError("build", "presentation produced no payload files");
+  }
+  return Object.freeze([first, ...rest]);
 }
 
 function sha256(contents: Uint8Array): string {

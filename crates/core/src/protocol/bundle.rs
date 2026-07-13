@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::error::Error;
 use std::fmt;
 
@@ -6,7 +7,10 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 const ENTRY_DOCUMENT: &str = "index.html";
 const MANIFEST_FILE: &str = "manifest.json";
-const ASSET_DIRECTORY: &str = "assets";
+const ASSET_ROOT: &str = "assets";
+const ASSET_SHA256_DIRECTORY: &str = "assets/sha256";
+const MAX_BUNDLE_FILES: usize = 99_999;
+const MAX_PATH_BYTES: usize = 1_024;
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 const SHA256_PREFIX: &str = "sha256:";
 const SHA256_HEX_BYTES: usize = 64;
@@ -44,6 +48,13 @@ impl<'de> Deserialize<'de> for BundleVersion {
 
 /// Stable description of one immutable presentation artifact.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(
+    feature = "schema",
+    schemars(
+        extend("x-onmark-manifest-file" = MANIFEST_FILE),
+        extend("x-onmark-asset-directory" = ASSET_SHA256_DIRECTORY)
+    )
+)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct BundleManifest {
@@ -55,16 +66,29 @@ pub struct BundleManifest {
     bundle_id: Box<str>,
     #[cfg_attr(feature = "schema", schemars(extend("const" = ENTRY_DOCUMENT)))]
     entry_point: Box<str>,
+    #[cfg_attr(
+        feature = "schema",
+        schemars(length(min = 1, max = MAX_BUNDLE_FILES))
+    )]
     files: Vec<BundleFile>,
 }
 
 impl BundleManifest {
+    /// Fixed browser entry beneath every presentation bundle.
+    pub const ENTRY_POINT: &'static str = ENTRY_DOCUMENT;
+    /// Reserved manifest filename beneath every unit root.
+    pub const FILE_NAME: &'static str = MANIFEST_FILE;
+    /// Deterministic directory containing frozen SHA-256 assets.
+    pub const ASSET_DIRECTORY: &'static str = ASSET_SHA256_DIRECTORY;
+    /// Maximum payload files representable by the V1 wire contract.
+    pub const MAX_FILES: usize = MAX_BUNDLE_FILES;
+
     /// Creates one canonical Gate-one bundle manifest.
     ///
     /// # Errors
     ///
-    /// Returns [`InvalidBundleManifest`] when the identity is malformed, the
-    /// file list is empty or unordered, or the fixed entry document is absent.
+    /// Returns [`InvalidBundleManifest`] when the identity, file count,
+    /// canonical path tree, or fixed entry document violates V1.
     pub fn new(
         bundle_id: impl Into<Box<str>>,
         files: Vec<BundleFile>,
@@ -76,7 +100,11 @@ impl BundleManifest {
         if files.is_empty() {
             return Err(InvalidBundleManifest::EmptyFiles);
         }
+        if files.len() > MAX_BUNDLE_FILES {
+            return Err(InvalidBundleManifest::TooManyFiles);
+        }
         validate_file_order(&files)?;
+        validate_path_tree(&files)?;
         if !files.iter().any(|file| file.path() == ENTRY_DOCUMENT) {
             return Err(InvalidBundleManifest::MissingEntryPoint);
         }
@@ -147,7 +175,10 @@ pub struct BundleFile {
     bytes: u64,
     #[cfg_attr(
         feature = "schema",
-        schemars(regex(pattern = r"^[a-z0-9._-]+(?:/[a-z0-9._-]+)*$"))
+        schemars(
+            length(max = MAX_PATH_BYTES),
+            regex(pattern = r"^[a-z0-9._-]+(?:/[a-z0-9._-]+)*$")
+        )
     )]
     path: Box<str>,
     #[cfg_attr(
@@ -231,10 +262,14 @@ pub enum InvalidBundleManifest {
     InvalidBundleId,
     /// No presentation payload files were supplied.
     EmptyFiles,
+    /// The payload file count exceeds the V1 safety ceiling.
+    TooManyFiles,
     /// Two files claim the same portable path.
     DuplicateFilePath,
     /// Files are not in canonical path order.
     UnorderedFiles,
+    /// One file path is an ancestor of another file path.
+    FilePathConflict,
     /// The fixed browser entry document is absent.
     MissingEntryPoint,
 }
@@ -244,8 +279,10 @@ impl fmt::Display for InvalidBundleManifest {
         formatter.write_str(match self {
             Self::InvalidBundleId => "bundle ID is not canonical SHA-256",
             Self::EmptyFiles => "bundle manifest must contain payload files",
+            Self::TooManyFiles => "bundle manifest exceeds the file-count ceiling",
             Self::DuplicateFilePath => "bundle manifest contains a duplicate file path",
             Self::UnorderedFiles => "bundle manifest files are not in canonical path order",
+            Self::FilePathConflict => "bundle manifest contains a file-directory path collision",
             Self::MissingEntryPoint => "bundle manifest does not contain index.html",
         })
     }
@@ -258,6 +295,8 @@ impl Error for InvalidBundleManifest {}
 pub enum InvalidBundleFile {
     /// The path is not a safe portable relative path.
     InvalidPath,
+    /// The portable path exceeds the V1 byte ceiling.
+    PathTooLong,
     /// The path collides with unit-root owned content.
     ReservedPath,
     /// The byte count cannot cross the JavaScript boundary exactly.
@@ -270,6 +309,7 @@ impl fmt::Display for InvalidBundleFile {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
             Self::InvalidPath => "bundle file path is not a safe portable relative path",
+            Self::PathTooLong => "bundle file path exceeds the byte ceiling",
             Self::ReservedPath => "bundle file path is reserved by the unit root",
             Self::UnsafeByteCount => "bundle file byte count exceeds the safe integer range",
             Self::InvalidDigest => "bundle file digest is not canonical SHA-256",
@@ -280,6 +320,9 @@ impl fmt::Display for InvalidBundleFile {
 impl Error for InvalidBundleFile {}
 
 fn validate_path(path: &str) -> Result<(), InvalidBundleFile> {
+    if path.len() > MAX_PATH_BYTES {
+        return Err(InvalidBundleFile::PathTooLong);
+    }
     let mut segments = path.split('/');
     let Some(first) = segments.next().filter(|segment| valid_segment(segment)) else {
         return Err(InvalidBundleFile::InvalidPath);
@@ -287,7 +330,7 @@ fn validate_path(path: &str) -> Result<(), InvalidBundleFile> {
     if segments.any(|segment| !valid_segment(segment)) {
         return Err(InvalidBundleFile::InvalidPath);
     }
-    if path == MANIFEST_FILE || first == ASSET_DIRECTORY {
+    if first == MANIFEST_FILE || first == ASSET_ROOT {
         return Err(InvalidBundleFile::ReservedPath);
     }
     Ok(())
@@ -321,6 +364,21 @@ fn validate_file_order(files: &[BundleFile]) -> Result<(), InvalidBundleManifest
         if pair[0].path() > pair[1].path() {
             return Err(InvalidBundleManifest::UnorderedFiles);
         }
+    }
+    Ok(())
+}
+
+fn validate_path_tree(files: &[BundleFile]) -> Result<(), InvalidBundleManifest> {
+    let mut paths = BTreeSet::new();
+    for file in files {
+        // Canonical ordering guarantees that every possible file ancestor has
+        // already appeared, even when unrelated siblings separate the pair.
+        for (separator, _) in file.path().match_indices('/') {
+            if paths.contains(&file.path()[..separator]) {
+                return Err(InvalidBundleManifest::FilePathConflict);
+            }
+        }
+        paths.insert(file.path());
     }
     Ok(())
 }
@@ -374,6 +432,15 @@ mod tests {
                 Err(InvalidBundleFile::ReservedPath),
             );
         }
+
+        assert_eq!(
+            BundleFile::new("manifest.json/child", 1, DIGEST),
+            Err(InvalidBundleFile::ReservedPath),
+        );
+        assert_eq!(
+            BundleFile::new("a".repeat(1_025), 1, DIGEST),
+            Err(InvalidBundleFile::PathTooLong),
+        );
     }
 
     #[test]
@@ -390,5 +457,19 @@ mod tests {
             Err(InvalidBundleManifest::MissingEntryPoint),
         );
         assert!(BundleManifest::new(DIGEST, vec![index]).is_ok());
+    }
+
+    #[test]
+    fn rejects_file_and_directory_path_collisions() {
+        let index = BundleFile::new("index.html", 1, DIGEST).expect("index is valid");
+        let sibling =
+            BundleFile::new("index.html-other", 1, DIGEST).expect("the sibling path is valid");
+        let descendant =
+            BundleFile::new("index.html/child", 1, DIGEST).expect("the child path is valid");
+
+        assert_eq!(
+            BundleManifest::new(DIGEST, vec![index, sibling, descendant]),
+            Err(InvalidBundleManifest::FilePathConflict),
+        );
     }
 }

@@ -11,6 +11,7 @@
           "type": "integer"
         },
         "path": {
+          "maxLength": 1024,
           "pattern": "^[a-z0-9._-]+(?:/[a-z0-9._-]+)*$",
           "type": "string"
         },
@@ -52,6 +53,8 @@
       "items": {
         "$ref": "#/$defs/BundleFile"
       },
+      "maxItems": 99999,
+      "minItems": 1,
       "type": "array"
     },
     "version": {
@@ -65,5 +68,7 @@
     "files"
   ],
   "title": "BundleManifest",
-  "type": "object"
+  "type": "object",
+  "x-onmark-asset-directory": "assets/sha256",
+  "x-onmark-manifest-file": "manifest.json"
 }

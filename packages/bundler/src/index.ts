@@ -9,3 +9,10 @@ export {
   type BundleManifest,
   type BundleOptions,
 } from "./presentation.js";
+
+export {
+  BUNDLE_ASSET_DIRECTORY,
+  BUNDLE_ENTRY_POINT,
+  BUNDLE_MANIFEST_FILE,
+  BUNDLE_VERSION,
+} from "./generated/bundle-manifest.js";

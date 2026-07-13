@@ -1,9 +1,8 @@
 //! Versioned wire values shared across execution-process boundaries.
 //!
-//! Domain values remain owned by `model` and `timeline`. This module lowers
-//! only the facts consumed across the Gate-one browser boundary.
-//! Native execution constructs and serializes requests; it deserializes and
-//! validates responses returned by the browser.
+//! Domain values remain owned by `model` and `timeline`. This module owns only
+//! facts that cross Gate-one process boundaries: native/browser messages and
+//! the Node/native presentation-bundle manifest.
 
 mod bundle;
 mod message;

@@ -1,4 +1,5 @@
 use std::fs;
+use std::path::{Path, PathBuf};
 
 use onmark_core::model::{AssetMetadata, Duration, FrozenAsset, FrozenAssetId};
 use onmark_core::protocol::{BundleFile, BundleManifest};
@@ -25,12 +26,33 @@ fn materializes_verified_bundle_and_asset_bytes() {
         read(&root.path().join(fixture.asset.unit_relative_path())),
         b"video",
     );
-    assert!(root.path().join("manifest.json").is_file());
+    assert!(root.path().join(BundleManifest::FILE_NAME).is_file());
     assert_eq!(root.entry_url().scheme(), "file");
 
     let path = root.path().to_owned();
     drop(root);
     assert!(!path.exists());
+}
+
+#[test]
+fn materializes_the_checked_in_bundle_contract() {
+    let root = conformance_bundle();
+    let source = fs::read_to_string(root.join(BundleManifest::FILE_NAME))
+        .expect("the conformance manifest is readable");
+    let manifest = serde_json::from_str::<BundleManifest>(&source)
+        .expect("the conformance manifest satisfies the Rust wire contract");
+    let unit = UnitRoot::materialize(
+        &root,
+        &manifest,
+        std::iter::empty::<&MaterializedAsset>(),
+        limits(4, 4_096),
+    )
+    .expect("the checked-in bundle must materialize across the native boundary");
+
+    assert_eq!(
+        read(&unit.path().join(BundleManifest::ENTRY_POINT)),
+        b"onmark\n"
+    );
 }
 
 #[test]
@@ -110,6 +132,21 @@ fn rejects_empty_or_unbounded_limits() {
     );
 }
 
+#[test]
+fn rejects_file_limits_before_bundle_identity_work() {
+    let bundle = tempdir().expect("the fixture bundle directory is available");
+    let files = vec![
+        BundleFile::new("index.html", 1, digest(b"index")).expect("index is valid"),
+        BundleFile::new("presentation.js", 1, digest(b"script")).expect("script is valid"),
+    ];
+    let manifest = BundleManifest::new(digest(b"wrong identity"), files)
+        .expect("the deliberately wrong identity is well formed");
+
+    let error = UnitRoot::materialize(bundle.path(), &manifest, [], limits(2, 4_096))
+        .expect_err("the file bound must reject work before identity hashing");
+    assert_eq!(error.kind(), UnitRootErrorKind::FileLimit);
+}
+
 #[cfg(unix)]
 #[test]
 fn rejects_bundle_symlinks() {
@@ -187,8 +224,14 @@ fn materialize(fixture: &Fixture) -> Result<UnitRoot, onmark_render::UnitRootErr
     )
 }
 
-fn read(path: &std::path::Path) -> Vec<u8> {
+fn read(path: &Path) -> Vec<u8> {
     fs::read(path).expect("the materialized fixture is readable")
+}
+
+fn conformance_bundle() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join("conformance/protocol/bundle-v1")
 }
 
 fn frozen_id(bytes: &[u8]) -> FrozenAssetId {

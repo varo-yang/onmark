@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 use std::fs::{self, File, OpenOptions};
-use std::io::{Read as _, Write as _};
+use std::io::{self, Read as _, Write};
 use std::path::Path;
 
 use onmark_core::protocol::{BundleFile, BundleManifest};
@@ -11,7 +11,6 @@ use tempfile::{Builder as TempDirBuilder, TempDir};
 use super::{UnitRootError, UnitRootErrorKind, UnitRootLimits};
 use crate::MaterializedAsset;
 
-const MANIFEST_FILE: &str = "manifest.json";
 const COPY_BUFFER_BYTES: usize = 64 * 1024;
 
 pub(super) fn materialize<'a>(
@@ -20,14 +19,14 @@ pub(super) fn materialize<'a>(
     assets: impl Iterator<Item = &'a MaterializedAsset>,
     limits: UnitRootLimits,
 ) -> Result<TempDir, UnitRootError> {
-    verify_bundle_identity(source_root, manifest)?;
     let assets = collect_assets(source_root, manifest, assets, limits.max_files())?;
-    let manifest_bytes = encode_manifest(manifest);
-    let mut writer = UnitWriter::create(source_root, limits.max_bytes(), &manifest_bytes)?;
+    verify_bundle_identity(source_root, manifest)?;
+    let manifest_bytes = encoded_manifest_bytes(manifest);
+    let mut writer = UnitWriter::create(source_root, limits.max_bytes(), manifest_bytes)?;
 
     writer.copy_bundle(source_root, manifest)?;
     writer.copy_assets(&assets)?;
-    writer.write_manifest(&manifest_bytes)?;
+    writer.write_manifest(manifest)?;
     Ok(writer.finish())
 }
 
@@ -46,12 +45,10 @@ fn verify_bundle_identity(root: &Path, manifest: &BundleManifest) -> Result<(), 
         entry_point: manifest.entry_point(),
         files: manifest.files(),
     };
-    let identity = serde_json::to_vec(&identity)
-        .expect("a validated bundle identity always serializes to JSON");
-    if sha256(&identity) != manifest.bundle_id() {
+    if json_sha256(&identity) != manifest.bundle_id() {
         return Err(failure(
             UnitRootErrorKind::BundleIdentity,
-            &root.join(MANIFEST_FILE),
+            &root.join(BundleManifest::FILE_NAME),
             "bundle ID does not match its canonical payload description",
         ));
     }
@@ -74,11 +71,12 @@ fn collect_assets<'a>(
     if base_files > max_files {
         return Err(file_limit(root));
     }
+    let available_assets = max_files - base_files;
 
     let mut seen = BTreeSet::new();
     let mut collected = Vec::new();
     for asset in assets {
-        if base_files + collected.len() >= max_files {
+        if collected.len() == available_assets {
             return Err(file_limit(root));
         }
         if !seen.insert(asset.id()) {
@@ -99,10 +97,13 @@ struct UnitWriter {
 }
 
 impl UnitWriter {
-    fn create(source_root: &Path, max_bytes: u64, manifest: &[u8]) -> Result<Self, UnitRootError> {
+    fn create(
+        source_root: &Path,
+        max_bytes: u64,
+        manifest_bytes: u64,
+    ) -> Result<Self, UnitRootError> {
         let mut budget = ByteBudget::new(max_bytes);
-        let manifest_bytes = u64::try_from(manifest.len()).map_err(|_| byte_limit(source_root))?;
-        budget.consume(source_root, manifest_bytes)?;
+        budget.consume(&source_root.join(BundleManifest::FILE_NAME), manifest_bytes)?;
         let directory = TempDirBuilder::new()
             .prefix("onmark-unit-")
             .tempdir()
@@ -167,9 +168,17 @@ impl UnitWriter {
         self.budget.consume(source, actual.bytes)
     }
 
-    fn write_manifest(&self, contents: &[u8]) -> Result<(), UnitRootError> {
-        let path = self.directory.path().join(MANIFEST_FILE);
-        fs::write(&path, contents).map_err(|source| {
+    fn write_manifest(&self, manifest: &BundleManifest) -> Result<(), UnitRootError> {
+        let path = self.directory.path().join(BundleManifest::FILE_NAME);
+        let mut output = create_destination(&path)?;
+        serde_json::to_writer_pretty(&mut output, manifest).map_err(|source| {
+            UnitRootError::io(
+                &path,
+                "failed to write unit-root manifest",
+                io::Error::other(source),
+            )
+        })?;
+        output.write_all(b"\n").map_err(|source| {
             UnitRootError::io(&path, "failed to write unit-root manifest", source)
         })
     }
@@ -265,15 +274,21 @@ fn create_destination(path: &Path) -> Result<File, UnitRootError> {
         .map_err(|source| UnitRootError::io(path, "failed to create unit-root payload", source))
 }
 
-fn encode_manifest(manifest: &BundleManifest) -> Vec<u8> {
-    let mut bytes = serde_json::to_vec_pretty(manifest)
-        .expect("a validated bundle manifest always serializes to JSON");
-    bytes.push(b'\n');
-    bytes
+fn encoded_manifest_bytes(manifest: &BundleManifest) -> u64 {
+    let mut counter = ByteCounter::default();
+    serde_json::to_writer_pretty(&mut counter, manifest)
+        .expect("a validated bundle manifest always serializes to a byte counter");
+    counter
+        .write_all(b"\n")
+        .expect("a byte counter cannot reject manifest bytes");
+    counter.finish()
 }
 
-fn sha256(bytes: &[u8]) -> String {
-    encode_sha256(&Sha256::digest(bytes))
+fn json_sha256(value: &impl Serialize) -> String {
+    let mut writer = DigestWriter(Sha256::new());
+    serde_json::to_writer(&mut writer, value)
+        .expect("a validated bundle identity always serializes to a digest writer");
+    writer.finish()
 }
 
 fn encode_sha256(digest: &[u8]) -> String {
@@ -307,6 +322,51 @@ impl ByteBudget {
     fn consume(&mut self, path: &Path, bytes: u64) -> Result<(), UnitRootError> {
         self.ensure(path, bytes)?;
         self.remaining -= bytes;
+        Ok(())
+    }
+}
+
+#[derive(Default)]
+struct ByteCounter {
+    bytes: u64,
+}
+
+impl ByteCounter {
+    const fn finish(self) -> u64 {
+        self.bytes
+    }
+}
+
+impl Write for ByteCounter {
+    fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+        let bytes = u64::try_from(buffer.len()).expect("an in-memory slice length fits in u64");
+        self.bytes = self
+            .bytes
+            .checked_add(bytes)
+            .expect("the bounded manifest cannot overflow u64");
+        Ok(buffer.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+struct DigestWriter(Sha256);
+
+impl DigestWriter {
+    fn finish(self) -> String {
+        encode_sha256(&self.0.finalize())
+    }
+}
+
+impl Write for DigestWriter {
+    fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+        self.0.update(buffer);
+        Ok(buffer.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
         Ok(())
     }
 }

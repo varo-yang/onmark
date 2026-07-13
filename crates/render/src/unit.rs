@@ -5,7 +5,7 @@ use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use onmark_core::model::{FrameRate, FrozenAsset, FrozenAssetId};
-use onmark_core::protocol::{BrowserPlan, InvalidBrowserPlan};
+use onmark_core::protocol::{BrowserPlan, BundleManifest, InvalidBrowserPlan};
 use onmark_core::timeline::{TimelineIr, TimelineVideo};
 
 use crate::{AdmittedVideo, UnsupportedVideo};
@@ -58,7 +58,8 @@ impl MaterializedAsset {
     /// Returns the deterministic location beneath a materialized unit root.
     #[must_use]
     pub fn unit_relative_path(&self) -> String {
-        let mut path = String::from("assets/sha256/");
+        let mut path = String::from(BundleManifest::ASSET_DIRECTORY);
+        path.push('/');
         for byte in self.id().as_sha256() {
             write!(path, "{byte:02x}").expect("writing into a String cannot fail");
         }
@@ -271,7 +272,7 @@ mod tests {
     };
     use onmark_core::timeline::TimelineIr;
 
-    use super::{InvalidRenderUnit, MaterializedAsset, RenderUnit};
+    use super::{BundleManifest, InvalidRenderUnit, MaterializedAsset, RenderUnit};
 
     #[test]
     fn composes_only_required_admitted_video_assets() {
@@ -291,7 +292,7 @@ mod tests {
                 .expect("the unit contains one video")
                 .asset()
                 .unit_relative_path(),
-            format!("assets/sha256/{}", "01".repeat(32)),
+            format!("{}/{}", BundleManifest::ASSET_DIRECTORY, "01".repeat(32)),
         );
         assert_eq!(
             unit.videos()

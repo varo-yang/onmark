@@ -11,7 +11,11 @@ export type BundleVersion = 1;
 export interface BundleManifest {
   bundleId: string;
   entryPoint: "index.html";
-  files: BundleFile[];
+  /**
+   * @minItems 1
+   * @maxItems 99999
+   */
+  files: [BundleFile, ...BundleFile[]];
   version: BundleVersion;
 }
 /**
@@ -22,3 +26,8 @@ export interface BundleFile {
   path: string;
   sha256: string;
 }
+
+export const BUNDLE_VERSION = 1 as const;
+export const BUNDLE_ENTRY_POINT = "index.html" as const;
+export const BUNDLE_MANIFEST_FILE = "manifest.json" as const;
+export const BUNDLE_ASSET_DIRECTORY = "assets/sha256" as const;

@@ -5,8 +5,11 @@ Authored `.onmark` inputs are maintained by hand. Expected `.ast.txt`,
 are generated golden artifacts and are not wire formats or protocol schemas.
 
 Files under `protocol/` are different: they are checked-in wire examples and
-therefore part of the versioned browser contract. They are maintained through
-the protocol conformance test and reviewed as compatibility-sensitive data.
+therefore part of versioned cross-process contracts. Browser request/response
+examples are maintained through the protocol conformance test. Bundle fixture
+directories also retain their payload bytes so native materialization verifies
+the declared size, digest, identity, and entry document together. Review all of
+these files as compatibility-sensitive data.
 
 Regenerate goldens after intentionally changing public behavior:
 

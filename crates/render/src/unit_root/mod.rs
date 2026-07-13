@@ -13,7 +13,7 @@ pub use error::{UnitRootError, UnitRootErrorKind};
 
 use crate::MaterializedAsset;
 
-const MAX_FILES: usize = 100_000;
+const MAX_FILES: usize = BundleManifest::MAX_FILES + 1;
 const MAX_BYTES: u64 = 1 << 40;
 
 /// Explicit retained-storage limits for one private execution root.

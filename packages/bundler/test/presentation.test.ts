@@ -8,6 +8,8 @@ import { join } from "node:path";
 import test from "node:test";
 
 import {
+  BUNDLE_ENTRY_POINT,
+  BUNDLE_MANIFEST_FILE,
   BundleError,
   bundlePresentation,
   type BundleManifest,
@@ -50,15 +52,18 @@ test("builds a deterministic immutable presentation artifact", async () => {
     assert.equal(first.manifest.bundleId, bundleIdentity(first.manifest));
     assert.deepEqual(
       first.manifest.files.map((file) => file.path),
-      ["index.html", "presentation.css", "presentation.js"],
+      [BUNDLE_ENTRY_POINT, "presentation.css", "presentation.js"],
     );
-    const html = await readFile(join(first.directory, "index.html"), "utf8");
+    const html = await readFile(
+      join(first.directory, BUNDLE_ENTRY_POINT),
+      "utf8",
+    );
     const script = await readFile(
       join(first.directory, "presentation.js"),
       "utf8",
     );
     const savedManifest: unknown = JSON.parse(
-      await readFile(join(first.directory, "manifest.json"), "utf8"),
+      await readFile(join(first.directory, BUNDLE_MANIFEST_FILE), "utf8"),
     );
     assert.match(html, /src="\.\/presentation\.js"/u);
     assert.match(html, /href="\.\/presentation\.css"/u);

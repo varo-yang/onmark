@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "bundleId": "sha256:c499b505aa7827fe26aeda7c08cae12273dda80b1717a84f1cf89f2b7077fb8b",
+  "entryPoint": "index.html",
+  "files": [
+    {
+      "bytes": 7,
+      "path": "index.html",
+      "sha256": "sha256:e5b1907a0d8aeb6c9729a75dbf3769d7f0b719ecb3170a7927d46454588a64db"
+    }
+  ]
+}

@@ -76,7 +76,7 @@ fn browser_plan_requires_an_admitted_rate_for_every_video() {
 
 #[test]
 fn bundle_manifest_matches_the_versioned_wire_contract() {
-    let path = fixture("protocol", "bundle-manifest-v1.json");
+    let path = fixture("protocol", "bundle-v1/manifest.json");
     let source = std::fs::read_to_string(&path).expect("the bundle fixture must be readable");
     let manifest = serde_json::from_str::<BundleManifest>(&source)
         .expect("the bundle fixture must satisfy the Rust wire contract");
