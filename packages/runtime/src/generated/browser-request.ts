@@ -30,6 +30,10 @@ export type BrowserCommand =
  */
 export type WireFrame = number;
 /**
+ * Closed overlay roles understood by the Gate-one presentation.
+ */
+export type BrowserOverlayKind = "title" | "callToAction";
+/**
  * Correlation identity shared by one request and its response events.
  */
 export type RequestId = number;
@@ -53,6 +57,10 @@ export interface BrowserPlan {
   evaluation: WireInterval;
   frameRate: WireFrameRate;
   output: WireInterval;
+  /**
+   * @maxItems 10000
+   */
+  overlays: BrowserOverlay[];
   timelineVersion: 1;
   /**
    * @maxItems 10000
@@ -72,6 +80,14 @@ export interface WireInterval {
 export interface WireFrameRate {
   denominator: number;
   numerator: number;
+}
+/**
+ * One solved overlay placement consumed by the browser presentation.
+ */
+export interface BrowserOverlay {
+  interval: WireInterval;
+  kind: BrowserOverlayKind;
+  text: string;
 }
 /**
  * One primary video placement consumed by the browser presentation adapter.

@@ -75,6 +75,27 @@ fn browser_plan_requires_an_admitted_rate_for_every_video() {
 }
 
 #[test]
+fn browser_plan_retains_solved_overlay_facts() {
+    let plan = serde_json::to_value(gate_one_plan()).expect("the browser plan must serialize");
+
+    assert_eq!(
+        plan["overlays"],
+        serde_json::json!([
+            {
+                "kind": "title",
+                "text": "Opening",
+                "interval": { "start": 15, "end": 75 }
+            },
+            {
+                "kind": "callToAction",
+                "text": "Buy now",
+                "interval": { "start": 45, "end": 75 }
+            }
+        ]),
+    );
+}
+
+#[test]
 fn bundle_manifest_matches_the_versioned_wire_contract() {
     let path = fixture("protocol", "bundle-v1/manifest.json");
     let source = std::fs::read_to_string(&path).expect("the bundle fixture must be readable");
@@ -120,7 +141,7 @@ fn gate_one_timeline() -> (TimelineIr, FrozenAssetId, FrameRate) {
     )]);
     let parsed = compiler::parse(
         SourceId::new(0),
-        r#"<film><scene><shot><video src="opening.mp4" /></shot></scene></film>"#,
+        r#"<film><scene><shot><video src="opening.mp4" /><title delay="500ms">Opening</title><cta delay="1.5s">Buy now</cta></shot></scene></film>"#,
     );
     let (document, diagnostics) = parsed.into_parts();
     assert!(diagnostics.is_empty());

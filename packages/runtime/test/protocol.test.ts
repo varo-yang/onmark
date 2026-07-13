@@ -6,6 +6,8 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
+  MAX_BROWSER_OVERLAYS,
+  MAX_BROWSER_OVERLAY_TEXT_CHARACTERS,
   MAX_BROWSER_VIDEOS,
   MAX_FAILURE_MESSAGE_CHARACTERS,
   MAX_PENDING_RESOURCE_CHARACTERS,
@@ -47,6 +49,7 @@ test("rejects values outside the versioned browser contract", () => {
           frameRate: { numerator: 30, denominator: 1 },
           evaluation: { start: 0, end: 1 },
           output: { start: 0, end: 1 },
+          overlays: [],
           videos: [
             {
               assetId: "opening.mp4",
@@ -103,11 +106,57 @@ test("rejects protocol payloads outside generated resource budgets", () => {
         frameRate: { numerator: 30, denominator: 1 },
         evaluation: { start: 0, end: 1 },
         output: { start: 0, end: 1 },
+        overlays: [],
         videos: Array.from({ length: MAX_BROWSER_VIDEOS + 1 }, () => video),
       },
     },
   };
   assert.throws(() => decodeBrowserRequest(request), ProtocolDecodeError);
+
+  const overlay = {
+    kind: "title",
+    text: "Opening",
+    interval: { start: 0, end: 1 },
+  };
+  const excessiveOverlays = {
+    ...request,
+    command: {
+      ...request.command,
+      plan: {
+        ...request.command.plan,
+        videos: [],
+        overlays: Array.from(
+          { length: MAX_BROWSER_OVERLAYS + 1 },
+          () => overlay,
+        ),
+      },
+    },
+  };
+  assert.throws(
+    () => decodeBrowserRequest(excessiveOverlays),
+    ProtocolDecodeError,
+  );
+
+  const excessiveOverlayText = {
+    ...request,
+    command: {
+      ...request.command,
+      plan: {
+        ...request.command.plan,
+        videos: [],
+        overlays: [
+          {
+            ...overlay,
+            text: "x".repeat(MAX_BROWSER_OVERLAY_TEXT_CHARACTERS + 1),
+          },
+        ],
+      },
+    },
+  };
+  assert.throws(
+    () => decodeBrowserRequest(excessiveOverlayText),
+    ProtocolDecodeError,
+  );
 
   const oversizedFailures = [
     failure("x".repeat(MAX_FAILURE_MESSAGE_CHARACTERS + 1), []),

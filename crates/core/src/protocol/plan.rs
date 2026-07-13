@@ -5,12 +5,14 @@ use std::fmt;
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize};
 
-use crate::model::{FrameIndex, FrameInterval, FrameRate, FrozenAssetId};
-use crate::timeline::{TimelineIr, TimelineVideo};
+use crate::model::{ElementKind, FrameIndex, FrameInterval, FrameRate, FrozenAssetId};
+use crate::timeline::{TimelineIr, TimelineOverlay, TimelineText, TimelineVideo};
 
 /// Largest integer represented exactly by every JavaScript implementation.
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 const MAX_BROWSER_VIDEOS: usize = 10_000;
+const MAX_BROWSER_OVERLAYS: usize = 10_000;
+const MAX_BROWSER_OVERLAY_TEXT_CHARACTERS: usize = 65_536;
 
 /// Timeline facts consumed by the Gate-one browser clock and presentation.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -27,6 +29,11 @@ pub struct BrowserPlan {
         schemars(length(max = MAX_BROWSER_VIDEOS))
     )]
     videos: Vec<BrowserVideo>,
+    #[cfg_attr(
+        feature = "schema",
+        schemars(length(max = MAX_BROWSER_OVERLAYS))
+    )]
+    overlays: Vec<BrowserOverlay>,
 }
 
 impl BrowserPlan {
@@ -34,9 +41,9 @@ impl BrowserPlan {
     ///
     /// # Errors
     ///
-    /// Returns [`InvalidBrowserPlan`] when the plan exceeds its video budget, a
-    /// video has no admitted source rate, or a frame lies outside JavaScript's
-    /// exact integer domain.
+    /// Returns [`InvalidBrowserPlan`] when a placement exceeds its resource
+    /// budget, a video has no admitted source rate, an overlay is malformed,
+    /// or a frame lies outside JavaScript's exact integer domain.
     pub fn from_timeline(
         timeline: &TimelineIr,
         source_frame_rates: &BTreeMap<FrozenAssetId, FrameRate>,
@@ -50,6 +57,13 @@ impl BrowserPlan {
             }
             videos.push(browser_video(video, source_frame_rates)?);
         }
+        let mut overlays = Vec::new();
+        for overlay in timeline.overlays() {
+            if overlays.len() == MAX_BROWSER_OVERLAYS {
+                return Err(InvalidBrowserPlan::TooManyOverlays);
+            }
+            overlays.push(browser_overlay(overlay)?);
+        }
 
         Ok(Self {
             timeline_version: timeline.version().get(),
@@ -57,6 +71,7 @@ impl BrowserPlan {
             evaluation: interval,
             output: interval,
             videos,
+            overlays,
         })
     }
 
@@ -88,6 +103,12 @@ impl BrowserPlan {
     #[must_use]
     pub fn videos(&self) -> &[BrowserVideo] {
         &self.videos
+    }
+
+    /// Returns overlay placements in screenplay order.
+    #[must_use]
+    pub fn overlays(&self) -> &[BrowserOverlay] {
+        &self.overlays
     }
 }
 
@@ -125,6 +146,51 @@ impl BrowserVideo {
     }
 }
 
+/// Closed overlay roles understood by the Gate-one presentation.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum BrowserOverlayKind {
+    /// Authored title content.
+    Title,
+    /// Authored call-to-action content.
+    CallToAction,
+}
+
+/// One solved overlay placement consumed by the browser presentation.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct BrowserOverlay {
+    kind: BrowserOverlayKind,
+    #[cfg_attr(
+        feature = "schema",
+        schemars(length(max = MAX_BROWSER_OVERLAY_TEXT_CHARACTERS))
+    )]
+    text: Box<str>,
+    interval: WireInterval,
+}
+
+impl BrowserOverlay {
+    /// Returns the presentation role selected by the screenplay element.
+    #[must_use]
+    pub const fn kind(&self) -> BrowserOverlayKind {
+        self.kind
+    }
+
+    /// Returns decoded authored text with source runs joined in order.
+    #[must_use]
+    pub fn text(&self) -> &str {
+        &self.text
+    }
+
+    /// Returns the absolute frames during which the overlay is visible.
+    #[must_use]
+    pub const fn interval(&self) -> WireInterval {
+        self.interval
+    }
+}
+
 fn browser_video(
     video: &TimelineVideo,
     source_frame_rates: &BTreeMap<FrozenAssetId, FrameRate>,
@@ -142,12 +208,46 @@ fn browser_video(
     })
 }
 
+fn browser_overlay(overlay: &TimelineOverlay) -> Result<BrowserOverlay, InvalidBrowserPlan> {
+    let element_kind = overlay.element().kind();
+    let kind = match element_kind {
+        ElementKind::Title => BrowserOverlayKind::Title,
+        ElementKind::CallToAction => BrowserOverlayKind::CallToAction,
+        _ => return Err(InvalidBrowserPlan::InvalidOverlayKind(element_kind)),
+    };
+    let text = overlay
+        .text()
+        .iter()
+        .map(TimelineText::text)
+        .collect::<String>();
+    if text
+        .chars()
+        .take(MAX_BROWSER_OVERLAY_TEXT_CHARACTERS + 1)
+        .count()
+        > MAX_BROWSER_OVERLAY_TEXT_CHARACTERS
+    {
+        return Err(InvalidBrowserPlan::OverlayTextTooLong(element_kind));
+    }
+
+    Ok(BrowserOverlay {
+        kind,
+        text: text.into_boxed_str(),
+        interval: WireInterval::try_from(overlay.timing().interval())?,
+    })
+}
+
 /// Reason Timeline IR cannot form an exact browser-facing plan.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum InvalidBrowserPlan {
     /// The plan contains more video placements than V1 can carry.
     TooManyVideos,
+    /// The plan contains more overlay placements than V1 can carry.
+    TooManyOverlays,
+    /// A Timeline overlay carries a non-overlay element kind.
+    InvalidOverlayKind(ElementKind),
+    /// One overlay inscription exceeds the V1 character budget.
+    OverlayTextTooLong(ElementKind),
     /// One video lacks the source rate proved during render admission.
     MissingSourceFrameRate(FrozenAssetId),
     /// A frame lies outside JavaScript's exact integer range.
@@ -159,6 +259,21 @@ impl fmt::Display for InvalidBrowserPlan {
         match self {
             Self::TooManyVideos => {
                 formatter.write_str("browser plan exceeds the V1 video-placement limit")
+            }
+            Self::TooManyOverlays => {
+                formatter.write_str("browser plan exceeds the V1 overlay-placement limit")
+            }
+            Self::InvalidOverlayKind(kind) => {
+                write!(
+                    formatter,
+                    "timeline element {kind} is not a browser overlay"
+                )
+            }
+            Self::OverlayTextTooLong(kind) => {
+                write!(
+                    formatter,
+                    "browser {kind} text exceeds the V1 character limit"
+                )
             }
             Self::MissingSourceFrameRate(id) => {
                 write!(formatter, "source frame rate is missing for video {id}")
@@ -172,7 +287,11 @@ impl Error for InvalidBrowserPlan {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::InvalidFrame(source) => Some(source),
-            Self::TooManyVideos | Self::MissingSourceFrameRate(_) => None,
+            Self::TooManyVideos
+            | Self::TooManyOverlays
+            | Self::InvalidOverlayKind(_)
+            | Self::OverlayTextTooLong(_)
+            | Self::MissingSourceFrameRate(_) => None,
         }
     }
 }
@@ -320,13 +439,13 @@ mod tests {
         SourceSpan, Timebase,
     };
     use crate::timeline::{
-        TimelineContent, TimelineElement, TimelineIr, TimelineScene, TimelineShot, TimelineTiming,
-        TimelineVideo, TimingReason,
+        TimelineContent, TimelineElement, TimelineIr, TimelineOverlay, TimelineScene, TimelineShot,
+        TimelineText, TimelineTiming, TimelineVideo, TimingReason,
     };
 
     use super::{
-        BrowserPlan, InvalidBrowserPlan, InvalidWireFrame, MAX_BROWSER_VIDEOS, MAX_SAFE_INTEGER,
-        WireFrame,
+        BrowserPlan, InvalidBrowserPlan, InvalidWireFrame, MAX_BROWSER_OVERLAY_TEXT_CHARACTERS,
+        MAX_BROWSER_OVERLAYS, MAX_BROWSER_VIDEOS, MAX_SAFE_INTEGER, WireFrame,
     };
 
     #[test]
@@ -358,6 +477,27 @@ mod tests {
         );
     }
 
+    #[test]
+    fn rejects_a_plan_outside_the_overlay_budget() {
+        let timeline = timeline_with_overlays(MAX_BROWSER_OVERLAYS + 1, "Opening");
+
+        assert_eq!(
+            BrowserPlan::from_timeline(&timeline, &BTreeMap::new()),
+            Err(InvalidBrowserPlan::TooManyOverlays),
+        );
+    }
+
+    #[test]
+    fn rejects_overlay_text_outside_the_character_budget() {
+        let text = "片".repeat(MAX_BROWSER_OVERLAY_TEXT_CHARACTERS + 1);
+        let timeline = timeline_with_overlays(1, &text);
+
+        assert_eq!(
+            BrowserPlan::from_timeline(&timeline, &BTreeMap::new()),
+            Err(InvalidBrowserPlan::OverlayTextTooLong(ElementKind::Title)),
+        );
+    }
+
     fn timeline_with_videos(asset_id: FrozenAssetId, count: usize) -> TimelineIr {
         let span = SourceSpan::new(SourceId::new(0), ByteOffset::ZERO, ByteOffset::ZERO)
             .expect("equal source bounds form a valid span");
@@ -366,13 +506,36 @@ mod tests {
         let timing = TimelineTiming::new(interval, TimingReason::ShotStart, TimingReason::ShotEnd);
         let video = TimelineContent::Video(TimelineVideo::new(
             TimelineElement::new(ElementKind::Video, None, span),
-            timing.clone(),
+            timing,
             asset_id,
         ));
+        timeline_with_content(vec![video; count])
+    }
+
+    fn timeline_with_overlays(count: usize, text: &str) -> TimelineIr {
+        let span = SourceSpan::new(SourceId::new(0), ByteOffset::ZERO, ByteOffset::ZERO)
+            .expect("equal source bounds form a valid span");
+        let interval = FrameInterval::new(FrameIndex::ZERO, FrameIndex::new(1))
+            .expect("the fixture interval is ordered");
+        let timing = TimelineTiming::new(interval, TimingReason::ShotStart, TimingReason::ShotEnd);
+        let overlay = TimelineContent::Overlay(TimelineOverlay::new(
+            TimelineElement::new(ElementKind::Title, None, span),
+            timing,
+            vec![TimelineText::new(text.to_owned().into_boxed_str(), span)],
+        ));
+        timeline_with_content(vec![overlay; count])
+    }
+
+    fn timeline_with_content(content: Vec<TimelineContent>) -> TimelineIr {
+        let span = SourceSpan::new(SourceId::new(0), ByteOffset::ZERO, ByteOffset::ZERO)
+            .expect("equal source bounds form a valid span");
+        let interval = FrameInterval::new(FrameIndex::ZERO, FrameIndex::new(1))
+            .expect("the fixture interval is ordered");
+        let timing = TimelineTiming::new(interval, TimingReason::ShotStart, TimingReason::ShotEnd);
         let shot = TimelineShot::new(
             TimelineElement::new(ElementKind::Shot, None, span),
             timing.clone(),
-            vec![video; count],
+            content,
         );
         let scene = TimelineScene::new(
             TimelineElement::new(ElementKind::Scene, None, span),

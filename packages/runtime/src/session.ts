@@ -314,6 +314,17 @@ function planViolation(plan: BrowserPlan): string | undefined {
       return "plan video interval falls outside evaluation";
     }
   }
+  for (const overlay of plan.overlays) {
+    if (overlay.interval.start >= overlay.interval.end) {
+      return "plan overlay interval is empty or reversed";
+    }
+    if (
+      overlay.interval.start < plan.evaluation.start ||
+      overlay.interval.end > plan.evaluation.end
+    ) {
+      return "plan overlay interval falls outside evaluation";
+    }
+  }
   return undefined;
 }
 
@@ -332,6 +343,15 @@ function snapshotPlan(plan: BrowserPlan): RuntimePlan {
       }),
     ),
   );
+  const overlays = Object.freeze(
+    plan.overlays.map((overlay) =>
+      Object.freeze({
+        kind: overlay.kind,
+        text: overlay.text,
+        interval: Object.freeze({ ...overlay.interval }),
+      }),
+    ),
+  );
 
   return Object.freeze({
     timelineVersion: plan.timelineVersion,
@@ -339,6 +359,7 @@ function snapshotPlan(plan: BrowserPlan): RuntimePlan {
     evaluation,
     output,
     videos,
+    overlays,
   });
 }
 

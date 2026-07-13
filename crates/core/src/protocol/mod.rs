@@ -17,6 +17,6 @@ pub use message::{
     ProtocolFailure, ProtocolFailureCode, ProtocolVersion, RUNTIME_HOST_NAME, RequestId,
 };
 pub use plan::{
-    BrowserPlan, BrowserVideo, InvalidBrowserPlan, InvalidWireFrame, WireFrame, WireFrameRate,
-    WireInterval,
+    BrowserOverlay, BrowserOverlayKind, BrowserPlan, BrowserVideo, InvalidBrowserPlan,
+    InvalidWireFrame, WireFrame, WireFrameRate, WireInterval,
 };

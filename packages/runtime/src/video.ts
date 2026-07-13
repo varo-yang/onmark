@@ -1,18 +1,9 @@
 // Bounded browser-video lifecycle over a presentation-owned media element.
 // Timeline selection remains Rust-owned; this module only proves decode readiness.
 
-import type { RuntimeFrame } from "./clock.js";
 import { BUNDLE_ASSET_DIRECTORY } from "./generated/bundle-layout.js";
-import {
-  videoFrameSelection,
-  type RuntimeVideo,
-  type VideoFrameSelection,
-} from "./media.js";
-import {
-  RuntimeAdapterError,
-  type RuntimeAdapter,
-  type RuntimePlan,
-} from "./session.js";
+import type { RuntimeVideo, VideoFrameSelection } from "./media.js";
+import { RuntimeAdapterError } from "./session.js";
 
 const FRAME_TOLERANCE_SECONDS = 0.000_001;
 const MAX_READINESS_TIMEOUT_MILLISECONDS = 24 * 60 * 60 * 1_000;
@@ -112,154 +103,10 @@ export class DecodedVideo {
   }
 }
 
-// ── Runtime adapter ──
-
-/** Presentation-owned element, source, and visibility behavior for one video. */
-export interface VideoPresentation {
-  readonly element: BrowserVideoElement;
-  readonly source: string;
-  setVisible(visible: boolean): void;
-}
-
-/** Binds one immutable video placement to presentation-owned browser effects. */
-export type BindVideoPresentation = (
-  placement: RuntimeVideo,
-  index: number,
-) => VideoPresentation;
-
 /** Returns the unit-root source for one already-validated video placement. */
 export function materializedVideoSource(placement: RuntimeVideo): string {
   const digest = placement.assetId.slice("sha256:".length);
   return `./${BUNDLE_ASSET_DIRECTORY}/${digest}`;
-}
-
-interface BoundVideo {
-  readonly placement: RuntimeVideo;
-  readonly presentation: VideoPresentation;
-  readonly resource: DecodedVideo;
-}
-
-interface LoadedAdapterState {
-  readonly kind: "loaded";
-  readonly frameRate: RuntimePlan["frameRate"];
-  readonly videos: readonly BoundVideo[];
-}
-
-type AdapterState =
-  | { readonly kind: "empty" }
-  | LoadedAdapterState
-  | { readonly kind: "disposed" };
-
-/** Gate-one runtime adapter for presentation-owned browser video elements. */
-export class VideoRuntimeAdapter implements RuntimeAdapter {
-  readonly #bind: BindVideoPresentation;
-  readonly #timeoutMilliseconds: number;
-  #state: AdapterState = { kind: "empty" };
-
-  constructor(bind: BindVideoPresentation, timeoutMilliseconds: number) {
-    requireReadinessTimeout(timeoutMilliseconds);
-    this.#bind = bind;
-    this.#timeoutMilliseconds = timeoutMilliseconds;
-  }
-
-  async load(plan: RuntimePlan): Promise<void> {
-    if (this.#state.kind !== "empty") {
-      throw new RuntimeAdapterError(
-        "operation",
-        "video adapter load requires the empty state",
-      );
-    }
-    const videos: BoundVideo[] = [];
-    try {
-      for (const [index, placement] of plan.videos.entries()) {
-        const presentation = this.#bind(placement, index);
-        presentation.setVisible(false);
-        const resource = new DecodedVideo(
-          presentation.element,
-          this.#timeoutMilliseconds,
-        );
-        await resource.load(presentation.source);
-        videos.push({ placement, presentation, resource });
-      }
-    } catch (error) {
-      releaseVideos(videos);
-      throw adapterFailure(error, "video presentation failed to load");
-    }
-
-    this.#state = { kind: "loaded", frameRate: plan.frameRate, videos };
-  }
-
-  prepare(frame: RuntimeFrame): Promise<void> {
-    return this.#present(frame);
-  }
-
-  seek(frame: RuntimeFrame): Promise<void> {
-    return this.#present(frame);
-  }
-
-  async dispose(): Promise<void> {
-    if (this.#state.kind === "disposed") {
-      return;
-    }
-    const videos = this.#state.kind === "loaded" ? this.#state.videos : [];
-    this.#state = { kind: "disposed" };
-
-    const failure = releaseVideos(videos);
-    if (failure !== undefined) {
-      throw adapterFailure(failure, "video presentation cleanup failed");
-    }
-  }
-
-  async #present(frame: RuntimeFrame): Promise<void> {
-    if (this.#state.kind !== "loaded") {
-      throw new RuntimeAdapterError(
-        "operation",
-        "video adapter frame presentation requires the loaded state",
-      );
-    }
-    const { frameRate, videos } = this.#state;
-
-    try {
-      for (const video of videos) {
-        video.presentation.setVisible(false);
-      }
-
-      const visible: BoundVideo[] = [];
-      for (const video of videos) {
-        const selection = videoFrameSelection(
-          frame,
-          video.placement,
-          frameRate,
-        );
-        if (selection !== undefined) {
-          await video.resource.present(selection);
-          visible.push(video);
-        }
-      }
-      for (const video of visible) {
-        video.presentation.setVisible(true);
-      }
-    } catch (error) {
-      throw adapterFailure(error, "video frame presentation failed");
-    }
-  }
-}
-
-function releaseVideos(videos: readonly BoundVideo[]): unknown | undefined {
-  let failure: unknown;
-  for (const video of videos) {
-    try {
-      video.presentation.setVisible(false);
-    } catch (error) {
-      failure ??= error;
-    }
-    try {
-      video.resource.dispose();
-    } catch (error) {
-      failure ??= error;
-    }
-  }
-  return failure;
 }
 
 function releaseElement(element: BrowserVideoElement): unknown | undefined {

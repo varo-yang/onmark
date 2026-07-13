@@ -76,6 +76,43 @@
         }
       ]
     },
+    "BrowserOverlay": {
+      "additionalProperties": false,
+      "description": "One solved overlay placement consumed by the browser presentation.",
+      "properties": {
+        "interval": {
+          "$ref": "#/$defs/WireInterval"
+        },
+        "kind": {
+          "$ref": "#/$defs/BrowserOverlayKind"
+        },
+        "text": {
+          "maxLength": 65536,
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "text",
+        "interval"
+      ],
+      "type": "object"
+    },
+    "BrowserOverlayKind": {
+      "description": "Closed overlay roles understood by the Gate-one presentation.",
+      "oneOf": [
+        {
+          "const": "title",
+          "description": "Authored title content.",
+          "type": "string"
+        },
+        {
+          "const": "callToAction",
+          "description": "Authored call-to-action content.",
+          "type": "string"
+        }
+      ]
+    },
     "BrowserPlan": {
       "additionalProperties": false,
       "description": "Timeline facts consumed by the Gate-one browser clock and presentation.",
@@ -88,6 +125,13 @@
         },
         "output": {
           "$ref": "#/$defs/WireInterval"
+        },
+        "overlays": {
+          "items": {
+            "$ref": "#/$defs/BrowserOverlay"
+          },
+          "maxItems": 10000,
+          "type": "array"
         },
         "timelineVersion": {
           "const": 1,
@@ -109,7 +153,8 @@
         "frameRate",
         "evaluation",
         "output",
-        "videos"
+        "videos",
+        "overlays"
       ],
       "type": "object"
     },

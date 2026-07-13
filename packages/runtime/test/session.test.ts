@@ -31,6 +31,13 @@ const plan: BrowserPlan = {
       sourceFrameRate: { numerator: 24, denominator: 1 },
     },
   ],
+  overlays: [
+    {
+      kind: "title",
+      text: "Opening",
+      interval: { start: 12, end: 18 },
+    },
+  ],
 };
 
 // ── Protocol progression ──
@@ -258,6 +265,24 @@ test("rejects invalid browser video facts before adapter loading", async () => {
   }
 });
 
+test("rejects invalid browser overlay facts before adapter loading", async () => {
+  const emptyOverlay = structuredClone(plan);
+  firstOverlay(emptyOverlay).interval = { start: 12, end: 12 };
+  const escapedOverlay = structuredClone(plan);
+  firstOverlay(escapedOverlay).interval = { start: 9, end: 18 };
+
+  for (const invalidPlan of [emptyOverlay, escapedOverlay]) {
+    const adapter = new RecordingAdapter();
+    const session = new RuntimeSession(adapter);
+    const rejected = await session.dispatch(
+      request(1, { type: "load", plan: invalidPlan }),
+    );
+
+    assertFailure(rejected, "invalidRequest");
+    assert.deepEqual(adapter.operations, []);
+  }
+});
+
 test("keeps the owned plan immutable after passing it to the adapter", async () => {
   const adapter = new RecordingAdapter();
   const session = new RuntimeSession(adapter);
@@ -267,6 +292,7 @@ test("keeps the owned plan immutable after passing it to the adapter", async () 
   assert.ok(loadedPlan);
   assert.equal(Reflect.set(loadedPlan.frameRate, "numerator", 60), false);
   assert.equal(Reflect.set(firstVideo(loadedPlan).interval, "start", 0), false);
+  assert.equal(Reflect.set(firstOverlay(loadedPlan), "text", "Changed"), false);
 
   await session.dispatch(request(2, { type: "prepare", evaluationStart: 10 }));
   await session.dispatch(request(3, { type: "seek", frame: 15 }));
@@ -286,6 +312,14 @@ function firstVideo<Video>(plan: { readonly videos: readonly Video[] }): Video {
   const video = plan.videos[0];
   assert.ok(video);
   return video;
+}
+
+function firstOverlay<Overlay>(plan: {
+  readonly overlays: readonly Overlay[];
+}): Overlay {
+  const overlay = plan.overlays[0];
+  assert.ok(overlay);
+  return overlay;
 }
 
 function assertFailure(response: BrowserResponse, code: FailureCode): void {

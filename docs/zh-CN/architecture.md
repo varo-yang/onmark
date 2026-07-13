@@ -445,7 +445,7 @@ transport 的 navigation 返回误当成完整生命周期屏障。
 Gate 一每次只拥有一张 PNG，捕获后直接写入 `FFmpeg image2pipe`，不存在 frame
 queue 或整段视频 buffer；固定的 H.264 `yuv420p` profile 会在进程启动前拒绝
 奇数 viewport 尺寸。conformance 会启动固定版本的 Chrome for Testing 与
-`FFmpeg`，加载 production video adapter，走过类型化
+`FFmpeg`，加载 production presentation adapter，走过类型化
 `Load`/`Prepare`/`Seek` 握手，probe 最终 H.264 MP4 并验证 decoded motion。
 checked-in bundle fixture 携带真实 payload bytes，由 bundler test 逐字节重建，
 并通过 native materialization 穿过生成的 Node/native manifest contract。最外层
@@ -465,7 +465,7 @@ Gate 一的 native browser operation 与 decoded-video wait 最多接受一天 d
        └──────────  @onmark/bundler
 ```
 
-`runtime` 是浏览器底座和长期稳定扩展点，拥有当前帧 hook、FrameReady 协议、`stateless/warmup/sequential` 能力声明以及 adapter contract。`authoring` 只通过 runtime 的 types-only entrypoint 使用这些公开类型，不能依赖 runtime 的副作用入口。`bundler` 注入固定 runtime artifact 并生成 manifest；runtime 永不依赖 authoring 或 bundler。Gate 一的 `RuntimeSession` 拥有 protocol 顺序、interval 关系检查、精确帧投影与 terminal disposal；并发 command 直接拒绝，不暗中增长队列，adapter 只会收到递归冻结的 plan snapshot。浏览器具体工作只通过一个窄 adapter 进入，其等待必须有界，预期失败必须类型化。production video adapter 接收 presentation-owned element、source 与 visibility effect；它负责有界媒体加载、精确 source-frame selection、decoded-frame readiness 与 terminal cleanup，但不创建 layout 或 canvas state。adapter 与 bundler 使用的 materialized asset directory 同样由 Rust bundle schema 生成。
+`runtime` 是浏览器底座和长期稳定扩展点，拥有当前帧 hook、FrameReady 协议、`stateless/warmup/sequential` 能力声明以及 adapter contract。`authoring` 只通过 runtime 的 types-only entrypoint 使用这些公开类型，不能依赖 runtime 的副作用入口。`bundler` 注入固定 runtime artifact 并生成 manifest；runtime 永不依赖 authoring 或 bundler。Gate 一的 `RuntimeSession` 拥有 protocol 顺序、interval 关系检查、精确帧投影与 terminal disposal；并发 command 直接拒绝，不暗中增长队列，adapter 只会收到递归冻结的 plan snapshot。浏览器具体工作只通过一个窄 adapter 进入，其等待必须有界，预期失败必须类型化。production presentation adapter 接收 presentation-owned element、source 与 visibility effect；它负责有界媒体加载、精确 source-frame selection、decoded-frame readiness、已求解 overlay visibility 与 terminal cleanup，但不创建 layout 或 canvas state。adapter 与 bundler 使用的 materialized asset directory 同样由 Rust bundle schema 生成。
 
 `@onmark/bundler` 是 Node-only 的产品构建边界，不是仓库自动化。它只允许依赖 Node built-in、`@onmark/runtime` 的公开入口和固定版本的生产依赖 `esbuild`；浏览器 package 不得反向依赖它。Gate 一只编译单个 ESM presentation、替换为固定 runtime 入口、生成固定 document shell，并以稳定 SHA-256 manifest 记录每个 presentation payload 文件。package 通过窄 `onmark-bundle` executable 暴露同一个操作，native CLI 因而不 import Node 或 esbuild type。child process 只接收显式 entry、output 和 retained-byte-limit 参数，成功时不向 stdout 写 payload，失败时向 stderr 写稳定类别；native caller 自己施加 process deadline，持续排空诊断但只保留有界 tail，并把产出的 manifest 重新交给 Rust-owned wire type 解析。manifest shape 与 layout constants 都来自 Rust protocol contract 的生成结果，不在 TypeScript 手写第二份。构建显式限制最终保留字节数，经输出目录同级的私有 staging directory 写入，并拒绝构建前或发布前已存在的输出路径。最后一次 directory rename 能防止读者看到正常完成过程中的半成品，但 Node 的可移植文件系统 API 无法把此前的 absent check 变成跨进程 no-clobber transaction。当前边界刻意不提供 watch、plugin API、cache、development server 或 asset materialization policy。Esbuild 内部工作内存仍由固定的第三方实现管理，不受 retained-output ceiling 约束。
 
@@ -502,9 +502,9 @@ decode invocation
 
 Rust wire types 是 source of truth。`cargo xtask schema` 从它们生成 versioned JSON Schema 和 TypeScript types/codecs，CI 重新生成并要求工作树零 diff。生成结果提交进仓库，供 npm package、diff review 和非 Rust 消费者直接使用；禁止手工修改。Gate 一首次对外发布之前，v1 可以原地收口，避免初始公开契约背负实验字段；一旦发布，任何不兼容 wire 变化都必须使用新 protocol version 并带 migration/conformance fixture。Rust 本身直接使用原始领域/wire types，不再从 schema 反向生成第二套 Rust 类型。
 
-Gate 一的 `BrowserPlan` 现在携带 runtime 与 decoded-media adapter 已真实消费的 output frame rate、evaluation/output interval 和 primary-video placement。每个 placement 记录 immutable asset identity、绝对可见区间，以及验证 decoded-frame selection 所需的 admitted CFR source rate；materialized URL 仍是 render-owned fact。这是 whole-film Render Unit 的第一份 browser-facing projection，不是 Render Graph 或 partition contract。它只能包含浏览器真实消费的事实；output path、cache key、FFmpeg 参数和 materialization policy 都不得进入。VFR timestamp map、overlay 与 component 事实等 production adapter 真正消费时再加入，不提前把后续 gate 塞进协议。
+Gate 一的 `BrowserPlan` 现在携带 production presentation adapter 已真实消费的 output frame rate、evaluation/output interval、primary-video placement，以及 title/call-to-action overlay。video placement 记录 immutable asset identity、绝对可见区间和验证 decoded-frame selection 所需的 admitted CFR source rate；overlay placement 只记录语义角色、decoded text 与 compiler 已求解的绝对区间。materialized URL 仍是 render-owned fact，DOM 结构与 CSS 则始终是 presentation-owned effect。这是 whole-film Render Unit 的第一份 browser-facing projection，不是 Render Graph 或 partition contract。它只能包含浏览器真实消费的事实；output path、cache key、FFmpeg 参数、source span 和 materialization policy 都不得进入。VFR timestamp map 与更多 component 事实等 production adapter 真正消费时再加入，不提前把后续 gate 塞进协议。
 
-Protocol V1 最多携带 10,000 个 video placement。一条 failure 最多包含 4,096 个 message 字符与 256 条 pending-resource description，每条 description 最多 1,024 个字符；它们的确定性顺序由 producer 拥有。runtime-host property name 与这些 failure limit 都从 Rust-owned schema metadata 生成，native executor、browser runtime 与 validator 不得各自保存手写副本。
+Protocol V1 最多携带 10,000 个 video placement 与 10,000 个 overlay placement；每条 overlay inscription 最多包含 65,536 个 Unicode 字符。一条 failure 最多包含 4,096 个 message 字符与 256 条 pending-resource description，每条 description 最多 1,024 个字符；它们的确定性顺序由 producer 拥有。runtime-host property name 与这些 resource limit 都从 Rust-owned schema metadata 生成，native executor、browser runtime 与 validator 不得各自保存手写副本。
 
 authoring API 可以追求浏览器端人体工程学，但不能复制求时语义。
 

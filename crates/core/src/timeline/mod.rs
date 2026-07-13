@@ -100,6 +100,11 @@ impl TimelineIr {
         self.contents().filter_map(TimelineContent::as_voice_over)
     }
 
+    /// Returns title and call-to-action overlays in screenplay order.
+    pub fn overlays(&self) -> impl Iterator<Item = &TimelineOverlay> {
+        self.contents().filter_map(TimelineContent::as_overlay)
+    }
+
     fn contents(&self) -> impl Iterator<Item = &TimelineContent> {
         self.scenes
             .iter()
@@ -268,6 +273,13 @@ impl TimelineContent {
         match self {
             Self::VoiceOver(voice_over) => Some(voice_over),
             Self::Video(_) | Self::Overlay(_) => None,
+        }
+    }
+
+    fn as_overlay(&self) -> Option<&TimelineOverlay> {
+        match self {
+            Self::Overlay(overlay) => Some(overlay),
+            Self::Video(_) | Self::VoiceOver(_) => None,
         }
     }
 }

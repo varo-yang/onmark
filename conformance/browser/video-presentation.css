@@ -16,3 +16,24 @@ video {
   object-fit: cover;
   position: fixed;
 }
+
+.onmark-overlay {
+  background: rgb(0 0 0 / 72%);
+  color: white;
+  font-family: sans-serif;
+  left: 16px;
+  padding: 8px 12px;
+  position: fixed;
+}
+
+.onmark-title {
+  font-size: 24px;
+  font-weight: 700;
+  top: 16px;
+}
+
+.onmark-call-to-action {
+  bottom: 16px;
+  font-size: 18px;
+  font-weight: 600;
+}

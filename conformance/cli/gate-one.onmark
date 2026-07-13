@@ -2,6 +2,8 @@
   <scene>
     <shot>
       <video src="source.mp4" />
+      <title>Gate one</title>
+      <cta delay="500ms">Render now</cta>
     </shot>
   </scene>
 </film>

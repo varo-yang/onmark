@@ -41,6 +41,7 @@ test("installs one immutable host that decodes before dispatch", async () => {
           evaluation: { start: 0, end: 1 },
           output: { start: 0, end: 1 },
           videos: [],
+          overlays: [],
         },
       },
     }),

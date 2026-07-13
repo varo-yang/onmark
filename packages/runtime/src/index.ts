@@ -17,14 +17,20 @@ export {
 } from "./media.js";
 export {
   DecodedVideo,
-  VideoRuntimeAdapter,
   materializedVideoSource,
-  type BindVideoPresentation,
   type BrowserVideoElement,
-  type VideoPresentation,
 } from "./video.js";
+export {
+  PresentationRuntimeAdapter,
+  type OverlayPresentation,
+  type PresentationBindings,
+  type RuntimeOverlay,
+  type VideoPresentation,
+} from "./presentation.js";
 export { BUNDLE_ASSET_DIRECTORY } from "./generated/bundle-layout.js";
 export {
+  MAX_BROWSER_OVERLAYS,
+  MAX_BROWSER_OVERLAY_TEXT_CHARACTERS,
   MAX_BROWSER_VIDEOS,
   MAX_FAILURE_MESSAGE_CHARACTERS,
   MAX_PENDING_RESOURCE_CHARACTERS,
