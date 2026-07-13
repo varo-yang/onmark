@@ -384,16 +384,18 @@ mod tests {
     async fn retains_encoder_diagnostics_when_frame_input_breaks() {
         let fixture = EncoderFixture::new("write-failed.mp4", Duration::from_secs(1), 4_096);
         let mut session = fixture.start();
-        session
-            .write_frame(&EncodedPng::new(vec![0]))
-            .await
-            .expect("the pipe may accept one frame while the fixture exits");
-        sleep(Duration::from_millis(30)).await;
-
-        let error = session
-            .write_frame(&EncodedPng::new(vec![0]))
-            .await
-            .expect_err("the exited fixture must close its input pipe");
+        let first_write = session.write_frame(&EncodedPng::new(vec![0])).await;
+        let error = if let Err(error) = first_write {
+            error
+        } else {
+            // Pipe buffering differs by platform. If the first byte was
+            // accepted while the child exited, the next write observes it.
+            sleep(Duration::from_millis(30)).await;
+            session
+                .write_frame(&EncodedPng::new(vec![0]))
+                .await
+                .expect_err("the exited fixture must close its input pipe")
+        };
 
         assert_eq!(error.kind(), EncodeErrorKind::InputWrite);
         assert!(error.to_string().contains("decoder rejected the PNG frame"));
