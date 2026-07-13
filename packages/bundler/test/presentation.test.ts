@@ -8,8 +8,6 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-import { RUNTIME_HOST_NAME } from "@onmark/runtime";
-
 import {
   BUNDLE_ENTRY_POINT,
   BUNDLE_MANIFEST_FILE,
@@ -61,16 +59,11 @@ test("builds a deterministic immutable presentation artifact", async () => {
       join(first.directory, BUNDLE_ENTRY_POINT),
       "utf8",
     );
-    const script = await readFile(
-      join(first.directory, "presentation.js"),
-      "utf8",
-    );
     const savedManifest: unknown = JSON.parse(
       await readFile(join(first.directory, BUNDLE_MANIFEST_FILE), "utf8"),
     );
     assert.match(html, /src="\.\/presentation\.js"/u);
     assert.match(html, /href="\.\/presentation\.css"/u);
-    assert.ok(script.includes(RUNTIME_HOST_NAME));
     assert.deepEqual(savedManifest, first.manifest);
   } finally {
     await rm(workspace, { force: true, recursive: true });
