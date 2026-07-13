@@ -59,6 +59,8 @@ impl RenderExecutor {
         let plan = unit.browser_plan();
         let frame_count = self.validate_plan(plan, output)?;
         let disposal_request = disposal_request_id(frame_count, output)?;
+        let frame_rate = plan.frame_rate();
+        let audio = unit.audio_inputs().collect::<Vec<_>>();
         let staging = StagedOutput::new(output)?;
         let browser = BrowserSession::launch(
             &self.browser_executable,
@@ -74,7 +76,7 @@ impl RenderExecutor {
                 plan,
                 disposal_request,
                 unit.entry_url().as_str(),
-                staging.path(),
+                staging.visual_path(),
                 output,
             )
             .await;
@@ -83,8 +85,13 @@ impl RenderExecutor {
             .await
             .map_err(|source| RenderError::browser(output, source));
 
-        let video = render_result?;
+        let visual = render_result?;
         shutdown_result?;
+        let video = self
+            .ffmpeg
+            .mix_audio(visual, audio, frame_rate, staging.mixed_path())
+            .await
+            .map_err(|source| RenderError::encoder(output, source))?;
         staging.publish(video, output)
     }
 

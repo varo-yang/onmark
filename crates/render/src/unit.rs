@@ -4,11 +4,13 @@ use std::fmt;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
-use onmark_core::model::{FrameRate, FrozenAsset, FrozenAssetId};
+use onmark_core::model::{FrameInterval, FrameRate, FrozenAsset, FrozenAssetId};
 use onmark_core::protocol::{BrowserPlan, BundleManifest, InvalidBrowserPlan};
-use onmark_core::timeline::{TimelineIr, TimelineVideo};
+use onmark_core::timeline::{TimelineIr, TimelineVideo, TimelineVoiceOver};
 
 use crate::{AdmittedVideo, RenderProfile, UnsupportedVideo};
+
+const MAX_AUDIO_TRACKS: usize = 512;
 
 /// One frozen artifact at its browser-visible execution location.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -89,6 +91,7 @@ pub struct RenderUnit {
     bundle_manifest: BundleManifest,
     profile: RenderProfile,
     videos: BTreeMap<FrozenAssetId, RenderVideo>,
+    audio: AudioPlan,
 }
 
 /// One materialized video with its already-proven browser timing capability.
@@ -112,12 +115,50 @@ impl RenderVideo {
     }
 }
 
+/// Render-owned audio facts for one whole-film execution.
+///
+/// Audio remains outside [`BrowserPlan`]: Chromium renders resolved pixels,
+/// while the executor gives this plan to `FFmpeg` after frame capture.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AudioPlan {
+    tracks: Vec<RenderAudio>,
+}
+
+impl AudioPlan {
+    /// Returns tracks in screenplay order.
+    #[must_use]
+    pub fn tracks(&self) -> impl ExactSizeIterator<Item = &RenderAudio> {
+        self.tracks.iter()
+    }
+}
+
+/// One frozen voice-over artifact placed on the solved frame grid.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RenderAudio {
+    asset: MaterializedAsset,
+    interval: FrameInterval,
+}
+
+impl RenderAudio {
+    /// Returns the verified bytes mixed for this voice-over.
+    #[must_use]
+    pub const fn asset(&self) -> &MaterializedAsset {
+        &self.asset
+    }
+
+    /// Returns the solved half-open interval occupied by the voice-over.
+    #[must_use]
+    pub const fn interval(&self) -> FrameInterval {
+        self.interval
+    }
+}
+
 impl RenderUnit {
     /// Composes the single Gate-one unit from solved facts and local inputs.
     ///
-    /// Extra materialized assets are not retained. Every referenced video must
-    /// be present and admissible; voice-over is rejected until the Audio Plan
-    /// executes it rather than being silently dropped.
+    /// Extra materialized assets are not retained. Every referenced video and
+    /// voice-over must be present; video also passes the browser profile while
+    /// voice-over becomes a separate executor-owned audio plan.
     ///
     /// # Errors
     ///
@@ -129,13 +170,13 @@ impl RenderUnit {
         profile: RenderProfile,
         assets: impl IntoIterator<Item = MaterializedAsset>,
     ) -> Result<Self, InvalidRenderUnit> {
-        reject_unplanned_audio(timeline)?;
-        let mut available = materialized_catalog(assets)?;
+        let available = materialized_catalog(assets)?;
         let required = required_video_ids(timeline);
         let mut videos = BTreeMap::new();
         for id in required {
             let asset = available
-                .remove(&id)
+                .get(&id)
+                .cloned()
                 .ok_or(InvalidRenderUnit::MissingAsset(id))?;
             let source_frame_rate = AdmittedVideo::admit(asset.frozen().metadata())
                 .map_err(|source| InvalidRenderUnit::UnsupportedVideo { id, source })?
@@ -152,12 +193,14 @@ impl RenderUnit {
             .collect();
         let browser_plan = BrowserPlan::from_timeline(timeline, &source_frame_rates)
             .map_err(InvalidRenderUnit::BrowserPlan)?;
+        let audio = audio_plan(timeline, &available)?;
 
         Ok(Self {
             browser_plan,
             bundle_manifest,
             profile,
             videos,
+            audio,
         })
     }
 
@@ -179,16 +222,29 @@ impl RenderUnit {
         self.videos.values()
     }
 
+    /// Returns voice-over tracks in screenplay order.
+    #[must_use]
+    pub fn audio_tracks(&self) -> impl ExactSizeIterator<Item = &RenderAudio> {
+        self.audio.tracks()
+    }
+
     pub(crate) const fn bundle_manifest(&self) -> &BundleManifest {
         &self.bundle_manifest
     }
 
     pub(crate) fn materialized_assets(&self) -> impl ExactSizeIterator<Item = &MaterializedAsset> {
-        self.videos.values().map(RenderVideo::asset)
+        let mut assets = BTreeMap::new();
+        for video in self.videos.values() {
+            assets.insert(video.asset().id(), video.asset());
+        }
+        for audio in self.audio.tracks() {
+            assets.insert(audio.asset().id(), audio.asset());
+        }
+        assets.into_values().collect::<Vec<_>>().into_iter()
     }
 
-    pub(crate) fn into_browser_plan(self) -> BrowserPlan {
-        self.browser_plan
+    pub(crate) fn into_execution_plans(self) -> (BrowserPlan, AudioPlan) {
+        (self.browser_plan, self.audio)
     }
 }
 
@@ -207,8 +263,8 @@ pub enum InvalidRenderUnit {
         /// Exact profile rule that rejected it.
         source: UnsupportedVideo,
     },
-    /// Gate one has not yet built the Audio Plan required by voice-over.
-    VoiceOverNotSupported(FrozenAssetId),
+    /// The audio plan would exceed the bounded Gate-one process envelope.
+    AudioTrackLimit,
     /// A timeline frame cannot cross the JavaScript wire boundary exactly.
     BrowserPlan(InvalidBrowserPlan),
 }
@@ -224,8 +280,11 @@ impl fmt::Display for InvalidRenderUnit {
                     "materialized video {id} is unsupported: {source}"
                 )
             }
-            Self::VoiceOverNotSupported(id) => {
-                write!(formatter, "voice-over asset {id} requires an Audio Plan")
+            Self::AudioTrackLimit => {
+                write!(
+                    formatter,
+                    "audio plan exceeds the {MAX_AUDIO_TRACKS}-track limit"
+                )
             }
             Self::BrowserPlan(source) => source.fmt(formatter),
         }
@@ -255,17 +314,37 @@ fn materialized_catalog(
     Ok(catalog)
 }
 
-fn reject_unplanned_audio(timeline: &TimelineIr) -> Result<(), InvalidRenderUnit> {
-    if let Some(voice_over) = timeline.voice_overs().next() {
-        return Err(InvalidRenderUnit::VoiceOverNotSupported(
-            voice_over.asset_id(),
-        ));
-    }
-    Ok(())
-}
-
 fn required_video_ids(timeline: &TimelineIr) -> BTreeSet<FrozenAssetId> {
     timeline.videos().map(TimelineVideo::asset_id).collect()
+}
+
+fn audio_plan(
+    timeline: &TimelineIr,
+    available: &BTreeMap<FrozenAssetId, MaterializedAsset>,
+) -> Result<AudioPlan, InvalidRenderUnit> {
+    let mut tracks = Vec::new();
+    for voice_over in timeline.voice_overs() {
+        if tracks.len() == MAX_AUDIO_TRACKS {
+            return Err(InvalidRenderUnit::AudioTrackLimit);
+        }
+        tracks.push(render_audio(voice_over, available)?);
+    }
+    Ok(AudioPlan { tracks })
+}
+
+fn render_audio(
+    voice_over: &TimelineVoiceOver,
+    available: &BTreeMap<FrozenAssetId, MaterializedAsset>,
+) -> Result<RenderAudio, InvalidRenderUnit> {
+    let id = voice_over.asset_id();
+    let asset = available
+        .get(&id)
+        .cloned()
+        .ok_or(InvalidRenderUnit::MissingAsset(id))?;
+    Ok(RenderAudio {
+        asset,
+        interval: voice_over.timing().interval(),
+    })
 }
 
 #[cfg(test)]
@@ -280,7 +359,10 @@ mod tests {
     use onmark_core::protocol::BundleFile;
     use onmark_core::timeline::TimelineIr;
 
-    use super::{BundleManifest, InvalidRenderUnit, MaterializedAsset, RenderProfile, RenderUnit};
+    use super::{
+        BundleManifest, InvalidRenderUnit, MAX_AUDIO_TRACKS, MaterializedAsset, RenderProfile,
+        RenderUnit,
+    };
 
     #[test]
     fn composes_only_required_admitted_video_assets() {
@@ -347,20 +429,60 @@ mod tests {
     }
 
     #[test]
-    fn rejects_voice_over_until_an_audio_plan_executes_it() {
+    fn composes_voice_over_into_the_audio_plan() {
         let id = FrozenAssetId::from_sha256([1; 32]);
         let voice = FrozenAsset::new(
             id,
             AssetMetadata::audio(Duration::from_nanos(1_000_000_000)),
         );
         let timeline = solve(
-            r#"<film><scene><shot><vo src="voice.mp3">Read me</vo></shot></scene></film>"#,
+            r#"<film><scene><shot><vo src="voice.mp3" delay="500ms">Read me</vo></shot></scene></film>"#,
             "voice.mp3",
-            voice,
+            voice.clone(),
         );
+        let materialized =
+            MaterializedAsset::new(voice, "/tmp/voice.mp3").expect("the fixture path is present");
+        let unit = RenderUnit::whole_film(
+            &timeline,
+            bundle_manifest(),
+            render_profile(),
+            [materialized],
+        )
+        .expect("voice-over forms one whole-film audio plan");
+
+        assert_eq!(unit.audio_tracks().len(), 1);
+        let audio = unit
+            .audio_tracks()
+            .next()
+            .expect("the unit contains one voice-over track");
+        assert_eq!(audio.asset().id(), id);
+        assert_eq!(audio.interval().start().get(), 15);
+        assert_eq!(audio.interval().end().get(), 45);
+        assert_eq!(unit.materialized_assets().len(), 1);
+    }
+
+    #[test]
+    fn bounds_the_audio_plan_before_process_composition() {
+        let voice = FrozenAsset::new(
+            FrozenAssetId::from_sha256([1; 32]),
+            AssetMetadata::audio(Duration::from_nanos(1_000_000_000)),
+        );
+        let source = format!(
+            "<film><scene><shot>{}</shot></scene></film>",
+            r#"<vo src="voice.mp3" />"#.repeat(MAX_AUDIO_TRACKS + 1)
+        );
+        let timeline = solve(&source, "voice.mp3", voice.clone());
+        let materialized =
+            MaterializedAsset::new(voice, "/tmp/voice.mp3").expect("the fixture path is present");
+
         assert_eq!(
-            RenderUnit::whole_film(&timeline, bundle_manifest(), render_profile(), []),
-            Err(InvalidRenderUnit::VoiceOverNotSupported(id)),
+            RenderUnit::whole_film(
+                &timeline,
+                bundle_manifest(),
+                render_profile(),
+                [materialized],
+            ),
+            Err(InvalidRenderUnit::AudioTrackLimit),
         );
     }
 

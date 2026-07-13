@@ -38,7 +38,6 @@ pub(super) fn spawn_ffmpeg(
             OsStr::new("-f"),
             OsStr::new("mp4"),
             OsStr::new("-n"),
-            OsStr::new("--"),
         ])
         .arg(output)
         .stdin(Stdio::piped())

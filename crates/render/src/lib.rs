@@ -24,7 +24,8 @@ pub use encoder::{
 pub use executor::{RenderError, RenderErrorKind, RenderExecutor};
 pub use profile::{InvalidRenderProfile, RenderProfile};
 pub use unit::{
-    InvalidMaterializedAsset, InvalidRenderUnit, MaterializedAsset, RenderUnit, RenderVideo,
+    AudioPlan, InvalidMaterializedAsset, InvalidRenderUnit, MaterializedAsset, RenderAudio,
+    RenderUnit, RenderVideo,
 };
 pub use unit_root::{
     ExecutableUnit, InvalidUnitRootLimits, UnitRoot, UnitRootError, UnitRootErrorKind,

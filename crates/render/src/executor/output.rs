@@ -8,7 +8,8 @@ use crate::EncodedVideo;
 #[derive(Debug)]
 pub(super) struct StagedOutput {
     directory: TempDir,
-    path: PathBuf,
+    visual_path: PathBuf,
+    mixed_path: PathBuf,
 }
 
 impl StagedOutput {
@@ -27,12 +28,21 @@ impl StagedOutput {
             .map_err(|source| {
                 RenderError::output_io(output, "failed to create output staging directory", source)
             })?;
-        let path = directory.path().join("video.mp4");
-        Ok(Self { directory, path })
+        let visual_path = directory.path().join("visual.mp4");
+        let mixed_path = directory.path().join("video.mp4");
+        Ok(Self {
+            directory,
+            visual_path,
+            mixed_path,
+        })
     }
 
-    pub(super) fn path(&self) -> &Path {
-        &self.path
+    pub(super) fn visual_path(&self) -> &Path {
+        &self.visual_path
+    }
+
+    pub(super) fn mixed_path(&self) -> &Path {
+        &self.mixed_path
     }
 
     pub(super) fn publish(
@@ -40,7 +50,7 @@ impl StagedOutput {
         video: EncodedVideo,
         output: &Path,
     ) -> Result<EncodedVideo, RenderError> {
-        std::fs::hard_link(&self.path, output).map_err(|source| {
+        std::fs::hard_link(video.path(), output).map_err(|source| {
             RenderError::output_io(output, "failed to publish encoded video", source)
         })?;
         drop(self.directory);

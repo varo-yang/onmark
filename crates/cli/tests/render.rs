@@ -12,7 +12,7 @@ use tokio::time::timeout;
 
 const WIDTH: u32 = 320;
 const HEIGHT: u32 = 180;
-const FRAME_COUNT: usize = 30;
+const FRAME_COUNT: usize = 45;
 const PROCESS_DEADLINE: Duration = Duration::from_mins(3);
 
 #[tokio::test]
@@ -21,17 +21,19 @@ async fn renders_one_screenplay_deterministically_across_real_processes() {
     let directory = tempdir().expect("the conformance workspace is available");
     let fixture = Fixture::materialize(directory.path());
     fixture.generate_source_video().await;
+    fixture.generate_voice_over().await;
 
     let first = fixture.render("first.mp4").await;
     let second = fixture.render("second.mp4").await;
     assert_success(&first.output);
     assert_success(&second.output);
 
-    let first_video = inspect_video(&first.path).await;
-    let second_video = inspect_video(&second.path).await;
-    assert_eq!(first_video, second_video);
-    assert_eq!(first_video.frame_hashes.len(), FRAME_COUNT);
-    assert!(first_video.has_motion());
+    let first_output = inspect_output(&first.path).await;
+    let second_output = inspect_output(&second.path).await;
+    assert_eq!(first_output, second_output);
+    assert_eq!(first_output.video_frame_hashes.len(), FRAME_COUNT);
+    assert!(first_output.has_motion());
+    assert!(!first_output.audio_frame_hashes.is_empty());
 
     let original_digest = file_digest(&first.path);
     let rejected = fixture.render_to(&first.path).await;
@@ -93,6 +95,29 @@ impl Fixture {
         assert_process_success("source generation", &output);
     }
 
+    async fn generate_voice_over(&self) {
+        let output = run_process(
+            Command::new(required_path("ONMARK_FFMPEG"))
+                .args([
+                    "-nostdin",
+                    "-v",
+                    "error",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "sine=frequency=440:sample_rate=48000:duration=1",
+                    "-c:a",
+                    "aac",
+                    "-b:a",
+                    "128k",
+                    "-y",
+                ])
+                .arg(self.root.join("voice.m4a")),
+        )
+        .await;
+        assert_process_success("voice-over generation", &output);
+    }
+
     async fn render(&self, name: &str) -> RenderedOutput {
         let path = self.root.join(name);
         let output = self.render_to(&path).await;
@@ -120,28 +145,32 @@ struct RenderedOutput {
 }
 
 #[derive(Debug, Eq, PartialEq)]
-struct InspectedVideo {
-    stream: ProbeStream,
-    frame_hashes: Vec<String>,
+struct InspectedOutput {
+    video: VideoStream,
+    video_frame_hashes: Vec<String>,
+    audio: AudioStream,
+    audio_frame_hashes: Vec<String>,
 }
 
-impl InspectedVideo {
+impl InspectedOutput {
     fn has_motion(&self) -> bool {
-        let Some(first) = self.frame_hashes.first() else {
+        let Some(first) = self.video_frame_hashes.first() else {
             return false;
         };
-        self.frame_hashes.iter().any(|hash| hash != first)
+        self.video_frame_hashes.iter().any(|hash| hash != first)
     }
 }
 
-async fn inspect_video(path: &Path) -> InspectedVideo {
-    InspectedVideo {
-        stream: probe_stream(path).await,
-        frame_hashes: decode_frame_hashes(path).await,
+async fn inspect_output(path: &Path) -> InspectedOutput {
+    InspectedOutput {
+        video: probe_video_stream(path).await,
+        video_frame_hashes: decode_video_hashes(path).await,
+        audio: probe_audio_stream(path).await,
+        audio_frame_hashes: decode_audio_hashes(path).await,
     }
 }
 
-async fn probe_stream(path: &Path) -> ProbeStream {
+async fn probe_video_stream(path: &Path) -> VideoStream {
     let output = run_process(
         Command::new(required_path("ONMARK_FFPROBE"))
             .args([
@@ -160,9 +189,9 @@ async fn probe_stream(path: &Path) -> ProbeStream {
     )
     .await;
     assert_process_success("output probing", &output);
-    let response: ProbeResponse =
+    let response: VideoProbeResponse =
         serde_json::from_slice(&output.stdout).expect("ffprobe emits valid JSON");
-    let [stream]: [ProbeStream; 1] = response
+    let [stream]: [VideoStream; 1] = response
         .streams
         .try_into()
         .expect("ffprobe must report exactly one video stream");
@@ -174,15 +203,63 @@ async fn probe_stream(path: &Path) -> ProbeStream {
     stream
 }
 
-async fn decode_frame_hashes(path: &Path) -> Vec<String> {
+async fn probe_audio_stream(path: &Path) -> AudioStream {
+    let output = run_process(
+        Command::new(required_path("ONMARK_FFPROBE"))
+            .args([
+                "-v",
+                "error",
+                "-select_streams",
+                "a:0",
+                "-show_entries",
+                "stream=codec_name,sample_rate,channels",
+                "-of",
+                "json",
+                "--",
+            ])
+            .arg(path),
+    )
+    .await;
+    assert_process_success("audio output probing", &output);
+    let response: AudioProbeResponse =
+        serde_json::from_slice(&output.stdout).expect("ffprobe emits valid JSON");
+    let [stream]: [AudioStream; 1] = response
+        .streams
+        .try_into()
+        .expect("ffprobe must report exactly one audio stream");
+    assert_eq!(stream.codec_name, "aac");
+    assert_eq!(stream.sample_rate, "48000");
+    assert_eq!(stream.channels, 1);
+    stream
+}
+
+async fn decode_video_hashes(path: &Path) -> Vec<String> {
     let output = run_process(
         Command::new(required_path("ONMARK_FFMPEG"))
             .args(["-nostdin", "-v", "error", "-i"])
             .arg(path)
-            .args(["-f", "framemd5", "-"]),
+            .args(["-map", "0:v:0", "-f", "framemd5", "-"]),
     )
     .await;
     assert_process_success("frame decoding", &output);
+
+    String::from_utf8(output.stdout)
+        .expect("framemd5 output is UTF-8")
+        .lines()
+        .filter(|line| !line.starts_with('#'))
+        .map(frame_hash)
+        .collect()
+}
+
+async fn decode_audio_hashes(path: &Path) -> Vec<String> {
+    let output = run_process(
+        Command::new(required_path("ONMARK_FFMPEG"))
+            .args(["-nostdin", "-v", "error", "-i"])
+            .arg(path)
+            .args(["-map", "0:a:0", "-f", "framemd5", "-"]),
+    )
+    .await;
+    assert_process_success("audio decoding", &output);
 
     String::from_utf8(output.stdout)
         .expect("framemd5 output is UTF-8")
@@ -248,15 +325,27 @@ fn repository() -> PathBuf {
 }
 
 #[derive(Debug, Deserialize)]
-struct ProbeResponse {
-    streams: Vec<ProbeStream>,
+struct VideoProbeResponse {
+    streams: Vec<VideoStream>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AudioProbeResponse {
+    streams: Vec<AudioStream>,
 }
 
 #[derive(Debug, Deserialize, Eq, PartialEq)]
-struct ProbeStream {
+struct VideoStream {
     codec_name: String,
     width: u32,
     height: u32,
     avg_frame_rate: String,
     nb_read_frames: String,
+}
+
+#[derive(Debug, Deserialize, Eq, PartialEq)]
+struct AudioStream {
+    codec_name: String,
+    sample_rate: String,
+    channels: u32,
 }

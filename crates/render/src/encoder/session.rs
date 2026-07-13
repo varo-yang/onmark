@@ -11,6 +11,7 @@ use tokio::time::timeout;
 use super::error::{EncodeError, EncodeErrorKind};
 use super::limits::{EncodeLimits, InvalidFfmpeg};
 use super::process::{CapturedStderr, capture_stderr, spawn_ffmpeg};
+use super::{AudioInput, audio};
 use crate::EncodedPng;
 
 const CLEANUP_TIMEOUT: Duration = Duration::from_secs(5);
@@ -99,6 +100,28 @@ impl Ffmpeg {
             reaped: false,
             completed: false,
         })
+    }
+
+    pub(crate) async fn mix_audio(
+        &self,
+        visual: EncodedVideo,
+        inputs: Vec<AudioInput>,
+        frame_rate: WireFrameRate,
+        output: impl Into<PathBuf>,
+    ) -> Result<EncodedVideo, EncodeError> {
+        if inputs.is_empty() {
+            return Ok(visual);
+        }
+
+        audio::mix_audio(
+            &self.executable,
+            self.limits,
+            visual,
+            inputs,
+            frame_rate,
+            output.into(),
+        )
+        .await
     }
 }
 
@@ -292,7 +315,7 @@ impl FfmpegSession {
     }
 }
 
-fn with_stderr(message: &str, stderr: &CapturedStderr) -> String {
+pub(super) fn with_stderr(message: &str, stderr: &CapturedStderr) -> String {
     let suffix = if stderr.truncated { " [truncated]" } else { "" };
     let stderr = String::from_utf8_lossy(&stderr.bytes);
     let stderr = stderr.trim_ascii_end();
@@ -343,6 +366,13 @@ impl EncodedVideo {
             frames: self.frames,
         }
     }
+
+    pub(super) fn muxed_at(self, path: PathBuf) -> Self {
+        Self {
+            path,
+            frames: self.frames,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -350,13 +380,14 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::time::Duration;
 
-    use onmark_core::model::FrameRate;
+    use onmark_core::model::{FrameIndex, FrameRate};
     use onmark_core::protocol::WireFrameRate;
     use tempfile::{TempDir, tempdir};
     use tokio::time::sleep;
 
-    use super::{EncodeError, EncodeErrorKind, EncodeLimits, Ffmpeg, FfmpegSession};
+    use super::{EncodeError, EncodeErrorKind, EncodeLimits, EncodedVideo, Ffmpeg, FfmpegSession};
     use crate::EncodedPng;
+    use crate::encoder::AudioInput;
 
     #[tokio::test]
     async fn translates_a_failed_encoder_and_removes_its_partial_output() {
@@ -428,6 +459,32 @@ mod tests {
         let error = fixture.finish().await;
 
         assert_eq!(error.kind(), EncodeErrorKind::Timeout);
+        assert!(!fixture.output().exists());
+    }
+
+    #[tokio::test]
+    async fn removes_a_failed_audio_mix_after_retaining_its_diagnostics() {
+        let fixture = EncoderFixture::new("failed.mp4", Duration::from_secs(1), 4_096);
+        let visual = EncodedVideo {
+            path: fixture.directory.path().join("visual.mp4"),
+            frames: 1,
+        };
+        let input = AudioInput::new(fixture.directory.path().join("voice.m4a"), FrameIndex::ZERO);
+        let rate = FrameRate::new(30, 1).expect("the fixture frame rate is valid");
+
+        let error = fixture
+            .ffmpeg
+            .mix_audio(
+                visual,
+                vec![input],
+                WireFrameRate::from(rate),
+                fixture.output(),
+            )
+            .await
+            .expect_err("the fixture mixer must fail");
+
+        assert_eq!(error.kind(), EncodeErrorKind::Failed);
+        assert!(error.to_string().contains("encoder rejected the stream"));
         assert!(!fixture.output().exists());
     }
 

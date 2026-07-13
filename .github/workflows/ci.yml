@@ -148,7 +148,7 @@ jobs:
         run: |
           tools="$RUNNER_TEMP/onmark-tools"
           mkdir -p "$tools"
-          printf '%s\n' '#!/bin/sh' 'exec "$ONMARK_CHROME_BINARY" --no-sandbox "$@"' > "$tools/google-chrome"
+          printf '%s\n' '#!/bin/sh' "exec \"$ONMARK_CHROME_BINARY\" --no-sandbox \"\$@\"" > "$tools/google-chrome"
           chmod +x "$tools/google-chrome"
           ln -s /usr/bin/ffmpeg "$tools/ffmpeg"
           ln -s /usr/bin/ffprobe "$tools/ffprobe"
@@ -173,7 +173,6 @@ jobs:
         env:
           ONMARK_CLI: ${{ github.workspace }}/target/release/onmark
           ONMARK_CHROME: ${{ runner.temp }}/onmark-tools/google-chrome
-          ONMARK_CHROME_BINARY: ${{ steps.chrome.outputs.chrome-path }}
           ONMARK_FFMPEG: /usr/bin/ffmpeg
           ONMARK_FFPROBE: /usr/bin/ffprobe
         run: |

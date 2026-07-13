@@ -62,6 +62,15 @@ URL or asset root. Gate one has exactly one whole-film unit. Gate two introduces
 the Render Graph and may derive several units of the same type; it does not
 replace the executor contract.
 
+Gate-one `AudioPlan` contains only solved voice-over placements. Materialization
+copies their frozen bytes beside browser assets without making them browser
+inputs. After Chromium has encoded the visual stream, the executor resets each
+audio input to its origin, applies its exact rational frame delay, mixes the
+tracks, and muxes AAC into the final MP4. Gain, fades, resampling policy, and
+general audio effects remain deferred rather than being implied by this first
+mixing contract. One Gate-one unit retains at most 512 audio tracks, keeping
+the `FFmpeg` argument and filter-graph boundary explicitly bounded.
+
 ## End-to-end pipeline
 
 ```text
@@ -274,7 +283,7 @@ AWS Lambda is an adapter, not another engine. A later independently published `@
 
 ## Delivery gates
 
-**Gate one: render one real video reliably.** Implement the minimal language, frozen asset catalog, media probing, Rust timing, versioned Timeline IR, immutable presentation bundle, deterministic browser clock, frame handshake, and a single-process whole-film Render Unit through Chromium/FFmpeg. The Gate-one audio contract must either be executed and muxed or explicitly rejected before rendering; silently dropping authored voice-over is not acceptable. Do not build distributed control-plane machinery.
+**Gate one: render one real video reliably.** Implement the minimal language, frozen asset catalog, media probing, Rust timing, versioned Timeline IR, immutable presentation bundle, deterministic browser clock, frame handshake, and a single-process whole-film Render Unit through Chromium/FFmpeg. Gate one executes and muxes authored voice-over; silently dropping it is not acceptable. Do not build distributed control-plane machinery.
 
 **Gate two: partition correctly.** Render two independent local units and assemble them. Introduce the Render Graph, evaluation/output intervals, preroll, unit caching, and dependency-based invalidation.
 

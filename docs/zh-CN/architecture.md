@@ -163,6 +163,8 @@ Timeline IR + Frozen Asset Catalog + Bundle Manifest + Render Profile
 
 这条接缝不是另一个编译相位。Timeline IR 只回答影片中什么事实在何时成立；presentation bundle 负责把这些事实画成 DOM、CSS、Canvas 或 WebGL；Render Unit 则定义一次 executor 调用消费哪些不可变输入。第一关只有一个覆盖整部影片的 unit。第二关加入 Render Graph 后，可以产生多个同类型 unit，但不更换执行器合约。
 
+Gate 一的 `AudioPlan` 只包含已求解的旁白 placement。materialization 会把其冻结字节与浏览器素材一起复制，却不把它们变成浏览器输入。Chromium 编出视觉流后，executor 将每个音频输入归零、施加精确有理的帧延迟、混合轨道，并将 AAC mux 进最终 MP4。gain、fade、重采样策略和通用音频效果仍然延期，不能从这份首个混音合约中推断出来。一条 Gate 一 unit 最多保留 512 条音轨，使 `FFmpeg` 参数和 filter graph 边界始终有界。
+
 ## 5. 从源码到 MP4
 
 ### A. 装载并冻结输入
@@ -550,7 +552,7 @@ Rust API 用于嵌入服务端；TS API 用于 authoring；跨进程使用 versi
 Screenplay → Timeline IR → Browser Runtime → Chromium → FFmpeg → MP4
 ```
 
-范围只有：最小剧本语言、冻结素材 catalog、素材探测、Rust 时间求解、versioned Timeline IR、不可变 presentation bundle、TS 确定性时钟、FrameReady handshake，以及单进程 whole-film Render Unit 的真实视频。必须测清字体、图片、视频 seek、异步稳定和捕获方式。作者写下的 voice-over 必须被执行并 mux，或在 render 前被明确拒绝；不能静默丢弃音频。
+范围只有：最小剧本语言、冻结素材 catalog、素材探测、Rust 时间求解、versioned Timeline IR、不可变 presentation bundle、TS 确定性时钟、FrameReady handshake，以及单进程 whole-film Render Unit 的真实视频。必须测清字体、图片、视频 seek、异步稳定和捕获方式。Gate 一执行并 mux 作者写下的 voice-over，不能静默丢弃音频。
 
 这一关不建设 coordinator、lease、远程 worker、能力调度和分层缓存。
 

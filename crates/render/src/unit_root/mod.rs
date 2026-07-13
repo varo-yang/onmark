@@ -11,7 +11,8 @@ use url::Url;
 
 pub use error::{UnitRootError, UnitRootErrorKind};
 
-use crate::{MaterializedAsset, RenderProfile, RenderUnit};
+use crate::encoder::AudioInput;
+use crate::{AudioPlan, MaterializedAsset, RenderProfile, RenderUnit};
 
 const MAX_FILES: usize = BundleManifest::MAX_FILES + 1;
 const MAX_BYTES: u64 = 1 << 40;
@@ -89,6 +90,7 @@ impl Error for InvalidUnitRootLimits {}
 pub struct ExecutableUnit {
     browser_plan: BrowserPlan,
     profile: RenderProfile,
+    audio: AudioPlan,
     root: UnitRoot,
 }
 
@@ -111,11 +113,12 @@ impl ExecutableUnit {
             limits,
         )?;
         let profile = unit.profile();
-        let browser_plan = unit.into_browser_plan();
+        let (browser_plan, audio) = unit.into_execution_plans();
 
         Ok(Self {
             browser_plan,
             profile,
+            audio,
             root,
         })
     }
@@ -130,6 +133,13 @@ impl ExecutableUnit {
     #[must_use]
     pub const fn profile(&self) -> RenderProfile {
         self.profile
+    }
+
+    pub(crate) fn audio_inputs(&self) -> impl ExactSizeIterator<Item = AudioInput> + '_ {
+        self.audio.tracks().map(|track| {
+            let source = self.root.path().join(track.asset().unit_relative_path());
+            AudioInput::new(source, track.interval().start())
+        })
     }
 
     /// Returns the verified presentation entry loaded by Chromium.

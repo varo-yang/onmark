@@ -17,7 +17,7 @@ pub enum RenderErrorKind {
     Output,
     /// Chromium or the browser runtime boundary failed.
     Browser,
-    /// `FFmpeg` encoding failed.
+    /// `FFmpeg` visual encoding or audio mixing failed.
     Encoder,
     /// The runtime returned a well-formed but unexpected response.
     Protocol,
@@ -67,7 +67,7 @@ impl RenderError {
         Self {
             kind: RenderErrorKind::Encoder,
             output: output.to_owned(),
-            message: "video encoding failed".into(),
+            message: "FFmpeg execution failed".into(),
             source: Some(Box::new(RenderErrorSource::Encoder(source))),
         }
     }
