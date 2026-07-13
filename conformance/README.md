@@ -11,6 +11,11 @@ directories also retain their payload bytes so native materialization verifies
 the declared size, digest, identity, and entry document together. Review all of
 these files as compatibility-sensitive data.
 
+`protocol/bundle-v1/` is also the self-contained executable fixture used by the
+native Chromium-to-FFmpeg smoke. Its minimal host exercises the native protocol
+transport; the separate browser fixtures exercise the generated TypeScript
+runtime implementation.
+
 Regenerate goldens after intentionally changing public behavior:
 
 ```bash

@@ -9,7 +9,7 @@ use onmark_core::protocol::{
 };
 
 use self::output::StagedOutput;
-use crate::{BrowserLimits, BrowserSession, EncodedVideo, Ffmpeg, FfmpegSession};
+use crate::{BrowserLimits, BrowserSession, EncodedVideo, ExecutableUnit, Ffmpeg, FfmpegSession};
 
 pub use error::{RenderError, RenderErrorKind};
 
@@ -40,7 +40,7 @@ impl RenderExecutor {
         }
     }
 
-    /// Renders a media-free browser plan into one H.264 MP4 artifact.
+    /// Renders one verified media-free unit into an H.264 MP4 artifact.
     ///
     /// Frame capture and encoder input are sequential: at most one encoded PNG
     /// is owned between Chromium and `FFmpeg` at any time.
@@ -51,26 +51,29 @@ impl RenderExecutor {
     /// supported limits, the browser protocol deviates from its expected phase,
     /// or either process boundary fails. Chromium shutdown is still attempted
     /// after render work fails.
-    pub async fn render_synthetic(
+    pub async fn render(
         &self,
-        plan: BrowserPlan,
-        bundle_url: &str,
+        unit: ExecutableUnit,
         output: &Path,
     ) -> Result<EncodedVideo, RenderError> {
-        validate_output_dimensions(self.browser_limits, output)?;
-        let frame_count = self.validate_plan(&plan, output)?;
+        let plan = unit.browser_plan();
+        let frame_count = self.validate_plan(plan, output)?;
         let disposal_request = disposal_request_id(frame_count, output)?;
         let staging = StagedOutput::new(output)?;
-        let browser = BrowserSession::launch(&self.browser_executable, self.browser_limits)
-            .await
-            .map_err(|source| RenderError::browser(output, source))?;
+        let browser = BrowserSession::launch(
+            &self.browser_executable,
+            unit.profile(),
+            self.browser_limits,
+        )
+        .await
+        .map_err(|source| RenderError::browser(output, source))?;
 
         let render_result = self
             .render_session(
                 &browser,
-                &plan,
+                plan,
                 disposal_request,
-                bundle_url,
+                unit.entry_url().as_str(),
                 staging.path(),
                 output,
             )
@@ -87,9 +90,10 @@ impl RenderExecutor {
 
     fn validate_plan(&self, plan: &BrowserPlan, output: &Path) -> Result<u64, RenderError> {
         if !plan.videos().is_empty() {
-            return Err(invalid_plan(
+            return Err(RenderError::new(
+                RenderErrorKind::UnsupportedUnit,
                 output,
-                "synthetic rendering cannot consume video placements",
+                "video placements require the browser media adapter",
             ));
         }
         let Some(frame_count) = output_frame_count(plan) else {
@@ -116,12 +120,12 @@ impl RenderExecutor {
         browser: &BrowserSession,
         plan: &BrowserPlan,
         disposal_request: RequestId,
-        bundle_url: &str,
+        entry_url: &str,
         staging: &Path,
         output: &Path,
     ) -> Result<EncodedVideo, RenderError> {
         browser
-            .navigate(bundle_url)
+            .navigate(entry_url)
             .await
             .map_err(|source| RenderError::browser(output, source))?;
         load_runtime(browser, plan, output).await?;
@@ -139,18 +143,6 @@ impl RenderExecutor {
             .await
             .map_err(|source| RenderError::encoder(output, source))
     }
-}
-
-fn validate_output_dimensions(limits: BrowserLimits, output: &Path) -> Result<(), RenderError> {
-    if limits.width().is_multiple_of(2) && limits.height().is_multiple_of(2) {
-        return Ok(());
-    }
-
-    Err(RenderError::new(
-        RenderErrorKind::InvalidConfiguration,
-        output,
-        "H.264 yuv420p output requires even viewport dimensions",
-    ))
 }
 
 async fn load_runtime(
@@ -292,25 +284,4 @@ fn request_identity_overflow(output: &Path) -> RenderError {
         output,
         "frame request identity exceeds the protocol domain",
     )
-}
-
-#[cfg(test)]
-mod tests {
-    use std::path::Path;
-    use std::time::Duration;
-
-    use crate::BrowserLimits;
-
-    use super::{RenderErrorKind, validate_output_dimensions};
-
-    #[test]
-    fn rejects_dimensions_that_yuv420p_cannot_encode() {
-        let limits = BrowserLimits::new(321, 181, Duration::from_secs(1), 1)
-            .expect("odd browser dimensions remain valid for capture");
-
-        let error = validate_output_dimensions(limits, Path::new("video.mp4"))
-            .expect_err("the fixed Gate-one encoder requires even dimensions");
-
-        assert_eq!(error.kind(), RenderErrorKind::InvalidConfiguration);
-    }
 }

@@ -20,7 +20,9 @@ use onmark_core::protocol::{
     BrowserCommand, BrowserEvent, BrowserPlan, BrowserRequest, RequestId, WireFrame,
 };
 use onmark_media::Ffprobe;
-use onmark_render::{AdmittedVideo, BrowserLimits, BrowserSession, EncodedPng, UnsupportedVideo};
+use onmark_render::{
+    AdmittedVideo, BrowserLimits, BrowserSession, EncodedPng, RenderProfile, UnsupportedVideo,
+};
 use serde::Deserialize;
 use tempfile::{NamedTempFile, tempdir};
 use tokio::process::Command;
@@ -114,7 +116,7 @@ struct MeasuredFrames<T> {
 }
 
 async fn capture_seek_sequence(fixture: &Url, plan: &BrowserPlan) -> MeasuredFrames<EncodedPng> {
-    let session = BrowserSession::launch(chrome(), browser_limits())
+    let session = BrowserSession::launch(chrome(), render_profile(), browser_limits())
         .await
         .expect("Chrome must launch");
     let capture_result = capture_video_frames(&session, fixture, plan).await;
@@ -552,8 +554,12 @@ fn required_path(variable: &str) -> PathBuf {
 }
 
 fn browser_limits() -> BrowserLimits {
-    BrowserLimits::new(WIDTH, HEIGHT, Duration::from_secs(10), MAX_REFERENCE_BYTES)
+    BrowserLimits::new(Duration::from_secs(10), MAX_REFERENCE_BYTES)
         .expect("the fixture browser limits are bounded")
+}
+
+fn render_profile() -> RenderProfile {
+    RenderProfile::new(WIDTH, HEIGHT).expect("the fixture render profile is valid")
 }
 
 #[derive(Debug, Deserialize)]

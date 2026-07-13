@@ -1,1 +1,74 @@
-onmark
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Onmark executable bundle fixture</title>
+    <style>
+      html,
+      body,
+      canvas {
+        height: 100%;
+        margin: 0;
+        width: 100%;
+      }
+
+      body {
+        overflow: hidden;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas aria-label="Deterministic frame fixture"></canvas>
+    <script>
+      const canvas = document.querySelector("canvas");
+      const context = canvas.getContext("2d", { alpha: false });
+
+      function draw(frame) {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        context.fillStyle = `rgb(${frame % 256}, 32, 96)`;
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        context.fillStyle = "white";
+        context.font = "48px sans-serif";
+        context.fillText(`frame ${frame}`, 48, 80);
+      }
+
+      const host = Object.freeze({
+        async dispatch(request) {
+          const { command, requestId, version } = request;
+          let event;
+          switch (command.type) {
+            case "load":
+              event = { type: "loaded" };
+              break;
+            case "prepare":
+              draw(command.evaluationStart);
+              event = {
+                type: "prepared",
+                evaluationStart: command.evaluationStart,
+              };
+              break;
+            case "seek":
+              draw(command.frame);
+              event = { type: "frameReady", frame: command.frame };
+              break;
+            case "dispose":
+              event = { type: "disposed" };
+              break;
+            default:
+              throw new TypeError("unsupported fixture command");
+          }
+          return { version, requestId, event };
+        },
+      });
+
+      Object.defineProperty(globalThis, "__ONMARK_RUNTIME__", {
+        configurable: false,
+        enumerable: false,
+        value: host,
+        writable: false,
+      });
+    </script>
+  </body>
+</html>

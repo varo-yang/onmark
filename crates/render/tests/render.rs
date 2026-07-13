@@ -1,17 +1,18 @@
 use std::collections::BTreeMap;
 use std::env;
 use std::error::Error;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use onmark_core::compiler;
 use onmark_core::model::{FrameRate, SourceId, Timebase};
 use onmark_core::protocol::{
-    BrowserCommand, BrowserEvent, BrowserPlan, BrowserRequest, RequestId, WireFrame,
+    BrowserCommand, BrowserEvent, BrowserPlan, BrowserRequest, BundleManifest, RequestId, WireFrame,
 };
 use onmark_render::{
-    BrowserErrorKind, BrowserLimits, BrowserSession, EncodeLimits, EncodedPng, Ffmpeg,
-    RenderExecutor,
+    BrowserErrorKind, BrowserLimits, BrowserSession, EncodeLimits, EncodedPng, ExecutableUnit,
+    Ffmpeg, RenderExecutor, RenderProfile, RenderUnit, UnitRootLimits,
 };
 use serde::Deserialize;
 use tempfile::tempdir;
@@ -26,9 +27,13 @@ const FRAME_COUNT: u64 = 75;
 #[tokio::test]
 #[ignore = "requires ONMARK_CHROME"]
 async fn rejects_a_page_that_never_installs_the_runtime_host() {
-    let session = BrowserSession::launch(chrome(), browser_limits(Duration::from_secs(5)))
-        .await
-        .expect("Chrome must launch");
+    let session = BrowserSession::launch(
+        chrome(),
+        render_profile(),
+        browser_limits(Duration::from_secs(5)),
+    )
+    .await
+    .expect("Chrome must launch");
     let fixture = render_fixture("missing-runtime.html");
 
     let error = session
@@ -44,9 +49,13 @@ async fn rejects_a_page_that_never_installs_the_runtime_host() {
 #[tokio::test]
 #[ignore = "requires ONMARK_CHROME and a built @onmark/runtime package"]
 async fn bounds_a_runtime_adapter_that_never_finishes_loading() {
-    let session = BrowserSession::launch(chrome(), browser_limits(Duration::from_secs(5)))
-        .await
-        .expect("Chrome must launch");
+    let session = BrowserSession::launch(
+        chrome(),
+        render_profile(),
+        browser_limits(Duration::from_secs(5)),
+    )
+    .await
+    .expect("Chrome must launch");
     let fixture = render_fixture("stalled-runtime.html");
     session
         .navigate(fixture.as_str())
@@ -72,9 +81,13 @@ async fn bounds_a_runtime_adapter_that_never_finishes_loading() {
 #[tokio::test]
 #[ignore = "requires ONMARK_CHROME and a built @onmark/runtime package"]
 async fn captures_stable_frames_across_the_real_browser_protocol() {
-    let session = BrowserSession::launch(chrome(), browser_limits(Duration::from_secs(10)))
-        .await
-        .expect("Chrome must launch");
+    let session = BrowserSession::launch(
+        chrome(),
+        render_profile(),
+        browser_limits(Duration::from_secs(10)),
+    )
+    .await
+    .expect("Chrome must launch");
     let fixture = browser_fixture();
 
     let result = exercise_protocol(&session, &fixture).await;
@@ -85,7 +98,7 @@ async fn captures_stable_frames_across_the_real_browser_protocol() {
 }
 
 #[tokio::test]
-#[ignore = "requires ONMARK_CHROME, ONMARK_FFMPEG, ONMARK_FFPROBE, and built runtime"]
+#[ignore = "requires ONMARK_CHROME, ONMARK_FFMPEG, and ONMARK_FFPROBE"]
 async fn renders_the_gate_one_plan_to_a_verified_mp4() {
     let directory = tempdir().expect("the test output directory must be available");
     let output = directory.path().join("gate-one.mp4");
@@ -94,9 +107,10 @@ async fn renders_the_gate_one_plan_to_a_verified_mp4() {
     let ffmpeg = Ffmpeg::new(required_path("ONMARK_FFMPEG"), limits)
         .expect("the FFmpeg executable path is present");
     let executor = RenderExecutor::new(chrome(), browser_limits(Duration::from_secs(10)), ffmpeg);
+    let unit = executable_gate_one_unit();
 
     let video = executor
-        .render_synthetic(gate_one_plan(), browser_fixture().as_str(), &output)
+        .render(unit, &output)
         .await
         .expect("the real local renderer must produce an MP4");
 
@@ -238,8 +252,11 @@ fn required_path(variable: &str) -> PathBuf {
 }
 
 fn browser_limits(deadline: Duration) -> BrowserLimits {
-    BrowserLimits::new(WIDTH, HEIGHT, deadline, 8 * 1024 * 1024)
-        .expect("the fixture browser limits are bounded")
+    BrowserLimits::new(deadline, 8 * 1024 * 1024).expect("the fixture browser limits are bounded")
+}
+
+fn render_profile() -> RenderProfile {
+    RenderProfile::new(WIDTH, HEIGHT).expect("the fixture render profile is valid")
 }
 
 fn browser_fixture() -> Url {
@@ -266,6 +283,11 @@ fn repository() -> PathBuf {
 }
 
 fn gate_one_plan() -> BrowserPlan {
+    BrowserPlan::from_timeline(&gate_one_timeline(), &BTreeMap::new())
+        .expect("the fixture timeline fits the browser frame domain")
+}
+
+fn gate_one_timeline() -> onmark_core::timeline::TimelineIr {
     let rate = FrameRate::new(30, 1).expect("the fixture frame rate is valid");
     let parsed = compiler::parse(
         SourceId::new(0),
@@ -283,13 +305,24 @@ fn gate_one_plan() -> BrowserPlan {
         Timebase::new(rate),
     )
     .expect("the fixture metadata is complete");
-    assert!(solved.diagnostics().is_empty());
+    let (timeline, diagnostics) = solved.into_parts();
+    assert!(diagnostics.is_empty());
+    timeline.expect("the fixture solves")
+}
 
-    BrowserPlan::from_timeline(
-        solved.timeline().expect("the fixture solves"),
-        &BTreeMap::new(),
-    )
-    .expect("the fixture timeline fits the browser frame domain")
+fn executable_gate_one_unit() -> ExecutableUnit {
+    let bundle = repository().join("conformance/protocol/bundle-v1");
+    let manifest = fs::read_to_string(bundle.join(BundleManifest::FILE_NAME))
+        .expect("the executable bundle manifest is readable");
+    let manifest = serde_json::from_str::<BundleManifest>(&manifest)
+        .expect("the executable bundle manifest is valid");
+    let unit = RenderUnit::whole_film(&gate_one_timeline(), manifest, render_profile(), [])
+        .expect("the fixture facts form one whole-film unit");
+    let limits = UnitRootLimits::new(4, 1024 * 1024)
+        .expect("the fixture materialization limits are bounded");
+
+    ExecutableUnit::materialize(unit, &bundle, limits)
+        .expect("the fixture bundle must become one executable unit")
 }
 
 #[derive(Debug, Deserialize)]

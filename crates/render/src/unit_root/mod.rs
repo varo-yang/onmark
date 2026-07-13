@@ -5,13 +5,13 @@ use std::error::Error;
 use std::fmt;
 use std::path::Path;
 
-use onmark_core::protocol::BundleManifest;
+use onmark_core::protocol::{BrowserPlan, BundleManifest};
 use tempfile::TempDir;
 use url::Url;
 
 pub use error::{UnitRootError, UnitRootErrorKind};
 
-use crate::MaterializedAsset;
+use crate::{MaterializedAsset, RenderProfile, RenderUnit};
 
 const MAX_FILES: usize = BundleManifest::MAX_FILES + 1;
 const MAX_BYTES: u64 = 1 << 40;
@@ -83,6 +83,61 @@ impl fmt::Display for InvalidUnitRootLimits {
 }
 
 impl Error for InvalidUnitRootLimits {}
+
+/// One render unit whose bundle and assets occupy a verified private root.
+#[derive(Debug)]
+pub struct ExecutableUnit {
+    browser_plan: BrowserPlan,
+    profile: RenderProfile,
+    root: UnitRoot,
+}
+
+impl ExecutableUnit {
+    /// Consumes materialization requirements into browser-executable inputs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`UnitRootError`] when bundle or asset bytes, resource limits,
+    /// or filesystem operations violate the unit contract.
+    pub fn materialize(
+        unit: RenderUnit,
+        bundle_directory: &Path,
+        limits: UnitRootLimits,
+    ) -> Result<Self, UnitRootError> {
+        let root = UnitRoot::materialize(
+            bundle_directory,
+            unit.bundle_manifest(),
+            unit.materialized_assets(),
+            limits,
+        )?;
+        let profile = unit.profile();
+        let browser_plan = unit.into_browser_plan();
+
+        Ok(Self {
+            browser_plan,
+            profile,
+            root,
+        })
+    }
+
+    /// Returns the browser-facing projection of the verified unit.
+    #[must_use]
+    pub const fn browser_plan(&self) -> &BrowserPlan {
+        &self.browser_plan
+    }
+
+    /// Returns pixel-affecting output facts for the verified unit.
+    #[must_use]
+    pub const fn profile(&self) -> RenderProfile {
+        self.profile
+    }
+
+    /// Returns the verified presentation entry loaded by Chromium.
+    #[must_use]
+    pub const fn entry_url(&self) -> &Url {
+        self.root.entry_url()
+    }
+}
 
 /// Private verified filesystem root retained for one local render lifetime.
 #[derive(Debug)]

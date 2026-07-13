@@ -8,7 +8,7 @@ use onmark_core::model::{FrameRate, FrozenAsset, FrozenAssetId};
 use onmark_core::protocol::{BrowserPlan, BundleManifest, InvalidBrowserPlan};
 use onmark_core::timeline::{TimelineIr, TimelineVideo};
 
-use crate::{AdmittedVideo, UnsupportedVideo};
+use crate::{AdmittedVideo, RenderProfile, UnsupportedVideo};
 
 /// One frozen artifact at its browser-visible execution location.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -82,11 +82,12 @@ impl fmt::Display for InvalidMaterializedAsset {
 
 impl Error for InvalidMaterializedAsset {}
 
-/// One whole-film execution unit after compilation and materialization join.
+/// One whole-film unit containing facts and local materialization requirements.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RenderUnit {
     browser_plan: BrowserPlan,
-    bundle_url: Box<str>,
+    bundle_manifest: BundleManifest,
+    profile: RenderProfile,
     videos: BTreeMap<FrozenAssetId, RenderVideo>,
 }
 
@@ -112,7 +113,7 @@ impl RenderVideo {
 }
 
 impl RenderUnit {
-    /// Composes the single Gate-one unit from solved facts and verified inputs.
+    /// Composes the single Gate-one unit from solved facts and local inputs.
     ///
     /// Extra materialized assets are not retained. Every referenced video must
     /// be present and admissible; voice-over is rejected until the Audio Plan
@@ -124,14 +125,10 @@ impl RenderUnit {
     /// supported by the browser profile, or outside the browser wire domain.
     pub fn whole_film(
         timeline: &TimelineIr,
-        bundle_url: impl Into<Box<str>>,
+        bundle_manifest: BundleManifest,
+        profile: RenderProfile,
         assets: impl IntoIterator<Item = MaterializedAsset>,
     ) -> Result<Self, InvalidRenderUnit> {
-        let bundle_url = bundle_url.into();
-        if bundle_url.trim().is_empty() {
-            return Err(InvalidRenderUnit::BlankBundleUrl);
-        }
-
         reject_unplanned_audio(timeline)?;
         let mut available = materialized_catalog(assets)?;
         let required = required_video_ids(timeline);
@@ -158,7 +155,8 @@ impl RenderUnit {
 
         Ok(Self {
             browser_plan,
-            bundle_url,
+            bundle_manifest,
+            profile,
             videos,
         })
     }
@@ -169,10 +167,10 @@ impl RenderUnit {
         &self.browser_plan
     }
 
-    /// Returns the immutable presentation entry loaded by Chromium.
+    /// Returns pixel-affecting output facts for this unit.
     #[must_use]
-    pub fn bundle_url(&self) -> &str {
-        &self.bundle_url
+    pub const fn profile(&self) -> RenderProfile {
+        self.profile
     }
 
     /// Returns required videos in deterministic frozen-identity order.
@@ -180,14 +178,24 @@ impl RenderUnit {
     pub fn videos(&self) -> impl ExactSizeIterator<Item = &RenderVideo> {
         self.videos.values()
     }
+
+    pub(crate) const fn bundle_manifest(&self) -> &BundleManifest {
+        &self.bundle_manifest
+    }
+
+    pub(crate) fn materialized_assets(&self) -> impl ExactSizeIterator<Item = &MaterializedAsset> {
+        self.videos.values().map(RenderVideo::asset)
+    }
+
+    pub(crate) fn into_browser_plan(self) -> BrowserPlan {
+        self.browser_plan
+    }
 }
 
 /// Reason solved and materialized facts cannot form one Gate-one unit.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum InvalidRenderUnit {
-    /// No immutable presentation entry was supplied.
-    BlankBundleUrl,
     /// Two materialized inputs claim the same frozen identity.
     DuplicateAsset(FrozenAssetId),
     /// Timeline IR references bytes absent from materialization.
@@ -208,7 +216,6 @@ pub enum InvalidRenderUnit {
 impl fmt::Display for InvalidRenderUnit {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::BlankBundleUrl => formatter.write_str("render bundle URL cannot be blank"),
             Self::DuplicateAsset(id) => write!(formatter, "materialized asset {id} is duplicated"),
             Self::MissingAsset(id) => write!(formatter, "materialized asset {id} is missing"),
             Self::UnsupportedVideo { id, source } => {
@@ -270,9 +277,10 @@ mod tests {
         AssetMetadata, AssetRef, Duration, FrameRate, FrozenAsset, FrozenAssetId, SourceId,
         Timebase, VideoMetadata, VideoTiming,
     };
+    use onmark_core::protocol::BundleFile;
     use onmark_core::timeline::TimelineIr;
 
-    use super::{BundleManifest, InvalidRenderUnit, MaterializedAsset, RenderUnit};
+    use super::{BundleManifest, InvalidRenderUnit, MaterializedAsset, RenderProfile, RenderUnit};
 
     #[test]
     fn composes_only_required_admitted_video_assets() {
@@ -280,12 +288,17 @@ mod tests {
         let timeline = video_timeline(frozen.clone());
         let materialized = MaterializedAsset::new(frozen, "/tmp/opening.mp4")
             .expect("the fixture path is present");
-        let unit = RenderUnit::whole_film(&timeline, "file:///bundle.html", [materialized])
-            .expect("CFR H.264 forms one whole-film unit");
+        let unit = RenderUnit::whole_film(
+            &timeline,
+            bundle_manifest(),
+            render_profile(),
+            [materialized],
+        )
+        .expect("CFR H.264 forms one whole-film unit");
 
         assert_eq!(unit.browser_plan().videos().len(), 1);
         assert_eq!(unit.videos().len(), 1);
-        assert_eq!(unit.bundle_url(), "file:///bundle.html");
+        assert_eq!(unit.profile(), render_profile());
         assert_eq!(
             unit.videos()
                 .next()
@@ -310,7 +323,7 @@ mod tests {
         let timeline = video_timeline(frozen);
 
         assert_eq!(
-            RenderUnit::whole_film(&timeline, "file:///bundle.html", []),
+            RenderUnit::whole_film(&timeline, bundle_manifest(), render_profile(), []),
             Err(InvalidRenderUnit::MissingAsset(id)),
         );
     }
@@ -323,7 +336,12 @@ mod tests {
             .expect("the fixture path is present");
 
         assert!(matches!(
-            RenderUnit::whole_film(&timeline, "file:///bundle.html", [materialized]),
+            RenderUnit::whole_film(
+                &timeline,
+                bundle_manifest(),
+                render_profile(),
+                [materialized]
+            ),
             Err(InvalidRenderUnit::UnsupportedVideo { .. }),
         ));
     }
@@ -341,7 +359,7 @@ mod tests {
             voice,
         );
         assert_eq!(
-            RenderUnit::whole_film(&timeline, "file:///bundle.html", []),
+            RenderUnit::whole_film(&timeline, bundle_manifest(), render_profile(), []),
             Err(InvalidRenderUnit::VoiceOverNotSupported(id)),
         );
     }
@@ -386,5 +404,17 @@ mod tests {
 
     fn frame_rate() -> FrameRate {
         FrameRate::new(30, 1).expect("the fixture frame rate is valid")
+    }
+
+    fn render_profile() -> RenderProfile {
+        RenderProfile::new(320, 180).expect("the fixture dimensions are valid")
+    }
+
+    fn bundle_manifest() -> BundleManifest {
+        const DIGEST: &str =
+            "sha256:0101010101010101010101010101010101010101010101010101010101010101";
+        let entry = BundleFile::new(BundleManifest::ENTRY_POINT, 1, DIGEST)
+            .expect("the fixture entry is valid");
+        BundleManifest::new(DIGEST, vec![entry]).expect("the fixture manifest is valid")
     }
 }

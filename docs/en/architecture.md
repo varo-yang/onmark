@@ -48,14 +48,19 @@ composition boundary:
 Timeline IR + Frozen Asset Catalog + Bundle Manifest + Render Profile
   → Render Unit
     → Browser Plan + Audio Plan + materialization requirements
+      → materialize → Executable Unit + verified private root
 ```
 
 This join is intentionally not another compiler phase. Timeline IR says what
 the film is and when each fact holds; a presentation bundle owns how those
 facts become DOM, CSS, Canvas, or WebGL; a Render Unit says which immutable
-inputs one executor invocation consumes. Gate one has exactly one whole-film
-unit. Gate two introduces the Render Graph and may derive several units of the
-same type; it does not replace the executor contract.
+inputs one executor invocation consumes. `RenderProfile` owns pixel-affecting
+facts such as viewport dimensions; process deadlines and retained-memory
+ceilings remain executor limits. Materialization consumes the unit into an
+`ExecutableUnit`, so the executor cannot pair a browser plan with an unrelated
+URL or asset root. Gate one has exactly one whole-film unit. Gate two introduces
+the Render Graph and may derive several units of the same type; it does not
+replace the executor contract.
 
 ## End-to-end pipeline
 
@@ -64,7 +69,8 @@ freeze inputs ─┬→ probe media ─→ compile ─────────�
                └→ bundle presentation ─────────────────┤
                                                        ▼
                          compose one whole-film Render Unit
-                           → capture/encode → mix audio → verify
+                           → materialize Executable Unit
+                             → capture/encode → mix audio → verify
 
 Gate two inserts: Timeline IR → Render Graph → partition → Render Units
 ```

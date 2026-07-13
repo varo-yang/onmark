@@ -10,6 +10,7 @@
 mod browser;
 mod encoder;
 mod executor;
+mod profile;
 mod unit;
 mod unit_root;
 mod video;
@@ -21,10 +22,12 @@ pub use encoder::{
     EncodeError, EncodeErrorKind, EncodeLimits, EncodedVideo, Ffmpeg, FfmpegSession, InvalidFfmpeg,
 };
 pub use executor::{RenderError, RenderErrorKind, RenderExecutor};
+pub use profile::{InvalidRenderProfile, RenderProfile};
 pub use unit::{
     InvalidMaterializedAsset, InvalidRenderUnit, MaterializedAsset, RenderUnit, RenderVideo,
 };
 pub use unit_root::{
-    InvalidUnitRootLimits, UnitRoot, UnitRootError, UnitRootErrorKind, UnitRootLimits,
+    ExecutableUnit, InvalidUnitRootLimits, UnitRoot, UnitRootError, UnitRootErrorKind,
+    UnitRootLimits,
 };
 pub use video::{AdmittedVideo, UnsupportedVideo};

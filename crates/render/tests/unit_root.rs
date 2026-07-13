@@ -1,10 +1,15 @@
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use onmark_core::model::{AssetMetadata, Duration, FrozenAsset, FrozenAssetId};
+use onmark_core::compiler;
+use onmark_core::model::{
+    AssetMetadata, Duration, FrameRate, FrozenAsset, FrozenAssetId, SourceId, Timebase,
+};
 use onmark_core::protocol::{BundleFile, BundleManifest};
 use onmark_render::{
-    InvalidUnitRootLimits, MaterializedAsset, UnitRoot, UnitRootErrorKind, UnitRootLimits,
+    ExecutableUnit, InvalidUnitRootLimits, MaterializedAsset, RenderProfile, RenderUnit, UnitRoot,
+    UnitRootErrorKind, UnitRootLimits,
 };
 use serde::Serialize;
 use sha2::{Digest as _, Sha256};
@@ -41,18 +46,17 @@ fn materializes_the_checked_in_bundle_contract() {
         .expect("the conformance manifest is readable");
     let manifest = serde_json::from_str::<BundleManifest>(&source)
         .expect("the conformance manifest satisfies the Rust wire contract");
-    let unit = UnitRoot::materialize(
-        &root,
-        &manifest,
-        std::iter::empty::<&MaterializedAsset>(),
-        limits(4, 4_096),
-    )
-    .expect("the checked-in bundle must materialize across the native boundary");
+    let unit = RenderUnit::whole_film(&static_timeline(), manifest, render_profile(), [])
+        .expect("the fixture facts form one render unit");
+    let executable = ExecutableUnit::materialize(unit, &root, limits(4, 4_096))
+        .expect("the checked-in bundle must materialize across the native boundary");
+    let entry = executable
+        .entry_url()
+        .to_file_path()
+        .expect("the executable entry is a local file");
 
-    assert_eq!(
-        read(&unit.path().join(BundleManifest::ENTRY_POINT)),
-        b"onmark\n"
-    );
+    assert!(read(&entry).starts_with(b"<!doctype html>"));
+    assert_eq!(executable.profile(), render_profile());
 }
 
 #[test]
@@ -232,6 +236,36 @@ fn conformance_bundle() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
         .join("conformance/protocol/bundle-v1")
+}
+
+fn static_timeline() -> onmark_core::timeline::TimelineIr {
+    let parsed = compiler::parse(
+        SourceId::new(0),
+        r#"<film><scene><shot duration="1s"><title>Frame</title></shot></scene></film>"#,
+    );
+    let (document, diagnostics) = parsed.into_parts();
+    assert!(diagnostics.is_empty());
+    let (film, diagnostics) = compiler::bind(document).into_parts();
+    assert!(diagnostics.is_empty());
+    let (film, diagnostics) = compiler::resolve(film.expect("the fixture binds")).into_parts();
+    assert!(diagnostics.is_empty());
+    let report = compiler::solve(
+        film.expect("the fixture resolves"),
+        &BTreeMap::new(),
+        Timebase::new(frame_rate()),
+    )
+    .expect("the static fixture requires no media metadata");
+    let (timeline, diagnostics) = report.into_parts();
+    assert!(diagnostics.is_empty());
+    timeline.expect("the fixture solves")
+}
+
+fn render_profile() -> RenderProfile {
+    RenderProfile::new(320, 180).expect("the fixture render profile is valid")
+}
+
+fn frame_rate() -> FrameRate {
+    FrameRate::new(30, 1).expect("the fixture frame rate is valid")
 }
 
 fn frozen_id(bytes: &[u8]) -> FrozenAssetId {

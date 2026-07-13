@@ -14,6 +14,7 @@ use tokio::time::{Instant, sleep, timeout, timeout_at};
 
 use super::error::{BrowserError, BrowserErrorKind};
 use super::limits::BrowserLimits;
+use crate::RenderProfile;
 
 const RUNTIME_HOST: &str = "__ONMARK_RUNTIME__";
 const READINESS_POLL_INTERVAL: Duration = Duration::from_millis(10);
@@ -60,10 +61,11 @@ impl BrowserSession {
     /// startup, or initial page creation fails.
     pub async fn launch(
         executable: impl AsRef<Path>,
+        render_profile: RenderProfile,
         limits: BrowserLimits,
     ) -> Result<Self, BrowserError> {
         let profile = browser_profile()?;
-        let config = browser_config(executable.as_ref(), profile.path(), limits)?;
+        let config = browser_config(executable.as_ref(), profile.path(), render_profile, limits)?;
         let (mut browser, mut handler) = Browser::launch(config)
             .await
             .map_err(|source| BrowserError::cdp(BrowserErrorKind::Launch, source))?;
@@ -220,19 +222,20 @@ fn browser_profile() -> Result<TempDir, BrowserError> {
 fn browser_config(
     executable: &Path,
     profile: &Path,
+    render_profile: RenderProfile,
     limits: BrowserLimits,
 ) -> Result<BrowserConfig, BrowserError> {
     BrowserConfig::builder()
         .chrome_executable(executable)
         .user_data_dir(profile)
         .new_headless_mode()
-        .window_size(limits.width(), limits.height())
+        .window_size(render_profile.width(), render_profile.height())
         .viewport(Viewport {
-            width: limits.width(),
-            height: limits.height(),
+            width: render_profile.width(),
+            height: render_profile.height(),
             device_scale_factor: Some(1.0),
             emulating_mobile: false,
-            is_landscape: limits.width() >= limits.height(),
+            is_landscape: render_profile.width() >= render_profile.height(),
             has_touch: false,
         })
         .launch_timeout(limits.deadline())

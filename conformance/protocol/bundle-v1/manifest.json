@@ -1,12 +1,12 @@
 {
   "version": 1,
-  "bundleId": "sha256:c499b505aa7827fe26aeda7c08cae12273dda80b1717a84f1cf89f2b7077fb8b",
+  "bundleId": "sha256:52db25b24164c14ba7f57584ccb23fb193247fb49ffeb839d3c2cc6dca6c2119",
   "entryPoint": "index.html",
   "files": [
     {
-      "bytes": 7,
+      "bytes": 2088,
       "path": "index.html",
-      "sha256": "sha256:e5b1907a0d8aeb6c9729a75dbf3769d7f0b719ecb3170a7927d46454588a64db"
+      "sha256": "sha256:3f1a964795a8b4f167a5b876e915015d05137718fce5ee56de06c6e398210b19"
     }
   ]
 }

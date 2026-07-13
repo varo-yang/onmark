@@ -9,8 +9,8 @@ use crate::{BrowserError, EncodeError};
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum RenderErrorKind {
-    /// The selected browser and encoder settings cannot form a valid pipeline.
-    InvalidConfiguration,
+    /// The unit requires an execution capability not implemented by this gate.
+    UnsupportedUnit,
     /// The browser plan contains no usable output interval.
     InvalidPlan,
     /// The plan exceeds a configured process or protocol limit.
