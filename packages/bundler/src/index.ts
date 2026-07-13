@@ -11,8 +11,8 @@ export {
 } from "./presentation.js";
 
 export {
+  BUNDLE_ASSET_DIRECTORY,
   BUNDLE_ENTRY_POINT,
   BUNDLE_MANIFEST_FILE,
   BUNDLE_VERSION,
 } from "./generated/bundle-manifest.js";
-export { BUNDLE_ASSET_DIRECTORY } from "@onmark/runtime";

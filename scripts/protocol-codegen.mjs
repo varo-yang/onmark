@@ -134,10 +134,15 @@ function bundleContractSource(schema, types) {
     schema["x-onmark-manifest-file"],
     "manifest file",
   );
+  const assetDirectory = schemaString(
+    schema["x-onmark-asset-directory"],
+    "asset directory",
+  );
   return `${types}
 export const BUNDLE_VERSION = ${JSON.stringify(version)} as const;
 export const BUNDLE_ENTRY_POINT = ${JSON.stringify(entryPoint)} as const;
 export const BUNDLE_MANIFEST_FILE = ${JSON.stringify(manifestFile)} as const;
+export const BUNDLE_ASSET_DIRECTORY = ${JSON.stringify(assetDirectory)} as const;
 `;
 }
 
