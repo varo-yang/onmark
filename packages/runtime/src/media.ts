@@ -4,7 +4,8 @@
 import type { RuntimeFrame } from "./clock.js";
 import type { RuntimePlan } from "./session.js";
 
-type Video = RuntimePlan["videos"][number];
+/** Immutable browser placement projected from Timeline IR. */
+export type RuntimeVideo = RuntimePlan["videos"][number];
 type FrameRate = RuntimePlan["frameRate"];
 
 /** One source frame and an interior seek time that cannot hit its boundary. */
@@ -16,7 +17,7 @@ export interface VideoFrameSelection {
 /** Selects the source frame visible at one output-frame midpoint. */
 export function videoFrameSelection(
   frame: RuntimeFrame,
-  video: Video,
+  video: RuntimeVideo,
   outputFrameRate: FrameRate,
 ): VideoFrameSelection | undefined {
   if (frame.index < video.interval.start || frame.index >= video.interval.end) {

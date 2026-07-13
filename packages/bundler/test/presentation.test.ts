@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import {
@@ -123,6 +124,32 @@ test("does not publish an oversized or pre-existing artifact", async () => {
       (error: unknown) =>
         error instanceof BundleError && error.kind === "output",
     );
+  } finally {
+    await rm(workspace, { force: true, recursive: true });
+  }
+});
+
+test("keeps the checked-in video presentation bundle current", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "onmark-bundler-test-"));
+  try {
+    const repository = fileURLToPath(new URL("../../../..", import.meta.url));
+    const expected = join(repository, "conformance/protocol/bundle-v1");
+    const outputDirectory = join(workspace, "bundle");
+    await bundlePresentation({
+      entryPoint: join(repository, "conformance/browser/video-presentation.ts"),
+      outputDirectory,
+      maxOutputBytes: 1_000_000,
+    });
+
+    const files = (await readdir(expected)).sort();
+    assert.deepEqual((await readdir(outputDirectory)).sort(), files);
+    for (const file of files) {
+      assert.deepEqual(
+        await readFile(join(outputDirectory, file)),
+        await readFile(join(expected, file)),
+        `${file} is stale`,
+      );
+    }
   } finally {
     await rm(workspace, { force: true, recursive: true });
   }

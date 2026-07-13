@@ -30,4 +30,3 @@ export interface BundleFile {
 export const BUNDLE_VERSION = 1 as const;
 export const BUNDLE_ENTRY_POINT = "index.html" as const;
 export const BUNDLE_MANIFEST_FILE = "manifest.json" as const;
-export const BUNDLE_ASSET_DIRECTORY = "assets/sha256" as const;

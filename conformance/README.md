@@ -12,9 +12,11 @@ the declared size, digest, identity, and entry document together. Review all of
 these files as compatibility-sensitive data.
 
 `protocol/bundle-v1/` is also the self-contained executable fixture used by the
-native Chromium-to-FFmpeg smoke. Its minimal host exercises the native protocol
-transport; the separate browser fixtures exercise the generated TypeScript
-runtime implementation.
+native Chromium-to-FFmpeg smoke. It is generated from
+`browser/video-presentation.ts` by `@onmark/bundler`, embeds the production
+runtime video adapter, and consumes materialized media from the unit root. The
+bundler test rebuilds it and requires byte-for-byte equality, so source,
+runtime, manifest, and payload cannot drift independently.
 
 Regenerate goldens after intentionally changing public behavior:
 
@@ -40,8 +42,10 @@ ONMARK_CHROME=/path/to/chrome cargo test -p onmark-render --test render \
 The smoke crosses the versioned browser protocol, captures two distinct frames,
 and requires a repeated capture of the same frame to produce identical PNG bytes.
 
-The full local-render smoke additionally streams every output frame through
-`FFmpeg`, probes the published MP4, and decodes it again:
+The full local-render smoke generates and probes a real H.264 source, verifies
+its frozen identity during unit materialization, decodes it through Chromium,
+streams every captured frame through `FFmpeg`, probes the published MP4, and
+requires decoded frame hashes to prove that the result contains motion:
 
 ```bash
 ONMARK_CHROME=/path/to/chrome \

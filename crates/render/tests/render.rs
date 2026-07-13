@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::error::Error;
 use std::fs;
@@ -6,15 +6,17 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use onmark_core::compiler;
-use onmark_core::model::{FrameRate, SourceId, Timebase};
+use onmark_core::model::{AssetRef, FrameRate, FrozenAsset, FrozenAssetId, SourceId, Timebase};
 use onmark_core::protocol::{
     BrowserCommand, BrowserEvent, BrowserPlan, BrowserRequest, BundleManifest, RequestId, WireFrame,
 };
+use onmark_media::Ffprobe;
 use onmark_render::{
     BrowserErrorKind, BrowserLimits, BrowserSession, EncodeLimits, EncodedPng, ExecutableUnit,
-    Ffmpeg, RenderExecutor, RenderProfile, RenderUnit, UnitRootLimits,
+    Ffmpeg, MaterializedAsset, RenderExecutor, RenderProfile, RenderUnit, UnitRootLimits,
 };
 use serde::Deserialize;
+use sha2::{Digest as _, Sha256};
 use tempfile::tempdir;
 use tokio::process::Command;
 use tokio::time::timeout;
@@ -101,13 +103,16 @@ async fn captures_stable_frames_across_the_real_browser_protocol() {
 #[ignore = "requires ONMARK_CHROME, ONMARK_FFMPEG, and ONMARK_FFPROBE"]
 async fn renders_the_gate_one_plan_to_a_verified_mp4() {
     let directory = tempdir().expect("the test output directory must be available");
+    let source = directory.path().join("source.mp4");
     let output = directory.path().join("gate-one.mp4");
+    generate_source_video(&source).await;
+    let frozen = freeze_video(&source).await;
     let limits = EncodeLimits::new(Duration::from_secs(30), 100, 64 * 1024 * 1024, 64 * 1024)
         .expect("the fixture encoding limits are bounded");
     let ffmpeg = Ffmpeg::new(required_path("ONMARK_FFMPEG"), limits)
         .expect("the FFmpeg executable path is present");
     let executor = RenderExecutor::new(chrome(), browser_limits(Duration::from_secs(10)), ffmpeg);
-    let unit = executable_gate_one_unit();
+    let unit = executable_gate_one_unit(frozen, source);
 
     let video = executor
         .render(unit, &output)
@@ -118,7 +123,56 @@ async fn renders_the_gate_one_plan_to_a_verified_mp4() {
     assert_eq!(video.frames(), FRAME_COUNT);
     assert!(output.metadata().expect("the MP4 must exist").len() > 0);
     assert_video_stream(&output).await;
-    assert_decodable(&output).await;
+    assert_decodable_motion(&output).await;
+}
+
+async fn generate_source_video(output: &Path) {
+    let source = format!("testsrc2=size={WIDTH}x{HEIGHT}:rate=30:duration=2.5");
+    let generated = Command::new(required_path("ONMARK_FFMPEG"))
+        .args(["-nostdin", "-v", "error", "-f", "lavfi", "-i", &source])
+        .args([
+            "-an",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-g",
+            "30",
+            "-bf",
+            "3",
+            "-movflags",
+            "+faststart",
+            "-y",
+        ])
+        .arg(output)
+        .output();
+    let generated = timeout(Duration::from_secs(20), generated)
+        .await
+        .expect("source generation must finish before its deadline")
+        .expect("FFmpeg must generate the source video");
+    assert!(
+        generated.status.success(),
+        "{}",
+        String::from_utf8_lossy(&generated.stderr),
+    );
+}
+
+async fn freeze_video(path: &Path) -> FrozenAsset {
+    let probe = Ffprobe::new(
+        required_path("ONMARK_FFPROBE"),
+        Duration::from_secs(20),
+        Ffprobe::MAX_OUTPUT_BYTES,
+    )
+    .expect("the fixture probe is bounded");
+    let source = path.to_owned();
+    let metadata = tokio::task::spawn_blocking(move || probe.probe(&source))
+        .await
+        .expect("the probe task must complete")
+        .expect("ffprobe must normalize the source video");
+    let bytes = fs::read(path).expect("the source video must remain readable");
+    let digest: [u8; 32] = Sha256::digest(bytes).into();
+
+    FrozenAsset::new(FrozenAssetId::from_sha256(digest), metadata)
 }
 
 async fn exercise_protocol(session: &BrowserSession, fixture: &Url) -> Result<(), Box<dyn Error>> {
@@ -224,21 +278,33 @@ async fn assert_video_stream(output: &Path) {
     assert_eq!(stream.nb_read_frames, FRAME_COUNT.to_string());
 }
 
-async fn assert_decodable(output: &Path) {
+async fn assert_decodable_motion(output: &Path) {
     let decoded = Command::new(required_path("ONMARK_FFMPEG"))
         .args(["-nostdin", "-v", "error", "-i"])
         .arg(output)
-        .args(["-f", "null", "-"])
+        .args(["-f", "framemd5", "-"])
         .output();
     let decoded = timeout(Duration::from_secs(10), decoded)
         .await
-        .expect("FFmpeg decode must finish before the conformance deadline")
-        .expect("FFmpeg must decode the completed MP4");
+        .expect("frame hashing must finish before the conformance deadline")
+        .expect("FFmpeg must hash the completed MP4");
     assert!(
         decoded.status.success(),
         "{}",
-        String::from_utf8_lossy(&decoded.stderr)
+        String::from_utf8_lossy(&decoded.stderr),
     );
+    let frames = String::from_utf8(decoded.stdout).expect("framemd5 output must be UTF-8");
+    let hashes = frames
+        .lines()
+        .filter(|line| !line.starts_with('#'))
+        .map(|line| {
+            line.rsplit_once(',')
+                .expect("every framemd5 record contains a hash")
+                .1
+                .trim()
+        })
+        .collect::<BTreeSet<_>>();
+    assert!(hashes.len() > 1, "the rendered video must contain motion");
 }
 
 fn chrome() -> PathBuf {
@@ -283,16 +349,23 @@ fn repository() -> PathBuf {
 }
 
 fn gate_one_plan() -> BrowserPlan {
-    BrowserPlan::from_timeline(&gate_one_timeline(), &BTreeMap::new())
+    BrowserPlan::from_timeline(&synthetic_timeline(), &BTreeMap::new())
         .expect("the fixture timeline fits the browser frame domain")
 }
 
-fn gate_one_timeline() -> onmark_core::timeline::TimelineIr {
-    let rate = FrameRate::new(30, 1).expect("the fixture frame rate is valid");
-    let parsed = compiler::parse(
-        SourceId::new(0),
+fn synthetic_timeline() -> onmark_core::timeline::TimelineIr {
+    solve_timeline(
         r#"<film><scene><shot duration="2.5s"><title>Opening</title></shot></scene></film>"#,
-    );
+        &BTreeMap::new(),
+    )
+}
+
+fn solve_timeline(
+    source: &str,
+    assets: &BTreeMap<AssetRef, FrozenAsset>,
+) -> onmark_core::timeline::TimelineIr {
+    let frame_rate = FrameRate::new(30, 1).expect("the fixture frame rate is valid");
+    let parsed = compiler::parse(SourceId::new(0), source);
     let (document, diagnostics) = parsed.into_parts();
     assert!(diagnostics.is_empty());
     let (film, diagnostics) = compiler::bind(document).into_parts();
@@ -301,8 +374,8 @@ fn gate_one_timeline() -> onmark_core::timeline::TimelineIr {
     assert!(diagnostics.is_empty());
     let solved = compiler::solve(
         film.expect("the fixture resolves"),
-        &BTreeMap::new(),
-        Timebase::new(rate),
+        assets,
+        Timebase::new(frame_rate),
     )
     .expect("the fixture metadata is complete");
     let (timeline, diagnostics) = solved.into_parts();
@@ -310,19 +383,31 @@ fn gate_one_timeline() -> onmark_core::timeline::TimelineIr {
     timeline.expect("the fixture solves")
 }
 
-fn executable_gate_one_unit() -> ExecutableUnit {
+fn executable_gate_one_unit(frozen: FrozenAsset, source: PathBuf) -> ExecutableUnit {
     let bundle = repository().join("conformance/protocol/bundle-v1");
     let manifest = fs::read_to_string(bundle.join(BundleManifest::FILE_NAME))
         .expect("the executable bundle manifest is readable");
     let manifest = serde_json::from_str::<BundleManifest>(&manifest)
         .expect("the executable bundle manifest is valid");
-    let unit = RenderUnit::whole_film(&gate_one_timeline(), manifest, render_profile(), [])
+    let timeline = gate_one_video_timeline(frozen.clone());
+    let materialized =
+        MaterializedAsset::new(frozen, source).expect("the fixture source path is present");
+    let unit = RenderUnit::whole_film(&timeline, manifest, render_profile(), [materialized])
         .expect("the fixture facts form one whole-film unit");
-    let limits = UnitRootLimits::new(4, 1024 * 1024)
+    let limits = UnitRootLimits::new(8, 64 * 1024 * 1024)
         .expect("the fixture materialization limits are bounded");
 
     ExecutableUnit::materialize(unit, &bundle, limits)
         .expect("the fixture bundle must become one executable unit")
+}
+
+fn gate_one_video_timeline(frozen: FrozenAsset) -> onmark_core::timeline::TimelineIr {
+    let asset = AssetRef::parse("source.mp4").expect("the fixture asset reference is valid");
+    let assets = BTreeMap::from([(asset, frozen)]);
+    solve_timeline(
+        r#"<film><scene><shot><video src="source.mp4" /></shot></scene></film>"#,
+        &assets,
+    )
 }
 
 #[derive(Debug, Deserialize)]

@@ -10,7 +10,20 @@ export type { BrowserRequest } from "./generated/browser-request.js";
 export type { BrowserResponse } from "./generated/browser-response.js";
 export type { BrowserPlan } from "./generated/browser-request.js";
 export { runtimeFrameAt, type RuntimeFrame } from "./clock.js";
-export { videoFrameSelection, type VideoFrameSelection } from "./media.js";
+export {
+  videoFrameSelection,
+  type RuntimeVideo,
+  type VideoFrameSelection,
+} from "./media.js";
+export {
+  DecodedVideo,
+  VideoRuntimeAdapter,
+  materializedVideoSource,
+  type BindVideoPresentation,
+  type BrowserVideoElement,
+  type VideoPresentation,
+} from "./video.js";
+export { BUNDLE_ASSET_DIRECTORY } from "./generated/bundle-layout.js";
 export {
   RUNTIME_HOST_NAME,
   installRuntimeHost,

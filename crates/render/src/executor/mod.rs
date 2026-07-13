@@ -40,7 +40,7 @@ impl RenderExecutor {
         }
     }
 
-    /// Renders one verified media-free unit into an H.264 MP4 artifact.
+    /// Renders one verified unit into an H.264 MP4 artifact.
     ///
     /// Frame capture and encoder input are sequential: at most one encoded PNG
     /// is owned between Chromium and `FFmpeg` at any time.
@@ -89,13 +89,6 @@ impl RenderExecutor {
     }
 
     fn validate_plan(&self, plan: &BrowserPlan, output: &Path) -> Result<u64, RenderError> {
-        if !plan.videos().is_empty() {
-            return Err(RenderError::new(
-                RenderErrorKind::UnsupportedUnit,
-                output,
-                "video placements require the browser media adapter",
-            ));
-        }
         let Some(frame_count) = output_frame_count(plan) else {
             return Err(invalid_plan(output, "browser output interval is reversed"));
         };
