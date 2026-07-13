@@ -9,7 +9,7 @@
       "default": "./dist/src/index.js"
     },
     "./types": {
-      "types": "./dist/src/types.d.ts",
+      "types": "./src/types.ts",
       "default": "./dist/src/types.js"
     }
   },
