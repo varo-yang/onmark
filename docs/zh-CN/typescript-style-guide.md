@@ -165,8 +165,10 @@ generator 与 CI script 使用 named constant、稳定顺序、显式 exit statu
 `exactOptionalPropertyTypes`、`noImplicitOverride`、
 `noPropertyAccessFromIndexSignature`、`isolatedModules` 与
 `verbatimModuleSyntax`。lint 禁止显式 `any`、产品代码 default export、`console`、
-不一致 type import 与直接读取 `process.env`。格式完全机械化并由 CI 检查；生成输出不
-参与手工 formatter，而由 regeneration gate 管理。
+不一致 type import 与直接读取 `process.env`。格式完全机械化并由 CI 检查。根目录
+`conformance/` 下的手写 browser source 必须和 package source 一样经过 strict typecheck、
+lint、shape 与 format gate；bundler build 成功不能替代类型检查。生成输出不参与手工
+formatter，而由 regeneration gate 管理。
 
 ## 一票否决反模式
 

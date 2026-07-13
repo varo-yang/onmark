@@ -25,6 +25,12 @@ export {
 } from "./video.js";
 export { BUNDLE_ASSET_DIRECTORY } from "./generated/bundle-layout.js";
 export {
+  MAX_BROWSER_VIDEOS,
+  MAX_FAILURE_MESSAGE_CHARACTERS,
+  MAX_PENDING_RESOURCE_CHARACTERS,
+  MAX_PENDING_RESOURCES,
+} from "./generated/runtime-contract.js";
+export {
   RUNTIME_HOST_NAME,
   installRuntimeHost,
   type RuntimeHost,

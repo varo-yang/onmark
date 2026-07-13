@@ -3,10 +3,10 @@
 
 import { decodeBrowserRequest } from "./generated/codec.js";
 import type { BrowserResponse } from "./generated/browser-response.js";
+import { RUNTIME_HOST_NAME } from "./generated/runtime-contract.js";
 import { RuntimeSession, type RuntimeAdapter } from "./session.js";
 
-/** Global property used by the native Chromium executor. */
-export const RUNTIME_HOST_NAME = "__ONMARK_RUNTIME__";
+export { RUNTIME_HOST_NAME };
 
 /** Narrow browser capability invoked by the native executor through CDP. */
 export interface RuntimeHost {

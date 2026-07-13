@@ -100,6 +100,7 @@
           "items": {
             "$ref": "#/$defs/BrowserVideo"
           },
+          "maxItems": 10000,
           "type": "array"
         }
       },
@@ -218,5 +219,6 @@
     "command"
   ],
   "title": "BrowserRequest",
-  "type": "object"
+  "type": "object",
+  "x-onmark-runtime-host": "__ONMARK_RUNTIME__"
 }

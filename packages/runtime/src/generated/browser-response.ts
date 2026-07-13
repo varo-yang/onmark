@@ -38,7 +38,9 @@ export type BrowserEvent =
        */
       message: string;
       /**
-       * Resources that prevented readiness, in deterministic order.
+       * Resources that prevented readiness, in caller-owned deterministic order.
+       *
+       * @maxItems 256
        */
       pendingResources: string[];
       type: "failed";

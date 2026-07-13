@@ -5,11 +5,11 @@
   "scripts": {
     "generate": "cargo xtask schema",
     "generate:check": "cargo xtask schema --check",
-    "format": "prettier --write \"packages/**/*.{ts,js,mjs,json}\" \"scripts/**/*.{js,mjs,json}\" \"*.{js,mjs,json}\" \".github/workflows/*.{yml,yaml}\" pnpm-workspace.yaml",
-    "format:check": "prettier --check \"packages/**/*.{ts,js,mjs,json}\" \"scripts/**/*.{js,mjs,json}\" \"*.{js,mjs,json}\" \".github/workflows/*.{yml,yaml}\" pnpm-workspace.yaml",
-    "lint": "oxlint packages scripts --ignore-pattern \"**/node_modules/**\" --ignore-pattern \"packages/runtime/src/generated/**\" --deny-warnings && node scripts/check-typescript-style.mjs",
+    "format": "prettier --write \"packages/**/*.{ts,js,mjs,json}\" \"scripts/**/*.{js,mjs,json}\" \"conformance/browser/**/*.{ts,js,mjs,json,css,html}\" \"*.{js,mjs,json}\" \".github/workflows/*.{yml,yaml}\" pnpm-workspace.yaml",
+    "format:check": "prettier --check \"packages/**/*.{ts,js,mjs,json}\" \"scripts/**/*.{js,mjs,json}\" \"conformance/browser/**/*.{ts,js,mjs,json,css,html}\" \"*.{js,mjs,json}\" \".github/workflows/*.{yml,yaml}\" pnpm-workspace.yaml",
+    "lint": "oxlint packages scripts conformance/browser --ignore-pattern \"**/node_modules/**\" --ignore-pattern \"packages/runtime/src/generated/**\" --deny-warnings && node scripts/check-typescript-style.mjs",
     "test": "pnpm --recursive test",
-    "typecheck": "pnpm --recursive typecheck"
+    "typecheck": "pnpm --recursive typecheck && tsc --project conformance/browser/tsconfig.json"
   },
   "devDependencies": {
     "@types/node": "24.10.1",

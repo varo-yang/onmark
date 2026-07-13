@@ -1,23 +1,12 @@
 {
+  "extends": "../../tsconfig.json",
   "compilerOptions": {
     "allowJs": true,
     "checkJs": false,
     "declaration": true,
-    "exactOptionalPropertyTypes": true,
-    "forceConsistentCasingInFileNames": true,
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
-    "noFallthroughCasesInSwitch": true,
-    "noImplicitOverride": true,
-    "noPropertyAccessFromIndexSignature": true,
-    "noUncheckedIndexedAccess": true,
     "outDir": "dist",
     "rootDir": ".",
-    "isolatedModules": true,
-    "strict": true,
-    "target": "ES2024",
-    "types": ["node"],
-    "verbatimModuleSyntax": true
+    "types": ["node"]
   },
   "include": ["src", "test"]
 }

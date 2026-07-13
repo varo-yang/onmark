@@ -6,6 +6,10 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
+  MAX_BROWSER_VIDEOS,
+  MAX_FAILURE_MESSAGE_CHARACTERS,
+  MAX_PENDING_RESOURCE_CHARACTERS,
+  MAX_PENDING_RESOURCES,
   ProtocolDecodeError,
   decodeBrowserRequest,
   decodeBrowserResponse,
@@ -82,9 +86,60 @@ test("rejects values outside the versioned browser contract", () => {
   }
 });
 
+test("rejects protocol payloads outside generated resource budgets", () => {
+  const video = {
+    assetId:
+      "sha256:0101010101010101010101010101010101010101010101010101010101010101",
+    interval: { start: 0, end: 1 },
+    sourceFrameRate: { numerator: 30, denominator: 1 },
+  };
+  const request = {
+    version: 1,
+    requestId: 1,
+    command: {
+      type: "load",
+      plan: {
+        timelineVersion: 1,
+        frameRate: { numerator: 30, denominator: 1 },
+        evaluation: { start: 0, end: 1 },
+        output: { start: 0, end: 1 },
+        videos: Array.from({ length: MAX_BROWSER_VIDEOS + 1 }, () => video),
+      },
+    },
+  };
+  assert.throws(() => decodeBrowserRequest(request), ProtocolDecodeError);
+
+  const oversizedFailures = [
+    failure("x".repeat(MAX_FAILURE_MESSAGE_CHARACTERS + 1), []),
+    failure(
+      "rendering failed",
+      Array.from({ length: MAX_PENDING_RESOURCES + 1 }, () => "resource"),
+    ),
+    failure("rendering failed", [
+      "x".repeat(MAX_PENDING_RESOURCE_CHARACTERS + 1),
+    ]),
+  ];
+  for (const response of oversizedFailures) {
+    assert.throws(() => decodeBrowserResponse(response), ProtocolDecodeError);
+  }
+});
+
 async function fixture(filename: string): Promise<unknown[]> {
   const lines = (await readFile(new URL(filename, PROTOCOL_FIXTURES), "utf8"))
     .trim()
     .split("\n");
   return lines.map((line) => JSON.parse(line) as unknown);
+}
+
+function failure(message: string, pendingResources: string[]): unknown {
+  return {
+    version: 1,
+    requestId: 1,
+    event: {
+      type: "failed",
+      code: "internal",
+      message,
+      pendingResources,
+    },
+  };
 }

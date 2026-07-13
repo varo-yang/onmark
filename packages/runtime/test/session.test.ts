@@ -5,6 +5,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  MAX_FAILURE_MESSAGE_CHARACTERS,
+  MAX_PENDING_RESOURCE_CHARACTERS,
+  MAX_PENDING_RESOURCES,
   RuntimeAdapterError,
   RuntimeSession,
   type BrowserPlan,
@@ -162,6 +165,33 @@ test("reserves readiness timeouts for operations that wait for a frame", async (
   const failure = await session.dispatch(request(1, { type: "load", plan }));
 
   assertFailure(failure, "loadFailed");
+});
+
+test("bounds typed adapter failure details before encoding", () => {
+  assert.throws(
+    () =>
+      new RuntimeAdapterError(
+        "operation",
+        "x".repeat(MAX_FAILURE_MESSAGE_CHARACTERS + 1),
+      ),
+    TypeError,
+  );
+  assert.throws(
+    () =>
+      new RuntimeAdapterError(
+        "operation",
+        "rendering failed",
+        Array.from({ length: MAX_PENDING_RESOURCES + 1 }, () => "resource"),
+      ),
+    TypeError,
+  );
+  assert.throws(
+    () =>
+      new RuntimeAdapterError("operation", "rendering failed", [
+        "x".repeat(MAX_PENDING_RESOURCE_CHARACTERS + 1),
+      ]),
+    TypeError,
+  );
 });
 
 test("takes ownership of plan facts and makes disposal terminal", async () => {

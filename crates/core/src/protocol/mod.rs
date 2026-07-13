@@ -14,7 +14,7 @@ pub use bundle::{
 
 pub use message::{
     BrowserCommand, BrowserEvent, BrowserRequest, BrowserResponse, InvalidProtocolFailure,
-    ProtocolFailure, ProtocolFailureCode, ProtocolVersion, RequestId,
+    ProtocolFailure, ProtocolFailureCode, ProtocolVersion, RUNTIME_HOST_NAME, RequestId,
 };
 pub use plan::{
     BrowserPlan, BrowserVideo, InvalidBrowserPlan, InvalidWireFrame, WireFrame, WireFrameRate,

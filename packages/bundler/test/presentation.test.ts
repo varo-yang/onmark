@@ -8,6 +8,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
+import { RUNTIME_HOST_NAME } from "@onmark/runtime";
+
 import {
   BUNDLE_ENTRY_POINT,
   BUNDLE_MANIFEST_FILE,
@@ -68,7 +70,7 @@ test("builds a deterministic immutable presentation artifact", async () => {
     );
     assert.match(html, /src="\.\/presentation\.js"/u);
     assert.match(html, /href="\.\/presentation\.css"/u);
-    assert.match(script, /__ONMARK_RUNTIME__/u);
+    assert.ok(script.includes(RUNTIME_HOST_NAME));
     assert.deepEqual(savedManifest, first.manifest);
   } finally {
     await rm(workspace, { force: true, recursive: true });

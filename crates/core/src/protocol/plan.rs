@@ -10,6 +10,7 @@ use crate::timeline::{TimelineIr, TimelineVideo};
 
 /// Largest integer represented exactly by every JavaScript implementation.
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
+const MAX_BROWSER_VIDEOS: usize = 10_000;
 
 /// Timeline facts consumed by the Gate-one browser clock and presentation.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -21,6 +22,10 @@ pub struct BrowserPlan {
     frame_rate: WireFrameRate,
     evaluation: WireInterval,
     output: WireInterval,
+    #[cfg_attr(
+        feature = "schema",
+        schemars(length(max = MAX_BROWSER_VIDEOS))
+    )]
     videos: Vec<BrowserVideo>,
 }
 
@@ -29,18 +34,22 @@ impl BrowserPlan {
     ///
     /// # Errors
     ///
-    /// Returns [`InvalidBrowserPlan`] when a video has no admitted source rate
-    /// or a frame lies outside JavaScript's exact integer domain.
+    /// Returns [`InvalidBrowserPlan`] when the plan exceeds its video budget, a
+    /// video has no admitted source rate, or a frame lies outside JavaScript's
+    /// exact integer domain.
     pub fn from_timeline(
         timeline: &TimelineIr,
         source_frame_rates: &BTreeMap<FrozenAssetId, FrameRate>,
     ) -> Result<Self, InvalidBrowserPlan> {
         let rate = timeline.timebase().frame_rate();
         let interval = WireInterval::try_from(timeline.interval())?;
-        let videos = timeline
-            .videos()
-            .map(|video| browser_video(video, source_frame_rates))
-            .collect::<Result<_, _>>()?;
+        let mut videos = Vec::new();
+        for video in timeline.videos() {
+            if videos.len() == MAX_BROWSER_VIDEOS {
+                return Err(InvalidBrowserPlan::TooManyVideos);
+            }
+            videos.push(browser_video(video, source_frame_rates)?);
+        }
 
         Ok(Self {
             timeline_version: timeline.version().get(),
@@ -137,6 +146,8 @@ fn browser_video(
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum InvalidBrowserPlan {
+    /// The plan contains more video placements than V1 can carry.
+    TooManyVideos,
     /// One video lacks the source rate proved during render admission.
     MissingSourceFrameRate(FrozenAssetId),
     /// A frame lies outside JavaScript's exact integer range.
@@ -146,6 +157,9 @@ pub enum InvalidBrowserPlan {
 impl fmt::Display for InvalidBrowserPlan {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::TooManyVideos => {
+                formatter.write_str("browser plan exceeds the V1 video-placement limit")
+            }
             Self::MissingSourceFrameRate(id) => {
                 write!(formatter, "source frame rate is missing for video {id}")
             }
@@ -158,7 +172,7 @@ impl Error for InvalidBrowserPlan {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::InvalidFrame(source) => Some(source),
-            Self::MissingSourceFrameRate(_) => None,
+            Self::TooManyVideos | Self::MissingSourceFrameRate(_) => None,
         }
     }
 }
@@ -299,7 +313,21 @@ impl Error for InvalidWireFrame {}
 
 #[cfg(test)]
 mod tests {
-    use super::{InvalidWireFrame, MAX_SAFE_INTEGER, WireFrame};
+    use std::collections::BTreeMap;
+
+    use crate::model::{
+        ByteOffset, ElementKind, FrameIndex, FrameInterval, FrameRate, FrozenAssetId, SourceId,
+        SourceSpan, Timebase,
+    };
+    use crate::timeline::{
+        TimelineContent, TimelineElement, TimelineIr, TimelineScene, TimelineShot, TimelineTiming,
+        TimelineVideo, TimingReason,
+    };
+
+    use super::{
+        BrowserPlan, InvalidBrowserPlan, InvalidWireFrame, MAX_BROWSER_VIDEOS, MAX_SAFE_INTEGER,
+        WireFrame,
+    };
 
     #[test]
     fn rejects_a_frame_that_javascript_would_round() {
@@ -313,5 +341,52 @@ mod tests {
     fn rejects_an_unsafe_deserialized_frame() {
         let encoded = (MAX_SAFE_INTEGER + 1).to_string();
         assert!(serde_json::from_str::<WireFrame>(&encoded).is_err());
+    }
+
+    #[test]
+    fn rejects_a_plan_outside_the_video_budget() {
+        let asset_id = FrozenAssetId::from_sha256([1; 32]);
+        let timeline = timeline_with_videos(asset_id, MAX_BROWSER_VIDEOS + 1);
+        let source_rates = BTreeMap::from([(
+            asset_id,
+            FrameRate::new(30, 1).expect("the fixture frame rate is valid"),
+        )]);
+
+        assert_eq!(
+            BrowserPlan::from_timeline(&timeline, &source_rates),
+            Err(InvalidBrowserPlan::TooManyVideos),
+        );
+    }
+
+    fn timeline_with_videos(asset_id: FrozenAssetId, count: usize) -> TimelineIr {
+        let span = SourceSpan::new(SourceId::new(0), ByteOffset::ZERO, ByteOffset::ZERO)
+            .expect("equal source bounds form a valid span");
+        let interval = FrameInterval::new(FrameIndex::ZERO, FrameIndex::new(1))
+            .expect("the fixture interval is ordered");
+        let timing = TimelineTiming::new(interval, TimingReason::ShotStart, TimingReason::ShotEnd);
+        let video = TimelineContent::Video(TimelineVideo::new(
+            TimelineElement::new(ElementKind::Video, None, span),
+            timing.clone(),
+            asset_id,
+        ));
+        let shot = TimelineShot::new(
+            TimelineElement::new(ElementKind::Shot, None, span),
+            timing.clone(),
+            vec![video; count],
+        );
+        let scene = TimelineScene::new(
+            TimelineElement::new(ElementKind::Scene, None, span),
+            timing,
+            vec![shot],
+        );
+        let frame_rate = FrameRate::new(30, 1).expect("the fixture frame rate is valid");
+
+        TimelineIr::new(
+            Timebase::new(frame_rate),
+            TimelineElement::new(ElementKind::Film, None, span),
+            interval,
+            BTreeMap::new(),
+            vec![scene],
+        )
     }
 }

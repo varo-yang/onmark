@@ -65,15 +65,18 @@
             },
             "message": {
               "description": "Direct explanation in browser/runtime terms.",
+              "maxLength": 4096,
               "pattern": "\\S",
               "type": "string"
             },
             "pendingResources": {
-              "description": "Resources that prevented readiness, in deterministic order.",
+              "description": "Resources that prevented readiness, in caller-owned deterministic order.",
               "items": {
+                "maxLength": 1024,
                 "pattern": "\\S",
                 "type": "string"
               },
+              "maxItems": 256,
               "type": "array"
             },
             "type": {
@@ -189,5 +192,8 @@
     "event"
   ],
   "title": "BrowserResponse",
-  "type": "object"
+  "type": "object",
+  "x-onmark-max-failure-message-characters": 4096,
+  "x-onmark-max-pending-resource-characters": 1024,
+  "x-onmark-max-pending-resources": 256
 }

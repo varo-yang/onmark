@@ -6,7 +6,7 @@ import { basename, extname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const REPOSITORY = fileURLToPath(new URL("..", import.meta.url));
-const SOURCE_ROOTS = ["packages", "scripts"];
+const SOURCE_ROOTS = ["packages", "scripts", "conformance/browser"];
 const SOURCE_EXTENSIONS = new Set([".js", ".mjs", ".ts"]);
 const IGNORED_DIRECTORIES = new Set(["dist", "generated", "node_modules"]);
 const FORBIDDEN_STEMS = new Set(["common", "helpers", "shared", "utils"]);

@@ -416,6 +416,8 @@ protocol    → diagnostics + timeline + model
 
 `onmark-render` 拥有 Chromium 与 `FFmpeg` 的重型依赖预算。它只把 `chromiumoxide` 用作 CDP transport 与进程启动器，`tokio` 和 `futures` 也只存在于这条异步执行边界；`tempfile` 为每个 browser session 提供隔离 profile、创建同文件系统的私有输出暂存目录，并保有一个 RAII 私有 unit root。unit-root materialization 只用 `serde_json` 编码 Rust-owned manifest、用 `sha2` 流式复核 identity、用 `url` 构造 browser entry URL；file bound 会在 identity 工作前拒绝，canonical hash 与 manifest size 都通过固定内存 writer 流式计算，pretty manifest 直接写入私有 root。它拒绝 symlink 与非普通文件，复制已验证字节而不链接可变 source path，同时限制保留文件数与总字节。固定 safety envelope 是十万个文件与一 TiB，每个调用方仍须提供更小的显式 policy。因此并行 session 既不共享 Chrome lock，也不共享已接纳的输入路径；只有 Chromium 与 `FFmpeg` 都干净结束后，才用 no-clobber hard link 发布完整 MP4。crate 显式提供 executable path、viewport、browser process/request deadline、encoder inactivity timeout、frame/input/capture byte ceiling、有界 stderr 保留与 shutdown，并把 Chromium、CDP、subprocess 类型翻译成 render 自己拥有的稳定错误。有限 frame/byte budget 与每次 write、finalization 的 timeout 共同约束 encoder 生命周期；等待 Chromium 的时间不消耗 encoder inactivity budget。浏览器导航会分别等待 document load 与 runtime host；不能把 transport 的 navigation 返回误当成完整生命周期屏障。Gate 一每次只拥有一张 PNG，捕获后直接写入 `FFmpeg image2pipe`，不存在 frame queue 或整段视频 buffer；固定的 H.264 `yuv420p` profile 会在进程启动前拒绝奇数 viewport 尺寸。conformance 会启动本机 Chrome 与 `FFmpeg`，加载 production video adapter，走过类型化 `Load`/`Prepare`/`Seek` 握手，probe 最终 H.264 MP4 并验证 decoded motion。checked-in bundle fixture 携带真实 payload bytes，由 bundler test 逐字节重建，并通过 native materialization 穿过生成的 Node/native manifest contract。在 CI 拥有固定 Chromium/FFmpeg image 前，这些真实进程 smoke 保持 opt-in。
 
+Gate 一的 native browser operation 与 decoded-video wait 最多接受一天 deadline，使所有平台 timer 都处于显式支持的时间范围内。
+
 校验失败原因保留为局部领域值。syntax 提供源码上下文后，由 `compiler` 模块唯一负责把 `InvalidNodeId` 等原因翻译成带源码位置的 `Diagnostic`，包括各阶段特有的 message 和 help；`diagnostics` 只拥有通用诊断表示与稳定 code。`model` 和 `syntax` 都不依赖 diagnostics，调用方也不得重复实现这层翻译。
 
 ### TypeScript package 方向
@@ -464,6 +466,8 @@ decode invocation
 Rust wire types 是 source of truth。`cargo xtask schema` 从它们生成 versioned JSON Schema 和 TypeScript types/codecs，CI 重新生成并要求工作树零 diff。生成结果提交进仓库，供 npm package、diff review 和非 Rust 消费者直接使用；禁止手工修改。Gate 一首次对外发布之前，v1 可以原地收口，避免初始公开契约背负实验字段；一旦发布，任何不兼容 wire 变化都必须使用新 protocol version 并带 migration/conformance fixture。Rust 本身直接使用原始领域/wire types，不再从 schema 反向生成第二套 Rust 类型。
 
 Gate 一的 `BrowserPlan` 现在携带 runtime 与 decoded-media adapter 已真实消费的 output frame rate、evaluation/output interval 和 primary-video placement。每个 placement 记录 immutable asset identity、绝对可见区间，以及验证 decoded-frame selection 所需的 admitted CFR source rate；materialized URL 仍是 render-owned fact。这是 whole-film Render Unit 的第一份 browser-facing projection，不是 Render Graph 或 partition contract。它只能包含浏览器真实消费的事实；output path、cache key、FFmpeg 参数和 materialization policy 都不得进入。VFR timestamp map、overlay 与 component 事实等 production adapter 真正消费时再加入，不提前把后续 gate 塞进协议。
+
+Protocol V1 最多携带 10,000 个 video placement。一条 failure 最多包含 4,096 个 message 字符与 256 条 pending-resource description，每条 description 最多 1,024 个字符；它们的确定性顺序由 producer 拥有。runtime-host property name 与这些 failure limit 都从 Rust-owned schema metadata 生成，native executor、browser runtime 与 validator 不得各自保存手写副本。
 
 authoring API 可以追求浏览器端人体工程学，但不能复制求时语义。
 

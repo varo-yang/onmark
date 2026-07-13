@@ -8,6 +8,11 @@ import type {
   BrowserRequest,
 } from "./generated/browser-request.js";
 import type { BrowserResponse } from "./generated/browser-response.js";
+import {
+  MAX_FAILURE_MESSAGE_CHARACTERS,
+  MAX_PENDING_RESOURCE_CHARACTERS,
+  MAX_PENDING_RESOURCES,
+} from "./generated/runtime-contract.js";
 import { runtimeFrameAt, type RuntimeFrame } from "./clock.js";
 
 // ── Browser adapter boundary ──
@@ -48,12 +53,15 @@ export class RuntimeAdapterError extends Error {
     message: string,
     pendingResources: readonly string[] = [],
   ) {
-    super(nonBlank(message, "adapter failure message"));
+    const failureMessage = boundedText(
+      message,
+      "adapter failure message",
+      MAX_FAILURE_MESSAGE_CHARACTERS,
+    );
+    super(failureMessage);
     this.name = "RuntimeAdapterError";
     this.kind = kind;
-    this.pendingResources = pendingResources.map((resource) =>
-      nonBlank(resource, "pending resource"),
-    );
+    this.pendingResources = boundedPendingResources(pendingResources);
   }
 }
 
@@ -341,6 +349,27 @@ function loadedState(plan: RuntimePlan): LoadedState {
     evaluationEnd: plan.evaluation.end,
     frameRate: plan.frameRate,
   };
+}
+
+function boundedPendingResources(resources: readonly string[]): string[] {
+  if (resources.length > MAX_PENDING_RESOURCES) {
+    throw new TypeError("adapter failure has too many pending resources");
+  }
+  return resources.map((resource) =>
+    boundedText(resource, "pending resource", MAX_PENDING_RESOURCE_CHARACTERS),
+  );
+}
+
+function boundedText(value: string, role: string, limit: number): string {
+  const text = nonBlank(value, role);
+  let characters = 0;
+  for (const _character of text) {
+    characters += 1;
+    if (characters > limit) {
+      throw new TypeError(`${role} exceeds the protocol character limit`);
+    }
+  }
+  return text;
 }
 
 function nonBlank(value: string, role: string): string {

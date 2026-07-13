@@ -115,6 +115,14 @@ test("releases media bytes and makes disposal terminal", async () => {
   await assert.rejects(video.present(selection), RuntimeAdapterError);
 });
 
+test("rejects readiness deadlines outside the browser timer budget", () => {
+  assert.throws(() => new DecodedVideo(new FakeVideoElement(), 0), TypeError);
+  assert.throws(
+    () => new DecodedVideo(new FakeVideoElement(), 86_400_001),
+    TypeError,
+  );
+});
+
 // ── Runtime adapter ──
 
 test("coordinates presentation-owned videos without owning their layout", async () => {

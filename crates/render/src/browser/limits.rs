@@ -3,6 +3,7 @@ use std::fmt;
 use std::time::Duration;
 
 const MAX_CAPTURE_BYTES: usize = 512 * 1024 * 1024;
+const MAX_DEADLINE: Duration = Duration::from_hours(24);
 
 /// Explicit limits applied to one Chromium capture session.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -24,6 +25,9 @@ impl BrowserLimits {
     ) -> Result<Self, InvalidBrowserLimits> {
         if deadline.is_zero() {
             return Err(InvalidBrowserLimits::ZeroDeadline);
+        }
+        if deadline.as_nanos() > MAX_DEADLINE.as_nanos() {
+            return Err(InvalidBrowserLimits::DeadlineTooLong);
         }
         if max_capture_bytes == 0 {
             return Err(InvalidBrowserLimits::EmptyCaptureBudget);
@@ -56,6 +60,8 @@ impl BrowserLimits {
 pub enum InvalidBrowserLimits {
     /// Browser operations have no deadline.
     ZeroDeadline,
+    /// The deadline exceeds the supported timer horizon.
+    DeadlineTooLong,
     /// No capture bytes may be retained.
     EmptyCaptureBudget,
     /// The capture budget exceeds the supported in-memory ceiling.
@@ -66,6 +72,7 @@ impl fmt::Display for InvalidBrowserLimits {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
             Self::ZeroDeadline => "browser operations require a positive deadline",
+            Self::DeadlineTooLong => "browser deadline exceeds the one-day safety ceiling",
             Self::EmptyCaptureBudget => "browser capture budget must be positive",
             Self::CaptureBudgetTooLarge => "browser capture budget exceeds the safety ceiling",
         })
@@ -76,7 +83,7 @@ impl Error for InvalidBrowserLimits {}
 
 #[cfg(test)]
 mod tests {
-    use super::{BrowserLimits, InvalidBrowserLimits, MAX_CAPTURE_BYTES};
+    use super::{BrowserLimits, InvalidBrowserLimits, MAX_CAPTURE_BYTES, MAX_DEADLINE};
     use std::time::Duration;
 
     #[test]
@@ -101,6 +108,10 @@ mod tests {
         assert_eq!(
             BrowserLimits::new(Duration::from_secs(1), MAX_CAPTURE_BYTES + 1),
             Err(InvalidBrowserLimits::CaptureBudgetTooLarge),
+        );
+        assert_eq!(
+            BrowserLimits::new(MAX_DEADLINE + Duration::from_nanos(1), 1),
+            Err(InvalidBrowserLimits::DeadlineTooLong),
         );
     }
 }

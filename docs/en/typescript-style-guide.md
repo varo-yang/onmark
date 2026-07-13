@@ -199,8 +199,11 @@ must not mutate the repository.
 `noPropertyAccessFromIndexSignature`, `isolatedModules`, and
 `verbatimModuleSyntax`. Linting rejects explicit `any`, default exports in product
 code, `console`, inconsistent type imports, and direct `process.env` access.
-Formatting is mechanical and checked in CI. Generated output is excluded from
-hand-formatting and checked through regeneration instead.
+Formatting is mechanical and checked in CI. Handwritten browser sources under
+root `conformance/` receive the same strict typecheck, lint, shape, and format
+gates as package source; a successful bundler build is not a substitute for
+typechecking. Generated output is excluded from hand-formatting and checked
+through regeneration instead.
 
 ## Verdict-level anti-patterns
 

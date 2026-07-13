@@ -13,7 +13,7 @@ const READINESS_TIMEOUT_MILLISECONDS = 5_000;
 
 const adapter = new VideoRuntimeAdapter((placement, index) => {
   const element = document.createElement("video");
-  element.dataset.placement = String(index);
+  element.dataset["placement"] = String(index);
   element.muted = true;
   element.playsInline = true;
   element.hidden = true;

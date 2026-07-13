@@ -54,6 +54,9 @@ export interface BrowserPlan {
   frameRate: WireFrameRate;
   output: WireInterval;
   timelineVersion: 1;
+  /**
+   * @maxItems 10000
+   */
   videos: BrowserVideo[];
 }
 /**

@@ -7,7 +7,7 @@ use chromiumoxide::error::CdpError;
 use chromiumoxide::handler::viewport::Viewport;
 use chromiumoxide::page::{Page, ScreenshotParams};
 use futures::StreamExt as _;
-use onmark_core::protocol::{BrowserRequest, BrowserResponse};
+use onmark_core::protocol::{BrowserRequest, BrowserResponse, RUNTIME_HOST_NAME};
 use tempfile::TempDir;
 use tokio::task::JoinHandle;
 use tokio::time::{Instant, sleep, timeout, timeout_at};
@@ -16,7 +16,6 @@ use super::error::{BrowserError, BrowserErrorKind};
 use super::limits::BrowserLimits;
 use crate::RenderProfile;
 
-const RUNTIME_HOST: &str = "__ONMARK_RUNTIME__";
 const READINESS_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
 /// One PNG frame returned by Chromium within the configured byte budget.
@@ -124,7 +123,7 @@ impl BrowserSession {
     ) -> Result<BrowserResponse, BrowserError> {
         let request = serde_json::to_string(request)
             .map_err(|source| BrowserError::json(BrowserErrorKind::Protocol, source))?;
-        let expression = format!("globalThis.{RUNTIME_HOST}.dispatch({request})");
+        let expression = format!("globalThis.{RUNTIME_HOST_NAME}.dispatch({request})");
         let evaluation = self.page.evaluate_expression(expression);
         let result = timeout(self.limits.deadline(), evaluation)
             .await
@@ -178,8 +177,11 @@ impl BrowserSession {
     }
 
     async fn wait_for_runtime_host(&self) -> Result<(), BrowserError> {
-        let deadline = Instant::now() + self.limits.deadline();
-        let expression = format!("typeof globalThis.{RUNTIME_HOST}?.dispatch === \"function\"");
+        let deadline = Instant::now()
+            .checked_add(self.limits.deadline())
+            .ok_or_else(|| BrowserError::without_source(BrowserErrorKind::RuntimeHost))?;
+        let expression =
+            format!("typeof globalThis.{RUNTIME_HOST_NAME}?.dispatch === \"function\"");
 
         loop {
             if self.runtime_host_is_ready(deadline, &expression).await? {

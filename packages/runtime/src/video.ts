@@ -15,6 +15,7 @@ import {
 } from "./session.js";
 
 const FRAME_TOLERANCE_SECONDS = 0.000_001;
+const MAX_READINESS_TIMEOUT_MILLISECONDS = 24 * 60 * 60 * 1_000;
 
 type VideoEvent = "error" | "loadeddata" | "seeked";
 type FrameCallback = (
@@ -462,9 +463,13 @@ class FrameReadiness {
 }
 
 function requireReadinessTimeout(timeoutMilliseconds: number): void {
-  if (!Number.isSafeInteger(timeoutMilliseconds) || timeoutMilliseconds <= 0) {
+  if (
+    !Number.isSafeInteger(timeoutMilliseconds) ||
+    timeoutMilliseconds <= 0 ||
+    timeoutMilliseconds > MAX_READINESS_TIMEOUT_MILLISECONDS
+  ) {
     throw new TypeError(
-      "video readiness timeout must be a positive safe integer",
+      "video readiness timeout must be a positive integer no greater than one day",
     );
   }
 }

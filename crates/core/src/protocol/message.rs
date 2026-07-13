@@ -6,6 +6,13 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 use super::{BrowserPlan, WireFrame};
 
+/// Browser-global capability installed by every compatible runtime bundle.
+pub const RUNTIME_HOST_NAME: &str = "__ONMARK_RUNTIME__";
+
+const MAX_FAILURE_MESSAGE_CHARACTERS: usize = 4_096;
+const MAX_PENDING_RESOURCES: usize = 256;
+const MAX_PENDING_RESOURCE_CHARACTERS: usize = 1_024;
+
 /// Version of the native-to-browser message contract.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "schema", schemars(extend("const" = 1)))]
@@ -60,6 +67,10 @@ impl RequestId {
 
 /// One versioned command sent from the native executor to the browser.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(
+    feature = "schema",
+    schemars(extend("x-onmark-runtime-host" = RUNTIME_HOST_NAME))
+)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct BrowserRequest {
@@ -129,6 +140,16 @@ pub enum BrowserCommand {
 
 /// One versioned event returned by the browser runtime.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(
+    feature = "schema",
+    schemars(
+        extend("x-onmark-max-failure-message-characters" = MAX_FAILURE_MESSAGE_CHARACTERS),
+        extend("x-onmark-max-pending-resources" = MAX_PENDING_RESOURCES),
+        extend(
+            "x-onmark-max-pending-resource-characters" = MAX_PENDING_RESOURCE_CHARACTERS
+        )
+    )
+)]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct BrowserResponse {
@@ -203,10 +224,25 @@ pub struct ProtocolFailure {
     /// Stable machine-readable failure category.
     code: ProtocolFailureCode,
     /// Direct explanation in browser/runtime terms.
-    #[cfg_attr(feature = "schema", schemars(regex(pattern = r"\S")))]
+    #[cfg_attr(
+        feature = "schema",
+        schemars(
+            length(max = MAX_FAILURE_MESSAGE_CHARACTERS),
+            regex(pattern = r"\S")
+        )
+    )]
     message: Box<str>,
-    /// Resources that prevented readiness, in deterministic order.
-    #[cfg_attr(feature = "schema", schemars(inner(regex(pattern = r"\S"))))]
+    /// Resources that prevented readiness, in caller-owned deterministic order.
+    #[cfg_attr(
+        feature = "schema",
+        schemars(
+            length(max = MAX_PENDING_RESOURCES),
+            inner(
+                length(max = MAX_PENDING_RESOURCE_CHARACTERS),
+                regex(pattern = r"\S")
+            )
+        )
+    )]
     pending_resources: Vec<Box<str>>,
 }
 
@@ -215,8 +251,8 @@ impl ProtocolFailure {
     ///
     /// # Errors
     ///
-    /// Returns [`InvalidProtocolFailure`] when the message or any resource
-    /// description contains only whitespace.
+    /// Returns [`InvalidProtocolFailure`] when the report exceeds its V1 wire
+    /// budget or contains a blank message or resource description.
     pub fn new(
         code: ProtocolFailureCode,
         message: impl Into<Box<str>>,
@@ -226,11 +262,19 @@ impl ProtocolFailure {
         if message.trim().is_empty() {
             return Err(InvalidProtocolFailure::BlankMessage);
         }
-        if let Some(index) = pending_resources
-            .iter()
-            .position(|resource| resource.trim().is_empty())
-        {
-            return Err(InvalidProtocolFailure::BlankPendingResource(index));
+        if exceeds_character_limit(&message, MAX_FAILURE_MESSAGE_CHARACTERS) {
+            return Err(InvalidProtocolFailure::MessageTooLong);
+        }
+        if pending_resources.len() > MAX_PENDING_RESOURCES {
+            return Err(InvalidProtocolFailure::TooManyPendingResources);
+        }
+        for (index, resource) in pending_resources.iter().enumerate() {
+            if resource.trim().is_empty() {
+                return Err(InvalidProtocolFailure::BlankPendingResource(index));
+            }
+            if exceeds_character_limit(resource, MAX_PENDING_RESOURCE_CHARACTERS) {
+                return Err(InvalidProtocolFailure::PendingResourceTooLong(index));
+            }
         }
 
         Ok(Self {
@@ -285,18 +329,36 @@ struct ProtocolFailureWire {
 pub enum InvalidProtocolFailure {
     /// The direct failure explanation contains no visible content.
     BlankMessage,
+    /// The direct failure explanation exceeds the V1 character limit.
+    MessageTooLong,
+    /// The report contains more pending resources than V1 can carry.
+    TooManyPendingResources,
     /// One pending-resource description contains no visible content.
     BlankPendingResource(usize),
+    /// One pending-resource description exceeds the V1 character limit.
+    PendingResourceTooLong(usize),
 }
 
 impl fmt::Display for InvalidProtocolFailure {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::BlankMessage => formatter.write_str("protocol failure message cannot be blank"),
+            Self::MessageTooLong => {
+                formatter.write_str("protocol failure message exceeds the V1 character limit")
+            }
+            Self::TooManyPendingResources => {
+                formatter.write_str("protocol failure has too many pending resources")
+            }
             Self::BlankPendingResource(index) => {
                 write!(
                     formatter,
                     "pending resource at index {index} cannot be blank"
+                )
+            }
+            Self::PendingResourceTooLong(index) => {
+                write!(
+                    formatter,
+                    "pending resource at index {index} exceeds the V1 character limit"
                 )
             }
         }
@@ -304,6 +366,10 @@ impl fmt::Display for InvalidProtocolFailure {
 }
 
 impl Error for InvalidProtocolFailure {}
+
+fn exceeds_character_limit(value: &str, limit: usize) -> bool {
+    value.chars().nth(limit).is_some()
+}
 
 /// Stable browser protocol failure category.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -329,7 +395,11 @@ pub enum ProtocolFailureCode {
 
 #[cfg(test)]
 mod tests {
-    use super::{BrowserResponse, InvalidProtocolFailure, ProtocolFailure, ProtocolFailureCode};
+    use super::{
+        BrowserResponse, InvalidProtocolFailure, MAX_FAILURE_MESSAGE_CHARACTERS,
+        MAX_PENDING_RESOURCE_CHARACTERS, MAX_PENDING_RESOURCES, ProtocolFailure,
+        ProtocolFailureCode,
+    };
 
     #[test]
     fn rejects_an_unsupported_deserialized_protocol_version() {
@@ -396,6 +466,37 @@ mod tests {
                 vec![Box::from("\t")],
             ),
             Err(InvalidProtocolFailure::BlankPendingResource(0)),
+        );
+    }
+
+    #[test]
+    fn rejects_failure_details_outside_the_wire_budget() {
+        assert_eq!(
+            ProtocolFailure::new(
+                ProtocolFailureCode::Internal,
+                "x".repeat(MAX_FAILURE_MESSAGE_CHARACTERS + 1),
+                Vec::new(),
+            ),
+            Err(InvalidProtocolFailure::MessageTooLong),
+        );
+        assert_eq!(
+            ProtocolFailure::new(
+                ProtocolFailureCode::Internal,
+                "rendering failed",
+                vec![Box::from("resource"); MAX_PENDING_RESOURCES + 1],
+            ),
+            Err(InvalidProtocolFailure::TooManyPendingResources),
+        );
+        assert_eq!(
+            ProtocolFailure::new(
+                ProtocolFailureCode::Internal,
+                "rendering failed",
+                vec![
+                    "x".repeat(MAX_PENDING_RESOURCE_CHARACTERS + 1)
+                        .into_boxed_str()
+                ],
+            ),
+            Err(InvalidProtocolFailure::PendingResourceTooLong(0)),
         );
     }
 }
