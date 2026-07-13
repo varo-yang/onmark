@@ -1,0 +1,7 @@
+<film>
+  <scene>
+    <shot>
+      <video src="source.mp4" />
+    </shot>
+  </scene>
+</film>

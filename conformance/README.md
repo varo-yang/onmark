@@ -54,3 +54,23 @@ ONMARK_FFPROBE=/path/to/ffprobe \
 cargo test -p onmark-render --test render \
   renders_the_gate_one_plan_to_a_verified_mp4 -- --ignored
 ```
+
+`cli/gate-one.onmark` drives the outermost Gate-one contract. The CLI smoke
+copies that screenplay and the production video presentation into a private
+workspace, generates its referenced video, and invokes the real `onmark`
+binary twice. It requires identical decoded raw-frame hashes from the two
+independent Chromium and `FFmpeg` sessions, verifies motion and stream facts,
+and proves that a third invocation cannot replace an existing output:
+
+```bash
+ONMARK_CHROME=/path/to/chrome \
+ONMARK_BUNDLER=/path/to/onmark-bundle \
+ONMARK_FFMPEG=/path/to/ffmpeg \
+ONMARK_FFPROBE=/path/to/ffprobe \
+cargo test -p onmark-cli --test render -- --ignored
+```
+
+CI runs all real-process conformance on Ubuntu 24.04 with Chrome for Testing
+149.0.7827.55 and Ubuntu's `FFmpeg` 7:6.1.1-3ubuntu5. Exact executable paths
+are supplied to every test; neither the runner's browser nor an ambient media
+tool can silently change the measured environment.

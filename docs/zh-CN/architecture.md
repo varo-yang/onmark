@@ -418,7 +418,40 @@ protocol    → diagnostics + timeline + model
 
 `onmark-media` 只依赖 core，以及用于私有 ffprobe response 边界的 `serde`/`serde_json`。它使用参数数组直接启动配置的 ffprobe executable，绝不经过 shell；退出后仍让派生进程持有输出 pipe 的 wrapper 不属于该 executable contract。在这条 direct-child 契约下，进程寿命和保留的 stdout/stderr 字节数都有显式上限，两条 pipe 并发排空；显式 shutdown 会报告 process-control failure，`Drop` 只作 best-effort termination fallback。私有 ffprobe response type 只在此边界翻译一次并产出 core-owned `AssetMetadata`；JSON value 与第三方 error type 不定义稳定 API，但底层 error 会通过标准 source chain 保留，供调试使用。Gate 一会请求所选视觉流的全部 presentation timestamp，用精确整数 timestamp 差值与 stream time base 证明 CFR。既有的一 MiB stdout ceiling 同时约束这份证明：完整 timing evidence 放不下的素材会被拒绝，而不是只采样一部分后猜测分类。
 
-`onmark-render` 拥有 Chromium 与 `FFmpeg` 的重型依赖预算。它只把 `chromiumoxide` 用作 CDP transport 与进程启动器，`tokio` 和 `futures` 也只存在于这条异步执行边界；`tempfile` 为每个 browser session 提供隔离 profile、创建同文件系统的私有输出暂存目录，并保有一个 RAII 私有 unit root。unit-root materialization 只用 `serde_json` 编码 Rust-owned manifest、用 `sha2` 流式复核 identity、用 `url` 构造 browser entry URL；file bound 会在 identity 工作前拒绝，canonical hash 与 manifest size 都通过固定内存 writer 流式计算，pretty manifest 直接写入私有 root。它拒绝 symlink 与非普通文件，复制已验证字节而不链接可变 source path，同时限制保留文件数与总字节。固定 safety envelope 是十万个文件与一 TiB，每个调用方仍须提供更小的显式 policy。因此并行 session 既不共享 Chrome lock，也不共享已接纳的输入路径；只有 Chromium 与 `FFmpeg` 都干净结束后，才用 no-clobber hard link 发布完整 MP4。crate 显式提供 executable path、viewport、browser process/request deadline、encoder inactivity timeout、frame/input/capture byte ceiling、有界 stderr 保留与 shutdown，并把 Chromium、CDP、subprocess 类型翻译成 render 自己拥有的稳定错误。有限 frame/byte budget 与每次 write、finalization 的 timeout 共同约束 encoder 生命周期；等待 Chromium 的时间不消耗 encoder inactivity budget。浏览器导航会分别等待 document load 与 runtime host；不能把 transport 的 navigation 返回误当成完整生命周期屏障。Gate 一每次只拥有一张 PNG，捕获后直接写入 `FFmpeg image2pipe`，不存在 frame queue 或整段视频 buffer；固定的 H.264 `yuv420p` profile 会在进程启动前拒绝奇数 viewport 尺寸。conformance 会启动本机 Chrome 与 `FFmpeg`，加载 production video adapter，走过类型化 `Load`/`Prepare`/`Seek` 握手，probe 最终 H.264 MP4 并验证 decoded motion。checked-in bundle fixture 携带真实 payload bytes，由 bundler test 逐字节重建，并通过 native materialization 穿过生成的 Node/native manifest contract。在 CI 拥有固定 Chromium/FFmpeg image 前，这些真实进程 smoke 保持 opt-in。
+`onmark-render` 拥有 Chromium 与 `FFmpeg` 的重型依赖预算。它只把
+`chromiumoxide` 用作 CDP transport 与进程启动器，`tokio` 和 `futures`
+也只存在于这条异步执行边界。`tempfile` 为每个 browser session 提供隔离
+profile、创建同文件系统的私有输出暂存目录，并保有一个 RAII 私有 unit
+root。
+
+unit-root materialization 只用 `serde_json` 编码 Rust-owned manifest、用
+`sha2` 流式复核 identity、用 `url` 构造 browser entry URL。file bound 会在
+identity 工作前拒绝，canonical hash 与 manifest size 都通过固定内存 writer
+流式计算，pretty manifest 直接写入私有 root。它拒绝 symlink 与非普通文件，
+复制已验证字节而不链接可变 source path，同时限制保留文件数与总字节。固定
+safety envelope 是十万个文件与一 TiB，每个调用方仍须提供更小的显式
+policy。因此并行 session 既不共享 Chrome lock，也不共享已接纳的输入路径；
+只有 Chromium 与 `FFmpeg` 都干净结束后，才用 no-clobber hard link 发布完整
+MP4。
+
+crate 显式提供 executable path、viewport、browser process/request deadline、
+encoder inactivity timeout、frame/input/capture byte ceiling、有界 stderr
+保留与 shutdown，并把 Chromium、CDP、subprocess 类型翻译成 render 自己拥有
+的稳定错误。有限 frame/byte budget 与每次 write、finalization 的 timeout
+共同约束 encoder 生命周期；等待 Chromium 的时间不消耗 encoder inactivity
+budget。浏览器导航会分别等待 document load 与 runtime host；不能把
+transport 的 navigation 返回误当成完整生命周期屏障。
+
+Gate 一每次只拥有一张 PNG，捕获后直接写入 `FFmpeg image2pipe`，不存在 frame
+queue 或整段视频 buffer；固定的 H.264 `yuv420p` profile 会在进程启动前拒绝
+奇数 viewport 尺寸。conformance 会启动固定版本的 Chrome for Testing 与
+`FFmpeg`，加载 production video adapter，走过类型化
+`Load`/`Prepare`/`Seek` 握手，probe 最终 H.264 MP4 并验证 decoded motion。
+checked-in bundle fixture 携带真实 payload bytes，由 bundler test 逐字节重建，
+并通过 native materialization 穿过生成的 Node/native manifest contract。最外层
+CLI conformance 会启动两次独立的 whole-film session，比较完整的 decoded
+raw-frame hash 序列，再验证 no-clobber 发布。CI 显式拥有这些测试使用的 browser
+与 media-tool 版本；本机运行仍保持 opt-in，因为它需要这些外部进程。
 
 Gate 一的 native browser operation 与 decoded-video wait 最多接受一天 deadline，使所有平台 timer 都处于显式支持的时间范围内。
 

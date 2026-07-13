@@ -793,6 +793,7 @@ dependencies = [
  "onmark-core",
  "onmark-media",
  "onmark-render",
+ "serde",
  "serde_json",
  "sha2",
  "tempfile",

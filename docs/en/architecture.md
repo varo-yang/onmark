@@ -208,7 +208,47 @@ The `protocol` module uses `serde` for stable browser and bundle-manifest JSON b
 
 `onmark-media` depends on core plus `serde` and `serde_json` for a private ffprobe response boundary. It starts the configured ffprobe executable directly with an argument array, never through a shell; wrappers that leave descendant processes holding the output pipes are outside this executable contract. Process lifetime and retained stdout/stderr bytes are explicitly bounded under that direct-child contract, both pipes are drained concurrently, and explicit shutdown reports process-control failures while `Drop` remains a best-effort termination fallback. Private ffprobe response types are translated once into core-owned `AssetMetadata`; JSON values and third-party error types do not define the stable API, while underlying errors remain available through the standard error source chain for debugging. Gate-one probing requests every presentation timestamp from the selected video stream and proves CFR from exact integer timestamp deltas and the stream time base. The existing one-MiB stdout ceiling also bounds this proof: an artifact whose complete timing evidence does not fit is rejected rather than partially classified.
 
-`onmark-render` owns the heavy Chromium and `FFmpeg` dependency budget. It uses `chromiumoxide` only as a CDP transport and process launcher, with `tokio` and `futures` confined to this asynchronous execution boundary. `tempfile` gives every browser session an isolated profile, owns a private same-filesystem output staging directory, and retains one private RAII unit root. Unit-root materialization uses `serde_json` only for the Rust-owned manifest encoding, `sha2` for streaming identity verification, and `url` for the browser entry URL. File bounds are rejected before identity work; canonical hashing and manifest sizing stream through fixed-memory writers, and the pretty manifest is serialized directly into the private root. It rejects symlinks and non-files, copies verified bytes instead of linking mutable source paths, and bounds both retained file count and total bytes; the fixed safety envelope is 100,000 files and one tebibyte, while each caller supplies a smaller explicit policy. Parallel sessions therefore share neither Chrome locks nor admitted input paths, and a completed MP4 is published with a no-clobber hard link only after both processes finish cleanly. The crate supplies executable paths, viewport, browser process and request deadlines, an encoder inactivity timeout, frame/input/capture-byte ceilings, bounded retained stderr, and explicit shutdown; Chromium, CDP, and subprocess types are translated into stable render-owned errors. Encoder lifetime remains bounded by finite frame and byte budgets plus timeouts on every write and finalization operation; time spent awaiting Chromium does not consume an encoder inactivity budget. Browser navigation waits separately for document load and the runtime host because the transport's navigation call does not itself establish that lifecycle barrier. Gate one captures one PNG at a time and writes it directly to `FFmpeg`'s `image2pipe`; there is no frame queue or whole-video buffer. The fixed H.264 `yuv420p` profile rejects odd viewport dimensions before either process starts. Conformance launches installed Chrome and `FFmpeg` against the production video adapter, crosses the typed `Load`/`Prepare`/`Seek` handshake, probes the resulting H.264 MP4, and verifies decoded motion. The checked-in bundle fixture carries real payload bytes, is rebuilt byte-for-byte in the bundler test, and crosses the generated Node/native manifest contract through native materialization. These real-process tests are opt-in until CI owns a pinned Chromium/FFmpeg image.
+`onmark-render` owns the heavy Chromium and `FFmpeg` dependency budget. It uses
+`chromiumoxide` only as a CDP transport and process launcher, with `tokio` and
+`futures` confined to this asynchronous execution boundary. `tempfile` gives
+every browser session an isolated profile, owns a private same-filesystem output
+staging directory, and retains one private RAII unit root.
+
+Unit-root materialization uses `serde_json` only for the Rust-owned manifest
+encoding, `sha2` for streaming identity verification, and `url` for the browser
+entry URL. File bounds are rejected before identity work; canonical hashing and
+manifest sizing stream through fixed-memory writers, and the pretty manifest is
+serialized directly into the private root. It rejects symlinks and non-files,
+copies verified bytes instead of linking mutable source paths, and bounds both
+retained file count and total bytes. The fixed safety envelope is 100,000 files
+and one tebibyte, while each caller supplies a smaller explicit policy.
+Parallel sessions therefore share neither Chrome locks nor admitted input
+paths, and a completed MP4 is published with a no-clobber hard link only after
+both processes finish cleanly.
+
+The crate supplies executable paths, viewport, browser process and request
+deadlines, an encoder inactivity timeout, frame/input/capture-byte ceilings,
+bounded retained stderr, and explicit shutdown. Chromium, CDP, and subprocess
+types are translated into stable render-owned errors. Encoder lifetime remains
+bounded by finite frame and byte budgets plus timeouts on every write and
+finalization operation; time spent awaiting Chromium does not consume an
+encoder inactivity budget. Browser navigation waits separately for document
+load and the runtime host because the transport's navigation call does not
+itself establish that lifecycle barrier.
+
+Gate one captures one PNG at a time and writes it directly to `FFmpeg`'s
+`image2pipe`; there is no frame queue or whole-video buffer. The fixed H.264
+`yuv420p` profile rejects odd viewport dimensions before either process starts.
+Conformance launches Chrome for Testing and `FFmpeg` against the production
+video adapter, crosses the typed `Load`/`Prepare`/`Seek` handshake, probes the
+resulting H.264 MP4, and verifies decoded motion. The checked-in bundle fixture
+carries real payload bytes, is rebuilt byte-for-byte in the bundler test, and
+crosses the generated Node/native manifest contract through native
+materialization. The outermost CLI conformance starts two independent
+whole-film sessions and compares their complete decoded raw-frame hash
+sequences before checking no-clobber publication. CI owns explicit browser and
+media-tool versions for these tests; local execution remains opt-in because it
+requires those external processes.
 
 Gate-one native browser operations and decoded-video waits accept at most a one-day deadline, keeping every platform timer inside an explicit supported horizon.
 
