@@ -5,6 +5,7 @@
     "moduleResolution": "Bundler",
     "noEmit": true,
     "paths": {
+      "@onmark/authoring": ["../../packages/authoring/src/index.ts"],
       "@onmark/runtime": ["../../packages/runtime/src/index.ts"]
     },
     "types": []

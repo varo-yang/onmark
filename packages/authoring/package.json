@@ -1,11 +1,8 @@
 {
-  "name": "@onmark/bundler",
+  "name": "@onmark/authoring",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "bin": {
-    "onmark-bundle": "./dist/src/command.js"
-  },
   "exports": {
     ".": {
       "types": "./dist/src/index.d.ts",
@@ -18,8 +15,6 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@onmark/authoring": "workspace:*",
-    "@onmark/runtime": "workspace:*",
-    "esbuild": "0.28.1"
+    "@onmark/runtime": "workspace:*"
   }
 }

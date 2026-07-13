@@ -14,9 +14,10 @@ these files as compatibility-sensitive data.
 `protocol/bundle-v1/` is also the self-contained executable fixture used by the
 native Chromium-to-FFmpeg smoke. It is generated from
 `browser/video-presentation.ts` by `@onmark/bundler`, embeds the production
-runtime video adapter, and consumes materialized media from the unit root. The
-bundler test rebuilds it and requires byte-for-byte equality, so source,
-runtime, manifest, and payload cannot drift independently.
+authoring bindings and runtime presentation adapter, and consumes materialized
+media from the unit root. The bundler test rebuilds it and requires
+byte-for-byte equality, so source, runtime, manifest, and payload cannot drift
+independently.
 
 Regenerate goldens after intentionally changing public behavior:
 
@@ -56,7 +57,7 @@ cargo test -p onmark-render --test render \
 ```
 
 `cli/gate-one.onmark` drives the outermost Gate-one contract. The CLI smoke
-copies that screenplay and the production video presentation into a private
+copies that screenplay and the production presentation into a private
 workspace, generates its referenced video, and invokes the real `onmark`
 binary twice. It requires identical decoded raw-frame hashes from the two
 independent Chromium and `FFmpeg` sessions, verifies motion and stream facts,

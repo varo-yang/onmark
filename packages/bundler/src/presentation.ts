@@ -16,6 +16,7 @@ import {
   type BundleManifest as WireBundleManifest,
 } from "./generated/bundle-manifest.js";
 
+const AUTHORING_ENTRY = fileURLToPath(import.meta.resolve("@onmark/authoring"));
 const RUNTIME_ENTRY = fileURLToPath(import.meta.resolve("@onmark/runtime"));
 
 // ── Public contract
@@ -137,7 +138,10 @@ async function compilePresentation(
 ): Promise<readonly OutputFile[]> {
   try {
     const result = await build({
-      alias: { "@onmark/runtime": RUNTIME_ENTRY },
+      alias: {
+        "@onmark/authoring": AUTHORING_ENTRY,
+        "@onmark/runtime": RUNTIME_ENTRY,
+      },
       bundle: true,
       entryNames: "presentation",
       entryPoints: [entryPoint],

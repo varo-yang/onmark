@@ -27,8 +27,17 @@ importers:
         specifier: 7.0.2
         version: 7.0.2
 
+  packages/authoring:
+    dependencies:
+      '@onmark/runtime':
+        specifier: workspace:*
+        version: link:../runtime
+
   packages/bundler:
     dependencies:
+      '@onmark/authoring':
+        specifier: workspace:*
+        version: link:../authoring
       '@onmark/runtime':
         specifier: workspace:*
         version: link:../runtime

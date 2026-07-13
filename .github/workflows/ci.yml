@@ -143,6 +143,7 @@ jobs:
       - name: Build browser products
         run: |
           pnpm --filter @onmark/runtime build
+          pnpm --filter @onmark/authoring build
           pnpm --filter @onmark/bundler build
           chmod +x packages/bundler/dist/src/command.js
 

@@ -1,6 +1,6 @@
 html,
 body,
-video {
+.onmark-video {
   height: 100%;
   margin: 0;
   width: 100%;
@@ -11,7 +11,7 @@ body {
   overflow: hidden;
 }
 
-video {
+.onmark-video {
   inset: 0;
   object-fit: cover;
   position: fixed;
