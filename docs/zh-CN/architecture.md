@@ -272,7 +272,7 @@ FrameReady(frame_index)
 Dispose
 ```
 
-`FrameReady(frame)` 只表示稳定屏障，只能在 DOM update、layout、字体、图片 decode、视频 seek、WebGL submission 和框架 microtask 稳定后返回。native executor 收到它以后再捕获画面，并对实际消费的 raw RGBA bytes 做 hash；runtime 不发布另一份自行定义的 state hash。runtime 内部的 `RuntimeFrame` 保留精确整数帧身份，只在调用浏览器 API 时从 Rust 给出的有理帧率推导浮点秒数；这个秒数永远不成为调度或协议事实。超时要指出未稳定资源，不能只报 `page timeout`。
+`FrameReady(frame)` 是逻辑稳定屏障，只能在 DOM update、layout、字体、图片 decode、视频 seek、WebGL submission 和框架 microtask 稳定后返回。native executor 收到它后，会在既有 capture deadline 内等待两个 animation-frame turn，让 Chromium 将已选状态提交到 compositor，再捕获画面并对实际消费的 raw RGBA bytes 做 hash。这个提交屏障不选择帧，也不成为时钟，只关闭 logical runtime 到 native capture 之间的竞态。runtime 不发布另一份自行定义的 state hash。runtime 内部的 `RuntimeFrame` 保留精确整数帧身份，只在调用浏览器 API 时从 Rust 给出的有理帧率推导浮点秒数；这个秒数永远不成为调度或协议事实。超时要指出未稳定资源，不能只报 `page timeout`。
 
 组件声明时间能力：
 

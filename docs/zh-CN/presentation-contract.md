@@ -51,9 +51,10 @@ presentation 必须用 `installRuntimeHost` 安装一个 runtime host。native r
 Load(plan) -> Prepare(evaluationStart) -> Seek(frame)* -> Dispose
 ```
 
-`FrameReady(frame)` 表示浏览器状态对这个精确帧已经稳定，可以被 native executor
-捕获。它不表示 presentation 自己算出了时间；它表示 runtime 已经应用 Rust 求解
-后的 plan。
+`FrameReady(frame)` 表示 runtime 已为这个精确帧应用选中的状态。它不表示
+presentation 自己算出了时间。capture 前，native executor 会进行一次有界的两个
+animation-frame compositor commit wait；该等待不选择时间，只确保 Chromium 已将选中的
+状态提交到 capture surface。
 
 ## 所有权
 

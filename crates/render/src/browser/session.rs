@@ -17,6 +17,10 @@ use super::limits::BrowserLimits;
 use crate::RenderProfile;
 
 const READINESS_POLL_INTERVAL: Duration = Duration::from_millis(10);
+// The first callback lets frame-ready DOM work enter the compositor. The
+// second runs after that rendering opportunity, before native capture.
+const COMPOSITOR_COMMIT: &str =
+    "new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))";
 
 /// One PNG frame returned by Chromium within the configured byte budget.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -159,6 +163,26 @@ impl BrowserSession {
             ));
         }
         Ok(EncodedPng::new(bytes))
+    }
+
+    /// Waits for the compositor to commit the current logical browser frame.
+    ///
+    /// `FrameReady` proves that the runtime selected its decoded resources.
+    /// Two animation-frame turns then put the native capture boundary after
+    /// the corresponding compositor commit without making browser time part
+    /// of frame selection.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`BrowserError`] when Chromium cannot evaluate the commit
+    /// barrier before the configured capture deadline.
+    pub(crate) async fn wait_for_compositor_commit(&self) -> Result<(), BrowserError> {
+        let evaluation = self.page.evaluate_expression(COMPOSITOR_COMMIT);
+        timeout(self.limits.deadline(), evaluation)
+            .await
+            .map_err(|_| BrowserError::without_source(BrowserErrorKind::Capture))?
+            .map_err(|source| BrowserError::cdp(BrowserErrorKind::Capture, source))?;
+        Ok(())
     }
 
     /// Closes Chromium and waits for both the process and CDP handler to exit.

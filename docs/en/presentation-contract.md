@@ -54,9 +54,11 @@ Native rendering waits for that host, then sends the versioned browser protocol:
 Load(plan) -> Prepare(evaluationStart) -> Seek(frame)* -> Dispose
 ```
 
-`FrameReady(frame)` means the browser state is stable for that exact frame. It
-does not mean the presentation computed time. It means the runtime applied the
-Rust-solved plan and the native executor may capture the frame.
+`FrameReady(frame)` means the runtime has applied its selected state for that
+exact frame. It does not mean the presentation computed time. Before capture,
+the native executor makes one bounded two-animation-frame compositor commit
+wait. That wait never selects time: it only ensures Chromium has committed the
+selected state to the capture surface.
 
 ## Ownership
 

@@ -369,6 +369,10 @@ async fn render_frames(
             .map_err(|_| invalid_plan(output, "browser output frame exceeds the wire domain"))?;
         let request_id = frame_request_id(offset, output)?;
         seek_frame(browser, request_id, frame, output).await?;
+        browser
+            .wait_for_compositor_commit()
+            .await
+            .map_err(|source| RenderError::browser(output, source))?;
         let captured = browser
             .capture_png()
             .await
