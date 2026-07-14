@@ -1,0 +1,12 @@
+<film>
+  <scene id="main">
+    <shot id="opening">
+      <video src="opening.mp4" />
+    </shot>
+    <shot id="closing">
+      <video src="closing.mp4" />
+      <vo src="voice.mp3">Read this</vo>
+      <title>Closing</title>
+    </shot>
+  </scene>
+</film>

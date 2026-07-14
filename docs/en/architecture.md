@@ -71,6 +71,16 @@ general audio effects remain deferred rather than being implied by this first
 mixing contract. One Gate-one unit retains at most 512 audio tracks, keeping
 the `FFmpeg` argument and filter-graph boundary explicitly bounded.
 
+The first Gate-two local assembly keeps its independently materialized units
+alive while their contiguous output frames enter one continuous visual encoder
+in screenplay order. Voice-over placements retain absolute Timeline starts
+until final assembly rebases them once to the assembled artifact's output
+origin and mixes them after every unit has captured its output. This avoids
+treating separately AAC-muxed segments as safely concatenable, and also avoids
+a second lossy visual encode. It is deliberately a correctness path, not yet a
+persistent segment-cache format: cached encoded segments require a separate
+equivalence proof before they become an execution artifact.
+
 ## End-to-end pipeline
 
 ```text
@@ -89,9 +99,13 @@ timeline solve without IO. Validation belongs to the phase that first has
 enough information to decide; solve constructs Timeline IR directly. Onmark
 does not add ceremonial `validate` or `lower` phases without a representation
 that proves a new invariant. At Gate two, the planner computes dependency
-closure before partitioning. Simple films naturally partition around shots;
-transitions, persistent elements, global effects, and historical shaders widen
-or merge units for correctness.
+closure before partitioning. Its first graph records each Gate-one shot as an
+independent region only because the production adapter has proved that it keeps
+no state across shot boundaries; the graph also records each region's direct
+frozen-media dependencies. This is evidence-backed, not a general
+shot-boundary rule. Transitions, persistent elements, global effects, and
+historical shaders must widen or merge regions for correctness before
+partitioning consumes them.
 
 Structural binding and attribute/reference resolution aggregate authored diagnostics while building candidate outputs. An error withholds the phase value from its report so rejected structure or recovery defaults cannot enter the next phase as compiler facts; warnings remain non-blocking.
 
@@ -211,7 +225,7 @@ Gate one's native command is deliberately narrow: `onmark render <screenplay>`. 
 
 `evals/` is checked-in language-product evidence, not a runtime package or a live-model CI service. It owns frozen cases, prompts, grader rules, raw outputs, model settings, and comparison baselines. Those assets are added only from real experiments; the repository does not create an empty framework or invent a historical baseline when the source material is unavailable.
 
-Core's internal dependency DAG is CI-enforced: `model` depends on nothing; `syntax`, `diagnostics`, and `timeline` may depend on model; `compiler` may depend on those four; `protocol` may depend on model, diagnostics, and timeline. No domain module depends back on protocol. New edges require an architecture change. CI performs a syntax-aware check of explicit Rust paths with `syn`. This cooperative guard covers ordinary paths, imports, aliases, and re-exports, but not paths generated inside macros or full rustc name resolution; review remains responsible for those edges.
+Core's internal dependency DAG is CI-enforced: `model` depends on nothing; `syntax`, `diagnostics`, and `timeline` may depend on model; `render_graph` may depend on model and timeline; `compiler` may depend on model, syntax, diagnostics, and timeline; `protocol` may depend on model, diagnostics, and timeline. No domain module depends back on protocol. New edges require an architecture change. CI performs a syntax-aware check of explicit Rust paths with `syn`. This cooperative guard covers ordinary paths, imports, aliases, and re-exports, but not paths generated inside macros or full rustc name resolution; review remains responsible for those edges.
 
 `onmark-core` uses `xmlparser` only inside `syntax` for pure, span-preserving XML-compatible fragment tokenization. Onmark owns tree construction, nesting checks, duplicate-attribute checks, reference decoding, and all authored semantics. Parser errors are translated at the syntax boundary and the dependency performs no IO. Test targets may use `proptest` for time algebra and `syn` for the cooperative module dependency-law check; neither development dependency is linked into library consumers or runtime artifacts.
 
@@ -275,7 +289,7 @@ On the TypeScript side, runtime is the foundation. Authoring consumes runtime's 
 
 `@onmark/bundler` is the Node-only product build boundary, not repository automation. It may depend on Node built-ins, the public `@onmark/authoring` and `@onmark/runtime` entry points, and the pinned `esbuild` production dependency; browser packages never depend back on it. Gate one compiles one ESM presentation, substitutes the pinned authoring and runtime entries, emits a fixed document shell, and records every presentation payload file in a stable SHA-256 manifest. The package exposes the same operation through the narrow `onmark-bundle` executable so the native CLI does not import Node or esbuild types. That child process receives explicit entry, output, and retained-byte-limit arguments, writes no success payload to stdout, and reports a stable failure category on stderr. The native caller applies its own process deadline, drains diagnostics continuously while retaining only a bounded tail, and parses the resulting manifest back through the Rust-owned wire type. The manifest shape and layout constants are generated from the Rust protocol contract rather than handwritten again in TypeScript. The build has an explicit retained-output byte ceiling, writes through a private sibling staging directory, and refuses an output path observed to exist before compilation or publication. The final directory rename prevents readers from observing a normally completed partial build, but portable Node filesystem APIs do not make the preceding absence check a cross-process no-clobber transaction. The current boundary deliberately has no watch mode, plugin API, cache, development server, or asset materialization policy. Esbuild's internal working memory remains governed by the pinned third-party implementation rather than the retained-output ceiling.
 
-Rust wire types are the source of truth. `cargo xtask schema` generates checked-in versioned JSON Schema and TypeScript types/codecs, and CI requires regeneration to produce no diff. Generated files are never hand-edited, and Rust does not regenerate a second Rust model from its own schema. Before the first external Gate-one release, v1 is refined in place so the initial public contract does not preserve experimental fields; after publication, an incompatible wire change requires a new protocol version and migration fixture. The Gate-one `BrowserPlan` carries the output frame rate, evaluation/output intervals, primary-video placements, and title/call-to-action overlays consumed by the production presentation adapter. Video placements identify immutable bytes, an absolute visible interval, and the admitted CFR source rate needed to verify decoded-frame selection; overlay placements carry only their semantic role, decoded text, and compiler-solved absolute interval. Materialized URLs remain render-owned facts, while DOM structure and CSS remain presentation-owned effects. This is the first browser-facing projection of the whole-film Render Unit, not a Render Graph or partition contract. It may contain only facts consumed in the browser; output paths, cache keys, `FFmpeg` arguments, source spans, and materialization policy remain outside it. VFR timestamp maps and further component facts are added only when the production adapter consumes them.
+Rust wire types are the source of truth. `cargo xtask schema` generates checked-in versioned JSON Schema and TypeScript types/codecs, and CI requires regeneration to produce no diff. Generated files are never hand-edited, and Rust does not regenerate a second Rust model from its own schema. Before the first external Gate-one release, v1 is refined in place so the initial public contract does not preserve experimental fields; after publication, an incompatible wire change requires a new protocol version and migration fixture. The `BrowserPlan` carries the output frame rate, evaluation/output intervals, primary-video placements, and title/call-to-action overlays consumed by the production presentation adapter. Video placements identify immutable bytes, an absolute visible interval, and the admitted CFR source rate needed to verify decoded-frame selection; overlay placements carry only their semantic role, decoded text, and compiler-solved absolute interval. Materialized URLs remain render-owned facts, while DOM structure and CSS remain presentation-owned effects. This is the browser-facing projection of one Render Unit, not the Render Graph or partition plan itself. It may contain only facts consumed in the browser; output paths, cache keys, `FFmpeg` arguments, source spans, and materialization policy remain outside it. VFR timestamp maps and further component facts are added only when the production adapter consumes them.
 
 Protocol V1 carries at most 10,000 video placements and 10,000 overlay placements; one overlay inscription carries at most 65,536 Unicode characters. One failure carries at most 4,096 message characters and 256 pending-resource descriptions of at most 1,024 characters each; the producer owns their deterministic order. The runtime-host property name and these resource limits are generated from Rust-owned schema metadata, so native execution, browser runtime, and validation do not maintain handwritten copies.
 
@@ -285,7 +299,7 @@ AWS Lambda is an adapter, not another engine. A later independently published `@
 
 **Gate one (complete): render one real video reliably.** The completed milestone includes the minimal language, frozen asset catalog, media probing, Rust timing, versioned Timeline IR, immutable presentation bundle, deterministic browser clock, frame handshake, and a single-process whole-film Render Unit through Chromium/FFmpeg. It executes and muxes authored voice-over rather than silently dropping it. Its exit conformance builds the release CLI, renders the same screenplay through two independent Chromium/FFmpeg sessions, compares decoded video and audio frame hashes, verifies motion and stream facts, and proves no-clobber publication.
 
-**Gate two (current): partition correctly.** Render two independent local units and assemble them. Introduce the Render Graph, evaluation/output intervals, preroll, unit caching, and dependency-based invalidation.
+**Gate two (current): partition and assemble correctly.** The current slice renders two independent local units and assembles them through the existing executor. It introduces the Render Graph and evaluation/output intervals. Preroll, persistent unit caching, and dependency-based invalidation remain deferred until a real dependency or cache consumer requires them.
 
 **Gate three: leave the machine.** Execute the same plan in independent worker processes with object storage, leases, retries, idempotent publication, and capability scheduling. Validate byte-identical plans, raw-frame hashes in a locked environment, and decoded media equivalence.
 

@@ -64,7 +64,7 @@ CLI 与集群执行相同的 `ExecutionPlan` 和 worker 状态机。本地模式
 
 ### 分片由像素依赖决定
 
-`shot` 是优秀的创作和缓存候选边界，却不是无条件执行边界。转场、贯穿元素、全局层、shader history 和相邻采样都会产生跨镜头依赖。规划器必须先求依赖闭包，再切任务。
+`shot` 是优秀的创作和缓存候选边界，却不是无条件执行边界。Gate 二的第一版 graph 仅在当前生产 adapter 已证明不会跨 shot 保留状态的前提下，把每个 shot 记录为独立 region，并记录该 region 的直接冻结媒体依赖；这不是“shot 天然可切”的通用规则。转场、贯穿元素、全局层、shader history 和相邻采样都会产生跨镜头依赖，必须先扩大或合并 region，再由规划器求依赖闭包、切任务。
 
 ### 浏览器只负责画，不负责决定
 
@@ -164,6 +164,8 @@ Timeline IR + Frozen Asset Catalog + Bundle Manifest + Render Profile
 这条接缝不是另一个编译相位。Timeline IR 只回答影片中什么事实在何时成立；presentation bundle 负责把这些事实画成 DOM、CSS、Canvas 或 WebGL；Render Unit 则定义一次 executor 调用消费哪些不可变输入。第一关只有一个覆盖整部影片的 unit。第二关加入 Render Graph 后，可以产生多个同类型 unit，但不更换执行器合约。
 
 Gate 一的 `AudioPlan` 只包含已求解的旁白 placement。materialization 会把其冻结字节与浏览器素材一起复制，却不把它们变成浏览器输入。Chromium 编出视觉流后，executor 将每个音频输入归零、施加精确有理的帧延迟、混合轨道，并将 AAC mux 进最终 MP4。gain、fade、重采样策略和通用音频效果仍然延期，不能从这份首个混音合约中推断出来。一条 Gate 一 unit 最多保留 512 条音轨，使 `FFmpeg` 参数和 filter graph 边界始终有界。
+
+Gate 二的首条本地组装路径会在各自独立 materialize 的 unit 依次把连续 output 帧送入同一个视觉 encoder 期间保留这些 unit root。旁白先保留绝对 Timeline 起点，最终总装时只按成片 output 原点重基一次，并在所有 unit 的画面都捕获完后混合。这样既不假定已 mux AAC 的分段可以安全拼接，也不再做一次有损的视频重编码。这是一条正确性优先的路径，不是持久分段缓存格式；缓存编码分段必须先有独立的等价性证明，才能成为执行产物。
 
 ## 5. 从源码到 MP4
 
@@ -399,6 +401,8 @@ compiler ──→ syntax ──────→ model
     ├────→ timeline ───────→ model
     └────→ model
 
+render_graph ─→ timeline / model
+
 protocol ─→ diagnostics / timeline / model
 ```
 
@@ -409,6 +413,7 @@ model       → (none)
 syntax      → model
 diagnostics → model
 timeline    → model
+render_graph → timeline + model
 compiler    → syntax + diagnostics + timeline + model
 protocol    → diagnostics + timeline + model
 ```
@@ -510,7 +515,7 @@ decode invocation
 
 Rust wire types 是 source of truth。`cargo xtask schema` 从它们生成 versioned JSON Schema 和 TypeScript types/codecs，CI 重新生成并要求工作树零 diff。生成结果提交进仓库，供 npm package、diff review 和非 Rust 消费者直接使用；禁止手工修改。Gate 一首次对外发布之前，v1 可以原地收口，避免初始公开契约背负实验字段；一旦发布，任何不兼容 wire 变化都必须使用新 protocol version 并带 migration/conformance fixture。Rust 本身直接使用原始领域/wire types，不再从 schema 反向生成第二套 Rust 类型。
 
-Gate 一的 `BrowserPlan` 现在携带 production presentation adapter 已真实消费的 output frame rate、evaluation/output interval、primary-video placement，以及 title/call-to-action overlay。video placement 记录 immutable asset identity、绝对可见区间和验证 decoded-frame selection 所需的 admitted CFR source rate；overlay placement 只记录语义角色、decoded text 与 compiler 已求解的绝对区间。materialized URL 仍是 render-owned fact，DOM 结构与 CSS 则始终是 presentation-owned effect。这是 whole-film Render Unit 的第一份 browser-facing projection，不是 Render Graph 或 partition contract。它只能包含浏览器真实消费的事实；output path、cache key、FFmpeg 参数、source span 和 materialization policy 都不得进入。VFR timestamp map 与更多 component 事实等 production adapter 真正消费时再加入，不提前把后续 gate 塞进协议。
+`BrowserPlan` 现在携带 production presentation adapter 已真实消费的 output frame rate、evaluation/output interval、primary-video placement，以及 title/call-to-action overlay。video placement 记录 immutable asset identity、绝对可见区间和验证 decoded-frame selection 所需的 admitted CFR source rate；overlay placement 只记录语义角色、decoded text 与 compiler 已求解的绝对区间。materialized URL 仍是 render-owned fact，DOM 结构与 CSS 则始终是 presentation-owned effect。这是一条 Render Unit 的 browser-facing projection，不是 Render Graph 或 partition plan 本身。它只能包含浏览器真实消费的事实；output path、cache key、FFmpeg 参数、source span 和 materialization policy 都不得进入。VFR timestamp map 与更多 component 事实等 production adapter 真正消费时再加入，不提前把后续 gate 塞进协议。
 
 Protocol V1 最多携带 10,000 个 video placement 与 10,000 个 overlay placement；每条 overlay inscription 最多包含 65,536 个 Unicode 字符。一条 failure 最多包含 4,096 个 message 字符与 256 条 pending-resource description，每条 description 最多 1,024 个字符；它们的确定性顺序由 producer 拥有。runtime-host property name 与这些 resource limit 都从 Rust-owned schema metadata 生成，native executor、browser runtime 与 validator 不得各自保存手写副本。
 
@@ -558,9 +563,9 @@ Screenplay → Timeline IR → Browser Runtime → Chromium → FFmpeg → MP4
 
 这一关不建设 coordinator、lease、远程 worker、能力调度和分层缓存。
 
-### 第二关（当前）：正确地切开
+### 第二关（当前）：正确地切开并总装
 
-把同一视频编译成两个 Render Unit，在本地独立捕获、编码并总装。此时实现 Render Graph、`evaluation/output` 区间、转场预卷、unit cache 和依赖闭包失效。修改一个 shot 后，只允许被图证明安全的产物复用。
+当前切片把同一影片编译成两个独立的本地 Render Unit，经既有 executor 捕获并总装。它实现 Render Graph 与 `evaluation/output` 区间。转场预卷、持久 unit cache 和依赖闭包失效要等真实依赖或缓存消费者出现后再实现；当前不提前搭它们的空架子。
 
 ### 第三关：离开本机仍然成立
 

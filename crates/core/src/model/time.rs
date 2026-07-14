@@ -291,6 +291,21 @@ impl FrameInterval {
     pub const fn is_empty(self) -> bool {
         self.start.0 == self.end.0
     }
+
+    /// Returns whether `other` is bounded by this interval.
+    #[must_use]
+    pub const fn contains_interval(self, other: Self) -> bool {
+        self.start.0 <= other.start.0 && other.end.0 <= self.end.0
+    }
+
+    /// Returns whether this interval and `other` share at least one frame.
+    #[must_use]
+    pub const fn intersects(self, other: Self) -> bool {
+        !self.is_empty()
+            && !other.is_empty()
+            && self.start.0 < other.end.0
+            && other.start.0 < self.end.0
+    }
 }
 
 /// A frame interval whose end precedes its start.
@@ -517,6 +532,30 @@ mod tests {
 
         assert_eq!(interval.len(), FrameCount::ZERO);
         assert!(interval.is_empty());
+    }
+
+    #[test]
+    fn empty_intervals_do_not_intersect() {
+        let empty = FrameInterval::new(FrameIndex::new(5), FrameIndex::new(5))
+            .expect("equal bounds form an empty interval");
+        let enclosing = FrameInterval::new(FrameIndex::new(4), FrameIndex::new(6))
+            .expect("ordered bounds form an interval");
+
+        assert!(!empty.intersects(enclosing));
+        assert!(!enclosing.intersects(empty));
+    }
+
+    #[test]
+    fn adjacent_intervals_do_not_intersect() {
+        let left = FrameInterval::new(FrameIndex::new(4), FrameIndex::new(5))
+            .expect("ordered bounds form an interval");
+        let right = FrameInterval::new(FrameIndex::new(5), FrameIndex::new(6))
+            .expect("ordered bounds form an interval");
+        let overlap = FrameInterval::new(FrameIndex::new(4), FrameIndex::new(6))
+            .expect("ordered bounds form an interval");
+
+        assert!(!left.intersects(right));
+        assert!(left.intersects(overlap));
     }
 
     #[test]

@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use onmark_core::diagnostics::Diagnostic;
 use onmark_core::model::Timebase;
+use onmark_core::render_graph::{PartitionPlan, RenderGraph};
 use onmark_core::timeline::TimelineIr;
 use onmark_media::Ffprobe;
 use onmark_render::{
@@ -116,10 +117,12 @@ pub(super) async fn run(args: RenderArgs) -> Result<RenderOutcome, CliError> {
     let bundle = PresentationBundler::new(executables.bundler)
         .bundle(&presentation)
         .await?;
-    let executable = materialize_unit(&timeline, profile, bundle, frozen)?;
+    let (partitions, units) = materialize_units(&timeline, profile, bundle, frozen)?;
 
     let executor = render_executor(executables.browser, executables.ffmpeg);
-    let video = executor.render(executable, &output).await?;
+    let video = executor
+        .render_partitioned(&partitions, units, &output)
+        .await?;
     Ok(RenderOutcome::Completed {
         source_path: args.screenplay,
         source,
@@ -128,18 +131,40 @@ pub(super) async fn run(args: RenderArgs) -> Result<RenderOutcome, CliError> {
     })
 }
 
-fn materialize_unit(
+fn materialize_units(
     timeline: &TimelineIr,
     profile: RenderProfile,
     bundle: BundleArtifact,
     frozen: FrozenCatalog,
-) -> Result<ExecutableUnit, CliError> {
+) -> Result<(PartitionPlan, Vec<ExecutableUnit>), CliError> {
     let (bundle_directory, manifest, _bundle_root) = bundle.into_parts();
     let materialized = frozen.into_materialized()?;
     let (assets, _asset_root) = materialized.into_parts();
-    let unit = RenderUnit::whole_film(timeline, manifest, profile, assets)?;
+    let partitions = RenderGraph::from_timeline(timeline).into_partition();
+    let mut units = Vec::with_capacity(partitions.units().len());
 
-    ExecutableUnit::materialize(unit, &bundle_directory, unit_root_limits()).map_err(Into::into)
+    for partition in partitions.units() {
+        // Partition roots are isolated. Shared frozen bytes may therefore be
+        // selected by multiple partitions, but only graph-proven inputs enter
+        // each composition.
+        let unit = RenderUnit::from_partition(
+            timeline,
+            partition,
+            manifest.clone(),
+            profile,
+            assets
+                .iter()
+                .filter(|asset| partition.requires_media_asset(asset.id()))
+                .cloned(),
+        )?;
+        units.push(ExecutableUnit::materialize(
+            unit,
+            &bundle_directory,
+            unit_root_limits(),
+        )?);
+    }
+
+    Ok((partitions, units))
 }
 
 fn reject_existing_output(output: &Path) -> Result<(), CliError> {

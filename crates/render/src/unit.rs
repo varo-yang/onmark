@@ -1,16 +1,17 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
-use onmark_core::model::{FrameInterval, FrameRate, FrozenAsset, FrozenAssetId};
+use onmark_core::model::{FrameIndex, FrameInterval, FrameRate, FrozenAsset, FrozenAssetId};
 use onmark_core::protocol::{BrowserPlan, BundleManifest, InvalidBrowserPlan};
-use onmark_core::timeline::{TimelineIr, TimelineVideo, TimelineVoiceOver};
+use onmark_core::render_graph::RenderPartition;
+use onmark_core::timeline::{TimelineIr, TimelineVoiceOver};
 
 use crate::{AdmittedVideo, RenderProfile, UnsupportedVideo};
 
-const MAX_AUDIO_TRACKS: usize = 512;
+pub(crate) const MAX_AUDIO_TRACKS: usize = 512;
 
 /// One frozen artifact at its browser-visible execution location.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -84,7 +85,7 @@ impl fmt::Display for InvalidMaterializedAsset {
 
 impl Error for InvalidMaterializedAsset {}
 
-/// One whole-film unit containing facts and local materialization requirements.
+/// One materializable local unit containing facts and local requirements.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RenderUnit {
     browser_plan: BrowserPlan,
@@ -115,7 +116,7 @@ impl RenderVideo {
     }
 }
 
-/// Render-owned audio facts for one whole-film execution.
+/// Render-owned audio facts for one local execution.
 ///
 /// Audio remains outside [`BrowserPlan`]: Chromium renders resolved pixels,
 /// while the executor gives this plan to `FFmpeg` after frame capture.
@@ -132,11 +133,11 @@ impl AudioPlan {
     }
 }
 
-/// One frozen voice-over artifact placed on the solved frame grid.
+/// One frozen voice-over artifact placed at an absolute Timeline frame.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RenderAudio {
     asset: MaterializedAsset,
-    interval: FrameInterval,
+    start: FrameIndex,
 }
 
 impl RenderAudio {
@@ -146,15 +147,15 @@ impl RenderAudio {
         &self.asset
     }
 
-    /// Returns the solved half-open interval occupied by the voice-over.
+    /// Returns the Timeline frame at which the voice-over starts.
     #[must_use]
-    pub const fn interval(&self) -> FrameInterval {
-        self.interval
+    pub const fn start(&self) -> FrameIndex {
+        self.start
     }
 }
 
 impl RenderUnit {
-    /// Composes the single Gate-one unit from solved facts and local inputs.
+    /// Composes the single whole-film unit from solved facts and local inputs.
     ///
     /// Extra materialized assets are not retained. Every referenced video and
     /// voice-over must be present; video also passes the browser profile while
@@ -170,30 +171,61 @@ impl RenderUnit {
         profile: RenderProfile,
         assets: impl IntoIterator<Item = MaterializedAsset>,
     ) -> Result<Self, InvalidRenderUnit> {
+        let interval = timeline.interval();
+        Self::compose(
+            timeline,
+            interval,
+            interval,
+            bundle_manifest,
+            profile,
+            assets,
+        )
+    }
+
+    /// Composes one independently planned partition from solved facts and local inputs.
+    ///
+    /// The partition remains a pure core fact until this boundary joins it to a
+    /// bundle, profile, and worker-local materializations.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InvalidRenderUnit`] when an input is missing, duplicated, not
+    /// supported by the browser profile, or outside the browser wire domain.
+    pub fn from_partition(
+        timeline: &TimelineIr,
+        partition: &RenderPartition,
+        bundle_manifest: BundleManifest,
+        profile: RenderProfile,
+        assets: impl IntoIterator<Item = MaterializedAsset>,
+    ) -> Result<Self, InvalidRenderUnit> {
+        Self::compose(
+            timeline,
+            partition.evaluation(),
+            partition.output(),
+            bundle_manifest,
+            profile,
+            assets,
+        )
+    }
+
+    fn compose(
+        timeline: &TimelineIr,
+        evaluation: FrameInterval,
+        output: FrameInterval,
+        bundle_manifest: BundleManifest,
+        profile: RenderProfile,
+        assets: impl IntoIterator<Item = MaterializedAsset>,
+    ) -> Result<Self, InvalidRenderUnit> {
         let available = materialized_catalog(assets)?;
-        let required = required_video_ids(timeline);
-        let mut videos = BTreeMap::new();
-        for id in required {
-            let asset = available
-                .get(&id)
-                .cloned()
-                .ok_or(InvalidRenderUnit::MissingAsset(id))?;
-            let source_frame_rate = AdmittedVideo::admit(asset.frozen().metadata())
-                .map_err(|source| InvalidRenderUnit::UnsupportedVideo { id, source })?
-                .frame_rate();
-            let video = RenderVideo {
-                asset,
-                source_frame_rate,
-            };
-            videos.insert(id, video);
-        }
+        let videos = render_videos(timeline, evaluation, &available)?;
         let source_frame_rates = videos
             .iter()
             .map(|(id, video)| (*id, video.source_frame_rate()))
             .collect();
-        let browser_plan = BrowserPlan::from_timeline(timeline, &source_frame_rates)
-            .map_err(InvalidRenderUnit::BrowserPlan)?;
-        let audio = audio_plan(timeline, &available)?;
+        let browser_plan =
+            BrowserPlan::from_timeline_for_unit(timeline, &source_frame_rates, evaluation, output)
+                .map_err(InvalidRenderUnit::BrowserPlan)?;
+        let audio = audio_plan(timeline, output, &available)?;
 
         Ok(Self {
             browser_plan,
@@ -265,6 +297,8 @@ pub enum InvalidRenderUnit {
     },
     /// The audio plan would exceed the bounded Gate-one process envelope.
     AudioTrackLimit,
+    /// A voice-over crosses a unit output boundary and cannot be mixed safely.
+    AudioCrossesOutput(FrozenAssetId),
     /// A timeline frame cannot cross the JavaScript wire boundary exactly.
     BrowserPlan(InvalidBrowserPlan),
 }
@@ -284,6 +318,12 @@ impl fmt::Display for InvalidRenderUnit {
                 write!(
                     formatter,
                     "audio plan exceeds the {MAX_AUDIO_TRACKS}-track limit"
+                )
+            }
+            Self::AudioCrossesOutput(id) => {
+                write!(
+                    formatter,
+                    "voice-over {id} crosses the unit output boundary"
                 )
             }
             Self::BrowserPlan(source) => source.fmt(formatter),
@@ -314,26 +354,60 @@ fn materialized_catalog(
     Ok(catalog)
 }
 
-fn required_video_ids(timeline: &TimelineIr) -> BTreeSet<FrozenAssetId> {
-    timeline.videos().map(TimelineVideo::asset_id).collect()
+fn render_videos(
+    timeline: &TimelineIr,
+    evaluation: FrameInterval,
+    available: &BTreeMap<FrozenAssetId, MaterializedAsset>,
+) -> Result<BTreeMap<FrozenAssetId, RenderVideo>, InvalidRenderUnit> {
+    let mut videos = BTreeMap::new();
+
+    for timeline_video in timeline.videos() {
+        if !timeline_video.timing().interval().intersects(evaluation) {
+            continue;
+        }
+
+        let id = timeline_video.asset_id();
+        let asset = available
+            .get(&id)
+            .cloned()
+            .ok_or(InvalidRenderUnit::MissingAsset(id))?;
+        let source_frame_rate = AdmittedVideo::admit(asset.frozen().metadata())
+            .map_err(|source| InvalidRenderUnit::UnsupportedVideo { id, source })?
+            .frame_rate();
+        videos.insert(
+            id,
+            RenderVideo {
+                asset,
+                source_frame_rate,
+            },
+        );
+    }
+
+    Ok(videos)
 }
 
 fn audio_plan(
     timeline: &TimelineIr,
+    output: FrameInterval,
     available: &BTreeMap<FrozenAssetId, MaterializedAsset>,
 ) -> Result<AudioPlan, InvalidRenderUnit> {
     let mut tracks = Vec::new();
+
     for voice_over in timeline.voice_overs() {
+        if !voice_over.timing().interval().intersects(output) {
+            continue;
+        }
         if tracks.len() == MAX_AUDIO_TRACKS {
             return Err(InvalidRenderUnit::AudioTrackLimit);
         }
-        tracks.push(render_audio(voice_over, available)?);
+        tracks.push(render_audio(voice_over, output, available)?);
     }
     Ok(AudioPlan { tracks })
 }
 
 fn render_audio(
     voice_over: &TimelineVoiceOver,
+    output: FrameInterval,
     available: &BTreeMap<FrozenAssetId, MaterializedAsset>,
 ) -> Result<RenderAudio, InvalidRenderUnit> {
     let id = voice_over.asset_id();
@@ -341,9 +415,13 @@ fn render_audio(
         .get(&id)
         .cloned()
         .ok_or(InvalidRenderUnit::MissingAsset(id))?;
+    let interval = voice_over.timing().interval();
+    if !output.contains_interval(interval) {
+        return Err(InvalidRenderUnit::AudioCrossesOutput(id));
+    }
     Ok(RenderAudio {
         asset,
-        interval: voice_over.timing().interval(),
+        start: interval.start(),
     })
 }
 
@@ -357,6 +435,7 @@ mod tests {
         Timebase, VideoMetadata, VideoTiming,
     };
     use onmark_core::protocol::BundleFile;
+    use onmark_core::render_graph::RenderGraph;
     use onmark_core::timeline::TimelineIr;
 
     use super::{
@@ -396,6 +475,38 @@ mod tests {
                 .source_frame_rate(),
             frame_rate(),
         );
+    }
+
+    #[test]
+    fn composes_a_partition_into_its_own_browser_interval() {
+        let frozen = video_asset(VideoTiming::Constant(frame_rate()));
+        let timeline = solve(
+            r#"<film><scene><shot duration="1s"><title>Opening</title></shot><shot duration="2s"><title>Closing</title></shot></scene></film>"#,
+            "unused.mp4",
+            frozen,
+        );
+        let partitions = RenderGraph::from_timeline(&timeline).into_partition();
+        let partition = partitions
+            .units()
+            .get(1)
+            .expect("the fixture has a second partition");
+        let unit = RenderUnit::from_partition(
+            &timeline,
+            partition,
+            bundle_manifest(),
+            render_profile(),
+            [],
+        )
+        .expect("a static second shot forms a browser unit");
+
+        assert_eq!(unit.browser_plan().evaluation().start().get(), 30);
+        assert_eq!(unit.browser_plan().evaluation().end().get(), 90);
+        assert_eq!(
+            unit.browser_plan().output(),
+            unit.browser_plan().evaluation()
+        );
+        assert_eq!(unit.browser_plan().overlays().len(), 1);
+        assert_eq!(unit.browser_plan().overlays()[0].text(), "Closing");
     }
 
     #[test]
@@ -456,9 +567,44 @@ mod tests {
             .next()
             .expect("the unit contains one voice-over track");
         assert_eq!(audio.asset().id(), id);
-        assert_eq!(audio.interval().start().get(), 15);
-        assert_eq!(audio.interval().end().get(), 45);
+        assert_eq!(audio.start().get(), 15);
         assert_eq!(unit.materialized_assets().len(), 1);
+    }
+
+    #[test]
+    fn retains_voice_over_timeline_start_in_a_partition() {
+        let id = FrozenAssetId::from_sha256([1; 32]);
+        let voice = FrozenAsset::new(
+            id,
+            AssetMetadata::audio(Duration::from_nanos(1_000_000_000)),
+        );
+        let timeline = solve(
+            r#"<film><scene><shot duration="1s" /><shot><vo src="voice.mp3">Read me</vo></shot></scene></film>"#,
+            "voice.mp3",
+            voice.clone(),
+        );
+        let partitions = RenderGraph::from_timeline(&timeline).into_partition();
+        let partition = partitions
+            .units()
+            .get(1)
+            .expect("the fixture has a second partition");
+        let materialized =
+            MaterializedAsset::new(voice, "/tmp/voice.mp3").expect("the fixture path is present");
+        let unit = RenderUnit::from_partition(
+            &timeline,
+            partition,
+            bundle_manifest(),
+            render_profile(),
+            [materialized],
+        )
+        .expect("the second shot forms one audio unit");
+
+        let audio = unit
+            .audio_tracks()
+            .next()
+            .expect("the unit contains the second-shot voice-over");
+        assert_eq!(audio.asset().id(), id);
+        assert_eq!(audio.start().get(), 30);
     }
 
     #[test]

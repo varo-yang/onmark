@@ -48,10 +48,47 @@ impl BrowserPlan {
         timeline: &TimelineIr,
         source_frame_rates: &BTreeMap<FrozenAssetId, FrameRate>,
     ) -> Result<Self, InvalidBrowserPlan> {
+        let interval = timeline.interval();
+        Self::from_timeline_for_unit(timeline, source_frame_rates, interval, interval)
+    }
+
+    /// Projects one evaluated and published unit from solved Timeline IR.
+    ///
+    /// Every browser placement must lie wholly inside `evaluation`. A later
+    /// graph capability that needs a placement across a unit boundary must
+    /// widen that region before projection; silently clipping a video would
+    /// change its source-frame mapping.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InvalidBrowserPlan`] when unit bounds are inconsistent, a
+    /// placement crosses the evaluation boundary, a placement exceeds its
+    /// resource budget, a video has no admitted source rate, an overlay is
+    /// malformed, or a frame lies outside JavaScript's exact integer domain.
+    pub fn from_timeline_for_unit(
+        timeline: &TimelineIr,
+        source_frame_rates: &BTreeMap<FrozenAssetId, FrameRate>,
+        evaluation: FrameInterval,
+        output: FrameInterval,
+    ) -> Result<Self, InvalidBrowserPlan> {
+        if !timeline.interval().contains_interval(evaluation) {
+            return Err(InvalidBrowserPlan::EvaluationOutsideTimeline);
+        }
+        if !evaluation.contains_interval(output) {
+            return Err(InvalidBrowserPlan::OutputOutsideEvaluation);
+        }
+
         let rate = timeline.timebase().frame_rate();
-        let interval = WireInterval::try_from(timeline.interval())?;
+        let evaluation_wire = WireInterval::try_from(evaluation)?;
+        let output_wire = WireInterval::try_from(output)?;
         let mut videos = Vec::new();
         for video in timeline.videos() {
+            if !video.timing().interval().intersects(evaluation) {
+                continue;
+            }
+            if !evaluation.contains_interval(video.timing().interval()) {
+                return Err(InvalidBrowserPlan::VideoCrossesEvaluation);
+            }
             if videos.len() == MAX_BROWSER_VIDEOS {
                 return Err(InvalidBrowserPlan::TooManyVideos);
             }
@@ -59,6 +96,12 @@ impl BrowserPlan {
         }
         let mut overlays = Vec::new();
         for overlay in timeline.overlays() {
+            if !overlay.timing().interval().intersects(evaluation) {
+                continue;
+            }
+            if !evaluation.contains_interval(overlay.timing().interval()) {
+                return Err(InvalidBrowserPlan::OverlayCrossesEvaluation);
+            }
             if overlays.len() == MAX_BROWSER_OVERLAYS {
                 return Err(InvalidBrowserPlan::TooManyOverlays);
             }
@@ -68,8 +111,8 @@ impl BrowserPlan {
         Ok(Self {
             timeline_version: timeline.version().get(),
             frame_rate: rate.into(),
-            evaluation: interval,
-            output: interval,
+            evaluation: evaluation_wire,
+            output: output_wire,
             videos,
             overlays,
         })
@@ -240,6 +283,14 @@ fn browser_overlay(overlay: &TimelineOverlay) -> Result<BrowserOverlay, InvalidB
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum InvalidBrowserPlan {
+    /// The unit evaluation interval lies outside the solved film.
+    EvaluationOutsideTimeline,
+    /// The published interval lies outside the unit evaluation interval.
+    OutputOutsideEvaluation,
+    /// A video would need clipping at the unit evaluation boundary.
+    VideoCrossesEvaluation,
+    /// An overlay would need clipping at the unit evaluation boundary.
+    OverlayCrossesEvaluation,
     /// The plan contains more video placements than V1 can carry.
     TooManyVideos,
     /// The plan contains more overlay placements than V1 can carry.
@@ -257,6 +308,18 @@ pub enum InvalidBrowserPlan {
 impl fmt::Display for InvalidBrowserPlan {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::EvaluationOutsideTimeline => {
+                formatter.write_str("browser evaluation interval lies outside the solved film")
+            }
+            Self::OutputOutsideEvaluation => {
+                formatter.write_str("browser output interval lies outside evaluation")
+            }
+            Self::VideoCrossesEvaluation => {
+                formatter.write_str("browser video crosses the evaluation boundary")
+            }
+            Self::OverlayCrossesEvaluation => {
+                formatter.write_str("browser overlay crosses the evaluation boundary")
+            }
             Self::TooManyVideos => {
                 formatter.write_str("browser plan exceeds the V1 video-placement limit")
             }
@@ -287,7 +350,11 @@ impl Error for InvalidBrowserPlan {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::InvalidFrame(source) => Some(source),
-            Self::TooManyVideos
+            Self::EvaluationOutsideTimeline
+            | Self::OutputOutsideEvaluation
+            | Self::VideoCrossesEvaluation
+            | Self::OverlayCrossesEvaluation
+            | Self::TooManyVideos
             | Self::TooManyOverlays
             | Self::InvalidOverlayKind(_)
             | Self::OverlayTextTooLong(_)
@@ -498,17 +565,55 @@ mod tests {
         );
     }
 
-    fn timeline_with_videos(asset_id: FrozenAssetId, count: usize) -> TimelineIr {
-        let span = SourceSpan::new(SourceId::new(0), ByteOffset::ZERO, ByteOffset::ZERO)
-            .expect("equal source bounds form a valid span");
-        let interval = FrameInterval::new(FrameIndex::ZERO, FrameIndex::new(1))
-            .expect("the fixture interval is ordered");
-        let timing = TimelineTiming::new(interval, TimingReason::ShotStart, TimingReason::ShotEnd);
-        let video = TimelineContent::Video(TimelineVideo::new(
-            TimelineElement::new(ElementKind::Video, None, span),
-            timing,
+    #[test]
+    fn omits_placements_outside_the_unit_evaluation() {
+        let asset_id = FrozenAssetId::from_sha256([1; 32]);
+        let timeline =
+            timeline_with_content_in(vec![video(asset_id, interval(0, 1))], interval(0, 4));
+        let unit = interval(2, 4);
+
+        let plan = BrowserPlan::from_timeline_for_unit(&timeline, &BTreeMap::new(), unit, unit)
+            .expect("placements outside evaluation do not enter the browser plan");
+
+        assert!(plan.videos().is_empty());
+        assert_eq!(plan.evaluation().start().get(), 2);
+        assert_eq!(plan.evaluation().end().get(), 4);
+    }
+
+    #[test]
+    fn rejects_a_video_that_crosses_the_unit_evaluation() {
+        let asset_id = FrozenAssetId::from_sha256([1; 32]);
+        let timeline =
+            timeline_with_content_in(vec![video(asset_id, interval(1, 3))], interval(0, 4));
+        let source_rates = BTreeMap::from([(
             asset_id,
-        ));
+            FrameRate::new(30, 1).expect("the fixture frame rate is valid"),
+        )]);
+        let unit = interval(0, 2);
+
+        assert_eq!(
+            BrowserPlan::from_timeline_for_unit(&timeline, &source_rates, unit, unit),
+            Err(InvalidBrowserPlan::VideoCrossesEvaluation),
+        );
+    }
+
+    #[test]
+    fn rejects_output_outside_the_unit_evaluation() {
+        let timeline = timeline_with_overlays(1, "Opening");
+
+        assert_eq!(
+            BrowserPlan::from_timeline_for_unit(
+                &timeline,
+                &BTreeMap::new(),
+                interval(0, 1),
+                interval(0, 2),
+            ),
+            Err(InvalidBrowserPlan::OutputOutsideEvaluation),
+        );
+    }
+
+    fn timeline_with_videos(asset_id: FrozenAssetId, count: usize) -> TimelineIr {
+        let video = video(asset_id, interval(0, 1));
         timeline_with_content(vec![video; count])
     }
 
@@ -527,10 +632,15 @@ mod tests {
     }
 
     fn timeline_with_content(content: Vec<TimelineContent>) -> TimelineIr {
+        timeline_with_content_in(content, interval(0, 1))
+    }
+
+    fn timeline_with_content_in(
+        content: Vec<TimelineContent>,
+        interval: FrameInterval,
+    ) -> TimelineIr {
         let span = SourceSpan::new(SourceId::new(0), ByteOffset::ZERO, ByteOffset::ZERO)
             .expect("equal source bounds form a valid span");
-        let interval = FrameInterval::new(FrameIndex::ZERO, FrameIndex::new(1))
-            .expect("the fixture interval is ordered");
         let timing = TimelineTiming::new(interval, TimingReason::ShotStart, TimingReason::ShotEnd);
         let shot = TimelineShot::new(
             TimelineElement::new(ElementKind::Shot, None, span),
@@ -551,5 +661,22 @@ mod tests {
             BTreeMap::new(),
             vec![scene],
         )
+    }
+
+    fn video(asset_id: FrozenAssetId, interval: FrameInterval) -> TimelineContent {
+        let span = SourceSpan::new(SourceId::new(0), ByteOffset::ZERO, ByteOffset::ZERO)
+            .expect("equal source bounds form a valid span");
+        let timing = TimelineTiming::new(interval, TimingReason::ShotStart, TimingReason::ShotEnd);
+
+        TimelineContent::Video(TimelineVideo::new(
+            TimelineElement::new(ElementKind::Video, None, span),
+            timing,
+            asset_id,
+        ))
+    }
+
+    fn interval(start: u64, end: u64) -> FrameInterval {
+        FrameInterval::new(FrameIndex::new(start), FrameIndex::new(end))
+            .expect("the fixture interval is ordered")
     }
 }

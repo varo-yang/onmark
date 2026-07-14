@@ -5,6 +5,7 @@ use std::error::Error;
 use std::fmt;
 use std::path::Path;
 
+use onmark_core::model::FrameIndex;
 use onmark_core::protocol::{BrowserPlan, BundleManifest};
 use tempfile::TempDir;
 use url::Url;
@@ -89,6 +90,7 @@ impl Error for InvalidUnitRootLimits {}
 #[derive(Debug)]
 pub struct ExecutableUnit {
     browser_plan: BrowserPlan,
+    bundle_id: Box<str>,
     profile: RenderProfile,
     audio: AudioPlan,
     root: UnitRoot,
@@ -106,6 +108,7 @@ impl ExecutableUnit {
         bundle_directory: &Path,
         limits: UnitRootLimits,
     ) -> Result<Self, UnitRootError> {
+        let bundle_id = unit.bundle_manifest().bundle_id().into();
         let root = UnitRoot::materialize(
             bundle_directory,
             unit.bundle_manifest(),
@@ -117,6 +120,7 @@ impl ExecutableUnit {
 
         Ok(Self {
             browser_plan,
+            bundle_id,
             profile,
             audio,
             root,
@@ -135,10 +139,22 @@ impl ExecutableUnit {
         self.profile
     }
 
-    pub(crate) fn audio_inputs(&self) -> impl ExactSizeIterator<Item = AudioInput> + '_ {
-        self.audio.tracks().map(|track| {
+    pub(crate) fn bundle_id(&self) -> &str {
+        &self.bundle_id
+    }
+
+    /// Returns audio inputs relative to one published-output origin.
+    ///
+    /// The caller owns the artifact's frame-zero convention. A standalone
+    /// unit uses its own output start; assembled units use their plan start.
+    pub(crate) fn audio_inputs_rebased_to(
+        &self,
+        origin: FrameIndex,
+    ) -> impl ExactSizeIterator<Item = AudioInput> + '_ {
+        self.audio.tracks().map(move |track| {
+            let start = rebase_audio_start(track.start(), origin);
             let source = self.root.path().join(track.asset().unit_relative_path());
-            AudioInput::new(source, track.interval().start())
+            AudioInput::new(source, start)
         })
     }
 
@@ -146,6 +162,33 @@ impl ExecutableUnit {
     #[must_use]
     pub const fn entry_url(&self) -> &Url {
         self.root.entry_url()
+    }
+}
+
+fn rebase_audio_start(start: FrameIndex, origin: FrameIndex) -> FrameIndex {
+    start
+        .get()
+        .checked_sub(origin.get())
+        .map(FrameIndex::new)
+        .expect("a render unit retains only audio at or after its published-output origin")
+}
+
+#[cfg(test)]
+mod tests {
+    use onmark_core::model::FrameIndex;
+
+    use super::rebase_audio_start;
+
+    #[test]
+    fn rebases_audio_to_the_output_origin() {
+        assert_eq!(
+            rebase_audio_start(FrameIndex::new(30), FrameIndex::new(30)),
+            FrameIndex::new(0),
+        );
+        assert_eq!(
+            rebase_audio_start(FrameIndex::new(45), FrameIndex::new(30)),
+            FrameIndex::new(15),
+        );
     }
 }
 

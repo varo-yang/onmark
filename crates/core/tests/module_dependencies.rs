@@ -43,8 +43,10 @@ fn core_module_dependencies_follow_the_architecture_dag() {
 fn dependency_resolution_distinguishes_allowed_and_forbidden_siblings() {
     let syntax_module = vec![String::from("syntax"), String::from("parser")];
     let compiler_module = vec![String::from("compiler"), String::from("parse")];
+    let render_graph_module = vec![String::from("render_graph")];
     let diagnostics = vec![String::from("crate"), String::from("diagnostics")];
     let model = vec![String::from("crate"), String::from("model")];
+    let graph_timeline = vec![String::from("crate"), String::from("timeline")];
     let timeline = vec![
         String::from("super"),
         String::from("super"),
@@ -57,10 +59,13 @@ fn dependency_resolution_distinguishes_allowed_and_forbidden_siblings() {
         resolve_owner(&syntax_module, &model).expect("the explicit crate path has an owner");
     let compiler_to_timeline = resolve_owner(&compiler_module, &timeline)
         .expect("the explicit ancestor path has an owner");
+    let graph_to_timeline = resolve_owner(&render_graph_module, &graph_timeline)
+        .expect("the explicit crate path has an owner");
 
     assert!(!dependency_allowed("syntax", syntax_to_diagnostics));
     assert!(dependency_allowed("syntax", syntax_to_model));
     assert!(dependency_allowed("compiler", compiler_to_timeline));
+    assert!(dependency_allowed("render_graph", graph_to_timeline));
 }
 
 struct DependencyVisitor<'a> {
@@ -217,6 +222,7 @@ fn dependency_allowed(owner: &str, target: &str) -> bool {
     match owner {
         "model" => false,
         "syntax" | "diagnostics" | "timeline" => target == "model",
+        "render_graph" => matches!(target, "model" | "timeline"),
         "compiler" => matches!(target, "model" | "syntax" | "diagnostics" | "timeline"),
         "protocol" => matches!(target, "model" | "diagnostics" | "timeline"),
         _ => false,

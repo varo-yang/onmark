@@ -12,5 +12,6 @@ pub mod compiler;
 pub mod diagnostics;
 pub mod model;
 pub mod protocol;
+pub mod render_graph;
 pub mod syntax;
 pub mod timeline;

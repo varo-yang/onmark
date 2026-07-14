@@ -10,10 +10,12 @@ use onmark_core::model::{AssetRef, FrameRate, FrozenAsset, FrozenAssetId, Source
 use onmark_core::protocol::{
     BrowserCommand, BrowserEvent, BrowserPlan, BrowserRequest, BundleManifest, RequestId, WireFrame,
 };
+use onmark_core::render_graph::RenderGraph;
 use onmark_media::Ffprobe;
 use onmark_render::{
     BrowserErrorKind, BrowserLimits, BrowserSession, EncodeLimits, EncodedPng, ExecutableUnit,
-    Ffmpeg, MaterializedAsset, RenderExecutor, RenderProfile, RenderUnit, UnitRootLimits,
+    Ffmpeg, MaterializedAsset, RenderErrorKind, RenderExecutor, RenderProfile, RenderUnit,
+    UnitRootLimits,
 };
 use serde::Deserialize;
 use sha2::{Digest as _, Sha256};
@@ -25,6 +27,29 @@ use url::Url;
 const WIDTH: u32 = 320;
 const HEIGHT: u32 = 180;
 const FRAME_COUNT: u64 = 75;
+
+#[tokio::test]
+async fn rejects_units_that_do_not_match_the_partition_plan_before_launching_browser() {
+    let timeline = solve_timeline(
+        r#"<film><scene><shot duration="1s" /><shot duration="1s" /></scene></film>"#,
+        &BTreeMap::new(),
+    );
+    let partitions = RenderGraph::from_timeline(&timeline).into_partition();
+    let directory = tempdir().expect("the test output directory must be available");
+    let output = directory.path().join("partitioned.mp4");
+    let limits = EncodeLimits::new(Duration::from_secs(1), 2, 2, 2)
+        .expect("the fixture encoding limits are bounded");
+    let ffmpeg = Ffmpeg::new("ffmpeg", limits).expect("the fixture executable path is present");
+    let executor = RenderExecutor::new("browser", browser_limits(Duration::from_secs(1)), ffmpeg);
+
+    let error = executor
+        .render_partitioned(&partitions, Vec::new(), &output)
+        .await
+        .expect_err("all partition units must be present before browser launch");
+
+    assert_eq!(error.kind(), RenderErrorKind::InvalidPlan);
+    assert!(!output.exists());
+}
 
 #[tokio::test]
 #[ignore = "requires ONMARK_CHROME"]

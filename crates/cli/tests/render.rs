@@ -12,28 +12,20 @@ use tokio::time::timeout;
 
 const WIDTH: u32 = 320;
 const HEIGHT: u32 = 180;
-const FRAME_COUNT: usize = 45;
+const FRAME_RATE: usize = 30;
+const AUDIO_SAMPLE_RATE: usize = 48_000;
+const AUDIO_START_TOLERANCE_SAMPLES: usize = 2_048;
+const MIN_AUDIBLE_MEAN_AMPLITUDE: u64 = 100;
+const GATE_ONE_FRAME_COUNT: usize = 45;
+const GATE_TWO_FRAME_COUNT: usize = 60;
 const PROCESS_DEADLINE: Duration = Duration::from_mins(3);
 
 #[tokio::test]
 #[ignore = "requires ONMARK_CLI, ONMARK_FFMPEG, ONMARK_FFPROBE, and Gate-one tools on PATH"]
 async fn renders_one_screenplay_deterministically_across_real_processes() {
     let directory = tempdir().expect("the conformance workspace is available");
-    let fixture = Fixture::materialize(directory.path());
-    fixture.generate_source_video().await;
-    fixture.generate_voice_over().await;
-
-    let first = fixture.render("first.mp4").await;
-    let second = fixture.render("second.mp4").await;
-    assert_success(&first.output);
-    assert_success(&second.output);
-
-    let first_output = inspect_output(&first.path).await;
-    let second_output = inspect_output(&second.path).await;
-    assert_eq!(first_output, second_output);
-    assert_eq!(first_output.video_frame_hashes.len(), FRAME_COUNT);
-    assert!(first_output.has_motion());
-    assert!(!first_output.audio_frame_hashes.is_empty());
+    let fixture = Fixture::materialize(directory.path(), "cli/gate-one.onmark");
+    let first = render_fixture_twice(&fixture, GATE_ONE_FRAME_COUNT, 15).await;
 
     let original_digest = file_digest(&first.path);
     let rejected = fixture.render_to(&first.path).await;
@@ -43,16 +35,49 @@ async fn renders_one_screenplay_deterministically_across_real_processes() {
     assert_eq!(file_digest(&first.path), original_digest);
 }
 
+#[tokio::test]
+#[ignore = "requires ONMARK_CLI, ONMARK_FFMPEG, ONMARK_FFPROBE, and Gate-two tools on PATH"]
+async fn assembles_two_partitioned_units_deterministically_across_real_processes() {
+    let directory = tempdir().expect("the conformance workspace is available");
+    let fixture = Fixture::materialize(directory.path(), "cli/gate-two.onmark");
+
+    render_fixture_twice(&fixture, GATE_TWO_FRAME_COUNT, 30).await;
+}
+
+async fn render_fixture_twice(
+    fixture: &Fixture,
+    expected_frames: usize,
+    audio_start_frame: usize,
+) -> RenderedOutput {
+    fixture.generate_source_video().await;
+    fixture.generate_voice_over().await;
+
+    let first = fixture.render("first.mp4").await;
+    let second = fixture.render("second.mp4").await;
+    assert_success(&first.output, expected_frames);
+    assert_success(&second.output, expected_frames);
+
+    let first_output = inspect_output(&first.path, expected_frames).await;
+    let second_output = inspect_output(&second.path, expected_frames).await;
+    assert_eq!(first_output, second_output);
+    assert_eq!(first_output.video_frame_hashes.len(), expected_frames);
+    assert!(first_output.has_motion());
+    assert!(!first_output.audio_frame_hashes.is_empty());
+    assert_audio_begins_at_frame(&first.path, audio_start_frame).await;
+
+    first
+}
+
 struct Fixture {
     root: PathBuf,
     screenplay: PathBuf,
 }
 
 impl Fixture {
-    fn materialize(root: &Path) -> Self {
+    fn materialize(root: &Path, screenplay_fixture: &str) -> Self {
         let repository = repository();
-        let screenplay = root.join("gate-one.onmark");
-        copy_fixture(&repository, "cli/gate-one.onmark", &screenplay);
+        let screenplay = root.join("film.onmark");
+        copy_fixture(&repository, screenplay_fixture, &screenplay);
         copy_fixture(
             &repository,
             "browser/video-presentation.ts",
@@ -135,6 +160,16 @@ impl Fixture {
             .arg(WIDTH.to_string())
             .arg("--height")
             .arg(HEIGHT.to_string());
+        for (flag, variable) in [
+            ("--browser", "ONMARK_CHROME"),
+            ("--bundler", "ONMARK_BUNDLER"),
+            ("--ffmpeg", "ONMARK_FFMPEG"),
+            ("--ffprobe", "ONMARK_FFPROBE"),
+        ] {
+            if let Some(path) = env::var_os(variable) {
+                command.arg(flag).arg(path);
+            }
+        }
         run_process(&mut command).await
     }
 }
@@ -161,16 +196,16 @@ impl InspectedOutput {
     }
 }
 
-async fn inspect_output(path: &Path) -> InspectedOutput {
+async fn inspect_output(path: &Path, expected_frames: usize) -> InspectedOutput {
     InspectedOutput {
-        video: probe_video_stream(path).await,
+        video: probe_video_stream(path, expected_frames).await,
         video_frame_hashes: decode_video_hashes(path).await,
         audio: probe_audio_stream(path).await,
         audio_frame_hashes: decode_audio_hashes(path).await,
     }
 }
 
-async fn probe_video_stream(path: &Path) -> VideoStream {
+async fn probe_video_stream(path: &Path, expected_frames: usize) -> VideoStream {
     let output = run_process(
         Command::new(required_path("ONMARK_FFPROBE"))
             .args([
@@ -199,7 +234,7 @@ async fn probe_video_stream(path: &Path) -> VideoStream {
     assert_eq!(stream.width, WIDTH);
     assert_eq!(stream.height, HEIGHT);
     assert_eq!(stream.avg_frame_rate, "30/1");
-    assert_eq!(stream.nb_read_frames, FRAME_COUNT.to_string());
+    assert_eq!(stream.nb_read_frames, expected_frames.to_string());
     stream
 }
 
@@ -269,6 +304,58 @@ async fn decode_audio_hashes(path: &Path) -> Vec<String> {
         .collect()
 }
 
+async fn assert_audio_begins_at_frame(path: &Path, frame: usize) {
+    let output = run_process(
+        Command::new(required_path("ONMARK_FFMPEG"))
+            .args(["-nostdin", "-v", "error", "-i"])
+            .arg(path)
+            .args([
+                "-map", "0:a:0", "-ac", "1", "-ar", "48000", "-f", "s16le", "-",
+            ]),
+    )
+    .await;
+    assert_process_success("audio decoding", &output);
+
+    let start = frame * AUDIO_SAMPLE_RATE / FRAME_RATE;
+    let samples = output.stdout.len() / 2;
+    assert_eq!(output.stdout.len() % 2, 0);
+    assert!(samples > start + AUDIO_START_TOLERANCE_SAMPLES);
+
+    let silence_end = start.saturating_sub(AUDIO_START_TOLERANCE_SAMPLES);
+    assert!(
+        mean_amplitude(&output.stdout[..silence_end * 2]) <= 1,
+        "audio becomes audible before frame {frame}",
+    );
+
+    let audible_start = start + AUDIO_START_TOLERANCE_SAMPLES;
+    let audible_end = audible_start + AUDIO_SAMPLE_RATE / 4;
+    assert!(samples >= audible_end);
+    assert!(
+        mean_amplitude(&output.stdout[audible_start * 2..audible_end * 2])
+            >= MIN_AUDIBLE_MEAN_AMPLITUDE,
+        "audio remains silent after frame {frame}",
+    );
+}
+
+fn mean_amplitude(pcm: &[u8]) -> u64 {
+    assert!(
+        !pcm.is_empty(),
+        "the PCM analysis window must contain samples"
+    );
+
+    let mut total = 0_u64;
+    let mut samples = 0_u64;
+
+    for bytes in pcm.chunks_exact(2) {
+        let sample = i16::from_le_bytes([bytes[0], bytes[1]]);
+        total += u64::from(i32::from(sample).unsigned_abs());
+        samples += 1;
+    }
+
+    assert_eq!(pcm.len() % 2, 0);
+    total / samples
+}
+
 fn frame_hash(record: &str) -> String {
     record
         .rsplit_once(',')
@@ -286,10 +373,10 @@ async fn run_process(command: &mut Command) -> Output {
         .expect("the conformance process starts")
 }
 
-fn assert_success(output: &Output) {
+fn assert_success(output: &Output, expected_frames: usize) {
     assert_process_success("CLI rendering", output);
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains(&format!("Rendered {FRAME_COUNT} frames")));
+    assert!(stdout.contains(&format!("Rendered {expected_frames} frames")));
 }
 
 fn assert_process_success(operation: &str, output: &Output) {
