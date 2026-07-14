@@ -104,11 +104,11 @@ Input freezing separates three identities that must never be conflated:
 
 Timeline solving consumes a catalog from `AssetRef` to `FrozenAssetId` plus
 normalized `AssetMetadata`, all owned by `onmark-core`. Metadata records exact
-artifact duration and, when a selected visual stream exists, its exact stream
-duration, codec, pixel format, and either one exact rational frame rate or
-variable timing.
-Single-frame streams are represented separately because no source rate can be
-observed from one presentation timestamp.
+artifact duration, whether the artifact exposes an audio stream, and, when a
+selected visual stream exists, its exact stream duration, codec, pixel format,
+and either one exact rational frame rate or variable timing. Single-frame
+streams are represented separately because an exact reported frame count of one
+cannot establish a source rate.
 `onmark-media` produces metadata through probing, while a loader or composition
 root hashes and freezes the same bytes.
 ffprobe-specific structures, source paths, and browser URLs remain outside
@@ -217,7 +217,7 @@ Core's internal dependency DAG is CI-enforced: `model` depends on nothing; `synt
 
 The `protocol` module uses `serde` for stable browser and bundle-manifest JSON boundaries. Its optional `schema` feature exposes `schemars` only to repository generation; product binaries do not enable it. All repository-only automation lives under `scripts/`; it is not a product package or a miscellaneous application layer. Its Cargo manifest exists solely to give the Rust schema generator a pinned build-only dependency budget and a stable `cargo xtask` entry point. That binary is consumed only by developers and CI and may depend on core with the `schema` feature, `schemars`, and `serde_json`; product crates and packages never depend on it. The adjacent Node generator may use the pinned schema-to-TypeScript and validation toolchain. `cargo xtask schema` writes the versioned schemas, then invokes that generator. `json-schema-to-typescript` emits reviewable browser types into runtime and the manifest type into bundler; Ajv emits standalone browser validation code at build time. TypeScript checks both generated consumers. Oxlint, a narrow repository-shape check, and Prettier are repository-only development gates and never enter the browser artifact. The browser runtime does not compile schemas dynamically. Exact tool versions are pinned in the lockfiles and `mise.toml`, and CI rejects stale generated artifacts.
 
-`onmark-media` depends on core plus `serde` and `serde_json` for a private ffprobe response boundary. It starts the configured ffprobe executable directly with an argument array, never through a shell; wrappers that leave descendant processes holding the output pipes are outside this executable contract. Process lifetime and retained stdout/stderr bytes are explicitly bounded under that direct-child contract, both pipes are drained concurrently, and explicit shutdown reports process-control failures while `Drop` remains a best-effort termination fallback. Private ffprobe response types are translated once into core-owned `AssetMetadata`; JSON values and third-party error types do not define the stable API, while underlying errors remain available through the standard error source chain for debugging. Gate-one probing requests every presentation timestamp from the selected video stream and proves CFR from exact integer timestamp deltas and the stream time base. The existing one-MiB stdout ceiling also bounds this proof: an artifact whose complete timing evidence does not fit is rejected rather than partially classified.
+`onmark-media` depends on core plus `serde` and `serde_json` for a private ffprobe response boundary. It starts the configured ffprobe executable directly with an argument array, never through a shell; wrappers that leave descendant processes holding the output pipes are outside this executable contract. Process lifetime and retained stdout/stderr bytes are explicitly bounded under that direct-child contract, both pipes are drained concurrently, and explicit shutdown reports process-control failures while `Drop` remains a best-effort termination fallback. Private ffprobe response types are translated once into core-owned `AssetMetadata`; JSON values and third-party error types do not define the stable API, while underlying errors remain available through the standard error source chain for debugging. Gate-one probing requests bounded stream-level facts for every stream: `codec_type` records audio presence and selects the first visual stream, while `nb_frames` identifies stills. It classifies a visual stream as constant only when ffprobe's parseable `avg_frame_rate` and `r_frame_rate` normalize to the same exact rational rate; disagreement or unavailable values are conservatively variable. The one-MiB stdout ceiling therefore remains independent of media duration.
 
 `onmark-render` owns the heavy Chromium and `FFmpeg` dependency budget. It uses
 `chromiumoxide` only as a CDP transport and process launcher, with `tokio` and

@@ -66,6 +66,23 @@ fn incompatible_video_source_matches_stable_diagnostics() {
 }
 
 #[test]
+fn incompatible_audio_source_matches_stable_diagnostics() {
+    let source_path = fixture("timeline", "invalid/incompatible-audio-source.onmark");
+    let expected_path = fixture(
+        "timeline",
+        "invalid/incompatible-audio-source.diagnostics.txt",
+    );
+    let asset = AssetRef::parse("silent.mp4").expect("the fixture asset reference is valid");
+    let metadata = fixture_video_metadata(Duration::parse("2s").expect("the duration is valid"));
+    let frozen = FrozenAsset::new(FrozenAssetId::from_sha256([1; 32]), metadata);
+    let assets = BTreeMap::from([(asset, frozen)]);
+    let report = solve_fixture(&source_path, &assets).expect("the referenced asset was probed");
+
+    assert!(report.timeline().is_none());
+    assert_or_update(&expected_path, &render_diagnostics(report.diagnostics()));
+}
+
+#[test]
 fn frame_domain_overflow_matches_stable_diagnostics() {
     let source_path = fixture("timeline", "invalid/frame-overflow.onmark");
     let expected_path = fixture("timeline", "invalid/frame-overflow.diagnostics.txt");

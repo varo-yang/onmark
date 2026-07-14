@@ -1,13 +1,11 @@
 #!/bin/sh
 
-entries='format=duration:stream=codec_name,pix_fmt,time_base,duration:frame=best_effort_timestamp'
+entries='format=duration:stream=codec_type,codec_name,pix_fmt,duration,avg_frame_rate,r_frame_rate,nb_frames'
 
-if [ "$#" -ne 11 ] || \
+if [ "$#" -ne 8 ] || \
    [ "$1" != "-v" ] || [ "$2" != "error" ] || \
-   [ "$3" != "-select_streams" ] || [ "$4" != "v:0" ] || \
-   [ "$5" != "-show_frames" ] || [ "$6" != "-show_entries" ] || \
-   [ "$7" != "$entries" ] || \
-   [ "$8" != "-of" ] || [ "$9" != "json" ] || [ "${10}" != "--" ]; then
+   [ "$3" != "-show_entries" ] || [ "$4" != "$entries" ] || \
+   [ "$5" != "-of" ] || [ "$6" != "json" ] || [ "$7" != "--" ]; then
   printf 'unexpected ffprobe arguments\n' >&2
   exit 2
 fi
@@ -18,22 +16,28 @@ done
 
 case "${input##*/}" in
   valid.mp4)
-    printf '{"frames":[{"best_effort_timestamp":0},{"best_effort_timestamp":512},{"best_effort_timestamp":1024}],"streams":[{"codec_name":"h264","pix_fmt":"yuv420p","time_base":"1/15360","duration":"2.000000"}],"format":{"duration":"2.500000"}}'
+    printf '{"streams":[{"codec_type":"video","codec_name":"h264","pix_fmt":"yuv420p","duration":"2.000000","avg_frame_rate":"30/1","r_frame_rate":"30/1","nb_frames":"60"}],"format":{"duration":"2.500000"}}'
     ;;
   audio.mp3)
-    printf '{"frames":[],"streams":[],"format":{"duration":"2.500000"}}'
+    printf '{"streams":[{"codec_type":"audio"}],"format":{"duration":"2.500000"}}'
+    ;;
+  audiovisual.mp4)
+    printf '{"streams":[{"codec_type":"video","codec_name":"h264","pix_fmt":"yuv420p","duration":"2.000000","avg_frame_rate":"30/1","r_frame_rate":"30/1","nb_frames":"60"},{"codec_type":"audio"}],"format":{"duration":"2.500000"}}'
+    ;;
+  metadata-only.bin)
+    printf '{"streams":[{"codec_type":"subtitle"}],"format":{"duration":"2.500000"}}'
     ;;
   variable.mp4)
-    printf '{"frames":[{"best_effort_timestamp":0},{"best_effort_timestamp":512},{"best_effort_timestamp":1280}],"streams":[{"codec_name":"h264","pix_fmt":"yuv420p","time_base":"1/15360","duration":"2.000000"}],"format":{"duration":"2.500000"}}'
+    printf '{"streams":[{"codec_type":"video","codec_name":"h264","pix_fmt":"yuv420p","duration":"2.000000","avg_frame_rate":"30/1","r_frame_rate":"60/1","nb_frames":"60"}],"format":{"duration":"2.500000"}}'
     ;;
   still.mp4)
-    printf '{"frames":[{"best_effort_timestamp":0}],"streams":[{"codec_name":"h264","pix_fmt":"yuv420p","time_base":"1/15360","duration":"2.000000"}],"format":{"duration":"2.500000"}}'
+    printf '{"streams":[{"codec_type":"video","codec_name":"h264","pix_fmt":"yuv420p","duration":"2.000000","avg_frame_rate":"0/0","r_frame_rate":"0/0","nb_frames":"1"}],"format":{"duration":"2.500000"}}'
     ;;
   empty-video.mp4)
-    printf '{"frames":[],"streams":[{"codec_name":"h264","pix_fmt":"yuv420p","time_base":"1/15360","duration":"2.000000"}],"format":{"duration":"2.500000"}}'
+    printf '{"streams":[{"codec_type":"video","codec_name":"h264","pix_fmt":"yuv420p","duration":"2.000000","avg_frame_rate":"30/1","r_frame_rate":"30/1","nb_frames":"0"}],"format":{"duration":"2.500000"}}'
     ;;
   invalid-video-duration.mp4)
-    printf '{"frames":[{"best_effort_timestamp":0},{"best_effort_timestamp":512}],"streams":[{"codec_name":"h264","pix_fmt":"yuv420p","time_base":"1/15360","duration":"N/A"}],"format":{"duration":"2.500000"}}'
+    printf '{"streams":[{"codec_type":"video","codec_name":"h264","pix_fmt":"yuv420p","duration":"N/A","avg_frame_rate":"30/1","r_frame_rate":"30/1","nb_frames":"60"}],"format":{"duration":"2.500000"}}'
     ;;
   failed.mp4)
     printf 'probe failed' >&2
@@ -58,9 +62,7 @@ case "${input##*/}" in
     printf '{"format":{"duration":"N/A"}}'
     ;;
   slow.mp4)
-    while :; do
-      :
-    done
+    exec sleep 1 </dev/null >/dev/null 2>&1
     ;;
   large.mp4)
     index=0
@@ -75,7 +77,7 @@ case "${input##*/}" in
       printf '0123456789abcdef' >&2
       index=$((index + 1))
     done
-    printf '{"frames":[{"best_effort_timestamp":0},{"best_effort_timestamp":512}],"streams":[{"codec_name":"h264","pix_fmt":"yuv420p","time_base":"1/15360","duration":"1.000000"}],"format":{"duration":"1.000000"}}'
+    printf '{"streams":[{"codec_type":"video","codec_name":"h264","pix_fmt":"yuv420p","duration":"1.000000","avg_frame_rate":"30/1","r_frame_rate":"30/1","nb_frames":"30"}],"format":{"duration":"1.000000"}}'
     ;;
   *)
     printf 'unexpected fixture input: %s\n' "$input" >&2

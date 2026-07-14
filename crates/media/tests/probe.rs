@@ -1,14 +1,33 @@
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
 
 use onmark_core::compiler;
 use onmark_core::model::{
-    AssetRef, Duration as MediaDuration, FrameRate, FrozenAsset, FrozenAssetId, SourceId, Timebase,
-    VideoTiming,
+    AssetMetadata, AssetRef, Duration as MediaDuration, FrameRate, FrozenAsset, FrozenAssetId,
+    SourceId, Timebase, VideoTiming,
 };
 use onmark_media::{Ffprobe, InvalidFfprobe, ProbeError};
+
+static FIXTURE_PROCESS_LOCK: Mutex<()> = Mutex::new(());
+
+/// One serialized owner of the fixture executable and its process deadline.
+///
+/// The fixture deliberately includes an unresponsive probe. Keeping its
+/// process tests isolated prevents that deadline case from changing unrelated
+/// fixture assertions on a constrained CI worker.
+struct FixtureProbe {
+    ffprobe: Ffprobe,
+    _process_lock: MutexGuard<'static, ()>,
+}
+
+impl FixtureProbe {
+    fn probe(&self, path: &Path) -> Result<AssetMetadata, ProbeError> {
+        self.ffprobe.probe(path)
+    }
+}
 
 #[test]
 fn normalizes_exact_duration_from_ffprobe() {
@@ -31,22 +50,40 @@ fn normalizes_exact_duration_from_ffprobe() {
         video.timing(),
         VideoTiming::Constant(FrameRate::new(30, 1).expect("30 fps is valid")),
     );
+    assert!(!metadata.has_audio_stream());
 }
 
 #[test]
-fn distinguishes_audio_only_and_variable_frame_rate_assets() {
+fn records_audio_presence_independently_of_visual_metadata() {
     let ffprobe = fixture_probe(Duration::from_secs(1), 4_096);
     let audio = ffprobe
         .probe(Path::new("audio.mp3"))
         .expect("the fixture contains no video stream");
+    let audiovisual = ffprobe
+        .probe(Path::new("audiovisual.mp4"))
+        .expect("the fixture contains both required tracks");
+    let metadata_only = ffprobe
+        .probe(Path::new("metadata-only.bin"))
+        .expect("the fixture contains no media track");
+
+    assert!(audio.has_audio_stream());
+    assert!(audio.video_metadata().is_none());
+    assert!(audiovisual.has_audio_stream());
+    assert!(audiovisual.video_metadata().is_some());
+    assert!(!metadata_only.has_audio_stream());
+    assert!(metadata_only.video_metadata().is_none());
+}
+
+#[test]
+fn distinguishes_variable_and_still_video_timing() {
+    let ffprobe = fixture_probe(Duration::from_secs(1), 4_096);
     let variable = ffprobe
         .probe(Path::new("variable.mp4"))
-        .expect("the fixture contains variable frame intervals");
+        .expect("the fixture reports conflicting stream frame rates");
     let still = ffprobe
         .probe(Path::new("still.mp4"))
         .expect("the fixture contains one video frame");
 
-    assert!(audio.video_metadata().is_none());
     assert_eq!(
         variable
             .video_metadata()
@@ -217,12 +254,26 @@ fn drains_but_does_not_retain_output_past_the_limit() {
     }
 }
 
-fn fixture_probe(timeout: Duration, output_limit: usize) -> Ffprobe {
-    Ffprobe::new(fixture("ffprobe"), timeout, output_limit)
-        .expect("the fixture probe limits are valid")
+fn fixture_probe(timeout: Duration, output_limit: usize) -> FixtureProbe {
+    let process_lock = fixture_process_lock();
+    let ffprobe = Ffprobe::new(fixture("ffprobe"), timeout, output_limit)
+        .expect("the fixture probe limits are valid");
+
+    FixtureProbe {
+        ffprobe,
+        _process_lock: process_lock,
+    }
 }
 
-fn probe_error(ffprobe: &Ffprobe, path: &str) -> ProbeError {
+fn fixture_process_lock() -> MutexGuard<'static, ()> {
+    match FIXTURE_PROCESS_LOCK.lock() {
+        Ok(lock) => lock,
+        // A failing assertion must not conceal later independent fixture tests.
+        Err(poisoned) => poisoned.into_inner(),
+    }
+}
+
+fn probe_error(ffprobe: &FixtureProbe, path: &str) -> ProbeError {
     ffprobe
         .probe(Path::new(path))
         .expect_err("the fixture response is intentionally invalid")

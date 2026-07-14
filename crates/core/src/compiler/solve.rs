@@ -4,8 +4,8 @@ use std::fmt;
 
 use crate::diagnostics::{Diagnostic, DiagnosticCode, Diagnostics};
 use crate::model::{
-    AssetRef, CueId, Duration, EventRef, FrameCount, FrameIndex, FrameInterval, FrozenAsset,
-    FrozenAssetId, Rounding, SourceSpan, Timebase,
+    AssetMetadata, AssetRef, CueId, Duration, EventRef, FrameCount, FrameIndex, FrameInterval,
+    FrozenAsset, FrozenAssetId, Rounding, SourceSpan, Timebase, VideoMetadata,
 };
 use crate::timeline::{
     TimelineContent, TimelineElement, TimelineEvent, TimelineIr, TimelineOverlay, TimelineScene,
@@ -302,16 +302,11 @@ impl<'a> Solver<'a> {
             .assets
             .get(&asset_ref)
             .ok_or_else(|| SolveError::MissingFrozenAsset(asset_ref.clone()))?;
-        let duration = match track {
-            MediaTrack::Audio => frozen.metadata().duration(),
-            MediaTrack::Video => {
-                let Some(video) = frozen.metadata().video_metadata() else {
-                    self.diagnostics
-                        .push(incompatible_video_source(asset_span, &asset_ref));
-                    return Ok(None);
-                };
-                video.duration()
-            }
+        let Some(duration) = track.duration(frozen.metadata()) else {
+            self.diagnostics.push(incompatible_media_source(
+                asset_span, &asset_ref, &element, track,
+            ));
+            return Ok(None);
         };
         let Some((start, start_reason)) = self.prepare_delay(delay) else {
             return Ok(None);
@@ -477,6 +472,15 @@ impl<'a> Solver<'a> {
 enum MediaTrack {
     Audio,
     Video,
+}
+
+impl MediaTrack {
+    fn duration(self, metadata: &AssetMetadata) -> Option<Duration> {
+        match self {
+            Self::Audio => metadata.has_audio_stream().then_some(metadata.duration()),
+            Self::Video => metadata.video_metadata().map(VideoMetadata::duration),
+        }
+    }
 }
 
 struct ExplicitDuration {
@@ -682,14 +686,29 @@ fn missing_media_source(element: &ResolvedElement) -> Diagnostic {
     .expect("a formatted media-source help is non-blank")
 }
 
-fn incompatible_video_source(primary: SourceSpan, asset: &AssetRef) -> Diagnostic {
+fn incompatible_media_source(
+    primary: SourceSpan,
+    asset: &AssetRef,
+    element: &ResolvedElement,
+    track: MediaTrack,
+) -> Diagnostic {
+    let (stream, asset_kind) = match track {
+        MediaTrack::Audio => ("audio", "an audio"),
+        MediaTrack::Video => ("visual", "a video"),
+    };
     Diagnostic::new(
         DiagnosticCode::IncompatibleMediaSource,
         primary,
-        format!("<video> source \"{asset}\" has no visual stream"),
+        format!(
+            "<{}> source \"{asset}\" has no {stream} stream",
+            element.kind()
+        ),
     )
     .expect("a formatted media-track message is non-blank")
-    .with_help("choose a video asset for <video>")
+    .with_help(format!(
+        "choose {asset_kind} asset for <{}>",
+        element.kind()
+    ))
     .expect("a formatted media-track help is non-blank")
 }
 

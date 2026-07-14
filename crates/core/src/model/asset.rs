@@ -43,25 +43,43 @@ impl fmt::Display for FrozenAssetId {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AssetMetadata {
     duration: Duration,
-    video: Option<VideoMetadata>,
+    tracks: MediaTracks,
 }
 
 impl AssetMetadata {
-    /// Creates metadata for an artifact without a visual stream.
+    /// Creates metadata for an artifact with an audio stream and no visual stream.
     #[must_use]
     pub const fn audio(duration: Duration) -> Self {
         Self {
             duration,
-            video: None,
+            tracks: MediaTracks::Audio,
         }
     }
 
-    /// Creates metadata for an artifact with one selected visual stream.
+    /// Creates metadata for an artifact with one visual stream and no audio stream.
     #[must_use]
     pub const fn video(duration: Duration, video: VideoMetadata) -> Self {
         Self {
             duration,
-            video: Some(video),
+            tracks: MediaTracks::Video(video),
+        }
+    }
+
+    /// Creates metadata for an artifact with both audio and visual streams.
+    #[must_use]
+    pub const fn audio_video(duration: Duration, video: VideoMetadata) -> Self {
+        Self {
+            duration,
+            tracks: MediaTracks::AudioVideo(video),
+        }
+    }
+
+    /// Creates metadata for an artifact with neither audio nor visual streams.
+    #[must_use]
+    pub const fn without_media_tracks(duration: Duration) -> Self {
+        Self {
+            duration,
+            tracks: MediaTracks::None,
         }
     }
 
@@ -74,8 +92,31 @@ impl AssetMetadata {
     /// Returns normalized facts for the selected visual stream, when present.
     #[must_use]
     pub const fn video_metadata(&self) -> Option<&VideoMetadata> {
-        self.video.as_ref()
+        match &self.tracks {
+            MediaTracks::Video(video) | MediaTracks::AudioVideo(video) => Some(video),
+            MediaTracks::None | MediaTracks::Audio => None,
+        }
     }
+
+    /// Returns whether probing found at least one audio stream.
+    #[must_use]
+    pub const fn has_audio_stream(&self) -> bool {
+        matches!(self.tracks, MediaTracks::Audio | MediaTracks::AudioVideo(_))
+    }
+}
+
+/// The track combinations that matter to Gate-one compilation.
+///
+/// This remains private because callers ask only the two questions relevant to
+/// their element: whether an audio stream exists and whether normalized visual
+/// metadata exists. One closed probe fact is clearer than independently
+/// mutable audio and video flags.
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum MediaTracks {
+    None,
+    Audio,
+    Video(VideoMetadata),
+    AudioVideo(VideoMetadata),
 }
 
 /// Normalized facts for the visual stream selected during probing.
@@ -140,14 +181,14 @@ impl VideoMetadata {
     }
 }
 
-/// Exact timing shape observed across every reported source frame.
+/// Timing shape inferred from ffprobe's stream-level frame facts.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum VideoTiming {
-    /// Every consecutive presentation timestamp has the same interval.
+    /// ffprobe reports matching average and nominal rational frame rates.
     Constant(FrameRate),
-    /// At least two consecutive presentation intervals differ.
+    /// ffprobe reports disagreeing or unavailable stream frame rates.
     Variable,
-    /// The stream contains one frame and therefore has no observable rate.
+    /// ffprobe reports exactly one frame and therefore no observable rate.
     Still,
 }
 
@@ -215,7 +256,7 @@ impl FrozenAsset {
 
 #[cfg(test)]
 mod tests {
-    use super::{FrozenAssetId, InvalidVideoMetadata, VideoMetadata, VideoTiming};
+    use super::{AssetMetadata, FrozenAssetId, InvalidVideoMetadata, VideoMetadata, VideoTiming};
     use crate::model::{Duration, FrameRate};
 
     #[test]
@@ -251,5 +292,26 @@ mod tests {
             ),
             Err(InvalidVideoMetadata::InvalidPixelFormat),
         );
+    }
+
+    #[test]
+    fn asset_metadata_preserves_closed_track_combinations() {
+        let duration = Duration::from_nanos(1);
+        let rate = FrameRate::new(30, 1).expect("30 fps is valid");
+        let video = VideoMetadata::new(duration, "h264", "yuv420p", VideoTiming::Constant(rate))
+            .expect("the video metadata is valid");
+        let audio = AssetMetadata::audio(duration);
+        let video_only = AssetMetadata::video(duration, video.clone());
+        let audio_video = AssetMetadata::audio_video(duration, video);
+        let without_tracks = AssetMetadata::without_media_tracks(duration);
+
+        assert!(audio.has_audio_stream());
+        assert!(audio.video_metadata().is_none());
+        assert!(!video_only.has_audio_stream());
+        assert!(video_only.video_metadata().is_some());
+        assert!(audio_video.has_audio_stream());
+        assert!(audio_video.video_metadata().is_some());
+        assert!(!without_tracks.has_audio_stream());
+        assert!(without_tracks.video_metadata().is_none());
     }
 }
