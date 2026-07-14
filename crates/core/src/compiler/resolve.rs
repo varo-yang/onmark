@@ -477,7 +477,7 @@ fn invalid_asset_reference(attribute: &Attribute, reason: InvalidAssetRef) -> Di
     )
     .expect("a formatted invalid-attribute message is non-blank")
     .with_help(format!(
-        "provide a non-empty value for \"{}\"",
+        "provide a screenplay-relative path for \"{}\"",
         attribute.name()
     ))
     .expect("a formatted invalid-attribute help is non-blank")

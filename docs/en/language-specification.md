@@ -71,7 +71,7 @@ All resolutions preserve provenance in `TimingReason`, allowing the compiler to 
 
 ## Voice-over
 
-`vo` pairs authored inscription with a frozen media artifact. Text supports reading, review, subtitles, and editing; `src` supplies rendered audio and measured duration. The referenced artifact must expose an audio stream; otherwise solving reports `ONM-ASSET-002` at `src`. TTS belongs upstream. The compiler is offline and deterministic, and content hashes detect stale text/artifact pairs. Gate one materializes each solved voice-over into the private render root and mixes it outside browser capture at its solved frame interval. The presentation does not play, delay, or mix voice-over audio.
+`vo` pairs authored inscription with a frozen media artifact. Text supports reading, review, subtitles, and editing; `src` supplies rendered audio and measured duration. The reference is a screenplay-relative portable path: it uses `/` separators and cannot be absolute, contain `..`, empty or `.` components, backslashes, or a platform prefix. The referenced artifact must expose an audio stream; otherwise solving reports `ONM-ASSET-002` at `src`. TTS belongs upstream. The compiler is offline and deterministic, and content hashes detect stale text/artifact pairs. Gate one materializes each solved voice-over into the private render root and mixes it outside browser capture at its solved frame interval. The presentation does not play, delay, or mix voice-over audio.
 
 ## IDs and references
 

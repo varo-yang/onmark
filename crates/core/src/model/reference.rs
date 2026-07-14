@@ -55,15 +55,19 @@ pub enum EventRef {
 pub struct AssetRef(Box<str>);
 
 impl AssetRef {
-    /// Parses an opaque authored media reference.
+    /// Parses a screenplay-relative portable media reference.
     ///
     /// # Errors
     ///
-    /// Returns [`InvalidAssetRef::Empty`] when no artifact was authored.
+    /// Returns an error when the reference is empty or escapes the screenplay
+    /// directory through an absolute or parent path.
     pub fn parse(value: impl Into<Box<str>>) -> Result<Self, InvalidAssetRef> {
         let value = value.into();
         if value.is_empty() {
             return Err(InvalidAssetRef::Empty);
+        }
+        if !is_screenplay_relative(&value) {
+            return Err(InvalidAssetRef::NotScreenplayRelative);
         }
         Ok(Self(value))
     }
@@ -86,15 +90,34 @@ impl fmt::Display for AssetRef {
 pub enum InvalidAssetRef {
     /// No artifact reference was authored.
     Empty,
+    /// The reference is absolute or leaves the screenplay directory.
+    NotScreenplayRelative,
 }
 
 impl fmt::Display for InvalidAssetRef {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("asset reference cannot be empty")
+        let message = match self {
+            Self::Empty => "asset reference cannot be empty",
+            Self::NotScreenplayRelative => {
+                "asset reference must be a screenplay-relative portable path"
+            }
+        };
+        formatter.write_str(message)
     }
 }
 
 impl Error for InvalidAssetRef {}
+
+fn is_screenplay_relative(value: &str) -> bool {
+    !value.starts_with('/')
+        && !value.starts_with('\\')
+        && !value.contains('\\')
+        && !value.contains(':')
+        && !value.bytes().any(|byte| byte == 0)
+        && value
+            .split('/')
+            .all(|component| !matches!(component, "" | "." | ".."))
+}
 
 #[cfg(test)]
 mod tests {
@@ -113,5 +136,16 @@ mod tests {
             "product clip.mp4",
         );
         assert_eq!(AssetRef::parse(""), Err(InvalidAssetRef::Empty));
+    }
+
+    #[test]
+    fn rejects_asset_paths_that_leave_the_screenplay_directory() {
+        for value in ["../outside.mp4", "/absolute.mp4", r"C:\\absolute.mp4"] {
+            assert_eq!(
+                AssetRef::parse(value),
+                Err(InvalidAssetRef::NotScreenplayRelative),
+                "{value:?} must remain inside the screenplay directory",
+            );
+        }
     }
 }

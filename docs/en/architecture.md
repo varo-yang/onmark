@@ -97,16 +97,16 @@ Structural binding and attribute/reference resolution aggregate authored diagnos
 
 Input freezing separates three identities that must never be conflated:
 
-- `AssetRef` is the logical spelling authored in the screenplay;
+- `AssetRef` is the screenplay-relative portable path authored in the screenplay;
 - `FrozenAssetId` identifies the immutable bytes that were probed and compiled;
 - a materialized asset is a worker-local path or browser URL for those exact
   bytes.
 
 Timeline solving consumes a catalog from `AssetRef` to `FrozenAssetId` plus
 normalized `AssetMetadata`, all owned by `onmark-core`. Metadata records exact
-artifact duration, whether the artifact exposes an audio stream, and, when a
-selected visual stream exists, its exact stream duration, codec, pixel format,
-and either one exact rational frame rate or variable timing. Single-frame
+artifact duration and, for each selected audio or visual stream, its exact
+stream duration. Visual metadata also records codec, pixel format, and either
+one exact rational frame rate or variable timing. Single-frame
 streams are represented separately because an exact reported frame count of one
 cannot establish a source rate.
 `onmark-media` produces metadata through probing, while a loader or composition

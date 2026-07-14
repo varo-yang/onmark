@@ -68,10 +68,51 @@ fn records_audio_presence_independently_of_visual_metadata() {
 
     assert!(audio.has_audio_stream());
     assert!(audio.video_metadata().is_none());
+    assert_eq!(
+        audio
+            .audio_metadata()
+            .expect("the audio fixture has an audio stream")
+            .duration(),
+        MediaDuration::from_nanos(2_500_000_000),
+    );
     assert!(audiovisual.has_audio_stream());
     assert!(audiovisual.video_metadata().is_some());
+    assert_eq!(
+        audiovisual
+            .audio_metadata()
+            .expect("the audiovisual fixture has an audio stream")
+            .duration(),
+        MediaDuration::from_nanos(1_500_000_000),
+    );
     assert!(!metadata_only.has_audio_stream());
     assert!(metadata_only.video_metadata().is_none());
+}
+
+#[test]
+fn derives_artifact_duration_from_streams_when_format_duration_is_absent() {
+    let ffprobe = fixture_probe(Duration::from_secs(1), 4_096);
+    let metadata = ffprobe
+        .probe(Path::new("stream-duration-only.mp4"))
+        .expect("stream durations are sufficient when format duration is absent");
+
+    assert_eq!(
+        metadata.duration(),
+        MediaDuration::from_nanos(2_000_000_000)
+    );
+    assert_eq!(
+        metadata
+            .audio_metadata()
+            .expect("the fixture has an audio stream")
+            .duration(),
+        MediaDuration::from_nanos(1_500_000_000),
+    );
+    assert_eq!(
+        metadata
+            .video_metadata()
+            .expect("the fixture has a video stream")
+            .duration(),
+        MediaDuration::from_nanos(2_000_000_000),
+    );
 }
 
 #[test]

@@ -195,7 +195,7 @@ parse → bind structure → resolve attributes/references → solve Timeline IR
 
 结构 bind 与属性/引用 resolve 都会在构建候选产物的同时聚合创作诊断。只要存在 error，相位报告就不公开对应阶段值，避免被拒结构或恢复默认值被下一阶段误当成编译事实；warning 不阻塞产物。
 
-Timeline solve 消费由 `onmark-core` 拥有的 `AssetRef → FrozenAsset` catalog；其中 `FrozenAsset` 绑定不可变身份与同一字节产生的规范化 `AssetMetadata`。metadata 记录精确素材时长、素材是否含有音轨；若存在选中的视觉流，还会记录精确 stream duration、codec、pixel format，以及一个精确有理帧率或 variable timing。单帧流会单独建模，因为确切的单帧计数无法证明 source rate。`onmark-media` 通过探测生产 metadata，loader 或 composition root 负责冻结同一份字节；ffprobe 专属结构、路径与失败不得进入 core。引用素材若不在 catalog 中，属于 typed integration failure，而不是 authored diagnostic。媒体元素缺少 authored source 时仍可通过静态 resolve，但无法产出可渲染 Timeline IR，并在 solve 阶段收到 authored asset diagnostic。
+Timeline solve 消费由 `onmark-core` 拥有的 `AssetRef → FrozenAsset` catalog；其中 `FrozenAsset` 绑定不可变身份与同一字节产生的规范化 `AssetMetadata`。`AssetRef` 是 screenplay-relative portable path，只允许 `/` 分隔，不能是绝对路径，不能含 `..`、空组件、`.`、反斜杠或平台前缀。metadata 记录精确素材时长，以及选中的音频和视觉流各自的精确 stream duration；视觉流还会记录 codec、pixel format，以及一个精确有理帧率或 variable timing。单帧流会单独建模，因为确切的单帧计数无法证明 source rate。`onmark-media` 通过探测生产 metadata，loader 或 composition root 负责冻结同一份字节；ffprobe 专属结构、路径与失败不得进入 core。引用素材若不在 catalog 中，属于 typed integration failure，而不是 authored diagnostic。媒体元素缺少 authored source 时仍可通过静态 resolve，但无法产出可渲染 Timeline IR，并在 solve 阶段收到 authored asset diagnostic。
 
 诊断是语言产品的一部分，不是日志。每条创作诊断必须包含稳定 code、源码 span、直接原因、相关节点，并在存在确定修法时给出可执行建议。建议面向人和 LLM 使用源码词汇，例如“定义 `cue:offer`，或将该标题改为相对当前 shot 的 `delay`”，不能只暴露求解器术语。
 
@@ -524,7 +524,7 @@ handwritten TypeScript authoring API → screenplay source → Rust compiler
 
 ## 10. 产品表面与可观测性
 
-Gate 一当前唯一承诺的命令是：
+Gate 一唯一承诺的命令是：
 
 ```text
 onmark render film.onmark -o film.mp4

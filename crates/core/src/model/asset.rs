@@ -50,9 +50,16 @@ impl AssetMetadata {
     /// Creates metadata for an artifact with an audio stream and no visual stream.
     #[must_use]
     pub const fn audio(duration: Duration) -> Self {
+        Self::audio_with_stream_duration(duration, duration)
+    }
+
+    /// Creates metadata for an audio artifact whose stream has its own exact
+    /// duration.
+    #[must_use]
+    pub const fn audio_with_stream_duration(duration: Duration, audio_duration: Duration) -> Self {
         Self {
             duration,
-            tracks: MediaTracks::Audio,
+            tracks: MediaTracks::Audio(AudioMetadata::new(audio_duration)),
         }
     }
 
@@ -65,12 +72,17 @@ impl AssetMetadata {
         }
     }
 
-    /// Creates metadata for an artifact with both audio and visual streams.
+    /// Creates metadata for an artifact with independently measured audio and
+    /// visual streams.
     #[must_use]
-    pub const fn audio_video(duration: Duration, video: VideoMetadata) -> Self {
+    pub const fn audio_video(
+        duration: Duration,
+        audio: AudioMetadata,
+        video: VideoMetadata,
+    ) -> Self {
         Self {
             duration,
-            tracks: MediaTracks::AudioVideo(video),
+            tracks: MediaTracks::AudioVideo { audio, video },
         }
     }
 
@@ -93,15 +105,24 @@ impl AssetMetadata {
     #[must_use]
     pub const fn video_metadata(&self) -> Option<&VideoMetadata> {
         match &self.tracks {
-            MediaTracks::Video(video) | MediaTracks::AudioVideo(video) => Some(video),
-            MediaTracks::None | MediaTracks::Audio => None,
+            MediaTracks::Video(video) | MediaTracks::AudioVideo { video, .. } => Some(video),
+            MediaTracks::None | MediaTracks::Audio(_) => None,
+        }
+    }
+
+    /// Returns normalized facts for the selected audio stream, when present.
+    #[must_use]
+    pub const fn audio_metadata(&self) -> Option<&AudioMetadata> {
+        match &self.tracks {
+            MediaTracks::Audio(audio) | MediaTracks::AudioVideo { audio, .. } => Some(audio),
+            MediaTracks::None | MediaTracks::Video(_) => None,
         }
     }
 
     /// Returns whether probing found at least one audio stream.
     #[must_use]
     pub const fn has_audio_stream(&self) -> bool {
-        matches!(self.tracks, MediaTracks::Audio | MediaTracks::AudioVideo(_))
+        self.audio_metadata().is_some()
     }
 }
 
@@ -114,9 +135,32 @@ impl AssetMetadata {
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum MediaTracks {
     None,
-    Audio,
+    Audio(AudioMetadata),
     Video(VideoMetadata),
-    AudioVideo(VideoMetadata),
+    AudioVideo {
+        audio: AudioMetadata,
+        video: VideoMetadata,
+    },
+}
+
+/// Normalized facts for the selected audio stream.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct AudioMetadata {
+    duration: Duration,
+}
+
+impl AudioMetadata {
+    /// Creates audio metadata from an exact stream duration.
+    #[must_use]
+    pub const fn new(duration: Duration) -> Self {
+        Self { duration }
+    }
+
+    /// Returns the exact selected-stream duration.
+    #[must_use]
+    pub const fn duration(&self) -> Duration {
+        self.duration
+    }
 }
 
 /// Normalized facts for the visual stream selected during probing.
@@ -256,7 +300,10 @@ impl FrozenAsset {
 
 #[cfg(test)]
 mod tests {
-    use super::{AssetMetadata, FrozenAssetId, InvalidVideoMetadata, VideoMetadata, VideoTiming};
+    use super::{
+        AssetMetadata, AudioMetadata, FrozenAssetId, InvalidVideoMetadata, VideoMetadata,
+        VideoTiming,
+    };
     use crate::model::{Duration, FrameRate};
 
     #[test]
@@ -302,7 +349,7 @@ mod tests {
             .expect("the video metadata is valid");
         let audio = AssetMetadata::audio(duration);
         let video_only = AssetMetadata::video(duration, video.clone());
-        let audio_video = AssetMetadata::audio_video(duration, video);
+        let audio_video = AssetMetadata::audio_video(duration, AudioMetadata::new(duration), video);
         let without_tracks = AssetMetadata::without_media_tracks(duration);
 
         assert!(audio.has_audio_stream());
@@ -313,5 +360,21 @@ mod tests {
         assert!(audio_video.video_metadata().is_some());
         assert!(!without_tracks.has_audio_stream());
         assert!(without_tracks.video_metadata().is_none());
+    }
+
+    #[test]
+    fn audio_metadata_preserves_a_stream_duration_distinct_from_the_artifact() {
+        let artifact = Duration::from_nanos(2);
+        let stream = Duration::from_nanos(1);
+        let metadata = AssetMetadata::audio_with_stream_duration(artifact, stream);
+
+        assert_eq!(metadata.duration(), artifact);
+        assert_eq!(
+            metadata
+                .audio_metadata()
+                .expect("the metadata has an audio stream")
+                .duration(),
+            stream,
+        );
     }
 }

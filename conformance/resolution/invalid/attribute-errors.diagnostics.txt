@@ -12,7 +12,7 @@ ONM-ATTR-002 error @0:173..190 element <cue> requires the "id" attribute
 ONM-TIME-001 error @0:231..238 duration "3frames" is invalid: duration unit must be s or ms
   help: use an exact duration such as 3s, 500ms, or 1.5s
 ONM-ATTR-003 error @0:259..259 attribute "src" is invalid: asset reference cannot be empty
-  help: provide a non-empty value for "src"
+  help: provide a screenplay-relative path for "src"
 ONM-TIME-001 error @0:268..279 duration "1.0000001ms" is invalid: duration exceeds the supported fractional precision
   help: use an exact duration such as 3s, 500ms, or 1.5s
 ONM-ATTR-001 error @0:281..288 attribute "mystery" is not allowed on <video>

@@ -4,8 +4,8 @@ use std::fmt;
 
 use crate::diagnostics::{Diagnostic, DiagnosticCode, Diagnostics};
 use crate::model::{
-    AssetMetadata, AssetRef, CueId, Duration, EventRef, FrameCount, FrameIndex, FrameInterval,
-    FrozenAsset, FrozenAssetId, Rounding, SourceSpan, Timebase, VideoMetadata,
+    AssetMetadata, AssetRef, AudioMetadata, CueId, Duration, EventRef, FrameCount, FrameIndex,
+    FrameInterval, FrozenAsset, FrozenAssetId, Rounding, SourceSpan, Timebase, VideoMetadata,
 };
 use crate::timeline::{
     TimelineContent, TimelineElement, TimelineEvent, TimelineIr, TimelineOverlay, TimelineScene,
@@ -477,7 +477,7 @@ enum MediaTrack {
 impl MediaTrack {
     fn duration(self, metadata: &AssetMetadata) -> Option<Duration> {
         match self {
-            Self::Audio => metadata.has_audio_stream().then_some(metadata.duration()),
+            Self::Audio => metadata.audio_metadata().map(AudioMetadata::duration),
             Self::Video => metadata.video_metadata().map(VideoMetadata::duration),
         }
     }

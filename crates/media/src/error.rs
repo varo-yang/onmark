@@ -55,7 +55,7 @@ pub enum ProbeError {
     Failed(ProbeFailure),
     /// stdout was not a valid ffprobe JSON response.
     InvalidResponse(ProbeFailure),
-    /// ffprobe did not report a format duration.
+    /// ffprobe did not report a format or usable stream duration.
     MissingDuration(ProbeFailure),
     /// The reported duration was not an exact supported decimal.
     InvalidDuration(ProbeFailure),
@@ -147,7 +147,7 @@ impl ProbeError {
     pub(crate) fn missing_duration(path: &Path) -> Self {
         Self::MissingDuration(ProbeFailure::new(
             path,
-            "ffprobe response contains no format duration",
+            "ffprobe response contains no format or usable stream duration",
         ))
     }
 
