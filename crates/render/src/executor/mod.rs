@@ -422,13 +422,13 @@ async fn dispatch_expected(
 }
 
 fn unexpected_event(output: &Path, response: &BrowserResponse) -> RenderError {
-    let message = match response.event() {
-        BrowserEvent::Failed(failure) => {
-            format!("browser runtime failed: {}", failure.message())
-        }
-        _ => "browser response does not match the requested phase".to_owned(),
-    };
-    RenderError::protocol(output, message)
+    match response.event() {
+        BrowserEvent::Failed(failure) => RenderError::runtime_failure(output, failure),
+        _ => RenderError::protocol(
+            output,
+            "browser response does not match the requested phase",
+        ),
+    }
 }
 
 fn output_frame_count(plan: &BrowserPlan) -> Option<u64> {

@@ -3,7 +3,13 @@ use std::fmt;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use onmark_core::protocol::ProtocolFailure;
+
 use crate::{BrowserError, EncodeError};
+
+// A valid wire failure can name 256 resources. Keep terminal diagnostics
+// actionable without allowing one browser response to dominate them.
+const DISPLAYED_PENDING_RESOURCE_LIMIT: usize = 8;
 
 /// Stable category for a local render failure.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -76,6 +82,10 @@ impl RenderError {
         Self::new(RenderErrorKind::Protocol, output, message)
     }
 
+    pub(super) fn runtime_failure(output: &Path, failure: &ProtocolFailure) -> Self {
+        Self::protocol(output, runtime_failure_message(failure))
+    }
+
     pub(super) fn output_io(
         output: &Path,
         message: impl Into<Box<str>>,
@@ -88,6 +98,34 @@ impl RenderError {
             source: Some(Box::new(RenderErrorSource::Io(source))),
         }
     }
+}
+
+fn runtime_failure_message(failure: &ProtocolFailure) -> Box<str> {
+    let mut message = format!("browser runtime failed: {}", failure.message());
+    let mut resources = failure.pending_resources();
+    let resource_count = resources.len();
+    if resource_count == 0 {
+        return message.into();
+    }
+
+    message.push_str("; pending resources: ");
+    for (index, resource) in resources
+        .by_ref()
+        .take(DISPLAYED_PENDING_RESOURCE_LIMIT)
+        .enumerate()
+    {
+        if index > 0 {
+            message.push_str(", ");
+        }
+        message.push_str(resource);
+    }
+    if resource_count > DISPLAYED_PENDING_RESOURCE_LIMIT {
+        message.push_str("; and ");
+        message.push_str(&(resource_count - DISPLAYED_PENDING_RESOURCE_LIMIT).to_string());
+        message.push_str(" more");
+    }
+
+    message.into()
 }
 
 impl fmt::Display for RenderError {
@@ -126,5 +164,49 @@ impl Error for RenderErrorSource {
             Self::Encoder(source) => source.source(),
             Self::Io(source) => source.source(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use onmark_core::protocol::{ProtocolFailure, ProtocolFailureCode};
+
+    use super::{DISPLAYED_PENDING_RESOURCE_LIMIT, RenderError};
+
+    #[test]
+    fn runtime_failure_reports_pending_resources() {
+        let failure = ProtocolFailure::new(
+            ProtocolFailureCode::ReadinessTimeout,
+            "a required resource did not stabilize",
+            vec!["video:hero".into(), "font:inter".into()],
+        )
+        .expect("the fixture failure must satisfy the protocol contract");
+
+        let error = RenderError::runtime_failure(Path::new("output.mp4"), &failure);
+
+        assert_eq!(
+            error.to_string(),
+            "output.mp4: browser runtime failed: a required resource did not stabilize; \
+             pending resources: video:hero, font:inter",
+        );
+    }
+
+    #[test]
+    fn runtime_failure_bounds_pending_resource_rendering() {
+        let resources = (0..=DISPLAYED_PENDING_RESOURCE_LIMIT)
+            .map(|index| format!("resource:{index}").into())
+            .collect();
+        let failure = ProtocolFailure::new(
+            ProtocolFailureCode::ReadinessTimeout,
+            "a required resource did not stabilize",
+            resources,
+        )
+        .expect("the fixture failure must satisfy the protocol contract");
+
+        let error = RenderError::runtime_failure(Path::new("output.mp4"), &failure);
+
+        assert!(error.to_string().ends_with("resource:7; and 1 more"));
     }
 }

@@ -1,6 +1,6 @@
 # Onmark Presentation Contract
 
-> Status: Gate-one browser authoring contract.
+> Status: Gate-one browser authoring contract, reused unchanged by Gate two.
 
 Onmark uses two authored files at Gate one:
 
@@ -44,6 +44,41 @@ installRuntimeHost(adapter);
 unless `--presentation` names another entry. The bundler compiles that entry,
 injects the pinned Onmark packages, emits one immutable browser artifact, and
 records it in a Rust-owned bundle manifest.
+
+## Public adapter lifecycle
+
+The runtime has one browser-effect boundary. A presentation installs an
+implementation through `installRuntimeHost(adapter)`:
+
+```ts
+interface RuntimeAdapter {
+  load(plan: RuntimePlan): Promise<void>;
+  prepare(frame: RuntimeFrame): Promise<void>;
+  seek(frame: RuntimeFrame): Promise<void>;
+  dispose(): Promise<void>;
+}
+```
+
+`load` receives one recursively frozen snapshot of the accepted `BrowserPlan`.
+It may create resources, but it must not retain a mutable author-owned plan.
+`prepare` runs exactly once at `plan.evaluation.start` and must resolve only
+when resources needed at that frame are stable. `seek` runs only after a
+successful prepare and must resolve only when its exact requested frame is
+stable for capture. `dispose` is terminal even if cleanup reports a failure.
+
+`seek` does not accept a free time `t`. It receives a `RuntimeFrame`:
+
+```ts
+interface RuntimeFrame {
+  readonly index: number;
+  readonly timeSeconds: number;
+}
+```
+
+`index` is the absolute, exact frame identity selected by native execution.
+`timeSeconds` is a derived browser-API projection of that frame through the
+Rust-owned rational rate. It is useful for media APIs only; it must not become
+an alternate scheduling clock or a source of timing decisions.
 
 ## Runtime handshake
 
@@ -93,6 +128,47 @@ The default facade is deliberately small. A presentation can implement
 `PresentationBindings` directly for Canvas, WebGL, or custom DOM, but the same
 rules apply: bindings create browser resources, `setVisible` applies visibility,
 and `dispose` releases resources terminally.
+
+More precisely, the production adapter calls `bindVideo(placement, index)` and
+`bindOverlay(placement, index)` once during `load`. A video binding supplies
+the browser element, its materialized source, visibility effect, and terminal
+cleanup. An overlay binding supplies visibility and terminal cleanup. The
+`index` is the placement's stable position in the frozen plan; it is useful for
+DOM identity and is not a timing coordinate. On every `seek`, the runtime first
+hides videos, selects an admitted source frame from the authoritative output
+frame, presents ready videos, then applies solved overlay visibility. Bindings
+own those effects, not interval arithmetic.
+
+## Plan facts, component selection, and props
+
+The current language does **not** have `presents`, `definePresentation`, or a
+screenplay-to-presentation props channel. `onmark render` selects one
+`presentation.ts` through `--presentation` or same-directory discovery. The
+only dynamic facts delivered to that entry are the Rust-owned `BrowserPlan`
+facts sent by `Load(plan)`: frame rate, evaluation and output intervals, video
+placements, and overlay placements. Static values imported by
+`presentation.ts` are bundled program code, not screenplay props.
+
+This absence is intentional rather than an undocumented convention. A future
+presentation-selection or props feature must define, together, its screenplay
+spelling, typed schema and defaults, canonical wire encoding, source spans and
+diagnostics, bundle/cache identity, and interaction with temporal capability
+declarations. It also needs controlled language-evaluation evidence. Until that
+work exists, a presentation must not read author intent from globals, URL
+parameters, a mutable side channel, or an invented `presents` attribute.
+
+## Temporal capabilities
+
+`stateless`, `warmup`, and `sequential` are architectural categories, not a
+public adapter API or screenplay annotation today. The production adapter is
+the only adapter whose frame behavior is exercised by Gate-one and Gate-two
+conformance. A custom adapter therefore gains no implied random-seek or
+partitioning guarantee merely by implementing `PresentationBindings`.
+
+When temporal capabilities become public, they will be declared by
+`@onmark/runtime`, not duplicated in authoring or TypeScript timing code. Their
+meaning, proof obligations, scheduling effect, and conformance tests must land
+with the API; an arbitrary string or boolean is not a capability contract.
 
 ## Assets
 
@@ -147,6 +223,7 @@ idempotent where the browser API allows it.
 ## Non-goals
 
 Gate one does not provide a presentation development server, watch mode,
-plugin API, component registry, cross-scene persistence, free `begin/end/until`
-timing, or browser-side render planning. Those capabilities require explicit
-language, runtime, and evaluation evidence before they become public contract.
+plugin API, component registry, screenplay-selected components or props,
+cross-scene persistence, free `begin/end/until` timing, or browser-side render
+planning. Those capabilities require explicit language, runtime, and evaluation
+evidence before they become public contract.

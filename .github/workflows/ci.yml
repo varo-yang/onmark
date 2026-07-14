@@ -142,7 +142,7 @@ jobs:
           pnpm --filter @onmark/bundler build
           chmod +x packages/bundler/dist/src/command.js
 
-      - name: Configure Gate-one tool path
+      - name: Configure real-process tool paths
         env:
           ONMARK_CHROME_BINARY: ${{ steps.chrome.outputs.chrome-path }}
         run: |

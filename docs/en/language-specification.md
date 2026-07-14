@@ -140,9 +140,32 @@ Bad:
 constraint graph node 17 is unsatisfied
 ```
 
+## Presentation selection and props
+
+`presentation.ts` is selected by the render command, either through
+`--presentation` or same-directory discovery. The screenplay has no `presents`
+attribute, `definePresentation` declaration, or typed props channel in the
+current language. Its solved facts reach the browser only as the Rust-owned
+`BrowserPlan` delivered through the runtime `Load(plan)` command.
+
+This is a language boundary, not an undocumented implementation detail. A
+future screenplay-selected presentation or props feature must define its
+spelling, typed schema and defaults, canonical encoding, source-located
+diagnostics, bundle/cache identity, and temporal-capability effect together;
+it must also meet the admission rule below. Until then, static TypeScript
+imports are presentation code, not screenplay props. The browser authoring
+contract is specified separately in [the presentation contract](presentation-contract.md).
+
 ## Deferred capabilities
 
-Free `begin/end/until` expressions, shots ending at cues, generated cues from media analysis or typed semantic boundaries, negative offsets, general flex constraints, runtime branches, speed ramps, reverse playback, audio-reactive behavior, cross-scene persistence, content-aware transitions, and online media generation remain outside Gate one until their semantics and generation reliability are tested. A future typed semantic boundary must still produce a named event; it does not reintroduce free timing attributes.
+Free `begin/end/until` expressions, shots ending at cues, screenplay-selected
+presentations or props, generated cues from media analysis or typed semantic
+boundaries, negative offsets, general flex constraints, runtime branches,
+speed ramps, reverse playback, audio-reactive behavior, cross-scene
+persistence, content-aware transitions, and online media generation remain
+outside Gate one until their semantics and generation reliability are tested. A
+future typed semantic boundary must still produce a named event; it does not
+reintroduce free timing attributes.
 
 ## Admission rule
 
