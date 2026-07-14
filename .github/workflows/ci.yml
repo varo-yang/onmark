@@ -96,7 +96,7 @@ jobs:
         run: cargo doc --locked --workspace --no-deps
 
   real-process:
-    name: Gate-one real processes
+    name: Native real-process conformance
     needs: quality
     runs-on: ubuntu-24.04
     timeout-minutes: 20

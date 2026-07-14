@@ -10,7 +10,7 @@ use onmark_core::model::{AssetRef, FrameRate, FrozenAsset, FrozenAssetId, Source
 use onmark_core::protocol::{
     BrowserCommand, BrowserEvent, BrowserPlan, BrowserRequest, BundleManifest, RequestId, WireFrame,
 };
-use onmark_core::render_graph::RenderGraph;
+use onmark_core::render_graph::{PartitionPlan, RenderGraph};
 use onmark_media::Ffprobe;
 use onmark_render::{
     BrowserErrorKind, BrowserLimits, BrowserSession, EncodeLimits, EncodedPng, ExecutableUnit,
@@ -27,6 +27,10 @@ use url::Url;
 const WIDTH: u32 = 320;
 const HEIGHT: u32 = 180;
 const FRAME_COUNT: u64 = 75;
+const TWO_UNIT_FRAME_COUNT: u64 = 60;
+const VOICE_OVER_START_FRAME: u64 = 30;
+const MICROS_PER_SECOND: i64 = 1_000_000;
+const AUDIO_TIMESTAMP_TOLERANCE_MICROS: u64 = 25_000;
 
 #[tokio::test]
 async fn rejects_units_that_do_not_match_the_partition_plan_before_launching_browser() {
@@ -130,13 +134,9 @@ async fn renders_the_gate_one_plan_to_a_verified_mp4() {
     let directory = tempdir().expect("the test output directory must be available");
     let source = directory.path().join("source.mp4");
     let output = directory.path().join("gate-one.mp4");
-    generate_source_video(&source).await;
-    let frozen = freeze_video(&source).await;
-    let limits = EncodeLimits::new(Duration::from_secs(30), 100, 64 * 1024 * 1024, 64 * 1024)
-        .expect("the fixture encoding limits are bounded");
-    let ffmpeg = Ffmpeg::new(required_path("ONMARK_FFMPEG"), limits)
-        .expect("the FFmpeg executable path is present");
-    let executor = RenderExecutor::new(chrome(), browser_limits(Duration::from_secs(10)), ffmpeg);
+    generate_source_video(&source, "2.5").await;
+    let frozen = freeze_asset(&source).await;
+    let executor = real_executor(100);
     let unit = executable_gate_one_unit(frozen, source);
 
     let video = executor
@@ -147,12 +147,39 @@ async fn renders_the_gate_one_plan_to_a_verified_mp4() {
     assert_eq!(video.path(), output);
     assert_eq!(video.frames(), FRAME_COUNT);
     assert!(output.metadata().expect("the MP4 must exist").len() > 0);
-    assert_video_stream(&output).await;
+    assert_video_stream(&output, FRAME_COUNT).await;
     assert_decodable_motion(&output).await;
 }
 
-async fn generate_source_video(output: &Path) {
-    let source = format!("testsrc2=size={WIDTH}x{HEIGHT}:rate=30:duration=2.5");
+#[tokio::test]
+#[ignore = "requires ONMARK_CHROME, ONMARK_FFMPEG, and ONMARK_FFPROBE"]
+async fn renders_two_partitions_equivalently_to_one_whole_film_unit() {
+    let directory = tempdir().expect("the test output directory must be available");
+    let fixture = GateTwoFixture::materialize(directory.path()).await;
+    let whole_output = directory.path().join("whole-film.mp4");
+    let partitioned_output = directory.path().join("partitioned.mp4");
+    let executor = real_executor(TWO_UNIT_FRAME_COUNT);
+
+    let whole = executor
+        .render(fixture.whole_film, &whole_output)
+        .await
+        .expect("the whole-film baseline must render");
+    let partitioned = executor
+        .render_partitioned(
+            &fixture.partition_plan,
+            fixture.partitioned_units,
+            &partitioned_output,
+        )
+        .await
+        .expect("the two unit plan must render");
+
+    assert_eq!(whole.frames(), TWO_UNIT_FRAME_COUNT);
+    assert_eq!(partitioned.frames(), TWO_UNIT_FRAME_COUNT);
+    assert_equivalent_output(&whole_output, &partitioned_output).await;
+}
+
+async fn generate_source_video(output: &Path, duration_seconds: &str) {
+    let source = format!("testsrc2=size={WIDTH}x{HEIGHT}:rate=30:duration={duration_seconds}");
     let generated = Command::new(required_path("ONMARK_FFMPEG"))
         .args(["-nostdin", "-v", "error", "-f", "lavfi", "-i", &source])
         .args([
@@ -182,7 +209,36 @@ async fn generate_source_video(output: &Path) {
     );
 }
 
-async fn freeze_video(path: &Path) -> FrozenAsset {
+async fn generate_voice_over(output: &Path) {
+    let generated = Command::new(required_path("ONMARK_FFMPEG"))
+        .args([
+            "-nostdin",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:sample_rate=48000:duration=1",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "128k",
+            "-y",
+        ])
+        .arg(output)
+        .output();
+    let generated = timeout(Duration::from_secs(20), generated)
+        .await
+        .expect("voice-over generation must finish before its deadline")
+        .expect("FFmpeg must generate the voice-over");
+    assert!(
+        generated.status.success(),
+        "{}",
+        String::from_utf8_lossy(&generated.stderr),
+    );
+}
+
+async fn freeze_asset(path: &Path) -> FrozenAsset {
     let probe = Ffprobe::new(
         required_path("ONMARK_FFPROBE"),
         Duration::from_secs(20),
@@ -193,7 +249,7 @@ async fn freeze_video(path: &Path) -> FrozenAsset {
     let metadata = tokio::task::spawn_blocking(move || probe.probe(&source))
         .await
         .expect("the probe task must complete")
-        .expect("ffprobe must normalize the source video");
+        .expect("ffprobe must normalize the source media");
     let bytes = fs::read(path).expect("the source video must remain readable");
     let digest: [u8; 32] = Sha256::digest(bytes).into();
 
@@ -266,7 +322,7 @@ fn assert_png(frame: &EncodedPng) {
     assert!(frame.as_bytes().starts_with(b"\x89PNG\r\n\x1a\n"));
 }
 
-async fn assert_video_stream(output: &Path) {
+async fn assert_video_stream(output: &Path, expected_frames: u64) {
     let probe = Command::new(required_path("ONMARK_FFPROBE"))
         .args([
             "-v",
@@ -300,14 +356,62 @@ async fn assert_video_stream(output: &Path) {
     assert_eq!(stream.width, WIDTH);
     assert_eq!(stream.height, HEIGHT);
     assert_eq!(stream.avg_frame_rate, "30/1");
-    assert_eq!(stream.nb_read_frames, FRAME_COUNT.to_string());
+    assert_eq!(stream.nb_read_frames, expected_frames.to_string());
 }
 
 async fn assert_decodable_motion(output: &Path) {
+    let hashes = decoded_hashes(output, "0:v:0").await;
+    let hashes = hashes.iter().collect::<BTreeSet<_>>();
+    assert!(hashes.len() > 1, "the rendered video must contain motion");
+}
+
+async fn assert_equivalent_output(whole: &Path, partitioned: &Path) {
+    assert_video_stream(whole, TWO_UNIT_FRAME_COUNT).await;
+    assert_video_stream(partitioned, TWO_UNIT_FRAME_COUNT).await;
+
+    let whole = inspect_output(whole).await;
+    let partitioned = inspect_output(partitioned).await;
+    assert_eq!(whole, partitioned);
+    assert!(
+        whole.has_motion(),
+        "the equivalence fixture must have motion"
+    );
+    assert!(
+        !whole.audio_hashes.is_empty(),
+        "the equivalence fixture must retain voice-over audio",
+    );
+    assert_audio_starts_at(&whole, VOICE_OVER_START_FRAME);
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct DecodedOutput {
+    video_hashes: Vec<String>,
+    audio_hashes: Vec<String>,
+    audio_start_micros: i64,
+}
+
+impl DecodedOutput {
+    fn has_motion(&self) -> bool {
+        let Some(first) = self.video_hashes.first() else {
+            return false;
+        };
+        self.video_hashes.iter().any(|hash| hash != first)
+    }
+}
+
+async fn inspect_output(output: &Path) -> DecodedOutput {
+    DecodedOutput {
+        video_hashes: decoded_hashes(output, "0:v:0").await,
+        audio_hashes: decoded_hashes(output, "0:a:0").await,
+        audio_start_micros: first_audio_packet_micros(output).await,
+    }
+}
+
+async fn decoded_hashes(output: &Path, stream: &str) -> Vec<String> {
     let decoded = Command::new(required_path("ONMARK_FFMPEG"))
         .args(["-nostdin", "-v", "error", "-i"])
         .arg(output)
-        .args(["-f", "framemd5", "-"])
+        .args(["-map", stream, "-f", "framemd5", "-"])
         .output();
     let decoded = timeout(Duration::from_secs(10), decoded)
         .await
@@ -318,8 +422,9 @@ async fn assert_decodable_motion(output: &Path) {
         "{}",
         String::from_utf8_lossy(&decoded.stderr),
     );
-    let frames = String::from_utf8(decoded.stdout).expect("framemd5 output must be UTF-8");
-    let hashes = frames
+
+    String::from_utf8(decoded.stdout)
+        .expect("framemd5 output must be UTF-8")
         .lines()
         .filter(|line| !line.starts_with('#'))
         .map(|line| {
@@ -327,9 +432,84 @@ async fn assert_decodable_motion(output: &Path) {
                 .expect("every framemd5 record contains a hash")
                 .1
                 .trim()
+                .to_owned()
         })
-        .collect::<BTreeSet<_>>();
-    assert!(hashes.len() > 1, "the rendered video must contain motion");
+        .collect()
+}
+
+async fn first_audio_packet_micros(output: &Path) -> i64 {
+    let probe = Command::new(required_path("ONMARK_FFPROBE"))
+        .args([
+            "-v",
+            "error",
+            "-select_streams",
+            "a:0",
+            "-show_entries",
+            "packet=pts_time",
+            "-show_packets",
+            "-of",
+            "json",
+            "--",
+        ])
+        .arg(output)
+        .output();
+    let probe = timeout(Duration::from_secs(10), probe)
+        .await
+        .expect("audio timestamp probing must finish before its deadline")
+        .expect("ffprobe must inspect the output audio");
+    assert!(
+        probe.status.success(),
+        "{}",
+        String::from_utf8_lossy(&probe.stderr),
+    );
+    let response: AudioPacketProbe =
+        serde_json::from_slice(&probe.stdout).expect("ffprobe must emit its JSON response");
+    let packet = response
+        .packets
+        .first()
+        .expect("the output audio stream must have a first packet");
+
+    timestamp_micros(&packet.pts_time)
+}
+
+fn assert_audio_starts_at(output: &DecodedOutput, frame: u64) {
+    let expected = i64::try_from(frame)
+        .expect("the fixture frame fits in signed microseconds")
+        .checked_mul(MICROS_PER_SECOND)
+        .expect("the fixture timestamp fits in signed microseconds")
+        / 30;
+    assert!(
+        output.audio_start_micros.abs_diff(expected) <= AUDIO_TIMESTAMP_TOLERANCE_MICROS,
+        "audio starts at {}µs instead of frame {frame} ({expected}µs)",
+        output.audio_start_micros,
+    );
+}
+
+fn timestamp_micros(timestamp: &str) -> i64 {
+    let (negative, timestamp) = timestamp
+        .strip_prefix('-')
+        .map_or((false, timestamp), |timestamp| (true, timestamp));
+    let (seconds, fraction) = timestamp.split_once('.').unwrap_or((timestamp, ""));
+    let seconds = seconds
+        .parse::<i64>()
+        .expect("the fixture packet timestamp has integral seconds");
+    let mut micros = 0_i64;
+    let mut digits = 0_u32;
+
+    for digit in fraction.bytes().take(6) {
+        assert!(digit.is_ascii_digit());
+        micros = micros * 10 + i64::from(digit - b'0');
+        digits += 1;
+    }
+    for _ in digits..6 {
+        micros *= 10;
+    }
+
+    let micros = seconds
+        .checked_mul(MICROS_PER_SECOND)
+        .and_then(|seconds| seconds.checked_add(micros))
+        .expect("the fixture packet timestamp fits in signed microseconds");
+    if negative { -micros } else { micros }
 }
 
 fn chrome() -> PathBuf {
@@ -348,6 +528,20 @@ fn browser_limits(deadline: Duration) -> BrowserLimits {
 
 fn render_profile() -> RenderProfile {
     RenderProfile::new(WIDTH, HEIGHT).expect("the fixture render profile is valid")
+}
+
+fn real_executor(max_frames: u64) -> RenderExecutor {
+    let limits = EncodeLimits::new(
+        Duration::from_secs(30),
+        max_frames,
+        64 * 1024 * 1024,
+        64 * 1024,
+    )
+    .expect("the fixture encoding limits are bounded");
+    let ffmpeg = Ffmpeg::new(required_path("ONMARK_FFMPEG"), limits)
+        .expect("the FFmpeg executable path is present");
+
+    RenderExecutor::new(chrome(), browser_limits(Duration::from_secs(10)), ffmpeg)
 }
 
 fn browser_fixture() -> Url {
@@ -409,21 +603,19 @@ fn solve_timeline(
 }
 
 fn executable_gate_one_unit(frozen: FrozenAsset, source: PathBuf) -> ExecutableUnit {
-    let bundle = repository().join("conformance/protocol/bundle-v1");
-    let manifest = fs::read_to_string(bundle.join(BundleManifest::FILE_NAME))
-        .expect("the executable bundle manifest is readable");
-    let manifest = serde_json::from_str::<BundleManifest>(&manifest)
-        .expect("the executable bundle manifest is valid");
+    let bundle = FixtureBundle::load();
     let timeline = gate_one_video_timeline(frozen.clone());
     let materialized =
         MaterializedAsset::new(frozen, source).expect("the fixture source path is present");
-    let unit = RenderUnit::whole_film(&timeline, manifest, render_profile(), [materialized])
-        .expect("the fixture facts form one whole-film unit");
-    let limits = UnitRootLimits::new(8, 64 * 1024 * 1024)
-        .expect("the fixture materialization limits are bounded");
+    let unit = RenderUnit::whole_film(
+        &timeline,
+        bundle.manifest.clone(),
+        render_profile(),
+        [materialized],
+    )
+    .expect("the fixture facts form one whole-film unit");
 
-    ExecutableUnit::materialize(unit, &bundle, limits)
-        .expect("the fixture bundle must become one executable unit")
+    bundle.materialize(unit)
 }
 
 fn gate_one_video_timeline(frozen: FrozenAsset) -> onmark_core::timeline::TimelineIr {
@@ -433,6 +625,113 @@ fn gate_one_video_timeline(frozen: FrozenAsset) -> onmark_core::timeline::Timeli
         r#"<film><scene><shot><video src="source.mp4" /></shot></scene></film>"#,
         &assets,
     )
+}
+
+struct GateTwoFixture {
+    partition_plan: PartitionPlan,
+    whole_film: ExecutableUnit,
+    partitioned_units: Vec<ExecutableUnit>,
+}
+
+impl GateTwoFixture {
+    async fn materialize(workspace: &Path) -> Self {
+        let video_path = workspace.join("source.mp4");
+        let voice_over_path = workspace.join("voice.m4a");
+        generate_source_video(&video_path, "1").await;
+        generate_voice_over(&voice_over_path).await;
+
+        let video = freeze_asset(&video_path).await;
+        let voice_over = freeze_asset(&voice_over_path).await;
+        let assets = BTreeMap::from([
+            (
+                AssetRef::parse("source.mp4").expect("the fixture video path is valid"),
+                video.clone(),
+            ),
+            (
+                AssetRef::parse("voice.m4a").expect("the fixture voice-over path is valid"),
+                voice_over.clone(),
+            ),
+        ]);
+        let source = fs::read_to_string(repository().join("conformance/cli/gate-two.onmark"))
+            .expect("the two-unit screenplay fixture is readable");
+        let timeline = solve_timeline(&source, &assets);
+        let partition_plan = RenderGraph::from_timeline(&timeline).into_partition();
+        assert_eq!(
+            partition_plan.units().len(),
+            2,
+            "the gate-two fixture must produce two local units",
+        );
+
+        let materialized_assets = vec![
+            MaterializedAsset::new(video, video_path)
+                .expect("the fixture video source path is present"),
+            MaterializedAsset::new(voice_over, voice_over_path)
+                .expect("the fixture voice-over source path is present"),
+        ];
+        let bundle = FixtureBundle::load();
+        let whole_film = RenderUnit::whole_film(
+            &timeline,
+            bundle.manifest.clone(),
+            render_profile(),
+            materialized_assets.clone(),
+        )
+        .expect("the complete fixture forms one whole-film unit");
+        let whole_film = bundle.materialize(whole_film);
+        let partitioned_units = partition_plan
+            .units()
+            .iter()
+            .map(|partition| {
+                let assets = materialized_assets
+                    .iter()
+                    .filter(|asset| partition.requires_media_asset(asset.id()))
+                    .cloned();
+                let unit = RenderUnit::from_partition(
+                    &timeline,
+                    partition,
+                    bundle.manifest.clone(),
+                    render_profile(),
+                    assets,
+                )
+                .expect("each graph partition forms one local unit");
+
+                bundle.materialize(unit)
+            })
+            .collect();
+
+        Self {
+            partition_plan,
+            whole_film,
+            partitioned_units,
+        }
+    }
+}
+
+struct FixtureBundle {
+    directory: PathBuf,
+    manifest: BundleManifest,
+}
+
+impl FixtureBundle {
+    fn load() -> Self {
+        let directory = repository().join("conformance/protocol/bundle-v1");
+        let manifest = fs::read_to_string(directory.join(BundleManifest::FILE_NAME))
+            .expect("the executable bundle manifest is readable");
+        let manifest =
+            serde_json::from_str(&manifest).expect("the executable bundle manifest is valid");
+
+        Self {
+            directory,
+            manifest,
+        }
+    }
+
+    fn materialize(&self, unit: RenderUnit) -> ExecutableUnit {
+        let limits = UnitRootLimits::new(8, 64 * 1024 * 1024)
+            .expect("the fixture materialization limits are bounded");
+
+        ExecutableUnit::materialize(unit, &self.directory, limits)
+            .expect("the fixture bundle must become one executable unit")
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -446,4 +745,20 @@ struct ProbeStream {
     height: u32,
     avg_frame_rate: String,
     nb_read_frames: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct AudioPacketProbe {
+    packets: Vec<AudioPacket>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AudioPacket {
+    pts_time: String,
+}
+
+#[test]
+fn parses_audio_packet_timestamps_without_floating_point() {
+    assert_eq!(timestamp_micros("0.978"), 978_000);
+    assert_eq!(timestamp_micros("-0.021333"), -21_333);
 }
