@@ -576,9 +576,9 @@ Screenplay → Timeline IR → Browser Runtime → Chromium → FFmpeg → MP4
 
 这一关不建设 coordinator、lease、远程 worker、能力调度和分层缓存。
 
-### 第二关（当前）：正确地切开并总装
+### 第二关（已完成）：正确地切开并总装
 
-当前切片把同一影片编译成两个独立的本地 Render Unit，经既有 executor 捕获并总装。退出一致性测试会让同一条含媒体的两镜头影片分别作为 whole-film unit 与两个独立 materialize 的 unit 渲染，再比较解码后的视频与音频 hash，以及首个音频 packet 的落点。它实现 Render Graph 与 `evaluation/output` 区间。转场预卷、持久 unit cache 和依赖闭包失效要等真实依赖或缓存消费者出现后再实现；当前不提前搭它们的空架子。
+已完成的切片把同一影片编译成两个独立的本地 Render Unit，经既有 executor 捕获并总装。退出一致性测试会让同一条含媒体的两镜头影片分别作为 whole-film unit 与两个独立 materialize 的 unit 渲染，再比较解码后的视频与音频 hash，以及首个音频 packet 的落点。它实现 Render Graph 与 `evaluation/output` 区间。转场预卷、持久 unit cache 和依赖闭包失效要等真实依赖或缓存消费者出现后再实现；不提前搭它们的空架子。
 
 ### 第三关：离开本机仍然成立
 
