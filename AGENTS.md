@@ -2,7 +2,7 @@
 
 Onmark is a screenplay-first, browser-rendered video compiler and execution engine. Rust owns deterministic compilation and native execution; TypeScript owns authoring and the browser runtime.
 
-**Current phase:** design and delivery gate one. The only implementation goal is one real video through screenplay → Timeline IR → browser handshake → Chromium → FFmpeg → MP4. Do not build distributed control-plane scaffolding before that gate is stable.
+**Current phase:** design and delivery gate two. Gate one is complete. The only implementation goal is to partition one film into two correct local Render Units, execute both through the existing renderer, and assemble their output. Do not build distributed control-plane scaffolding before gate two is stable.
 
 ## Read before changing code
 

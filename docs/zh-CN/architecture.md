@@ -369,7 +369,7 @@ onmark/
 └── docs/
 ```
 
-当前里程碑包含 `onmark-core`、`onmark-media`、`onmark-render`、`@onmark/runtime` 的浏览器 session、`@onmark/authoring` 的语义 DOM bindings、`@onmark/bundler` 的 presentation artifact 边界，以及第一条 `onmark-cli` whole-film composition root：
+已完成的 Gate 一里程碑包含 `onmark-core`、`onmark-media`、`onmark-render`、`@onmark/runtime` 的浏览器 session、`@onmark/authoring` 的语义 DOM bindings、`@onmark/bundler` 的 presentation artifact 边界，以及第一条 `onmark-cli` whole-film composition root：
 
 - `onmark-core` 是纯内核，内部用 `syntax`、`diagnostics`、`model`、`compiler`、`timeline`、`protocol` 模块保持结构；
 - `onmark-media` 只负责素材探测和规范化 metadata，使服务端 compile/lint 修正循环能够使用 `core + media` 而不链接 Chromium；
@@ -544,7 +544,7 @@ Rust API 用于嵌入服务端；TS API 用于 authoring；跨进程使用 versi
 
 ## 12. 三个交付关卡
 
-### 第一关：稳定渲出一条真视频
+### 第一关（已完成）：稳定渲出一条真视频
 
 唯一目标是证明核心闭环：
 
@@ -552,11 +552,13 @@ Rust API 用于嵌入服务端；TS API 用于 authoring；跨进程使用 versi
 Screenplay → Timeline IR → Browser Runtime → Chromium → FFmpeg → MP4
 ```
 
-范围只有：最小剧本语言、冻结素材 catalog、素材探测、Rust 时间求解、versioned Timeline IR、不可变 presentation bundle、TS 确定性时钟、FrameReady handshake，以及单进程 whole-film Render Unit 的真实视频。必须测清字体、图片、视频 seek、异步稳定和捕获方式。Gate 一执行并 mux 作者写下的 voice-over，不能静默丢弃音频。
+范围只有：最小剧本语言、冻结素材 catalog、素材探测、Rust 时间求解、versioned Timeline IR、不可变 presentation bundle、TS 确定性时钟、FrameReady handshake，以及单进程 whole-film Render Unit 的真实视频。Gate 一验证了视频 seek、异步稳定、捕获方式和音频 mux；字体与图片的更多组合仍是 presentation 能力实验，不构成已冻结的 Gate 一语言表面。Gate 一执行并 mux 作者写下的 voice-over，不能静默丢弃音频。
+
+退出一致性测试会构建 release CLI，让同一份剧本经过两组独立 Chromium/FFmpeg session 渲染，比较解码后的音视频逐帧 hash，验证画面运动与 stream facts，并证明最终发布不会覆盖已有输出。
 
 这一关不建设 coordinator、lease、远程 worker、能力调度和分层缓存。
 
-### 第二关：正确地切开
+### 第二关（当前）：正确地切开
 
 把同一视频编译成两个 Render Unit，在本地独立捕获、编码并总装。此时实现 Render Graph、`evaluation/output` 区间、转场预卷、unit cache 和依赖闭包失效。修改一个 shot 后，只允许被图证明安全的产物复用。
 
