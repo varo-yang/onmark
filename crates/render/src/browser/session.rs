@@ -13,6 +13,7 @@ use tokio::task::JoinHandle;
 use tokio::time::{Instant, sleep, timeout, timeout_at};
 
 use super::error::{BrowserError, BrowserErrorKind};
+use super::frame::{CapturedFrame, EncodedPng};
 use super::limits::BrowserLimits;
 use crate::RenderProfile;
 
@@ -22,28 +23,6 @@ const READINESS_POLL_INTERVAL: Duration = Duration::from_millis(10);
 const COMPOSITOR_COMMIT: &str =
     "new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))";
 
-/// One PNG frame returned by Chromium within the configured byte budget.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct EncodedPng(Vec<u8>);
-
-impl EncodedPng {
-    pub(crate) fn new(bytes: Vec<u8>) -> Self {
-        Self(bytes)
-    }
-
-    /// Returns the encoded PNG bytes.
-    #[must_use]
-    pub fn as_bytes(&self) -> &[u8] {
-        &self.0
-    }
-
-    /// Transfers ownership of the encoded PNG bytes.
-    #[must_use]
-    pub fn into_bytes(self) -> Vec<u8> {
-        self.0
-    }
-}
-
 /// One owned Chromium process and its single Gate-one page.
 #[derive(Debug)]
 pub struct BrowserSession {
@@ -51,6 +30,7 @@ pub struct BrowserSession {
     page: Page,
     handler: JoinHandle<Result<(), CdpError>>,
     limits: BrowserLimits,
+    render_profile: RenderProfile,
     // Retained so Chrome's private profile outlives the process.
     _profile: TempDir,
 }
@@ -92,6 +72,7 @@ impl BrowserSession {
             page,
             handler,
             limits,
+            render_profile,
             _profile: profile,
         })
     }
@@ -163,6 +144,17 @@ impl BrowserSession {
             ));
         }
         Ok(EncodedPng::new(bytes))
+    }
+
+    /// Captures one encoder PNG together with canonical raw-RGBA evidence.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`BrowserError`] when Chromium cannot capture the viewport, the
+    /// retained PNG exceeds its bound, or the decoded pixels do not match the
+    /// configured render profile.
+    pub async fn capture_frame(&self) -> Result<CapturedFrame, BrowserError> {
+        CapturedFrame::from_png(self.capture_png().await?, self.render_profile)
     }
 
     /// Waits for the compositor to commit the current logical browser frame.

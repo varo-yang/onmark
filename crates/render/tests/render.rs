@@ -14,8 +14,8 @@ use onmark_core::render_graph::{PartitionPlan, RenderGraph};
 use onmark_media::Ffprobe;
 use onmark_render::{
     BrowserErrorKind, BrowserLimits, BrowserSession, EncodeLimits, EncodedPng, ExecutableUnit,
-    Ffmpeg, FrameArtifactLimits, MaterializedAsset, RenderErrorKind, RenderExecutor, RenderProfile,
-    RenderUnit, UnitRootLimits,
+    Ffmpeg, FrameArtifactLimits, MaterializedAsset, RawRgbaHash, RenderErrorKind, RenderExecutor,
+    RenderProfile, RenderUnit, UnitRootLimits,
 };
 use serde::Deserialize;
 use sha2::{Digest as _, Sha256};
@@ -111,21 +111,15 @@ async fn bounds_a_runtime_adapter_that_never_finishes_loading() {
 
 #[tokio::test]
 #[ignore = "requires ONMARK_CHROME and a built @onmark/runtime package"]
-async fn captures_stable_frames_across_the_real_browser_protocol() {
-    let session = BrowserSession::launch(
-        chrome(),
-        render_profile(),
-        browser_limits(Duration::from_secs(10)),
-    )
-    .await
-    .expect("Chrome must launch");
+async fn captures_stable_raw_rgba_frames_across_independent_browser_sessions() {
     let fixture = browser_fixture();
+    let first = capture_protocol_fingerprint(&fixture).await;
+    let second = capture_protocol_fingerprint(&fixture).await;
 
-    let result = exercise_protocol(&session, &fixture).await;
-    let shutdown = session.shutdown().await;
-
-    result.expect("the real browser protocol must capture deterministic frames");
-    shutdown.expect("Chrome must shut down cleanly");
+    assert_eq!(
+        first, second,
+        "locked browser sessions must capture equal RGBA"
+    );
 }
 
 #[tokio::test]
@@ -297,19 +291,38 @@ async fn freeze_asset(path: &Path) -> FrozenAsset {
     FrozenAsset::new(FrozenAssetId::from_sha256(digest), metadata)
 }
 
-async fn exercise_protocol(session: &BrowserSession, fixture: &Url) -> Result<(), Box<dyn Error>> {
+async fn capture_protocol_fingerprint(fixture: &Url) -> RawRgbaHash {
+    let session = BrowserSession::launch(
+        chrome(),
+        render_profile(),
+        browser_limits(Duration::from_secs(10)),
+    )
+    .await
+    .expect("Chrome must launch");
+    let result = exercise_protocol(&session, fixture).await;
+    let shutdown = session.shutdown().await;
+
+    let fingerprint = result.expect("the real browser protocol must capture deterministic frames");
+    shutdown.expect("Chrome must shut down cleanly");
+    fingerprint
+}
+
+async fn exercise_protocol(
+    session: &BrowserSession,
+    fixture: &Url,
+) -> Result<RawRgbaHash, Box<dyn Error>> {
     load_and_prepare(session, fixture).await?;
-    let first = session.capture_png().await?;
+    let first = session.capture_frame().await?;
 
     seek(session, 3, 15).await?;
-    let selected = session.capture_png().await?;
+    let selected = session.capture_frame().await?;
     seek(session, 4, 15).await?;
-    let repeated = session.capture_png().await?;
+    let repeated = session.capture_frame().await?;
 
-    assert_png(&first);
-    assert_ne!(first, selected);
-    assert_eq!(selected, repeated);
-    Ok(())
+    assert_png(first.png());
+    assert_ne!(first.raw_rgba_hash(), selected.raw_rgba_hash());
+    assert_eq!(selected.raw_rgba_hash(), repeated.raw_rgba_hash());
+    Ok(selected.raw_rgba_hash())
 }
 
 async fn load_and_prepare(session: &BrowserSession, fixture: &Url) -> Result<(), Box<dyn Error>> {

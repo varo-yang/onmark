@@ -8,7 +8,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use format::{FrameArtifactDescriptor, Header};
-use reader::open_verified;
+use reader::{FrameArtifactFingerprintSequence, open_verified};
 
 pub(crate) use reader::FrameArtifactReader;
 pub(crate) use writer::FrameArtifactWriter;
@@ -121,7 +121,8 @@ impl fmt::Display for InvalidFrameArtifactLimits {
 
 impl Error for InvalidFrameArtifactLimits {}
 
-/// Immutable, ordered PNG output published by one completed worker unit.
+/// Immutable PNG output and raw-pixel fingerprints from one completed worker
+/// unit.
 ///
 /// The artifact is one file rather than a directory of frame objects: its
 /// fixed header binds the artifact to the input unit, and its length-prefixed
@@ -202,7 +203,7 @@ impl FrameArtifact {
         )
     }
 
-    /// Verifies every length-prefixed PNG record and the final payload checksum.
+    /// Verifies every artifact record and the final payload checksum.
     ///
     /// This reads the artifact without launching a browser or encoder, which is
     /// useful to a worker retry before it reuses an immutable publication.
@@ -213,7 +214,42 @@ impl FrameArtifact {
     /// fails its declared checksum.
     pub async fn verify(&self) -> Result<(), FrameArtifactError> {
         let mut reader = self.reader().await?;
-        while reader.next_frame().await?.is_some() {}
+        while reader.next_fingerprint().await?.is_some() {}
+        Ok(())
+    }
+
+    /// Verifies that two artifact sequences have equal raw-RGBA fingerprints.
+    ///
+    /// This is a bounded equivalence check: it streams each PNG through a
+    /// fixed hash buffer and retains only one fingerprint from each sequence.
+    /// It deliberately compares canonical pixels rather than PNG compression
+    /// bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FrameArtifactError`] when either artifact sequence is invalid
+    /// or their ordered raw-RGBA frame fingerprints differ.
+    pub async fn verify_raw_rgba_equivalence(
+        expected: &[Self],
+        actual: &[Self],
+    ) -> Result<(), FrameArtifactError> {
+        let path = sequence_path(expected, actual);
+        let mut expected_frames = FrameArtifactFingerprintSequence::new(expected);
+        let mut actual_frames = FrameArtifactFingerprintSequence::new(actual);
+        let mut position = 0_u128;
+
+        while let Some(expected_fingerprint) = expected_frames.next_fingerprint().await? {
+            let Some(actual_fingerprint) = actual_frames.next_fingerprint().await? else {
+                return Err(actual_ends(path, position));
+            };
+            if expected_fingerprint != actual_fingerprint {
+                return Err(fingerprint_differs(path, position));
+            }
+            position += 1;
+        }
+        if actual_frames.next_fingerprint().await?.is_some() {
+            return Err(actual_continues(path, position));
+        }
         Ok(())
     }
 
@@ -269,6 +305,8 @@ pub enum FrameArtifactErrorKind {
     Incomplete,
     /// An artifact belongs to a different planned unit.
     IdentityMismatch,
+    /// Two completed artifact sequences have different canonical pixels.
+    RawRgbaMismatch,
 }
 
 /// Typed failure from the worker-frame artifact boundary.
@@ -337,14 +375,46 @@ impl Error for FrameArtifactError {
     }
 }
 
+fn sequence_path<'a>(expected: &'a [FrameArtifact], actual: &'a [FrameArtifact]) -> &'a Path {
+    expected
+        .first()
+        .or_else(|| actual.first())
+        .map_or_else(|| Path::new("."), FrameArtifact::path)
+}
+
+fn fingerprint_differs(path: &Path, position: u128) -> FrameArtifactError {
+    FrameArtifactError::new(
+        FrameArtifactErrorKind::RawRgbaMismatch,
+        path,
+        format!("raw-RGBA frame fingerprint differs at position {position}"),
+    )
+}
+
+fn actual_ends(path: &Path, position: u128) -> FrameArtifactError {
+    FrameArtifactError::new(
+        FrameArtifactErrorKind::RawRgbaMismatch,
+        path,
+        format!("actual raw-RGBA frame sequence ends at position {position}"),
+    )
+}
+
+fn actual_continues(path: &Path, position: u128) -> FrameArtifactError {
+    FrameArtifactError::new(
+        FrameArtifactErrorKind::RawRgbaMismatch,
+        path,
+        format!("actual raw-RGBA frame sequence has an extra frame at position {position}"),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use onmark_core::model::{FrameIndex, FrameInterval, FrameRate};
+    use std::path::Path;
     use tempfile::tempdir;
 
     use super::format::{FrameArtifactDescriptor, Header};
     use super::{FrameArtifact, FrameArtifactErrorKind, FrameArtifactLimits, FrameArtifactWriter};
-    use crate::{EncodedPng, RenderProfile};
+    use crate::{CapturedFrame, EncodedPng, RawRgbaHash, RenderProfile};
 
     #[tokio::test]
     async fn publishes_one_verified_frame_without_exposing_its_staging_file() {
@@ -354,7 +424,7 @@ mod tests {
             .await
             .expect("the artifact writer can stage one frame");
         writer
-            .write_frame(&EncodedPng::new(vec![1]))
+            .write_frame(&captured_frame())
             .await
             .expect("the frame fits the artifact limits");
 
@@ -373,18 +443,121 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn preserves_the_captured_raw_rgba_hash_with_each_frame() {
+        let directory = tempdir().expect("the fixture directory is available");
+        let path = directory.path().join("worker.onmark-frames");
+        let expected = RawRgbaHash::from_bytes([7; RawRgbaHash::BYTE_LENGTH]);
+        let mut writer = FrameArtifactWriter::create(&path, descriptor(), limits())
+            .await
+            .expect("the artifact writer can stage one frame");
+        writer
+            .write_frame(&CapturedFrame::recorded(EncodedPng::new(vec![1]), expected))
+            .await
+            .expect("the frame fits the artifact limits");
+        let artifact = writer
+            .finish()
+            .await
+            .expect("the completed artifact publishes atomically");
+        let mut reader = artifact
+            .reader()
+            .await
+            .expect("the completed artifact opens for streaming");
+        let frame = reader
+            .next_frame()
+            .await
+            .expect("the artifact frame reads")
+            .expect("the artifact contains one frame");
+
+        assert_eq!(frame.raw_rgba_hash(), expected);
+    }
+
+    #[tokio::test]
+    async fn compares_ordered_raw_rgba_fingerprints_across_artifacts() {
+        let directory = tempdir().expect("the fixture directory is available");
+        let expected = artifact(
+            &directory.path().join("expected.onmark-frames"),
+            &[[1; RawRgbaHash::BYTE_LENGTH], [2; RawRgbaHash::BYTE_LENGTH]],
+        )
+        .await;
+        let matching_first = artifact(
+            &directory.path().join("matching-first.onmark-frames"),
+            &[[1; RawRgbaHash::BYTE_LENGTH]],
+        )
+        .await;
+        let matching_second = artifact(
+            &directory.path().join("matching-second.onmark-frames"),
+            &[[2; RawRgbaHash::BYTE_LENGTH]],
+        )
+        .await;
+        let different = artifact(
+            &directory.path().join("different.onmark-frames"),
+            &[[3; RawRgbaHash::BYTE_LENGTH]],
+        )
+        .await;
+
+        FrameArtifact::verify_raw_rgba_equivalence(
+            std::slice::from_ref(&expected),
+            &[matching_first.clone(), matching_second],
+        )
+        .await
+        .expect("matching raw RGBA frames must compare equally");
+        let error = FrameArtifact::verify_raw_rgba_equivalence(
+            std::slice::from_ref(&expected),
+            &[matching_first, different],
+        )
+        .await
+        .expect_err("different raw RGBA frames must not compare equally");
+
+        assert_eq!(error.kind(), FrameArtifactErrorKind::RawRgbaMismatch);
+    }
+
+    #[tokio::test]
+    async fn rejects_raw_rgba_sequences_with_different_lengths() {
+        let directory = tempdir().expect("the fixture directory is available");
+        let complete = artifact(
+            &directory.path().join("complete.onmark-frames"),
+            &[[1; RawRgbaHash::BYTE_LENGTH], [2; RawRgbaHash::BYTE_LENGTH]],
+        )
+        .await;
+        let prefix = artifact(
+            &directory.path().join("prefix.onmark-frames"),
+            &[[1; RawRgbaHash::BYTE_LENGTH]],
+        )
+        .await;
+
+        let short = FrameArtifact::verify_raw_rgba_equivalence(
+            std::slice::from_ref(&complete),
+            std::slice::from_ref(&prefix),
+        )
+        .await
+        .expect_err("a shorter raw RGBA sequence must not compare equally");
+        let long = FrameArtifact::verify_raw_rgba_equivalence(
+            std::slice::from_ref(&prefix),
+            std::slice::from_ref(&complete),
+        )
+        .await
+        .expect_err("a longer raw RGBA sequence must not compare equally");
+
+        assert_eq!(short.kind(), FrameArtifactErrorKind::RawRgbaMismatch);
+        assert!(short.to_string().contains("ends"));
+        assert_eq!(long.kind(), FrameArtifactErrorKind::RawRgbaMismatch);
+        assert!(long.to_string().contains("extra"));
+    }
+
+    #[tokio::test]
     async fn rejects_an_artifact_with_a_tampered_payload_checksum() {
         let directory = tempdir().expect("the fixture directory is available");
         let path = directory.path().join("worker.onmark-frames");
         let header = Header {
             descriptor: descriptor(),
             frames: 1,
-            payload_bytes: 9,
+            payload_bytes: 41,
             digest: [0; 32],
         };
         let mut bytes = header.encode().to_vec();
         bytes.extend_from_slice(&1_u64.to_be_bytes());
         bytes.push(1);
+        bytes.extend_from_slice(&[0; 32]);
         tokio::fs::write(&path, bytes)
             .await
             .expect("the tampered artifact fixture is writable");
@@ -422,6 +595,29 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn rejects_the_previous_record_layout_version() {
+        let directory = tempdir().expect("the fixture directory is available");
+        let path = directory.path().join("worker.onmark-frames");
+        let mut header = Header {
+            descriptor: descriptor(),
+            frames: 1,
+            payload_bytes: 41,
+            digest: [0; 32],
+        }
+        .encode();
+        header[8..10].copy_from_slice(&1_u16.to_be_bytes());
+        tokio::fs::write(&path, header)
+            .await
+            .expect("the old-version fixture is writable");
+
+        let error = FrameArtifact::open(&path, limits())
+            .await
+            .expect_err("the old frame record layout must not decode as V2");
+
+        assert_eq!(error.kind(), FrameArtifactErrorKind::InvalidArtifact);
+    }
+
+    #[tokio::test]
     async fn drops_an_incomplete_staging_artifact_without_publication() {
         let directory = tempdir().expect("the fixture directory is available");
         let path = directory.path().join("worker.onmark-frames");
@@ -443,12 +639,48 @@ mod tests {
     }
 
     fn descriptor() -> FrameArtifactDescriptor {
+        descriptor_with_frames(1)
+    }
+
+    fn descriptor_with_frames(frames: u64) -> FrameArtifactDescriptor {
         FrameArtifactDescriptor {
-            output: FrameInterval::new(FrameIndex::new(4), FrameIndex::new(5))
+            output: FrameInterval::new(FrameIndex::new(4), FrameIndex::new(4 + frames))
                 .expect("the fixture interval is ordered"),
             frame_rate: FrameRate::new(30, 1).expect("the fixture rate is valid"),
             profile: RenderProfile::new(320, 180).expect("the fixture profile is valid"),
             visual_plan_digest: [1; 32],
         }
+    }
+
+    fn captured_frame() -> CapturedFrame {
+        CapturedFrame::recorded(
+            EncodedPng::new(vec![1]),
+            RawRgbaHash::from_bytes([1; RawRgbaHash::BYTE_LENGTH]),
+        )
+    }
+
+    async fn artifact(
+        path: &Path,
+        raw_rgba_hashes: &[[u8; RawRgbaHash::BYTE_LENGTH]],
+    ) -> FrameArtifact {
+        let frames = u64::try_from(raw_rgba_hashes.len())
+            .expect("the fixture frame count fits the artifact domain");
+        let mut writer =
+            FrameArtifactWriter::create(path, descriptor_with_frames(frames), limits())
+                .await
+                .expect("the artifact writer can stage fixture frames");
+        for raw_rgba_hash in raw_rgba_hashes {
+            writer
+                .write_frame(&CapturedFrame::recorded(
+                    EncodedPng::new(vec![1]),
+                    RawRgbaHash::from_bytes(*raw_rgba_hash),
+                ))
+                .await
+                .expect("the frame fits the artifact limits");
+        }
+        writer
+            .finish()
+            .await
+            .expect("the artifact publishes atomically")
     }
 }

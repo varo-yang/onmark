@@ -86,6 +86,32 @@ async fn assembles_two_independent_worker_processes_equivalently_to_one_local_fi
     );
 }
 
+#[tokio::test]
+#[ignore = "requires ONMARK_CHROME and a built @onmark/runtime package"]
+async fn partition_workers_match_the_whole_film_raw_rgba_sequence() {
+    let directory = tempdir().expect("the worker fixture directory is available");
+    let timeline = two_shot_timeline();
+    let partition_plan = RenderGraph::from_timeline(&timeline).into_partition();
+    let profile = render_profile();
+    let manifest = bundle_manifest();
+    let units = partition_units(&timeline, &partition_plan, &manifest, profile);
+    let worker_requests: Vec<_> = units
+        .iter()
+        .map(RenderUnit::worker_capture_request)
+        .collect();
+    let whole_unit = whole_film_unit(&timeline, &manifest, profile);
+    let whole_request = whole_unit.worker_capture_request();
+    let whole_artifact = capture_worker_artifact(directory.path(), "whole", &whole_request).await;
+    let partition_artifacts = capture_partition_artifacts(directory.path(), &worker_requests).await;
+
+    FrameArtifact::verify_raw_rgba_equivalence(
+        std::slice::from_ref(&whole_artifact),
+        &partition_artifacts,
+    )
+    .await
+    .expect("partition workers must capture the whole-film raw RGBA sequence");
+}
+
 async fn capture_partition_artifacts(
     workspace: &Path,
     requests: &[WorkerCaptureRequest],
@@ -93,21 +119,40 @@ async fn capture_partition_artifacts(
     let mut artifacts = Vec::with_capacity(requests.len());
 
     for (index, request) in requests.iter().enumerate() {
-        let input = workspace.join(format!("worker-input-{index}"));
-        let output = workspace.join(format!("worker-{index}.onmark-frames"));
-        stage_input(&input, request);
-        capture_with_worker(&input, &output).await;
-        let artifact = FrameArtifact::open(output, artifact_limits(FRAME_COUNT / 2))
-            .await
-            .expect("the worker publishes a verified partition artifact");
-        artifact
-            .verify()
-            .await
-            .expect("the worker artifact checksum is valid before assembly");
+        let name = format!("partition-{index}");
+        let artifact = capture_worker_artifact(workspace, &name, request).await;
         artifacts.push(artifact);
     }
 
     artifacts
+}
+
+async fn capture_worker_artifact(
+    workspace: &Path,
+    name: &str,
+    request: &WorkerCaptureRequest,
+) -> FrameArtifact {
+    let input = workspace.join(format!("{name}-input"));
+    let output = workspace.join(format!("{name}.onmark-frames"));
+    stage_input(&input, request);
+    capture_with_worker(&input, &output).await;
+    let artifact = FrameArtifact::open(output, artifact_limits(request_frame_count(request)))
+        .await
+        .expect("the worker publishes a verified artifact");
+    artifact
+        .verify()
+        .await
+        .expect("the worker artifact checksum is valid before conformance");
+    artifact
+}
+
+fn request_frame_count(request: &WorkerCaptureRequest) -> u64 {
+    let output = request.browser_plan().output();
+    output
+        .end()
+        .get()
+        .checked_sub(output.start().get())
+        .expect("the portable worker request has an ordered output interval")
 }
 
 async fn capture_with_worker(input: &Path, output: &Path) {
@@ -167,11 +212,19 @@ fn materialize_whole_film(
     manifest: &BundleManifest,
     profile: RenderProfile,
 ) -> ExecutableUnit {
-    let unit = RenderUnit::whole_film(timeline, manifest.clone(), profile, [])
-        .expect("the fixture whole film forms one render unit");
+    let unit = whole_film_unit(timeline, manifest, profile);
     let bundle = bundle();
     ExecutableUnit::materialize(unit, &bundle, unit_root_limits())
         .expect("the fixture whole film materializes")
+}
+
+fn whole_film_unit(
+    timeline: &TimelineIr,
+    manifest: &BundleManifest,
+    profile: RenderProfile,
+) -> RenderUnit {
+    RenderUnit::whole_film(timeline, manifest.clone(), profile, [])
+        .expect("the fixture whole film forms one render unit")
 }
 
 fn stage_input(input: &Path, request: &WorkerCaptureRequest) {

@@ -15,7 +15,7 @@ use crate::encoder::AudioInput;
 use crate::frame_artifact::FrameArtifactWriter;
 use crate::unit::MAX_AUDIO_TRACKS;
 use crate::{
-    BrowserLimits, BrowserSession, EncodedPng, EncodedVideo, ExecutableUnit, Ffmpeg, FfmpegSession,
+    BrowserLimits, BrowserSession, EncodedVideo, ExecutableUnit, Ffmpeg, FfmpegSession,
     FrameArtifact, FrameArtifactErrorKind, FrameArtifactLimits,
 };
 
@@ -546,21 +546,17 @@ async fn render_frames(
             .wait_for_compositor_commit()
             .await
             .map_err(|source| RenderError::browser(output, source))?;
-        let captured = browser
-            .capture_png()
-            .await
-            .map_err(|source| RenderError::browser(output, source))?;
-        frames.write_frame(&captured, output).await?;
+        frames.capture_and_write(browser, output).await?;
     }
     Ok(())
 }
 
 /// The two bounded destinations for a captured browser frame.
 ///
-/// Direct local rendering streams one frame into `FFmpeg`; Gate three worker
-/// capture writes the same frame into a checked artifact. The enum keeps this
-/// closed policy at the capture boundary instead of introducing an unbounded
-/// callback or channel abstraction.
+/// Direct local rendering streams one PNG into `FFmpeg`; Gate three worker
+/// capture also records its canonical raw-pixel fingerprint. The enum keeps
+/// this closed policy at the capture boundary instead of introducing an
+/// unbounded callback or channel abstraction.
 enum FrameSink<'a> {
     Encoder(&'a mut FfmpegSession),
     Artifact(&'a mut FrameArtifactWriter),
@@ -581,7 +577,7 @@ async fn stream_artifact(
         .map_err(|source| RenderError::artifact(output, source))?
     {
         encoder
-            .write_frame(&frame)
+            .write_frame(frame.png())
             .await
             .map_err(|source| RenderError::encoder(output, source))?;
     }
@@ -589,16 +585,32 @@ async fn stream_artifact(
 }
 
 impl FrameSink<'_> {
-    async fn write_frame(&mut self, frame: &EncodedPng, output: &Path) -> Result<(), RenderError> {
+    async fn capture_and_write(
+        &mut self,
+        browser: &BrowserSession,
+        output: &Path,
+    ) -> Result<(), RenderError> {
         match self {
-            Self::Encoder(encoder) => encoder
-                .write_frame(frame)
-                .await
-                .map_err(|source| RenderError::encoder(output, source)),
-            Self::Artifact(writer) => writer
-                .write_frame(frame)
-                .await
-                .map_err(|source| RenderError::artifact(output, source)),
+            Self::Encoder(encoder) => {
+                let frame = browser
+                    .capture_png()
+                    .await
+                    .map_err(|source| RenderError::browser(output, source))?;
+                encoder
+                    .write_frame(&frame)
+                    .await
+                    .map_err(|source| RenderError::encoder(output, source))
+            }
+            Self::Artifact(writer) => {
+                let frame = browser
+                    .capture_frame()
+                    .await
+                    .map_err(|source| RenderError::browser(output, source))?;
+                writer
+                    .write_frame(&frame)
+                    .await
+                    .map_err(|source| RenderError::artifact(output, source))
+            }
         }
     }
 }

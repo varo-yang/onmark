@@ -5,9 +5,11 @@ use tempfile::{NamedTempFile, TempPath};
 use tokio::fs::{File, OpenOptions};
 use tokio::io::{AsyncSeekExt as _, AsyncWriteExt as _, SeekFrom};
 
-use super::format::{FRAME_LENGTH_BYTES, FrameArtifactDescriptor, HEADER_BYTES, Header};
+use super::format::{
+    FRAME_LENGTH_BYTES, FrameArtifactDescriptor, HEADER_BYTES, Header, RAW_RGBA_HASH_BYTES,
+};
 use super::{FrameArtifact, FrameArtifactError, FrameArtifactErrorKind, FrameArtifactLimits};
-use crate::EncodedPng;
+use crate::CapturedFrame;
 
 /// The only mutable state while one worker owns an unpublished artifact.
 pub(crate) struct FrameArtifactWriter {
@@ -77,12 +79,13 @@ impl FrameArtifactWriter {
         })
     }
 
-    /// Appends one bounded PNG record in browser output order.
+    /// Appends one bounded PNG record and its raw-RGBA fingerprint in output order.
     pub(crate) async fn write_frame(
         &mut self,
-        frame: &EncodedPng,
+        frame: &CapturedFrame,
     ) -> Result<(), FrameArtifactError> {
-        let bytes = frame.as_bytes();
+        let bytes = frame.png().as_bytes();
+        let raw_rgba_hash = frame.raw_rgba_hash();
         let next = self.next_record(bytes)?;
         let length = next.frame_bytes.to_be_bytes();
 
@@ -102,9 +105,21 @@ impl FrameArtifactWriter {
                 source,
             )
         })?;
+        self.file
+            .write_all(raw_rgba_hash.as_bytes())
+            .await
+            .map_err(|source| {
+                FrameArtifactError::io(
+                    FrameArtifactErrorKind::Output,
+                    &self.output,
+                    "failed to write frame artifact raw-RGBA fingerprint",
+                    source,
+                )
+            })?;
 
         self.digest.update(length);
         self.digest.update(bytes);
+        self.digest.update(raw_rgba_hash.as_bytes());
         self.frames = next.frames;
         self.payload_bytes = next.payload_bytes;
         Ok(())
@@ -207,13 +222,16 @@ impl FrameArtifactWriter {
             ));
         }
 
-        let record_bytes = FRAME_LENGTH_BYTES.checked_add(frame_bytes).ok_or_else(|| {
-            FrameArtifactError::new(
-                FrameArtifactErrorKind::ByteLimit,
-                &self.output,
-                "frame artifact record size exceeds its accounting domain",
-            )
-        })?;
+        let record_bytes = FRAME_LENGTH_BYTES
+            .checked_add(frame_bytes)
+            .and_then(|bytes| bytes.checked_add(RAW_RGBA_HASH_BYTES))
+            .ok_or_else(|| {
+                FrameArtifactError::new(
+                    FrameArtifactErrorKind::ByteLimit,
+                    &self.output,
+                    "frame artifact record size exceeds its accounting domain",
+                )
+            })?;
         let payload_bytes = self
             .payload_bytes
             .checked_add(record_bytes)

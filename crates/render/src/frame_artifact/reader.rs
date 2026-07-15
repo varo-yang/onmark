@@ -4,11 +4,13 @@ use sha2::{Digest as _, Sha256};
 use tokio::fs::{self, File};
 use tokio::io::AsyncReadExt as _;
 
-use super::format::{FRAME_LENGTH_BYTES, HEADER_BYTES, Header};
-use super::{FrameArtifactError, FrameArtifactErrorKind, FrameArtifactLimits};
-use crate::EncodedPng;
+use super::format::{FRAME_LENGTH_BYTES, HEADER_BYTES, Header, RAW_RGBA_HASH_BYTES};
+use super::{FrameArtifact, FrameArtifactError, FrameArtifactErrorKind, FrameArtifactLimits};
+use crate::{CapturedFrame, EncodedPng, RawRgbaHash};
 
-/// One bounded, sequential view into a verified artifact payload.
+const PNG_HASH_BUFFER_BYTES: usize = 8 * 1024;
+
+/// One bounded, sequential reader for an artifact payload.
 pub(crate) struct FrameArtifactReader {
     file: File,
     path: PathBuf,
@@ -17,6 +19,40 @@ pub(crate) struct FrameArtifactReader {
     frames_read: u64,
     payload_bytes_read: u64,
     digest: Sha256,
+}
+
+/// One sequential fingerprint view spanning adjacent immutable artifacts.
+pub(super) struct FrameArtifactFingerprintSequence<'a> {
+    artifacts: std::slice::Iter<'a, FrameArtifact>,
+    reader: Option<FrameArtifactReader>,
+}
+
+impl<'a> FrameArtifactFingerprintSequence<'a> {
+    pub(super) fn new(artifacts: &'a [FrameArtifact]) -> Self {
+        Self {
+            artifacts: artifacts.iter(),
+            reader: None,
+        }
+    }
+
+    pub(super) async fn next_fingerprint(
+        &mut self,
+    ) -> Result<Option<RawRgbaHash>, FrameArtifactError> {
+        loop {
+            if let Some(reader) = self.reader.as_mut() {
+                if let Some(fingerprint) = reader.next_fingerprint().await? {
+                    return Ok(Some(fingerprint));
+                }
+                self.reader = None;
+                continue;
+            }
+
+            let Some(artifact) = self.artifacts.next() else {
+                return Ok(None);
+            };
+            self.reader = Some(artifact.reader().await?);
+        }
+    }
 }
 
 impl FrameArtifactReader {
@@ -33,7 +69,32 @@ impl FrameArtifactReader {
     }
 
     /// Reads exactly one retained frame and verifies the final record on EOF.
-    pub(crate) async fn next_frame(&mut self) -> Result<Option<EncodedPng>, FrameArtifactError> {
+    pub(crate) async fn next_frame(&mut self) -> Result<Option<CapturedFrame>, FrameArtifactError> {
+        let Some(record) = self.next_record().await? else {
+            return Ok(None);
+        };
+        let png = self.read_png(record.frame_len).await?;
+        let fingerprint = self.read_fingerprint().await?;
+        self.finish_record(&record)?;
+
+        Ok(Some(CapturedFrame::recorded(png, fingerprint)))
+    }
+
+    /// Reads one fingerprint while hashing its PNG payload without retaining it.
+    pub(super) async fn next_fingerprint(
+        &mut self,
+    ) -> Result<Option<RawRgbaHash>, FrameArtifactError> {
+        let Some(record) = self.next_record().await? else {
+            return Ok(None);
+        };
+        self.hash_png(record.frame_len).await?;
+        let fingerprint = self.read_fingerprint().await?;
+        self.finish_record(&record)?;
+
+        Ok(Some(fingerprint))
+    }
+
+    async fn next_record(&mut self) -> Result<Option<FrameRecord>, FrameArtifactError> {
         if self.frames_read == self.header.frames {
             return Ok(None);
         }
@@ -67,23 +128,32 @@ impl FrameArtifactReader {
                 "frame artifact PNG exceeds the configured per-frame byte limit",
             ));
         }
-        let next_payload_bytes = self
+        let payload_bytes = self
             .payload_bytes_read
             .checked_add(FRAME_LENGTH_BYTES)
             .and_then(|bytes| bytes.checked_add(frame_bytes))
+            .and_then(|bytes| bytes.checked_add(RAW_RGBA_HASH_BYTES))
             .ok_or_else(|| {
                 FrameArtifactError::invalid(
                     &self.path,
                     "frame artifact payload exceeds its accounting domain",
                 )
             })?;
-        if next_payload_bytes > self.header.payload_bytes {
+        if payload_bytes > self.header.payload_bytes {
             return Err(FrameArtifactError::invalid(
                 &self.path,
                 "frame artifact record exceeds its declared payload",
             ));
         }
 
+        self.digest.update(length);
+        Ok(Some(FrameRecord {
+            frame_len,
+            payload_bytes,
+        }))
+    }
+
+    async fn read_png(&mut self, frame_len: usize) -> Result<EncodedPng, FrameArtifactError> {
         let mut bytes = vec![0; frame_len];
         self.file.read_exact(&mut bytes).await.map_err(|source| {
             FrameArtifactError::io(
@@ -93,16 +163,54 @@ impl FrameArtifactReader {
                 source,
             )
         })?;
-        self.digest.update(length);
         self.digest.update(&bytes);
-        self.frames_read += 1;
-        self.payload_bytes_read = next_payload_bytes;
+        Ok(EncodedPng::new(bytes))
+    }
 
+    async fn hash_png(&mut self, frame_len: usize) -> Result<(), FrameArtifactError> {
+        let mut remaining = frame_len;
+        let mut buffer = [0; PNG_HASH_BUFFER_BYTES];
+
+        while remaining > 0 {
+            let length = remaining.min(buffer.len());
+            self.file
+                .read_exact(&mut buffer[..length])
+                .await
+                .map_err(|source| {
+                    FrameArtifactError::io(
+                        FrameArtifactErrorKind::InvalidArtifact,
+                        &self.path,
+                        "failed to read frame artifact PNG payload",
+                        source,
+                    )
+                })?;
+            self.digest.update(&buffer[..length]);
+            remaining -= length;
+        }
+        Ok(())
+    }
+
+    async fn read_fingerprint(&mut self) -> Result<RawRgbaHash, FrameArtifactError> {
+        let mut bytes = [0; RawRgbaHash::BYTE_LENGTH];
+        self.file.read_exact(&mut bytes).await.map_err(|source| {
+            FrameArtifactError::io(
+                FrameArtifactErrorKind::InvalidArtifact,
+                &self.path,
+                "failed to read frame artifact raw-RGBA fingerprint",
+                source,
+            )
+        })?;
+        self.digest.update(bytes);
+        Ok(RawRgbaHash::from_bytes(bytes))
+    }
+
+    fn finish_record(&mut self, record: &FrameRecord) -> Result<(), FrameArtifactError> {
+        self.frames_read += 1;
+        self.payload_bytes_read = record.payload_bytes;
         if self.frames_read == self.header.frames {
             self.verify_complete()?;
         }
-
-        Ok(Some(EncodedPng::new(bytes)))
+        Ok(())
     }
 
     fn verify_complete(&mut self) -> Result<(), FrameArtifactError> {
@@ -121,6 +229,11 @@ impl FrameArtifactReader {
         }
         Ok(())
     }
+}
+
+struct FrameRecord {
+    frame_len: usize,
+    payload_bytes: u64,
 }
 
 pub(super) async fn open_verified(

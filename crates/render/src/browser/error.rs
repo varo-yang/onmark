@@ -66,6 +66,22 @@ impl BrowserError {
         }
     }
 
+    pub(super) fn capture_pixels(message: impl Into<Box<str>>) -> Self {
+        Self {
+            kind: BrowserErrorKind::Capture,
+            message: Some(message.into()),
+            source: None,
+        }
+    }
+
+    pub(super) fn png(message: impl Into<Box<str>>, source: png::DecodingError) -> Self {
+        Self {
+            kind: BrowserErrorKind::Capture,
+            message: Some(message.into()),
+            source: Some(BrowserErrorSource::Png(source)),
+        }
+    }
+
     pub(super) fn cdp(kind: BrowserErrorKind, source: CdpError) -> Self {
         Self {
             kind,
@@ -136,6 +152,7 @@ impl fmt::Display for BrowserErrorKind {
 #[derive(Debug)]
 enum BrowserErrorSource {
     Cdp(CdpError),
+    Png(png::DecodingError),
     Io(io::Error),
     Join(JoinError),
     Json(serde_json::Error),
@@ -145,6 +162,7 @@ impl fmt::Display for BrowserErrorSource {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Cdp(source) => source.fmt(formatter),
+            Self::Png(source) => source.fmt(formatter),
             Self::Io(source) => source.fmt(formatter),
             Self::Join(source) => source.fmt(formatter),
             Self::Json(source) => source.fmt(formatter),
@@ -156,6 +174,7 @@ impl Error for BrowserErrorSource {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Cdp(source) => source.source(),
+            Self::Png(source) => source.source(),
             Self::Io(source) => source.source(),
             Self::Join(source) => source.source(),
             Self::Json(source) => source.source(),

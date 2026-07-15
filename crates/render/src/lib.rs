@@ -18,7 +18,8 @@ mod video;
 mod worker;
 
 pub use browser::{
-    BrowserError, BrowserErrorKind, BrowserLimits, BrowserSession, EncodedPng, InvalidBrowserLimits,
+    BrowserError, BrowserErrorKind, BrowserLimits, BrowserSession, CapturedFrame, EncodedPng,
+    InvalidBrowserLimits, RawRgbaHash,
 };
 pub use encoder::{
     EncodeError, EncodeErrorKind, EncodeLimits, EncodedVideo, Ffmpeg, FfmpegSession, InvalidFfmpeg,

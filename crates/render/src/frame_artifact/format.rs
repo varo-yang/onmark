@@ -7,14 +7,17 @@ use serde::Serialize;
 use sha2::{Digest as _, Sha256};
 
 use super::{FrameArtifactError, FrameArtifactErrorKind, FrameArtifactLimits};
-use crate::{ExecutableUnit, RenderProfile};
+use crate::{ExecutableUnit, RawRgbaHash, RenderProfile};
 
 pub(super) const HEADER_BYTES: usize = 124;
 pub(super) const FRAME_LENGTH_BYTES: u64 = 8;
-pub(super) const MIN_FRAME_RECORD_BYTES: u64 = FRAME_LENGTH_BYTES + 1;
+pub(super) const RAW_RGBA_HASH_BYTES: u64 = RawRgbaHash::BYTE_LENGTH as u64;
+pub(super) const MIN_FRAME_RECORD_BYTES: u64 = FRAME_LENGTH_BYTES + 1 + RAW_RGBA_HASH_BYTES;
 
 const MAGIC: [u8; 8] = *b"ONMARKF1";
-const VERSION: u16 = 1;
+// The magic identifies the frame-artifact family. V2 adds one raw-RGBA hash
+// beside every PNG record, so the explicit version rejects the former layout.
+const VERSION: u16 = 2;
 
 /// Immutable input facts that determine one visual frame artifact.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -45,7 +48,7 @@ impl FrameArtifactDescriptor {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct UnitIdentity<'a> {
-    // Declaration order is the V1 compact-JSON identity contract.
+    // Declaration order is the compact-JSON identity contract.
     version: u16,
     bundle_id: &'a str,
     width: u32,

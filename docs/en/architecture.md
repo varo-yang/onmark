@@ -164,29 +164,31 @@ does not synthesize an implicit full-screen DOM from Timeline IR. The public
 rules for author-owned browser code live in the
 [presentation contract](presentation-contract.md).
 
-Each worker executes one state machine:
+Each Gate-three capture worker executes one state machine:
 
 ```text
-claim → materialize → launch → ready → seek/capture → encode → verify → commit
+materialize → launch → ready → seek/capture → fingerprint → verify → commit
 ```
 
-Artifacts are verified and atomically published under content hashes. Audio follows a separate plan and is mixed outside browser frame capture.
+The capture worker never owns a visual encoder: it atomically publishes one
+verified frame artifact. A later coordinator owns claims and leases; the
+assembler owns the one continuous visual encode. Audio follows a separate plan
+and is mixed outside browser frame capture.
 
 ## Deterministic browser protocol
 
 The sole clock derives from frame index and rational timebase. Wall time and free-running animation or media clocks may not determine output.
 
-The runtime protocol includes `Load`, `Prepare`, `Seek`, `FrameReady`, and `Dispose`. `FrameReady(frame)` is a logical stability barrier: after receiving it, the native executor waits two bounded animation-frame turns for Chromium to commit the selected state to its compositor, then captures the frame and hashes the exact raw RGBA bytes it consumed. The commit barrier never selects a frame or contributes a clock; it only closes the logical-runtime-to-native-capture race. The runtime does not publish an independently invented state hash. Inside the runtime, `RuntimeFrame` retains the exact integral frame identity and derives floating-point seconds from the Rust-owned rational frame rate only for browser API calls; those seconds never become scheduling or protocol truth. Components declare temporal behavior such as `stateless`, `warmup(n)`, `sequential`, `global`, or `neighbor(radius)`. Unknown components default to `sequential`: parallel seekability must be proven, not guessed. Native APIs and audited adapters may safely provide stronger declarations. Detection may recommend an adapter but may not silently relax correctness.
+The runtime protocol includes `Load`, `Prepare`, `Seek`, `FrameReady`, and `Dispose`. `FrameReady(frame)` is a logical stability barrier: after receiving it, the native executor waits two bounded animation-frame turns for Chromium to commit the selected state to its compositor, then captures the frame. Direct rendering retains that PNG as its encoder payload. Worker capture additionally decodes it into the configured exact 8-bit RGBA viewport and hashes those canonical pixel bytes. A worker artifact records that raw-pixel hash beside each ordered PNG record, so independent captures can be compared without treating PNG compression bytes as visual truth. The commit barrier never selects a frame or contributes a clock; it only closes the logical-runtime-to-native-capture race. The runtime does not publish an independently invented state hash. Inside the runtime, `RuntimeFrame` retains the exact integral frame identity and derives floating-point seconds from the Rust-owned rational frame rate only for browser API calls; those seconds never become scheduling or protocol truth. Components declare temporal behavior such as `stateless`, `warmup(n)`, `sequential`, `global`, or `neighbor(radius)`. Unknown components default to `sequential`: parallel seekability must be proven, not guessed. Native APIs and audited adapters may safely provide stronger declarations. Detection may recommend an adapter but may not silently relax correctness.
 
 Determinism is layered. Canonically encoded Timeline IR and Execution Plans
 must be byte-identical once those encodings exist. The current in-memory
 Timeline IR is structurally deterministic but does not yet claim canonical wire
 bytes. Raw frames target identical hashes inside a locked browser/font/render
-environment. The current Gate-one executor captures PNG bytes and has not yet
-implemented the specified raw-RGBA hashing boundary. Encoded containers are
-validated by timestamps, frame counts, codec configuration, and decoded
-content; byte-identical MP4 output is an experimental property, not a blanket
-promise.
+environment; per-frame worker-artifact fingerprints make that property an
+executable conformance claim. Encoded containers are validated by timestamps,
+frame counts, codec configuration, and decoded content; byte-identical MP4
+output is an experimental property, not a blanket promise.
 
 ## Distributed execution (production target)
 
@@ -195,7 +197,8 @@ The coordinator stores DAG state, leases, retries, and artifact references but n
 Gate three starts with a deliberately narrower interchange: a worker captures a
 whole planned output interval into one bounded, checksummed frame artifact. The
 artifact is a single versioned file containing an exact output interval,
-render-profile and visual-plan identities, and one ordered PNG stream. It is published
+render-profile and visual-plan identities, and one ordered PNG stream with its
+canonical raw-RGBA fingerprints. It is published
 through a sibling staging file and no-clobber link, so a retry can verify or
 reuse an existing immutable result without ever exposing a partial one. The
 assembler verifies that each artifact belongs to its planned unit, streams the
@@ -238,7 +241,7 @@ onmark/
 ├── packages/
 │   ├── runtime/ authoring/ bundler/
 ├── scripts/     # repository-only generation and quality checks
-├── deploy/aws-lambda/  # introduced at delivery gate three
+├── deploy/aws-lambda/  # only after Gate-three artifact conformance
 ├── schemas/ conformance/ evals/ examples/ docs/
 ```
 
@@ -259,8 +262,10 @@ The `protocol` module uses `serde` for stable browser and bundle-manifest JSON b
 `onmark-media` depends on core plus `serde` and `serde_json` for a private ffprobe response boundary. It starts the configured ffprobe executable directly with an argument array, never through a shell; wrappers that leave descendant processes holding the output pipes are outside this executable contract. Process lifetime and retained stdout/stderr bytes are explicitly bounded under that direct-child contract, both pipes are drained concurrently, and explicit shutdown reports process-control failures while `Drop` remains a best-effort termination fallback. Private ffprobe response types are translated once into core-owned `AssetMetadata`; JSON values and third-party error types do not define the stable API, while underlying errors remain available through the standard error source chain for debugging. Gate-one probing requests bounded stream-level facts for every stream: `codec_type` records audio presence and selects the first visual stream, while `nb_frames` identifies stills. It classifies a visual stream as constant only when ffprobe's parseable `avg_frame_rate` and `r_frame_rate` normalize to the same exact rational rate; disagreement or unavailable values are conservatively variable. The one-MiB stdout ceiling therefore remains independent of media duration.
 
 `onmark-render` owns the heavy Chromium and `FFmpeg` dependency budget. It uses
-`chromiumoxide` only as a CDP transport and process launcher, with `tokio` and
-`futures` confined to this asynchronous execution boundary. `tempfile` gives
+`chromiumoxide` only as a CDP transport and process launcher, `png` only to
+decode a captured screenshot into canonical RGBA for its renderer-owned
+fingerprint, and `tokio` and `futures` only within this asynchronous execution
+boundary. `tempfile` gives
 every browser session an isolated profile, owns a private same-filesystem output
 staging directory, and retains one private RAII unit root.
 

@@ -383,11 +383,13 @@ mod tests {
     use onmark_core::model::{FrameIndex, FrameRate};
     use onmark_core::protocol::WireFrameRate;
     use tempfile::{TempDir, tempdir};
-    use tokio::time::sleep;
+    use tokio::time::{sleep, timeout};
 
     use super::{EncodeError, EncodeErrorKind, EncodeLimits, EncodedVideo, Ffmpeg, FfmpegSession};
     use crate::EncodedPng;
     use crate::encoder::AudioInput;
+
+    const FIXTURE_READY_TIMEOUT: Duration = Duration::from_secs(5);
 
     #[tokio::test]
     async fn translates_a_failed_encoder_and_removes_its_partial_output() {
@@ -415,18 +417,11 @@ mod tests {
     async fn retains_encoder_diagnostics_when_frame_input_breaks() {
         let fixture = EncoderFixture::new("write-failed.mp4", Duration::from_secs(1), 4_096);
         let mut session = fixture.start();
-        let first_write = session.write_frame(&EncodedPng::new(vec![0])).await;
-        let error = if let Err(error) = first_write {
-            error
-        } else {
-            // Pipe buffering differs by platform. If the first byte was
-            // accepted while the child exited, the next write observes it.
-            sleep(Duration::from_millis(30)).await;
-            session
-                .write_frame(&EncodedPng::new(vec![0]))
-                .await
-                .expect_err("the exited fixture must close its input pipe")
-        };
+        fixture.wait_for_closed_input().await;
+        let error = session
+            .write_frame(&EncodedPng::new(vec![0]))
+            .await
+            .expect_err("the fixture has closed its input pipe");
 
         assert_eq!(error.kind(), EncodeErrorKind::InputWrite);
         assert!(error.to_string().contains("decoder rejected the PNG frame"));
@@ -534,6 +529,20 @@ mod tests {
 
         fn output(&self) -> PathBuf {
             self.directory.path().join(self.output_name)
+        }
+
+        async fn wait_for_closed_input(&self) {
+            let marker = self
+                .directory
+                .path()
+                .join(format!("{}.stdin-closed", self.output_name));
+            timeout(FIXTURE_READY_TIMEOUT, async {
+                while !marker.exists() {
+                    sleep(Duration::from_millis(1)).await;
+                }
+            })
+            .await
+            .expect("the fixture must close its input before the test writes");
         }
     }
 
