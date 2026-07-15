@@ -10,7 +10,6 @@ case "${output##*/}" in
   write-failed.mp4)
     exec 0<&-
     printf 'decoder rejected the PNG frame' >&2
-    : > "${output}.stdin-closed"
     exit 9
     ;;
   failed.mp4)

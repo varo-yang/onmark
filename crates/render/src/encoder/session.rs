@@ -389,7 +389,10 @@ mod tests {
     use crate::EncodedPng;
     use crate::encoder::AudioInput;
 
-    const FIXTURE_READY_TIMEOUT: Duration = Duration::from_secs(5);
+    const FIXTURE_RETRY_TIMEOUT: Duration = Duration::from_secs(5);
+    // The broken-pipe fixture retries writes until the kernel exposes closure.
+    const FIXTURE_MAX_FRAMES: u64 = 10_000;
+    const FIXTURE_MAX_INPUT_BYTES: u64 = 10_000;
 
     #[tokio::test]
     async fn translates_a_failed_encoder_and_removes_its_partial_output() {
@@ -417,11 +420,7 @@ mod tests {
     async fn retains_encoder_diagnostics_when_frame_input_breaks() {
         let fixture = EncoderFixture::new("write-failed.mp4", Duration::from_secs(1), 4_096);
         let mut session = fixture.start();
-        fixture.wait_for_closed_input().await;
-        let error = session
-            .write_frame(&EncodedPng::new(vec![0]))
-            .await
-            .expect_err("the fixture has closed its input pipe");
+        let error = fixture.write_until_input_breaks(&mut session).await;
 
         assert_eq!(error.kind(), EncodeErrorKind::InputWrite);
         assert!(error.to_string().contains("decoder rejected the PNG frame"));
@@ -496,8 +495,13 @@ mod tests {
             stderr_limit: usize,
         ) -> Self {
             let directory = tempdir().expect("the fixture directory must be available");
-            let limits = EncodeLimits::new(inactivity_timeout, 2, 2, stderr_limit)
-                .expect("the fixture limits are bounded");
+            let limits = EncodeLimits::new(
+                inactivity_timeout,
+                FIXTURE_MAX_FRAMES,
+                FIXTURE_MAX_INPUT_BYTES,
+                stderr_limit,
+            )
+            .expect("the fixture limits are bounded");
             let ffmpeg = Ffmpeg::new(fixture_executable(), limits)
                 .expect("the fixture executable path is present");
 
@@ -531,18 +535,19 @@ mod tests {
             self.directory.path().join(self.output_name)
         }
 
-        async fn wait_for_closed_input(&self) {
-            let marker = self
-                .directory
-                .path()
-                .join(format!("{}.stdin-closed", self.output_name));
-            timeout(FIXTURE_READY_TIMEOUT, async {
-                while !marker.exists() {
-                    sleep(Duration::from_millis(1)).await;
+        async fn write_until_input_breaks(&self, session: &mut FfmpegSession) -> EncodeError {
+            let frame = EncodedPng::new(vec![0]);
+
+            timeout(FIXTURE_RETRY_TIMEOUT, async {
+                loop {
+                    match session.write_frame(&frame).await {
+                        Ok(()) => sleep(Duration::from_millis(1)).await,
+                        Err(error) => return error,
+                    }
                 }
             })
             .await
-            .expect("the fixture must close its input before the test writes");
+            .expect("the fixture must close its input before the write retry deadline")
         }
     }
 
