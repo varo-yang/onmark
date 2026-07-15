@@ -1,3 +1,8 @@
+//! No-clobber publication for locally encoded output.
+//!
+//! Intermediate files remain private to one temporary directory. The final
+//! hard link is the only operation that makes a successful render observable.
+
 use std::path::{Path, PathBuf};
 
 use tempfile::TempDir;
@@ -5,6 +10,7 @@ use tempfile::TempDir;
 use super::{RenderError, RenderErrorKind};
 use crate::EncodedVideo;
 
+/// Private visual and mixed outputs awaiting one atomic publication step.
 #[derive(Debug)]
 pub(super) struct StagedOutput {
     directory: TempDir,

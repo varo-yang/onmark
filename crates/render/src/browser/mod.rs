@@ -1,3 +1,5 @@
+//! Chromium adapter boundary for protocol execution and frame capture.
+
 mod error;
 mod frame;
 mod limits;

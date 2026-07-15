@@ -1,3 +1,8 @@
+//! Final translation from typed library failures to stable CLI exit behavior.
+//!
+//! Lower layers retain structured causes; only this process boundary chooses
+//! terminal wording and exit status.
+
 use std::error::Error;
 use std::fmt;
 use std::io::{self, Write};

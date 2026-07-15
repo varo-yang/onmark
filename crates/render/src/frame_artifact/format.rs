@@ -1,3 +1,8 @@
+//! Canonical binary layout and identity derivation for worker frame artifacts.
+//!
+//! Encoding and decoding share one fixed field order. Checksums protect stored
+//! bytes; raw-RGBA fingerprints separately prove visual equivalence.
+
 use std::fmt;
 use std::io;
 use std::path::Path;
@@ -246,89 +251,55 @@ pub(super) struct Header {
 
 impl Header {
     pub(super) fn encode(&self) -> [u8; HEADER_BYTES] {
-        let mut bytes = [0; HEADER_BYTES];
-        let mut cursor = 0;
-
-        write_bytes(&mut bytes, &mut cursor, &MAGIC);
-        write_bytes(&mut bytes, &mut cursor, &VERSION.to_be_bytes());
-        write_bytes(&mut bytes, &mut cursor, &[0, 0]);
-        write_bytes(
-            &mut bytes,
-            &mut cursor,
-            &self.descriptor.output.start().get().to_be_bytes(),
-        );
-        write_bytes(
-            &mut bytes,
-            &mut cursor,
-            &self.descriptor.output.end().get().to_be_bytes(),
-        );
-        write_bytes(
-            &mut bytes,
-            &mut cursor,
-            &self.descriptor.frame_rate.numerator().to_be_bytes(),
-        );
-        write_bytes(
-            &mut bytes,
-            &mut cursor,
-            &self.descriptor.frame_rate.denominator().to_be_bytes(),
-        );
-        write_bytes(
-            &mut bytes,
-            &mut cursor,
-            &self.descriptor.profile.width().to_be_bytes(),
-        );
-        write_bytes(
-            &mut bytes,
-            &mut cursor,
-            &self.descriptor.profile.height().to_be_bytes(),
-        );
-        write_bytes(
-            &mut bytes,
-            &mut cursor,
-            self.descriptor.capture_environment.as_sha256(),
-        );
-        write_bytes(&mut bytes, &mut cursor, &self.descriptor.visual_plan_digest);
-        write_bytes(&mut bytes, &mut cursor, &self.frames.to_be_bytes());
-        write_bytes(&mut bytes, &mut cursor, &self.payload_bytes.to_be_bytes());
-        write_bytes(&mut bytes, &mut cursor, &self.digest);
-
-        debug_assert_eq!(cursor, HEADER_BYTES);
-        bytes
+        let mut header = HeaderEncoder::new();
+        header.bytes(MAGIC);
+        header.u16(VERSION);
+        header.bytes([0, 0]);
+        header.u64(self.descriptor.output.start().get());
+        header.u64(self.descriptor.output.end().get());
+        header.u32(self.descriptor.frame_rate.numerator());
+        header.u32(self.descriptor.frame_rate.denominator());
+        header.u32(self.descriptor.profile.width());
+        header.u32(self.descriptor.profile.height());
+        header.bytes(*self.descriptor.capture_environment.as_sha256());
+        header.bytes(self.descriptor.visual_plan_digest);
+        header.u64(self.frames);
+        header.u64(self.payload_bytes);
+        header.bytes(self.digest);
+        header.finish()
     }
 
     pub(super) fn decode(
         path: &Path,
         bytes: [u8; HEADER_BYTES],
     ) -> Result<Self, FrameArtifactError> {
-        let mut cursor = 0;
-        if read_array::<8>(&bytes, &mut cursor) != MAGIC {
+        let mut header = HeaderDecoder::new(bytes);
+        if header.bytes::<8>() != MAGIC {
             return Err(FrameArtifactError::invalid(
                 path,
                 "frame artifact magic is invalid",
             ));
         }
-        if read_u16(&bytes, &mut cursor) != VERSION {
+        if header.u16() != VERSION {
             return Err(FrameArtifactError::invalid(
                 path,
                 "frame artifact version is unsupported",
             ));
         }
-        if read_array::<2>(&bytes, &mut cursor) != [0, 0] {
+        if header.bytes::<2>() != [0, 0] {
             return Err(FrameArtifactError::invalid(
                 path,
                 "frame artifact reserved header bytes are nonzero",
             ));
         }
 
-        let output = FrameInterval::new(
-            FrameIndex::new(read_u64(&bytes, &mut cursor)),
-            FrameIndex::new(read_u64(&bytes, &mut cursor)),
-        )
-        .map_err(|_| {
-            FrameArtifactError::invalid(path, "frame artifact output interval is reversed")
-        })?;
-        let numerator = read_u32(&bytes, &mut cursor);
-        let denominator = read_u32(&bytes, &mut cursor);
+        let output =
+            FrameInterval::new(FrameIndex::new(header.u64()), FrameIndex::new(header.u64()))
+                .map_err(|_| {
+                    FrameArtifactError::invalid(path, "frame artifact output interval is reversed")
+                })?;
+        let numerator = header.u32();
+        let denominator = header.u32();
         let frame_rate = FrameRate::new(numerator, denominator).map_err(|_| {
             FrameArtifactError::invalid(path, "frame artifact frame rate is invalid")
         })?;
@@ -338,19 +309,15 @@ impl Header {
                 "frame artifact frame rate is not canonical",
             ));
         }
-        let profile =
-            RenderProfile::new(read_u32(&bytes, &mut cursor), read_u32(&bytes, &mut cursor))
-                .map_err(|_| {
-                    FrameArtifactError::invalid(path, "frame artifact render profile is invalid")
-                })?;
-        let capture_environment =
-            CaptureEnvironmentId::from_sha256(read_array(&bytes, &mut cursor));
-        let visual_plan_digest = read_array::<32>(&bytes, &mut cursor);
-        let frames = read_u64(&bytes, &mut cursor);
-        let payload_bytes = read_u64(&bytes, &mut cursor);
-        let digest = read_array::<32>(&bytes, &mut cursor);
-
-        debug_assert_eq!(cursor, HEADER_BYTES);
+        let profile = RenderProfile::new(header.u32(), header.u32()).map_err(|_| {
+            FrameArtifactError::invalid(path, "frame artifact render profile is invalid")
+        })?;
+        let capture_environment = CaptureEnvironmentId::from_sha256(header.bytes());
+        let visual_plan_digest = header.bytes();
+        let frames = header.u64();
+        let payload_bytes = header.u64();
+        let digest = header.bytes();
+        header.finish();
         Ok(Self {
             descriptor: FrameArtifactDescriptor {
                 output,
@@ -424,33 +391,83 @@ fn frame_rate(plan: &BrowserPlan) -> FrameRate {
         .expect("a browser plan retains a validated canonical frame rate")
 }
 
-fn write_bytes(target: &mut [u8], cursor: &mut usize, source: &[u8]) {
-    let end = cursor
-        .checked_add(source.len())
-        .expect("the fixed frame artifact header cannot overflow usize");
-    target[*cursor..end].copy_from_slice(source);
-    *cursor = end;
+/// Forward-only writer whose final cursor proves the fixed layout stayed whole.
+struct HeaderEncoder {
+    bytes: [u8; HEADER_BYTES],
+    cursor: usize,
 }
 
-fn read_array<const N: usize>(source: &[u8], cursor: &mut usize) -> [u8; N] {
-    let end = cursor
-        .checked_add(N)
-        .expect("the fixed frame artifact header cannot overflow usize");
-    let bytes = source[*cursor..end]
-        .try_into()
-        .expect("the fixed frame artifact header contains every requested field");
-    *cursor = end;
-    bytes
+impl HeaderEncoder {
+    const fn new() -> Self {
+        Self {
+            bytes: [0; HEADER_BYTES],
+            cursor: 0,
+        }
+    }
+
+    fn bytes<const N: usize>(&mut self, value: [u8; N]) {
+        let end = self
+            .cursor
+            .checked_add(N)
+            .expect("the fixed frame artifact header cannot overflow usize");
+        self.bytes[self.cursor..end].copy_from_slice(&value);
+        self.cursor = end;
+    }
+
+    fn u16(&mut self, value: u16) {
+        self.bytes(value.to_be_bytes());
+    }
+
+    fn u32(&mut self, value: u32) {
+        self.bytes(value.to_be_bytes());
+    }
+
+    fn u64(&mut self, value: u64) {
+        self.bytes(value.to_be_bytes());
+    }
+
+    fn finish(self) -> [u8; HEADER_BYTES] {
+        debug_assert_eq!(self.cursor, HEADER_BYTES);
+        self.bytes
+    }
 }
 
-fn read_u16(source: &[u8], cursor: &mut usize) -> u16 {
-    u16::from_be_bytes(read_array(source, cursor))
+/// Mirror of [`HeaderEncoder`] for one already length-checked header.
+struct HeaderDecoder {
+    bytes: [u8; HEADER_BYTES],
+    cursor: usize,
 }
 
-fn read_u32(source: &[u8], cursor: &mut usize) -> u32 {
-    u32::from_be_bytes(read_array(source, cursor))
-}
+impl HeaderDecoder {
+    const fn new(bytes: [u8; HEADER_BYTES]) -> Self {
+        Self { bytes, cursor: 0 }
+    }
 
-fn read_u64(source: &[u8], cursor: &mut usize) -> u64 {
-    u64::from_be_bytes(read_array(source, cursor))
+    fn bytes<const N: usize>(&mut self) -> [u8; N] {
+        let end = self
+            .cursor
+            .checked_add(N)
+            .expect("the fixed frame artifact header cannot overflow usize");
+        let value = self.bytes[self.cursor..end]
+            .try_into()
+            .expect("the fixed frame artifact header contains every requested field");
+        self.cursor = end;
+        value
+    }
+
+    fn u16(&mut self) -> u16 {
+        u16::from_be_bytes(self.bytes())
+    }
+
+    fn u32(&mut self) -> u32 {
+        u32::from_be_bytes(self.bytes())
+    }
+
+    fn u64(&mut self) -> u64 {
+        u64::from_be_bytes(self.bytes())
+    }
+
+    fn finish(self) {
+        debug_assert_eq!(self.cursor, HEADER_BYTES);
+    }
 }

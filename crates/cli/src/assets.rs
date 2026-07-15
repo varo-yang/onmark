@@ -1,3 +1,8 @@
+//! Filesystem asset freezing at the outer compiler boundary.
+//!
+//! Logical references are probed, content-addressed, and materialized once;
+//! pure solving receives only immutable identities and normalized metadata.
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt;
@@ -19,6 +24,7 @@ const COPY_BUFFER_BYTES: usize = 64 * 1024;
 const MAX_ASSET_FILES: usize = 10_000;
 const MAX_FROZEN_BYTES: u64 = 128 * 1024 * 1024 * 1024;
 
+/// Complete film-wide mapping from authored references to frozen asset facts.
 #[derive(Debug)]
 pub(super) struct FrozenCatalog {
     directory: TempDir,
@@ -101,20 +107,22 @@ impl FrozenCatalog {
 
         Ok(MaterializedInputs {
             assets: assets.into_values().collect(),
-            directory,
+            _directory: directory,
         })
     }
 }
 
+/// Frozen files retained for bundling after compilation has consumed metadata.
 #[derive(Debug)]
 pub(super) struct MaterializedInputs {
     assets: Vec<MaterializedAsset>,
-    directory: TempDir,
+    // Owns the private paths referenced by every materialized asset.
+    _directory: TempDir,
 }
 
 impl MaterializedInputs {
-    pub(super) fn into_parts(self) -> (Vec<MaterializedAsset>, TempDir) {
-        (self.assets, self.directory)
+    pub(super) fn assets(&self) -> &[MaterializedAsset] {
+        &self.assets
     }
 }
 

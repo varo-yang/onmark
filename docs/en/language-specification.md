@@ -52,7 +52,7 @@ Text and attribute values support the five predefined XML entities (`amp`, `lt`,
 
 ## Time
 
-Authored durations use the exact grammar `integer[.fraction](s|ms)` with no whitespace or sign. Seconds admit at most nine fractional digits and milliseconds at most six, so every accepted value has an exact unsigned nanosecond representation. Frame units and floating-point approximations are not part of the language.
+Authored time values use the exact grammar `integer[.fraction](s|ms)` with no whitespace or sign. Seconds admit at most nine fractional digits and milliseconds at most six, so every accepted value has an exact unsigned nanosecond representation. A shot's `duration` must be greater than zero; cue times and delays may name zero. Frame units and floating-point approximations are not part of the language.
 
 The compiler maps exact nanosecond values onto a rational frame grid with integer arithmetic. Every conversion names either floor or ceiling rounding at its call site; no implicit cast or ambient default may choose a frame boundary. Gate-one authored starts, delays, cue times, and durations select the first frame boundary that is not earlier than the exact value (`Ceil`), so a positive sub-frame value never silently becomes zero frames. `Floor` remains available only for rules that explicitly require attribution to an earlier boundary.
 

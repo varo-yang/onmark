@@ -1,3 +1,9 @@
+//! Safe materialization of an immutable browser unit root.
+//!
+//! Manifest paths, byte counts, hashes, and asset identities are verified while
+//! copying into a private directory. Chromium never observes the source tree or
+//! a partially materialized root.
+
 use std::collections::BTreeSet;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read as _, Write};
@@ -97,6 +103,7 @@ fn collect_assets(
     Ok(collected)
 }
 
+/// Single owner of the private root and its aggregate byte budget.
 struct UnitWriter {
     directory: TempDir,
     budget: ByteBudget,
@@ -314,6 +321,7 @@ fn encode_sha256(digest: &[u8]) -> String {
     encoded
 }
 
+/// Remaining bytes across the complete unit, not merely the current file.
 struct ByteBudget {
     remaining: u64,
 }
@@ -337,6 +345,7 @@ impl ByteBudget {
     }
 }
 
+/// Serialization sink used to price the manifest before writing any file.
 #[derive(Default)]
 struct ByteCounter {
     bytes: u64,
@@ -363,6 +372,7 @@ impl Write for ByteCounter {
     }
 }
 
+/// Hash-only sink that shares the serializer's exact byte representation.
 struct DigestWriter(Sha256);
 
 impl DigestWriter {

@@ -1,10 +1,14 @@
+//! Exact authored duration parsing over integer nanoseconds.
+//!
+//! Decimal spellings are validated and scaled without floating-point rounding.
+
 use std::error::Error;
 use std::fmt;
 
 pub(super) const NANOS_PER_SECOND: u64 = 1_000_000_000;
 const NANOS_PER_MILLISECOND: u64 = 1_000_000;
 
-/// Exact non-negative authored duration measured in nanoseconds.
+/// Exact duration measured in non-negative integer nanoseconds.
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct Duration(u64);
 
@@ -51,6 +55,20 @@ impl Duration {
         Ok(Self(nanoseconds))
     }
 
+    /// Parses an exact authored duration that must be greater than zero.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InvalidDuration::Zero`] in addition to the errors from
+    /// [`Self::parse`] when the exact value contains no time.
+    pub fn parse_positive(value: &str) -> Result<Self, InvalidDuration> {
+        let duration = Self::parse(value)?;
+        if duration == Self::ZERO {
+            return Err(InvalidDuration::Zero);
+        }
+        Ok(duration)
+    }
+
     /// Returns the exact nanosecond representation.
     #[must_use]
     pub const fn as_nanos(self) -> u64 {
@@ -77,6 +95,8 @@ impl fmt::Display for Duration {
 pub enum InvalidDuration {
     /// No duration text was authored.
     Empty,
+    /// The authored duration equals zero.
+    Zero,
     /// The numeric spelling violates the duration grammar.
     Malformed,
     /// The suffix is not `s` or `ms`.
@@ -91,6 +111,7 @@ impl fmt::Display for InvalidDuration {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         let message = match self {
             Self::Empty => "duration cannot be empty",
+            Self::Zero => "duration must be greater than zero",
             Self::Malformed => "duration must be an unsigned decimal without whitespace",
             Self::UnknownUnit => "duration unit must be s or ms",
             Self::TooPrecise => "duration exceeds the supported fractional precision",
@@ -176,6 +197,8 @@ mod tests {
     #[test]
     fn distinguishes_invalid_duration_reasons() {
         assert_eq!(Duration::parse(""), Err(InvalidDuration::Empty));
+        assert_eq!(Duration::parse("0s"), Ok(Duration::ZERO));
+        assert_eq!(Duration::parse_positive("0s"), Err(InvalidDuration::Zero));
         assert_eq!(Duration::parse("-1s"), Err(InvalidDuration::Malformed));
         assert_eq!(Duration::parse("3m"), Err(InvalidDuration::UnknownUnit));
         assert_eq!(

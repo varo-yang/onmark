@@ -1,3 +1,8 @@
+//! Versioned AWS invocation and result contracts over portable worker values.
+//!
+//! S3 locations are deployment facts; render-engine and AWS SDK types never
+//! enter each other's domains.
+
 use std::error::Error;
 use std::fmt;
 
@@ -48,8 +53,14 @@ impl<'de> Deserialize<'de> for CaptureInvocationVersion {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct ObjectPrefix {
-    #[cfg_attr(feature = "schema", schemars(length(min = 1)))]
+    #[cfg_attr(feature = "schema", schemars(length(min = 1), regex(pattern = r"\S")))]
     bucket: Box<str>,
+    #[cfg_attr(
+        feature = "schema",
+        schemars(regex(
+            pattern = r"^(?:$|(?!/)(?!(?:.*/)?(?:\.|\.\.)(?:/|$))(?!.*//)(?!.*\/$).+)$"
+        ))
+    )]
     prefix: Box<str>,
 }
 

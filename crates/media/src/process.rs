@@ -1,3 +1,8 @@
+//! Bounded ffprobe process ownership and concurrent pipe draining.
+//!
+//! Output is drained even after retention limits are reached so a verbose child
+//! cannot deadlock on a full pipe while Onmark keeps memory bounded.
+
 use std::collections::VecDeque;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
@@ -173,11 +178,13 @@ impl OutputReaders {
     }
 }
 
+/// Both captured streams after the child has been reaped and readers joined.
 pub(crate) struct ProcessOutput {
     pub(crate) stdout: Captured,
     pub(crate) stderr: Captured,
 }
 
+/// Bounded retained bytes plus the information needed to reject truncation.
 pub(crate) struct Captured {
     pub(crate) bytes: Vec<u8>,
     pub(crate) truncated: bool,
@@ -224,6 +231,7 @@ enum RetainedEdge {
     Tail,
 }
 
+/// Fixed-memory head or tail retention over a fully drained stream.
 struct RetainedBytes {
     bytes: VecDeque<u8>,
     limit: usize,

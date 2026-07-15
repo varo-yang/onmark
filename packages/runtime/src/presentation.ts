@@ -87,7 +87,10 @@ export class PresentationRuntimeAdapter implements RuntimeAdapter {
       this.#bindOverlays(plan, overlays);
     } catch (error) {
       releasePresentation(videos, overlays);
-      throw adapterFailure(error, "presentation failed to load");
+      throw RuntimeAdapterError.fromUnknown(
+        error,
+        "presentation failed to load",
+      );
     }
 
     this.#state = {
@@ -118,7 +121,10 @@ export class PresentationRuntimeAdapter implements RuntimeAdapter {
       loaded?.overlays ?? [],
     );
     if (failure !== undefined) {
-      throw adapterFailure(failure, "presentation cleanup failed");
+      throw RuntimeAdapterError.fromUnknown(
+        failure,
+        "presentation cleanup failed",
+      );
     }
   }
 
@@ -157,7 +163,7 @@ export class PresentationRuntimeAdapter implements RuntimeAdapter {
       await presentVideos(frame, this.#state);
       presentOverlays(frame, this.#state.overlays);
     } catch (error) {
-      throw adapterFailure(error, "frame presentation failed");
+      throw RuntimeAdapterError.fromUnknown(error, "frame presentation failed");
     }
   }
 }
@@ -222,42 +228,28 @@ function releasePresentation(
 }
 
 function releaseVideo(video: BoundVideo): unknown | undefined {
-  let failure: unknown;
-  try {
-    video.presentation.setVisible(false);
-  } catch (error) {
-    failure = error;
-  }
-  try {
-    video.resource.dispose();
-  } catch (error) {
-    failure ??= error;
-  }
-  try {
-    video.presentation.dispose();
-  } catch (error) {
-    failure ??= error;
-  }
-  return failure;
+  return releaseAll([
+    () => video.presentation.setVisible(false),
+    () => video.resource.dispose(),
+    () => video.presentation.dispose(),
+  ]);
 }
 
 function releaseOverlay(overlay: BoundOverlay): unknown | undefined {
-  let failure: unknown;
-  try {
-    overlay.presentation.setVisible(false);
-  } catch (error) {
-    failure = error;
-  }
-  try {
-    overlay.presentation.dispose();
-  } catch (error) {
-    failure ??= error;
-  }
-  return failure;
+  return releaseAll([
+    () => overlay.presentation.setVisible(false),
+    () => overlay.presentation.dispose(),
+  ]);
 }
 
-function adapterFailure(error: unknown, message: string): RuntimeAdapterError {
-  return error instanceof RuntimeAdapterError
-    ? error
-    : new RuntimeAdapterError("operation", message);
+function releaseAll(operations: readonly (() => void)[]): unknown | undefined {
+  let failure: unknown;
+  for (const operation of operations) {
+    try {
+      operation();
+    } catch (error) {
+      failure ??= error;
+    }
+  }
+  return failure;
 }

@@ -1,3 +1,8 @@
+//! Public ffprobe boundary over one local immutable artifact.
+//!
+//! Process control and JSON normalization stay behind this value so consumers
+//! receive only stable metadata or typed probe failures.
+
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};

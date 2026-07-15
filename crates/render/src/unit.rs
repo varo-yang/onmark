@@ -1,3 +1,9 @@
+//! Composition of solved partitions, frozen assets, and browser presentation.
+//!
+//! A `RenderUnit` joins solved facts to local byte sources. Its worker request
+//! is the portable projection; an `ExecutableUnit` additionally owns the private
+//! verified root required by local or worker execution.
+
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt;

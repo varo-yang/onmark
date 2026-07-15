@@ -1,3 +1,8 @@
+//! Bounded sequential validation of an immutable frame artifact.
+//!
+//! Records are consumed in order and checked against both per-frame and whole-
+//! artifact identities; no untrusted length controls an unbounded allocation.
+
 use std::path::{Path, PathBuf};
 
 use sha2::{Digest as _, Sha256};
@@ -100,14 +105,8 @@ impl FrameArtifactReader {
         }
 
         let mut length = [0; std::mem::size_of::<u64>()];
-        self.file.read_exact(&mut length).await.map_err(|source| {
-            FrameArtifactError::io(
-                FrameArtifactErrorKind::InvalidArtifact,
-                &self.path,
-                "failed to read frame artifact record length",
-                source,
-            )
-        })?;
+        self.read_exact(&mut length, "failed to read frame artifact record length")
+            .await?;
         let frame_bytes = u64::from_be_bytes(length);
         if frame_bytes == 0 {
             return Err(FrameArtifactError::invalid(
@@ -155,14 +154,8 @@ impl FrameArtifactReader {
 
     async fn read_png(&mut self, frame_len: usize) -> Result<EncodedPng, FrameArtifactError> {
         let mut bytes = vec![0; frame_len];
-        self.file.read_exact(&mut bytes).await.map_err(|source| {
-            FrameArtifactError::io(
-                FrameArtifactErrorKind::InvalidArtifact,
-                &self.path,
-                "failed to read frame artifact PNG payload",
-                source,
-            )
-        })?;
+        self.read_exact(&mut bytes, "failed to read frame artifact PNG payload")
+            .await?;
         self.digest.update(&bytes);
         Ok(EncodedPng::new(bytes))
     }
@@ -173,17 +166,11 @@ impl FrameArtifactReader {
 
         while remaining > 0 {
             let length = remaining.min(buffer.len());
-            self.file
-                .read_exact(&mut buffer[..length])
-                .await
-                .map_err(|source| {
-                    FrameArtifactError::io(
-                        FrameArtifactErrorKind::InvalidArtifact,
-                        &self.path,
-                        "failed to read frame artifact PNG payload",
-                        source,
-                    )
-                })?;
+            self.read_exact(
+                &mut buffer[..length],
+                "failed to read frame artifact PNG payload",
+            )
+            .await?;
             self.digest.update(&buffer[..length]);
             remaining -= length;
         }
@@ -192,16 +179,29 @@ impl FrameArtifactReader {
 
     async fn read_fingerprint(&mut self) -> Result<RawRgbaHash, FrameArtifactError> {
         let mut bytes = [0; RawRgbaHash::BYTE_LENGTH];
-        self.file.read_exact(&mut bytes).await.map_err(|source| {
+        self.read_exact(
+            &mut bytes,
+            "failed to read frame artifact raw-RGBA fingerprint",
+        )
+        .await?;
+        self.digest.update(bytes);
+        Ok(RawRgbaHash::from_bytes(bytes))
+    }
+
+    async fn read_exact(
+        &mut self,
+        bytes: &mut [u8],
+        message: &'static str,
+    ) -> Result<(), FrameArtifactError> {
+        self.file.read_exact(bytes).await.map_err(|source| {
             FrameArtifactError::io(
                 FrameArtifactErrorKind::InvalidArtifact,
                 &self.path,
-                "failed to read frame artifact raw-RGBA fingerprint",
+                message,
                 source,
             )
         })?;
-        self.digest.update(bytes);
-        Ok(RawRgbaHash::from_bytes(bytes))
+        Ok(())
     }
 
     fn finish_record(&mut self, record: &FrameRecord) -> Result<(), FrameArtifactError> {
@@ -231,6 +231,7 @@ impl FrameArtifactReader {
     }
 }
 
+/// One decoded record after its declared payload and fingerprints agree.
 struct FrameRecord {
     frame_len: usize,
     payload_bytes: u64,

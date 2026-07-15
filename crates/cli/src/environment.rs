@@ -1,3 +1,8 @@
+//! Discovery and validation of host executables required by local rendering.
+//!
+//! Environment conventions stop here; renderer APIs receive explicit paths and
+//! never inspect process-global configuration.
+
 use std::env;
 use std::error::Error;
 use std::fmt;
@@ -16,6 +21,7 @@ const BROWSER_CANDIDATES: &[&str] = &[
     "msedge",
 ];
 
+/// Validated browser, `FFmpeg`, ffprobe, and bundler paths for one command.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct Executables {
     pub(super) browser: PathBuf,

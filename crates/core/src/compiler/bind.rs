@@ -1,3 +1,9 @@
+//! Structural binding from recovered syntax into the closed Onmark vocabulary.
+//!
+//! This phase owns containment, cardinality, and film-wide ID rules. It keeps
+//! walking after independent authored mistakes, but never lets unknown syntax
+//! enter the linked representation.
+
 use std::collections::BTreeMap;
 
 use crate::diagnostics::{Diagnostic, DiagnosticCode, Diagnostics};
@@ -93,6 +99,7 @@ pub fn bind(document: SourceDocument) -> BindReport {
     }
 }
 
+/// Single owner of film-wide names and recoverable structural diagnostics.
 struct Binder {
     ids: BTreeMap<NodeId, LinkedNode>,
     diagnostics: Diagnostics,

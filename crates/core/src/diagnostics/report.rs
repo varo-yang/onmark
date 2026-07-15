@@ -1,3 +1,9 @@
+//! Deterministic, structured reporting for authored mistakes.
+//!
+//! Diagnostics and related spans remain ordered by source position. Exact
+//! duplicates are retained so an accidental duplicate emission remains visible
+//! instead of being hidden by the collection.
+
 use std::cmp::Ordering;
 use std::error::Error;
 use std::fmt;

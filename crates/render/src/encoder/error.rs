@@ -1,3 +1,5 @@
+//! Stable encoder failures with bounded `FFmpeg` diagnostics and retained causes.
+
 use std::error::Error;
 use std::fmt;
 use std::io;

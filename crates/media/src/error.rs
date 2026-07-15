@@ -1,3 +1,5 @@
+//! Stable media-probe failures with bounded subprocess evidence.
+
 use std::error::Error;
 use std::fmt;
 use std::io;

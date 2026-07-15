@@ -1,3 +1,8 @@
+//! Stable terminal rendering of authored diagnostics against one source file.
+//!
+//! Compiler spans remain byte-based; this boundary alone projects them into
+//! human-readable line and column locations.
+
 use std::io::{self, Write};
 use std::path::Path;
 

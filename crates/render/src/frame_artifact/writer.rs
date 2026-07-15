@@ -1,3 +1,8 @@
+//! Single-owner construction and no-clobber publication of frame artifacts.
+//!
+//! Payload bytes remain in a private temporary file until the final header and
+//! digest are complete. Dropping the writer cannot expose a partial artifact.
+
 use std::path::Path;
 
 use sha2::{Digest as _, Sha256};
@@ -89,33 +94,27 @@ impl FrameArtifactWriter {
         let next = self.next_record(bytes)?;
         let length = next.frame_bytes.to_be_bytes();
 
-        self.file.write_all(&length).await.map_err(|source| {
-            FrameArtifactError::io(
-                FrameArtifactErrorKind::Output,
-                &self.output,
-                "failed to write frame artifact record length",
-                source,
-            )
-        })?;
-        self.file.write_all(bytes).await.map_err(|source| {
-            FrameArtifactError::io(
-                FrameArtifactErrorKind::Output,
-                &self.output,
-                "failed to write frame artifact PNG payload",
-                source,
-            )
-        })?;
-        self.file
-            .write_all(raw_rgba_hash.as_bytes())
-            .await
-            .map_err(|source| {
-                FrameArtifactError::io(
-                    FrameArtifactErrorKind::Output,
-                    &self.output,
-                    "failed to write frame artifact raw-RGBA fingerprint",
-                    source,
-                )
-            })?;
+        write_all(
+            &mut self.file,
+            &self.output,
+            &length,
+            "failed to write frame artifact record length",
+        )
+        .await?;
+        write_all(
+            &mut self.file,
+            &self.output,
+            bytes,
+            "failed to write frame artifact PNG payload",
+        )
+        .await?;
+        write_all(
+            &mut self.file,
+            &self.output,
+            raw_rgba_hash.as_bytes(),
+            "failed to write frame artifact raw-RGBA fingerprint",
+        )
+        .await?;
 
         self.digest.update(length);
         self.digest.update(bytes);
@@ -126,7 +125,7 @@ impl FrameArtifactWriter {
     }
 
     /// Finalizes the fixed header and publishes the staged bytes without replacement.
-    pub(crate) async fn finish(mut self) -> Result<FrameArtifact, FrameArtifactError> {
+    pub(crate) async fn finish(self) -> Result<FrameArtifact, FrameArtifactError> {
         let expected_frames = self.descriptor.output.len().get();
         if self.frames != expected_frames {
             return Err(FrameArtifactError::new(
@@ -136,47 +135,46 @@ impl FrameArtifactWriter {
             ));
         }
 
+        let Self {
+            mut file,
+            staging,
+            output,
+            descriptor,
+            limits,
+            frames,
+            payload_bytes,
+            digest,
+        } = self;
         let header = Header {
-            descriptor: self.descriptor,
-            frames: self.frames,
-            payload_bytes: self.payload_bytes,
-            digest: self.digest.finalize().into(),
+            descriptor,
+            frames,
+            payload_bytes,
+            digest: digest.finalize().into(),
         };
-        self.file.seek(SeekFrom::Start(0)).await.map_err(|source| {
+        file.seek(SeekFrom::Start(0)).await.map_err(|source| {
             FrameArtifactError::io(
                 FrameArtifactErrorKind::Output,
-                &self.output,
+                &output,
                 "failed to seek frame artifact header",
                 source,
             )
         })?;
-        self.file
-            .write_all(&header.encode())
-            .await
-            .map_err(|source| {
-                FrameArtifactError::io(
-                    FrameArtifactErrorKind::Output,
-                    &self.output,
-                    "failed to write frame artifact header",
-                    source,
-                )
-            })?;
-        self.file.sync_all().await.map_err(|source| {
+        write_all(
+            &mut file,
+            &output,
+            &header.encode(),
+            "failed to write frame artifact header",
+        )
+        .await?;
+        file.sync_all().await.map_err(|source| {
             FrameArtifactError::io(
                 FrameArtifactErrorKind::Output,
-                &self.output,
+                &output,
                 "failed to flush frame artifact staging file",
                 source,
             )
         })?;
 
-        let Self {
-            file,
-            staging,
-            output,
-            limits,
-            ..
-        } = self;
         drop(file);
         publish(staging, &output)?;
 
@@ -258,6 +256,18 @@ impl FrameArtifactWriter {
     }
 }
 
+async fn write_all(
+    file: &mut File,
+    output: &Path,
+    bytes: &[u8],
+    message: &'static str,
+) -> Result<(), FrameArtifactError> {
+    file.write_all(bytes).await.map_err(|source| {
+        FrameArtifactError::io(FrameArtifactErrorKind::Output, output, message, source)
+    })
+}
+
+/// Record metadata computed before any bytes become part of the artifact.
 struct NextRecord {
     frames: u64,
     frame_bytes: u64,

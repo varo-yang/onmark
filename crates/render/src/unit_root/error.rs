@@ -1,3 +1,5 @@
+//! Stable failures for untrusted unit-root materialization.
+
 use std::error::Error;
 use std::fmt;
 use std::io;

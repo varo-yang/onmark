@@ -13,5 +13,6 @@
       <cta cue="used">Used</cta>
       <cta cue="bad ref">Malformed reference</cta>
     </shot>
+    <shot duration="0s" />
   </scene>
 </film>

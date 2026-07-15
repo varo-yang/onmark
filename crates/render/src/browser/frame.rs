@@ -1,3 +1,8 @@
+//! Captured PNG validation and raw-RGBA visual fingerprinting.
+//!
+//! Encoded bytes prove artifact integrity; decoded pixels prove equivalence
+//! across independently captured or compressed artifacts.
+
 use std::io::Cursor;
 
 use png::{BitDepth, ColorType, Decoder, Limits, Transformations};

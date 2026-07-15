@@ -1,3 +1,8 @@
+//! Versioned wire contract for one immutable browser presentation bundle.
+//!
+//! Construction and deserialization share canonical path, size, ordering, and
+//! content-identity validation.
+
 use std::collections::BTreeSet;
 use std::error::Error;
 use std::fmt;

@@ -1,3 +1,8 @@
+//! Versioned request/response envelope for native-to-browser execution.
+//!
+//! The protocol transports solved facts and readiness only; browser vendor
+//! types and runtime-owned timing decisions are intentionally absent.
+
 use std::error::Error;
 use std::fmt;
 

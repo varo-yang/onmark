@@ -1,3 +1,5 @@
+//! `FFmpeg` visual encoding and final audio-mix boundary.
+
 mod audio;
 mod error;
 mod limits;

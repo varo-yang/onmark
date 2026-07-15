@@ -1,3 +1,8 @@
+//! Normalization of untrusted ffprobe JSON into stable core metadata.
+//!
+//! Stream-level facts are preferred over reconstructed per-frame timestamps so
+//! ordinary container rounding does not make constant-rate media look variable.
+
 use std::path::Path;
 
 use onmark_core::model::{
@@ -7,6 +12,7 @@ use serde::Deserialize;
 
 use crate::error::ProbeError;
 
+/// Minimal ffprobe projection; fields outside Onmark's contract are ignored.
 #[derive(Deserialize)]
 struct ProbeResponse {
     #[serde(default)]

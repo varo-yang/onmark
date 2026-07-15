@@ -1,3 +1,8 @@
+//! Admission policy for video streams supported by the locked browser profile.
+//!
+//! Probe facts remain media-owned; this module proves only the subset required
+//! for deterministic source-frame selection.
+
 use std::error::Error;
 use std::fmt;
 

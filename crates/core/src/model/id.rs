@@ -1,3 +1,5 @@
+//! Validated film-wide node identity.
+
 use std::error::Error;
 use std::fmt;
 

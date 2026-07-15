@@ -1,3 +1,8 @@
+//! `FFmpeg` process construction and bounded diagnostic capture.
+//!
+//! Arguments are passed without a shell, and stderr retention preserves the
+//! final failure cause without allowing an encoder to grow memory unboundedly.
+
 use std::collections::VecDeque;
 use std::ffi::OsStr;
 use std::path::Path;

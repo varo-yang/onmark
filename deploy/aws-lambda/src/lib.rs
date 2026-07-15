@@ -10,10 +10,16 @@
 #[cfg(feature = "runtime")]
 mod config;
 #[cfg(feature = "runtime")]
+mod deadline;
+#[cfg(feature = "runtime")]
+mod download;
+#[cfg(feature = "runtime")]
 mod error;
 #[cfg(feature = "runtime")]
 mod handler;
 mod invocation;
+#[cfg(feature = "runtime")]
+mod publication;
 #[cfg(feature = "runtime")]
 mod storage;
 
@@ -40,13 +46,12 @@ pub async fn run() -> Result<(), lambda_runtime::Error> {
         move |event: lambda_runtime::LambdaEvent<CaptureInvocation>| {
             let handler = handler.clone();
             async move {
-                handler
-                    .handle(event.payload)
+                Box::pin(handler.handle(event.payload))
                     .await
                     .map_err(|source| Box::new(source) as lambda_runtime::Error)
             }
         },
     );
 
-    lambda_runtime::run(service).await
+    Box::pin(lambda_runtime::run(service)).await
 }

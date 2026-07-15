@@ -1,3 +1,8 @@
+//! Immutable worker handoff containing ordered captured frames and provenance.
+//!
+//! The artifact is an intermediate visual fact, not a separately encoded video;
+//! final assembly therefore retains one continuous encoder and audio mix.
+
 mod format;
 mod reader;
 mod writer;

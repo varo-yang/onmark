@@ -1,3 +1,8 @@
+//! Owned, span-preserving syntax tree without Onmark semantic assumptions.
+//!
+//! Multiple roots, arbitrary element names, and text are representable so the
+//! compiler—not the tokenizer—owns language legality.
+
 use std::fmt;
 
 use crate::model::SourceSpan;

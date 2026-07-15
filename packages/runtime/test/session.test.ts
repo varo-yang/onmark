@@ -228,12 +228,15 @@ test("rejects interval relationships outside the browser plan contract", async (
   reversedEvaluation.evaluation = { start: 20, end: 10 };
   const reversedOutput = structuredClone(plan);
   reversedOutput.output = { start: 20, end: 10 };
+  const emptyOutput = structuredClone(plan);
+  emptyOutput.output = { start: 10, end: 10 };
   const escapedOutput = structuredClone(plan);
   escapedOutput.output = { start: 9, end: 20 };
 
   for (const invalidPlan of [
     reversedEvaluation,
     reversedOutput,
+    emptyOutput,
     escapedOutput,
   ]) {
     const adapter = new RecordingAdapter();

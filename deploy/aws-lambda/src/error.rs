@@ -1,3 +1,9 @@
+//! Typed deployment failures without leaking AWS errors into the render engine.
+//!
+//! Transport context is retained here for observability. Cleanup failures keep
+//! both the original operation error and the abort error instead of replacing
+//! the cause that initiated recovery.
+
 use std::error::Error;
 use std::fmt;
 use std::io;
@@ -64,6 +70,9 @@ pub(crate) enum DeploymentError {
         expected: FrameArtifactId,
         actual: FrameArtifactId,
     },
+    InvocationTimeout {
+        timeout: Duration,
+    },
     MultipartResponse {
         operation: &'static str,
         bucket: Box<str>,
@@ -73,6 +82,10 @@ pub(crate) enum DeploymentError {
     PublicationConflicts {
         bucket: Box<str>,
         key: Box<str>,
+    },
+    MultipartAbort {
+        failure: Box<DeploymentError>,
+        abort: Box<DeploymentError>,
     },
 }
 
@@ -207,6 +220,17 @@ impl DeploymentError {
             message,
         }
     }
+
+    pub(crate) const fn invocation_timeout(timeout: Duration) -> Self {
+        Self::InvocationTimeout { timeout }
+    }
+
+    pub(crate) fn multipart_abort(failure: Self, abort: Self) -> Self {
+        Self::MultipartAbort {
+            failure: Box::new(failure),
+            abort: Box::new(abort),
+        }
+    }
 }
 
 impl fmt::Display for DeploymentError {
@@ -275,6 +299,12 @@ impl fmt::Display for DeploymentError {
                 formatter,
                 "frame artifact identity {actual} does not match requested identity {expected}"
             ),
+            Self::InvocationTimeout { timeout } => {
+                write!(
+                    formatter,
+                    "Lambda capture exceeded its {timeout:?} deadline"
+                )
+            }
             Self::MultipartResponse {
                 operation,
                 bucket,
@@ -287,6 +317,10 @@ impl fmt::Display for DeploymentError {
             Self::PublicationConflicts { bucket, key } => write!(
                 formatter,
                 "conditional publication repeatedly conflicted for s3://{bucket}/{key}"
+            ),
+            Self::MultipartAbort { failure, abort } => write!(
+                formatter,
+                "multipart publication failed ({failure}); abort also failed ({abort})"
             ),
         }
     }
@@ -303,12 +337,14 @@ impl Error for DeploymentError {
             Self::Materialize(source) => Some(source),
             Self::Render(source) => Some(source),
             Self::Artifact(source) => Some(source),
+            Self::MultipartAbort { failure, .. } => Some(failure),
             Self::DownloadLimit { .. }
             | Self::S3IdleTimeout { .. }
             | Self::InputFiles { .. }
             | Self::InputLength { .. }
             | Self::CaptureEnvironment { .. }
             | Self::ArtifactIdentity { .. }
+            | Self::InvocationTimeout { .. }
             | Self::MultipartResponse { .. }
             | Self::PublicationConflicts { .. } => None,
         }
@@ -336,5 +372,24 @@ impl From<RenderError> for DeploymentError {
 impl From<FrameArtifactError> for DeploymentError {
     fn from(source: FrameArtifactError) -> Self {
         Self::Artifact(source)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::error::Error as _;
+    use std::time::Duration;
+
+    use super::DeploymentError;
+
+    #[test]
+    fn preserves_publication_and_abort_failures_together() {
+        let failure = DeploymentError::invocation_timeout(Duration::from_secs(1));
+        let abort = DeploymentError::invocation_timeout(Duration::from_secs(2));
+        let error = DeploymentError::multipart_abort(failure, abort);
+
+        assert!(matches!(error, DeploymentError::MultipartAbort { .. }));
+        assert!(error.source().is_some());
+        assert!(error.to_string().contains("abort also failed"));
     }
 }

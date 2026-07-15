@@ -1,3 +1,5 @@
+//! Fixed upper bounds for browser lifetime and retained capture memory.
+
 use std::error::Error;
 use std::fmt;
 use std::time::Duration;

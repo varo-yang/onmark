@@ -1,3 +1,8 @@
+//! Checked browser projection of Timeline IR.
+//!
+//! Conversion establishes JavaScript-safe integer and collection bounds before
+//! values cross the Rust/TypeScript boundary.
+
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt;
@@ -108,7 +113,7 @@ impl BrowserPlan {
             overlays.push(browser_overlay(overlay)?);
         }
 
-        Ok(Self {
+        Self::checked(BrowserPlanWire {
             timeline_version: timeline.version().get(),
             frame_rate: rate.into(),
             evaluation: evaluation_wire,
@@ -153,64 +158,46 @@ impl BrowserPlan {
     pub fn overlays(&self) -> &[BrowserOverlay] {
         &self.overlays
     }
-}
 
-impl<'de> Deserialize<'de> for BrowserPlan {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let wire = BrowserPlanWire::deserialize(deserializer)?;
+    fn checked(wire: BrowserPlanWire) -> Result<Self, InvalidBrowserPlan> {
         if wire.timeline_version != TimelineVersion::V1.get() {
-            return Err(D::Error::custom(
-                "unsupported browser plan timeline version",
-            ));
+            return Err(InvalidBrowserPlan::UnsupportedTimelineVersion);
         }
         if wire.videos.len() > MAX_BROWSER_VIDEOS {
-            return Err(D::Error::custom(
-                "browser plan exceeds the video-placement limit",
-            ));
+            return Err(InvalidBrowserPlan::TooManyVideos);
         }
         if wire.overlays.len() > MAX_BROWSER_OVERLAYS {
-            return Err(D::Error::custom(
-                "browser plan exceeds the overlay-placement limit",
-            ));
+            return Err(InvalidBrowserPlan::TooManyOverlays);
         }
         if !wire.evaluation.contains_interval(wire.output) {
-            return Err(D::Error::custom(
-                "browser plan output lies outside its evaluation interval",
-            ));
+            return Err(InvalidBrowserPlan::OutputOutsideEvaluation);
         }
         if wire.output.is_empty() {
-            return Err(D::Error::custom("browser plan output interval is empty"));
+            return Err(InvalidBrowserPlan::EmptyOutput);
         }
         if wire.videos.iter().any(|video| video.interval().is_empty()) {
-            return Err(D::Error::custom("browser video interval is empty"));
+            return Err(InvalidBrowserPlan::EmptyVideo);
         }
         if wire
             .overlays
             .iter()
             .any(|overlay| overlay.interval().is_empty())
         {
-            return Err(D::Error::custom("browser overlay interval is empty"));
+            return Err(InvalidBrowserPlan::EmptyOverlay);
         }
         if wire
             .videos
             .iter()
             .any(|video| !wire.evaluation.contains_interval(video.interval()))
         {
-            return Err(D::Error::custom(
-                "browser video lies outside the evaluation interval",
-            ));
+            return Err(InvalidBrowserPlan::VideoCrossesEvaluation);
         }
         if wire
             .overlays
             .iter()
             .any(|overlay| !wire.evaluation.contains_interval(overlay.interval()))
         {
-            return Err(D::Error::custom(
-                "browser overlay lies outside the evaluation interval",
-            ));
+            return Err(InvalidBrowserPlan::OverlayCrossesEvaluation);
         }
 
         Ok(Self {
@@ -221,6 +208,15 @@ impl<'de> Deserialize<'de> for BrowserPlan {
             videos: wire.videos,
             overlays: wire.overlays,
         })
+    }
+}
+
+impl<'de> Deserialize<'de> for BrowserPlan {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Self::checked(BrowserPlanWire::deserialize(deserializer)?).map_err(D::Error::custom)
     }
 }
 
@@ -428,10 +424,18 @@ fn text_exceeds_limit(text: &str) -> bool {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum InvalidBrowserPlan {
+    /// The plan names a Timeline IR version this runtime cannot consume.
+    UnsupportedTimelineVersion,
     /// The unit evaluation interval lies outside the solved film.
     EvaluationOutsideTimeline,
     /// The published interval lies outside the unit evaluation interval.
     OutputOutsideEvaluation,
+    /// The published interval contains no frame.
+    EmptyOutput,
+    /// A video placement contains no frame.
+    EmptyVideo,
+    /// An overlay placement contains no frame.
+    EmptyOverlay,
     /// A video would need clipping at the unit evaluation boundary.
     VideoCrossesEvaluation,
     /// An overlay would need clipping at the unit evaluation boundary.
@@ -453,12 +457,18 @@ pub enum InvalidBrowserPlan {
 impl fmt::Display for InvalidBrowserPlan {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::UnsupportedTimelineVersion => {
+                formatter.write_str("unsupported browser plan timeline version")
+            }
             Self::EvaluationOutsideTimeline => {
                 formatter.write_str("browser evaluation interval lies outside the solved film")
             }
             Self::OutputOutsideEvaluation => {
                 formatter.write_str("browser output interval lies outside evaluation")
             }
+            Self::EmptyOutput => formatter.write_str("browser output interval is empty"),
+            Self::EmptyVideo => formatter.write_str("browser video interval is empty"),
+            Self::EmptyOverlay => formatter.write_str("browser overlay interval is empty"),
             Self::VideoCrossesEvaluation => {
                 formatter.write_str("browser video crosses the evaluation boundary")
             }
@@ -495,8 +505,12 @@ impl Error for InvalidBrowserPlan {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::InvalidFrame(source) => Some(source),
-            Self::EvaluationOutsideTimeline
+            Self::UnsupportedTimelineVersion
+            | Self::EvaluationOutsideTimeline
             | Self::OutputOutsideEvaluation
+            | Self::EmptyOutput
+            | Self::EmptyVideo
+            | Self::EmptyOverlay
             | Self::VideoCrossesEvaluation
             | Self::OverlayCrossesEvaluation
             | Self::TooManyVideos
@@ -840,6 +854,17 @@ mod tests {
                 interval(0, 2),
             ),
             Err(InvalidBrowserPlan::OutputOutsideEvaluation),
+        );
+    }
+
+    #[test]
+    fn rejects_empty_output_from_timeline_projection() {
+        let empty = interval(0, 0);
+        let timeline = timeline_with_content_in(Vec::new(), empty);
+
+        assert_eq!(
+            BrowserPlan::from_timeline_for_unit(&timeline, &BTreeMap::new(), empty, empty,),
+            Err(InvalidBrowserPlan::EmptyOutput),
         );
     }
 

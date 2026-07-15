@@ -1,3 +1,8 @@
+//! Exact frame algebra and named duration-to-frame rounding.
+//!
+//! Indices, counts, rates, and intervals are distinct types even where their
+//! storage matches, preventing accidental timeline arithmetic.
+
 use std::error::Error;
 use std::fmt;
 

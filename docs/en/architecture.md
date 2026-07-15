@@ -228,6 +228,12 @@ precondition reuse verification against this capture's raw-RGBA sequence, and
 bounded conflict retry are the actual semantics it needs. AWS types stop at
 that deployment package; they never enter core or render.
 
+One absolute 13-minute work deadline spans materialization, capture,
+verification, and publication. Multipart publication observes that deadline
+inside its upload owner, so expiry still attempts abort; a cleanup failure is
+reported alongside, rather than instead of, the original failure. Two minutes
+remain beneath Lambda's platform ceiling for abort and response delivery.
+
 The adapter has no coordinator, queue, lease database, global retry owner,
 capability scheduler, infrastructure definition, or production Lambda image.
 Its input chooses only an immutable worker-input S3 prefix. The deployed image

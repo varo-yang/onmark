@@ -2,6 +2,8 @@
 #![warn(clippy::pedantic)]
 #![deny(clippy::print_stderr, clippy::print_stdout, clippy::unwrap_used)]
 
+//! Onmark command-line composition root.
+
 mod arguments;
 mod assets;
 mod bundler;

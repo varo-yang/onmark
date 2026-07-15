@@ -1,3 +1,8 @@
+//! Local composition root for compile, freeze, partition, execute, and assemble.
+//!
+//! Each phase consumes the previous phase's checked value. No timing or render-
+//! graph rule is recreated at this I/O boundary.
+
 use std::fs;
 use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
@@ -21,6 +26,7 @@ use crate::environment::Executables;
 use crate::execution;
 use crate::failure::CliError;
 
+/// Authored rejection or a completed local render, both retaining diagnostics.
 pub(super) enum RenderOutcome {
     Rejected {
         source_path: PathBuf,
@@ -107,7 +113,7 @@ pub(super) async fn run(args: RenderArgs) -> Result<RenderOutcome, CliError> {
     let bundle = PresentationBundler::new(executables.bundler)
         .bundle(&presentation)
         .await?;
-    let (partitions, units) = materialize_units(&timeline, profile, bundle, frozen)?;
+    let (partitions, units) = materialize_units(&timeline, profile, &bundle, frozen)?;
 
     let executor = render_executor(executables.browser, executables.ffmpeg);
     let video = executor
@@ -124,12 +130,11 @@ pub(super) async fn run(args: RenderArgs) -> Result<RenderOutcome, CliError> {
 fn materialize_units(
     timeline: &TimelineIr,
     profile: RenderProfile,
-    bundle: BundleArtifact,
+    bundle: &BundleArtifact,
     frozen: FrozenCatalog,
 ) -> Result<(PartitionPlan, Vec<ExecutableUnit>), CliError> {
-    let (bundle_directory, manifest, _bundle_root) = bundle.into_parts();
     let materialized = frozen.into_materialized()?;
-    let (assets, _asset_root) = materialized.into_parts();
+    let bundle_directory = bundle.directory();
     let partitions = RenderGraph::from_timeline(timeline).into_partition();
     let mut units = Vec::with_capacity(partitions.units().len());
 
@@ -140,9 +145,10 @@ fn materialize_units(
         let unit = RenderUnit::from_partition(
             timeline,
             partition,
-            manifest.clone(),
+            bundle.manifest().clone(),
             profile,
-            assets
+            materialized
+                .assets()
                 .iter()
                 .filter(|asset| partition.requires_media_asset(asset.id()))
                 .cloned(),

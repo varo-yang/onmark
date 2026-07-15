@@ -1,3 +1,5 @@
+//! Typed references layered over the film-wide node-identity namespace.
+
 use std::error::Error;
 use std::fmt;
 

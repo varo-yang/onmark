@@ -2,11 +2,11 @@
 
 Onmark is a screenplay-first, browser-rendered video compiler and execution engine. Rust owns deterministic compilation and native execution; TypeScript owns authoring and the browser runtime.
 
-**Current phase:** gates one and two are complete. Gate three is active. Its first
-slice proves that an independently executed unit can publish a bounded,
-verified frame artifact for the existing single visual encoder and final audio
-assembly. Do not build coordinator, cloud, queue, database, or deployment
-scaffolding until that interchange has passed equivalence conformance.
+**Current phase:** gates one and two are complete. Gate three is active. Local
+worker-artifact equivalence and the narrow Lambda/S3 capture adapter are
+implemented. The remaining deployment claim is a real Lambda Chromium
+conformance run; do not build a coordinator, queue, lease database, scheduler,
+or infrastructure product surface before that experiment is proven.
 
 ## Read before changing code
 

@@ -14,9 +14,11 @@
       "properties": {
         "bucket": {
           "minLength": 1,
+          "pattern": "\\S",
           "type": "string"
         },
         "prefix": {
+          "pattern": "^(?:$|(?!/)(?!(?:.*/)?(?:\\.|\\.\\.)(?:/|$))(?!.*//)(?!.*\\/$).+)$",
           "type": "string"
         }
       },

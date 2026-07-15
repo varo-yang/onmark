@@ -1,3 +1,8 @@
+//! Bounded Node/esbuild process boundary for presentation bundling.
+//!
+//! The CLI owns subprocess lifetime and diagnostic retention. The TypeScript
+//! package owns bundle semantics and returns a checked Rust wire manifest.
+
 use std::collections::VecDeque;
 use std::error::Error;
 use std::fmt;
@@ -20,6 +25,7 @@ const MAX_MANIFEST_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_STDERR_BYTES: usize = 64 * 1024;
 const READ_BUFFER_BYTES: usize = 8 * 1024;
 
+/// Configured external bundler command with fixed output and timeout bounds.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct PresentationBundler {
     executable: PathBuf,
@@ -62,11 +68,7 @@ impl PresentationBundler {
         let manifest = tokio::task::spawn_blocking(move || read_manifest(&manifest_path))
             .await
             .map_err(BundleError::ManifestTask)??;
-        Ok(BundleArtifact {
-            directory,
-            manifest,
-            root,
-        })
+        Ok(BundleArtifact { manifest, root })
     }
 
     fn spawn(&self, entry: &Path, output: &Path) -> Result<tokio::process::Child, BundleError> {
@@ -91,14 +93,17 @@ impl PresentationBundler {
 
 #[derive(Debug)]
 pub(super) struct BundleArtifact {
-    directory: PathBuf,
     manifest: BundleManifest,
     root: TempDir,
 }
 
 impl BundleArtifact {
-    pub(super) fn into_parts(self) -> (PathBuf, BundleManifest, TempDir) {
-        (self.directory, self.manifest, self.root)
+    pub(super) fn directory(&self) -> PathBuf {
+        self.root.path().join("presentation")
+    }
+
+    pub(super) const fn manifest(&self) -> &BundleManifest {
+        &self.manifest
     }
 }
 
@@ -222,6 +227,7 @@ pub(super) struct CapturedStderr {
     truncated: bool,
 }
 
+/// Tail-retaining stderr reader that continues draining after its size limit.
 struct DiagnosticReader {
     task: Option<tokio::task::JoinHandle<Result<CapturedStderr, io::Error>>>,
 }

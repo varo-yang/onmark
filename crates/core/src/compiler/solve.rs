@@ -1,3 +1,9 @@
+//! Exact timeline solving from typed intent and frozen asset facts.
+//!
+//! The solver alone converts duration into frames and assigns absolute
+//! intervals. A failed duration invalidates downstream placement without
+//! preventing independent diagnostics from being collected.
+
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt;
@@ -79,14 +85,13 @@ impl fmt::Display for SolveError {
 
 impl Error for SolveError {}
 
+/// Single mutable owner of event facts, sequential placement, and diagnostics.
 struct Solver<'a> {
     assets: &'a BTreeMap<AssetRef, FrozenAsset>,
     timebase: Timebase,
     events: BTreeMap<CueId, TimelineEvent>,
     diagnostics: Diagnostics,
-    cursor: FrameIndex,
-    cursor_trustworthy: bool,
-    emitted_shot: bool,
+    cursor: PlacementCursor,
 }
 
 impl<'a> Solver<'a> {
@@ -96,9 +101,7 @@ impl<'a> Solver<'a> {
             timebase,
             events: BTreeMap::new(),
             diagnostics: Diagnostics::new(),
-            cursor: FrameIndex::ZERO,
-            cursor_trustworthy: true,
-            emitted_shot: false,
+            cursor: PlacementCursor::FilmStart,
         }
     }
 
@@ -111,7 +114,7 @@ impl<'a> Solver<'a> {
             timeline_scenes.push(self.solve_scene(scene)?);
         }
 
-        let interval = interval(FrameIndex::ZERO, self.cursor);
+        let interval = interval(FrameIndex::ZERO, self.cursor.position());
         let candidate = TimelineIr::new(
             self.timebase,
             timeline_element(element),
@@ -147,8 +150,7 @@ impl<'a> Solver<'a> {
 
     fn solve_scene(&mut self, scene: ResolvedScene) -> Result<TimelineScene, SolveError> {
         let (element, shots) = scene.into_parts();
-        let start = self.cursor;
-        let starts_at_film = !self.emitted_shot;
+        let (start, start_reason) = self.cursor.scene_start();
         let mut timeline_shots = Vec::with_capacity(shots.len());
 
         for shot in shots {
@@ -157,13 +159,8 @@ impl<'a> Solver<'a> {
             }
         }
 
-        let start_reason = if starts_at_film {
-            TimingReason::FilmStart
-        } else {
-            TimingReason::Sequential
-        };
         let timing = TimelineTiming::new(
-            interval(start, self.cursor),
+            interval(start, self.cursor.position()),
             start_reason,
             TimingReason::Children,
         );
@@ -175,18 +172,13 @@ impl<'a> Solver<'a> {
     fn solve_shot(&mut self, shot: ResolvedShot) -> Result<Option<TimelineShot>, SolveError> {
         let (element, duration, content) = shot.into_parts();
         let source = element.span();
-        let has_duration_source = duration.is_some() || has_primary_content(&content);
         let prepared = self.prepare_contents(content)?;
-        let explicit = match duration {
-            Some(duration) => self.explicit_duration(duration),
-            None => None,
-        };
-        let primary_end = longest_primary(&prepared);
-        let duration = self.shot_duration(explicit, primary_end, has_duration_source, source);
+        let explicit = self.explicit_duration(duration);
+        let duration = self.shot_duration(explicit, prepared.primary, source);
         let Some(timing) = self.place_shot(duration, source) else {
             return Ok(None);
         };
-        let content = self.lower_contents(prepared, timing.interval());
+        let content = self.lower_contents(prepared.content, timing.interval());
         let element = timeline_element(element);
         let shot = TimelineShot::new(element, timing, content);
 
@@ -196,16 +188,26 @@ impl<'a> Solver<'a> {
     fn prepare_contents(
         &mut self,
         content: Vec<ResolvedShotContent>,
-    ) -> Result<Vec<PreparedContent>, SolveError> {
+    ) -> Result<PreparedShot, SolveError> {
         let mut prepared = Vec::with_capacity(content.len());
+        let mut primary = PrimaryDuration::Absent;
 
         for content in content {
+            let is_primary = is_primary_content(&content);
             if let Some(content) = self.prepare_content(content)? {
+                if let Some(end) = content.primary_end() {
+                    primary.include(end);
+                }
                 prepared.push(content);
+            } else if is_primary {
+                primary.reject();
             }
         }
 
-        Ok(prepared)
+        Ok(PreparedShot {
+            content: prepared,
+            primary,
+        })
     }
 
     fn lower_contents(
@@ -228,27 +230,18 @@ impl<'a> Solver<'a> {
         duration: Option<ShotDuration>,
         source: SourceSpan,
     ) -> Option<TimelineTiming> {
-        let start = self.cursor;
-        let start_reason = if self.emitted_shot {
-            TimingReason::Sequential
-        } else {
-            TimingReason::FilmStart
-        };
-        self.emitted_shot = true;
+        let (start, start_reason) = self.cursor.next_shot()?;
 
         let Some(duration) = duration else {
-            self.cursor_trustworthy = false;
+            self.cursor = PlacementCursor::Lost(start);
             return None;
         };
-        if !self.cursor_trustworthy {
-            return None;
-        }
         let Some(end) = advance(start, duration.frames, source, &mut self.diagnostics) else {
-            self.cursor_trustworthy = false;
+            self.cursor = PlacementCursor::Lost(start);
             return None;
         };
 
-        self.cursor = end;
+        self.cursor = PlacementCursor::Sequential(end);
         Some(TimelineTiming::new(
             interval(start, end),
             start_reason,
@@ -423,47 +416,87 @@ impl<'a> Solver<'a> {
         })
     }
 
-    fn explicit_duration(&mut self, duration: Authored<Duration>) -> Option<ExplicitDuration> {
+    fn explicit_duration(&mut self, duration: Option<Authored<Duration>>) -> ExplicitDuration {
+        let Some(duration) = duration else {
+            return ExplicitDuration::Absent;
+        };
         let (duration, authored_at) = duration.into_parts();
-        let frames = frames_for(self.timebase, duration, authored_at, &mut self.diagnostics)?;
+        let Some(frames) = frames_for(self.timebase, duration, authored_at, &mut self.diagnostics)
+        else {
+            return ExplicitDuration::Rejected;
+        };
 
-        Some(ExplicitDuration {
+        ExplicitDuration::Available {
             frames,
             authored_at,
-        })
+        }
     }
 
     fn shot_duration(
         &mut self,
-        explicit: Option<ExplicitDuration>,
-        primary: Option<PrimaryEnd>,
-        has_duration_source: bool,
+        explicit: ExplicitDuration,
+        primary: PrimaryDuration,
         source: SourceSpan,
     ) -> Option<ShotDuration> {
-        match (explicit, primary) {
-            (Some(explicit), Some(primary)) => {
-                self.diagnostics.push(conflicting_duration_sources(
-                    explicit.authored_at,
-                    primary.source,
-                ));
-                Some(ShotDuration::new(
-                    primary.frames,
-                    TimingReason::LongestContent(primary.source),
-                ))
+        if let PrimaryDuration::Available(primary) = primary {
+            if let ExplicitDuration::Available { authored_at, .. } = explicit {
+                self.diagnostics
+                    .push(conflicting_duration_sources(authored_at, primary.source));
             }
-            (Some(explicit), None) => Some(ShotDuration::new(
-                explicit.frames,
-                TimingReason::ExplicitDuration(explicit.authored_at),
-            )),
-            (None, Some(primary)) => Some(ShotDuration::new(
+            return Some(ShotDuration::new(
                 primary.frames,
                 TimingReason::LongestContent(primary.source),
-            )),
-            (None, None) if has_duration_source => None,
-            (None, None) => {
-                self.diagnostics.push(missing_duration_source(source));
-                None
-            }
+            ));
+        }
+        if let ExplicitDuration::Available {
+            frames,
+            authored_at,
+        } = explicit
+        {
+            return Some(ShotDuration::new(
+                frames,
+                TimingReason::ExplicitDuration(authored_at),
+            ));
+        }
+        if matches!(explicit, ExplicitDuration::Absent)
+            && matches!(primary, PrimaryDuration::Absent)
+        {
+            self.diagnostics.push(missing_duration_source(source));
+        }
+        None
+    }
+}
+
+/// Sequential placement state after the last trustworthy shot boundary.
+///
+/// `Lost` retains the last known position for enclosing spans while preventing
+/// later shots from receiving invented absolute intervals.
+enum PlacementCursor {
+    FilmStart,
+    Sequential(FrameIndex),
+    Lost(FrameIndex),
+}
+
+impl PlacementCursor {
+    const fn position(&self) -> FrameIndex {
+        match self {
+            Self::FilmStart => FrameIndex::ZERO,
+            Self::Sequential(at) | Self::Lost(at) => *at,
+        }
+    }
+
+    const fn scene_start(&self) -> (FrameIndex, TimingReason) {
+        match self {
+            Self::FilmStart => (FrameIndex::ZERO, TimingReason::FilmStart),
+            Self::Sequential(at) | Self::Lost(at) => (*at, TimingReason::Sequential),
+        }
+    }
+
+    const fn next_shot(&self) -> Option<(FrameIndex, TimingReason)> {
+        match self {
+            Self::FilmStart => Some((FrameIndex::ZERO, TimingReason::FilmStart)),
+            Self::Sequential(at) => Some((*at, TimingReason::Sequential)),
+            Self::Lost(_) => None,
         }
     }
 }
@@ -483,9 +516,18 @@ impl MediaTrack {
     }
 }
 
-struct ExplicitDuration {
-    frames: FrameCount,
-    authored_at: SourceSpan,
+/// Result of validating an authored shot duration.
+///
+/// `Rejected` is distinct from `Absent`: the former already emitted the useful
+/// diagnostic and must not also trigger a missing-duration error.
+#[derive(Clone, Copy)]
+enum ExplicitDuration {
+    Absent,
+    Rejected,
+    Available {
+        frames: FrameCount,
+        authored_at: SourceSpan,
+    },
 }
 
 struct ShotDuration {
@@ -503,6 +545,41 @@ impl ShotDuration {
 struct PrimaryEnd {
     frames: FrameCount,
     source: SourceSpan,
+}
+
+/// Longest usable primary-content duration seen while preparing one shot.
+///
+/// A rejected primary source carries the same diagnostic-suppression meaning
+/// as [`ExplicitDuration::Rejected`].
+#[derive(Clone, Copy)]
+enum PrimaryDuration {
+    Absent,
+    Rejected,
+    Available(PrimaryEnd),
+}
+
+impl PrimaryDuration {
+    fn reject(&mut self) {
+        if matches!(self, Self::Absent) {
+            *self = Self::Rejected;
+        }
+    }
+
+    fn include(&mut self, candidate: PrimaryEnd) {
+        let replace = match self {
+            Self::Available(current) => candidate.frames > current.frames,
+            Self::Absent | Self::Rejected => true,
+        };
+        if replace {
+            *self = Self::Available(candidate);
+        }
+    }
+}
+
+/// Content facts collected before the shot itself can receive an interval.
+struct PreparedShot {
+    content: Vec<PreparedContent>,
+    primary: PrimaryDuration,
 }
 
 enum PreparedContent {
@@ -528,25 +605,11 @@ impl PreparedContent {
     }
 }
 
-fn has_primary_content(content: &[ResolvedShotContent]) -> bool {
-    content.iter().any(|content| {
-        matches!(
-            content,
-            ResolvedShotContent::Video(_) | ResolvedShotContent::VoiceOver(_)
-        )
-    })
-}
-
-fn longest_primary(content: &[PreparedContent]) -> Option<PrimaryEnd> {
-    let mut longest = None;
-
-    for candidate in content.iter().filter_map(PreparedContent::primary_end) {
-        if longest.is_none_or(|current: PrimaryEnd| candidate.frames > current.frames) {
-            longest = Some(candidate);
-        }
-    }
-
-    longest
+const fn is_primary_content(content: &ResolvedShotContent) -> bool {
+    matches!(
+        content,
+        ResolvedShotContent::Video(_) | ResolvedShotContent::VoiceOver(_)
+    )
 }
 
 /// Media with shot-relative bounds, before its owning shot is placed.

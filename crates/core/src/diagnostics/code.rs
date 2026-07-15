@@ -1,3 +1,5 @@
+//! Stable diagnostic identities and their centrally owned severity policy.
+
 use std::fmt;
 
 /// Stable identity of an authored problem.

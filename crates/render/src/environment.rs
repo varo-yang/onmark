@@ -1,3 +1,5 @@
+//! Opaque identity for the host facts capable of changing captured pixels.
+
 use std::error::Error;
 use std::fmt;
 

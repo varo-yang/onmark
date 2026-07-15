@@ -1,3 +1,5 @@
+//! Checked pixel dimensions that participate in render and artifact identity.
+
 use std::error::Error;
 use std::fmt;
 

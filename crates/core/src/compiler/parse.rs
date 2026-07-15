@@ -1,3 +1,8 @@
+//! Compiler-owned translation from syntax failures to stable diagnostics.
+//!
+//! The syntax module deliberately knows neither diagnostic codes nor wording;
+//! this facade is the one boundary where parser detail becomes product output.
+
 use crate::diagnostics::{Diagnostic, DiagnosticCode, Diagnostics};
 use crate::model::{SourceId, SourceSpan};
 use crate::syntax::{self, SourceDocument, SyntaxError, SyntaxErrorKind, UnsupportedDirective};

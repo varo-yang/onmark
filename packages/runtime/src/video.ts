@@ -60,7 +60,7 @@ export class DecodedVideo {
     } catch (error) {
       readiness.cancel();
       releaseElement(this.#element);
-      throw adapterFailure(error, "video data failed to load");
+      throw RuntimeAdapterError.fromUnknown(error, "video data failed to load");
     }
   }
 
@@ -89,7 +89,10 @@ export class DecodedVideo {
     this.#presentedMediaTime = undefined;
     const failure = releaseElement(this.#element);
     if (failure !== undefined) {
-      throw adapterFailure(failure, "video resource cleanup failed");
+      throw RuntimeAdapterError.fromUnknown(
+        failure,
+        "video resource cleanup failed",
+      );
     }
   }
 
@@ -111,23 +114,17 @@ export function materializedVideoSource(placement: RuntimeVideo): string {
 
 function releaseElement(element: BrowserVideoElement): unknown | undefined {
   let failure: unknown;
-  try {
-    element.removeAttribute("src");
-  } catch (error) {
-    failure = error;
-  }
-  try {
-    element.load();
-  } catch (error) {
-    failure ??= error;
+  for (const release of [
+    () => element.removeAttribute("src"),
+    () => element.load(),
+  ]) {
+    try {
+      release();
+    } catch (error) {
+      failure ??= error;
+    }
   }
   return failure;
-}
-
-function adapterFailure(error: unknown, message: string): RuntimeAdapterError {
-  return error instanceof RuntimeAdapterError
-    ? error
-    : new RuntimeAdapterError("operation", message);
 }
 
 // ── Readiness waits ──
@@ -284,7 +281,9 @@ class FrameReadiness {
 
   #operationFailed(error: unknown): void {
     if (this.#settle()) {
-      this.#reject(adapterFailure(error, "video frame callback failed"));
+      this.#reject(
+        RuntimeAdapterError.fromUnknown(error, "video frame callback failed"),
+      );
     }
   }
 

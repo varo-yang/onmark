@@ -1,6 +1,6 @@
 <film>
   <cues>
-    <cue id="anchor" time="1500ms" />
+    <cue id="anchor" time="0s" />
   </cues>
   <scene>
     <shot duration="3.25s">

@@ -1,3 +1,5 @@
+//! Byte-precise source identities and spans for deterministic diagnostics.
+
 use std::error::Error;
 use std::fmt;
 

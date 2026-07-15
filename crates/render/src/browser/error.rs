@@ -1,3 +1,5 @@
+//! Stable browser failures that retain vendor causes behind the adapter boundary.
+
 use std::error::Error;
 use std::fmt;
 use std::io;

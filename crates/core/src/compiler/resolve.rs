@@ -1,4 +1,9 @@
-use std::collections::{BTreeMap, BTreeSet};
+//! Attribute and reference resolution without assigning frame positions.
+//!
+//! Raw syntax values are consumed here and replaced by typed authored intent.
+//! Asset probing and frame arithmetic remain later-phase responsibilities.
+
+use std::collections::BTreeMap;
 
 use crate::diagnostics::{Diagnostic, DiagnosticCode, Diagnostics};
 use crate::model::{
@@ -52,10 +57,10 @@ pub fn resolve(film: LinkedFilm) -> ResolveReport {
     Resolver::resolve(film)
 }
 
+/// Single owner of cue usage and all recoverable attribute diagnostics.
 struct Resolver {
     cue_table: BTreeMap<CueId, CueState>,
     ids: BTreeMap<NodeId, LinkedNode>,
-    rejected_ids: BTreeSet<NodeId>,
     diagnostics: Diagnostics,
 }
 
@@ -64,7 +69,6 @@ impl Resolver {
         Self {
             cue_table: BTreeMap::new(),
             ids,
-            rejected_ids: BTreeSet::new(),
             diagnostics: Diagnostics::new(),
         }
     }
@@ -82,14 +86,10 @@ impl Resolver {
         resolver.report_unused_cues();
 
         let Self {
-            ids,
-            rejected_ids,
-            diagnostics,
-            ..
+            ids, diagnostics, ..
         } = resolver;
         let ids = ids
             .into_iter()
-            .filter(|(id, _)| !rejected_ids.contains(id))
             .map(|(id, node)| (id, resolved_node(node)))
             .collect();
         let candidate = ResolvedFilm::new(element, cues, resolved_scenes, ids);
@@ -137,7 +137,7 @@ impl Resolver {
 
         let id = id?;
         let Some(time) = time else {
-            self.rejected_ids.insert(id);
+            self.ids.remove(&id);
             return None;
         };
 
@@ -180,7 +180,7 @@ impl Resolver {
         let (element, content) = shot.into_parts();
         let input = ElementInput::new(element);
         let (element, mut attributes) = input.into_resolved_parts();
-        let duration = self.take_duration(&mut attributes, "duration");
+        let duration = self.take_positive_duration(&mut attributes, "duration");
         attributes.reject_unknown(element.kind(), &mut self.diagnostics);
         let mut resolved_content = Vec::with_capacity(content.len());
 
@@ -276,7 +276,15 @@ impl Resolver {
     }
 
     fn resolve_duration(&mut self, attribute: &Attribute) -> Option<Authored<Duration>> {
-        match Duration::parse(attribute.value()) {
+        self.resolve_duration_with(attribute, Duration::parse)
+    }
+
+    fn resolve_duration_with(
+        &mut self,
+        attribute: &Attribute,
+        parse: fn(&str) -> Result<Duration, InvalidDuration>,
+    ) -> Option<Authored<Duration>> {
+        match parse(attribute.value()) {
             Ok(duration) => Some(Authored::new(duration, attribute.value_span())),
             Err(reason) => {
                 self.diagnostics.push(invalid_duration(attribute, reason));
@@ -292,6 +300,15 @@ impl Resolver {
     ) -> Option<Authored<Duration>> {
         let attribute = attributes.take(name)?;
         self.resolve_duration(&attribute)
+    }
+
+    fn take_positive_duration(
+        &mut self,
+        attributes: &mut Attributes,
+        name: &str,
+    ) -> Option<Authored<Duration>> {
+        let attribute = attributes.take(name)?;
+        self.resolve_duration_with(&attribute, Duration::parse_positive)
     }
 
     fn resolve_asset(&mut self, attribute: &Attribute) -> Option<Authored<AssetRef>> {
@@ -341,17 +358,20 @@ impl Resolver {
     }
 }
 
+/// Declaration facts retained until unused-cue reporting closes the phase.
 struct CueState {
     declared_at: SourceSpan,
     used: bool,
 }
 
+/// Attributes shared by media-bearing elements after raw names are consumed.
 struct MediaAttributes {
     element: ResolvedElement,
     src: Option<Authored<AssetRef>>,
     delay: Option<Authored<Duration>>,
 }
 
+/// Destructured linked element whose attributes still require typed resolution.
 struct ElementInput {
     kind: ElementKind,
     id: LinkedId,
@@ -378,6 +398,7 @@ impl ElementInput {
     }
 }
 
+/// Consuming attribute bag: recognized names are removed exactly once.
 struct Attributes(Vec<Attribute>);
 
 impl Attributes {

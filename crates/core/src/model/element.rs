@@ -1,3 +1,5 @@
+//! Closed screenplay element vocabulary shared by compiler phases.
+
 use std::fmt;
 
 /// Closed Gate-one screenplay vocabulary.

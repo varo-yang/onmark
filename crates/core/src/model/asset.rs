@@ -1,3 +1,8 @@
+//! Immutable asset identity and normalized media facts used by pure compilation.
+//!
+//! Paths and probing vendors stay outside the model; only content identity and
+//! facts that can affect solving cross this boundary.
+
 use std::error::Error;
 use std::fmt;
 

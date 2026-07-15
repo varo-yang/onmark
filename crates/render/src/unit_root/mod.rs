@@ -1,3 +1,8 @@
+//! Private, verified filesystem root presented to one browser render unit.
+//!
+//! Ownership of the temporary directory keeps every returned path valid and
+//! removes the complete root when execution ends.
+
 mod error;
 mod materializer;
 

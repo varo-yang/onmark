@@ -1,3 +1,9 @@
+//! Span-preserving XML token adaptation and bounded syntax recovery.
+//!
+//! `xmlparser` owns lexical well-formedness; Onmark owns the recovered tree and
+//! error vocabulary. Fatal tokenizer failures stop recovery because no later
+//! fragment boundary can be trusted.
+
 use crate::model::{ByteOffset, SourceId, SourceSpan};
 
 use xmlparser::{ElementEnd, StrSpan, Token, Tokenizer};
@@ -27,11 +33,11 @@ pub(crate) fn parse(source: SourceId, text: &str) -> SyntaxReport {
     Parser::new(source, text).parse()
 }
 
+/// Single owner of the recovered tree and syntax errors for one source buffer.
 struct Parser<'a> {
     source: SourceText<'a>,
     tree: TreeBuilder,
     errors: Vec<SyntaxError>,
-    fatal_lexical_error: bool,
 }
 
 impl<'a> Parser<'a> {
@@ -40,25 +46,15 @@ impl<'a> Parser<'a> {
             source: SourceText::new(source, text),
             tree: TreeBuilder::new(),
             errors: Vec::new(),
-            fatal_lexical_error: false,
         }
     }
 
     fn parse(mut self) -> SyntaxReport {
-        let text = self.source.text;
-        let fragment_start = self.consume_leading_doctype().unwrap_or(0);
-        let tokens = Tokenizer::from_fragment(text, fragment_start..text.len());
-
-        if !self.fatal_lexical_error {
-            for token in tokens {
-                match token {
-                    Ok(token) => self.consume(token),
-                    Err(error) => self.reject_tokenizer_error(error),
-                }
-            }
-        }
-
-        self.finish_open_elements();
+        let completed = match self.leading_markup() {
+            Tokenization::ContinueAt(start) => self.consume_tokens(start),
+            Tokenization::Stop => false,
+        };
+        self.finish_open_elements(completed);
 
         let source_span = self.source.range(ByteOffset::new(0), self.source.end());
 
@@ -68,9 +64,9 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn consume_leading_doctype(&mut self) -> Option<usize> {
+    fn leading_markup(&mut self) -> Tokenization {
         if !starts_with_doctype(self.source.text) {
-            return None;
+            return Tokenization::ContinueAt(0);
         }
 
         for token in Tokenizer::from(self.source.text) {
@@ -80,22 +76,36 @@ impl<'a> Parser<'a> {
                 }
                 Ok(Token::EmptyDtd { span, .. }) => {
                     self.reject_directive(UnsupportedDirective::DocumentTypeDeclaration, span);
-                    return Some(span.end());
+                    return Tokenization::ContinueAt(span.end());
                 }
-                Ok(Token::DtdEnd { span }) => return Some(span.end()),
+                Ok(Token::DtdEnd { span }) => return Tokenization::ContinueAt(span.end()),
                 // The opening token already rejected this declaration; its
                 // internal tokens carry no additional authored mistake.
                 Ok(_) => {}
                 Err(error) => {
                     self.reject_tokenizer_error(error);
-                    return Some(self.source.text.len());
+                    return Tokenization::Stop;
                 }
             }
         }
 
         // Without a DTD end token there is no trustworthy fragment boundary.
         // The entire remaining source belongs to the rejected declaration.
-        Some(self.source.text.len())
+        Tokenization::Stop
+    }
+
+    fn consume_tokens(&mut self, start: usize) -> bool {
+        let text = self.source.text;
+        for token in Tokenizer::from_fragment(text, start..text.len()) {
+            match token {
+                Ok(token) => self.consume(token),
+                Err(error) => {
+                    self.reject_tokenizer_error(error);
+                    return false;
+                }
+            }
+        }
+        true
     }
 
     fn consume(&mut self, token: Token<'a>) {
@@ -130,7 +140,6 @@ impl<'a> Parser<'a> {
     }
 
     fn reject_tokenizer_error(&mut self, error: xmlparser::Error) {
-        self.fatal_lexical_error = true;
         self.errors.push(SyntaxError::new(
             SyntaxErrorKind::MalformedMarkup,
             self.source.point(error.pos()),
@@ -203,8 +212,8 @@ impl<'a> Parser<'a> {
         self.tree.append(Node::Text(text));
     }
 
-    fn finish_open_elements(&mut self) {
-        if !self.fatal_lexical_error {
+    fn finish_open_elements(&mut self, completed: bool) {
+        if completed {
             let offset = self.source.end();
             let ended_at = self.source.range(offset, offset);
             self.errors.extend(self.tree.unclosed_elements(ended_at));
@@ -228,6 +237,12 @@ impl<'a> Parser<'a> {
             self.source.qualified_name_span(prefix, local),
         )
     }
+}
+
+/// Whether a trustworthy fragment remains after consuming leading markup.
+enum Tokenization {
+    ContinueAt(usize),
+    Stop,
 }
 
 fn optional_prefix(prefix: StrSpan<'_>) -> Option<Box<str>> {

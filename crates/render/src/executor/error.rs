@@ -1,3 +1,5 @@
+//! Translation of browser, encoder, artifact, and output failures at execution.
+
 use std::error::Error;
 use std::fmt;
 use std::io;

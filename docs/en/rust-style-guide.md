@@ -614,6 +614,12 @@ Early returns are welcome when they remove nesting. Dense iterator chains are no
 
 Public rustdoc explains why an API exists, includes a realistic example, and documents `# Errors`, `# Panics`, and `# Safety` where applicable.
 
+Non-trivial implementation modules start with concise inner rustdoc that names
+their responsibility, boundary, and principal invariant. Private state types
+document information that their fields cannot express alone: recovery meaning,
+resource ownership, concurrency obligations, and protocol trade-offs. Do not
+add comments merely to narrate control flow or restate a precise type name.
+
 ### 13. Protocol values have one owner
 
 Message names, diagnostic codes, filenames, environment variables, JSON field names, cache-key components, and browser globals are protocol. Define each once in its owner crate. Never copy a protocol string to avoid an import.

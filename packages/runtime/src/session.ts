@@ -63,6 +63,13 @@ export class RuntimeAdapterError extends Error {
     this.kind = kind;
     this.pendingResources = boundedPendingResources(pendingResources);
   }
+
+  /** Preserves typed failures and contains untyped browser exceptions. */
+  static fromUnknown(error: unknown, message: string): RuntimeAdapterError {
+    return error instanceof RuntimeAdapterError
+      ? error
+      : new RuntimeAdapterError("operation", message);
+  }
 }
 
 // ── Protocol session ──
@@ -293,8 +300,8 @@ function planViolation(plan: BrowserPlan): string | undefined {
   if (plan.evaluation.start > plan.evaluation.end) {
     return "plan evaluation interval is reversed";
   }
-  if (plan.output.start > plan.output.end) {
-    return "plan output interval is reversed";
+  if (plan.output.start >= plan.output.end) {
+    return "plan output interval is empty or reversed";
   }
   if (
     plan.output.start < plan.evaluation.start ||

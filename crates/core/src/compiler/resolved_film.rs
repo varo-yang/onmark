@@ -1,3 +1,8 @@
+//! Typed authored intent between resolution and exact timeline solving.
+//!
+//! Syntax attributes no longer cross this boundary; values retain only the
+//! spans needed for later timing diagnostics.
+
 use std::collections::BTreeMap;
 
 use crate::model::{AssetRef, CueId, Duration, ElementKind, EventRef, NodeId, SourceSpan};

@@ -1,3 +1,8 @@
+//! Linear composition of the pure compiler phases for CLI callers.
+//!
+//! Authored diagnostics accumulate across safe phase boundaries. A phase with
+//! errors withholds its value so later phases never consume invalid state.
+
 use std::collections::BTreeMap;
 
 use onmark_core::compiler::{self, ResolvedFilm, SolveError};
@@ -5,6 +10,7 @@ use onmark_core::diagnostics::Diagnostic;
 use onmark_core::model::{AssetRef, FrozenAsset, SourceId, Timebase};
 use onmark_core::timeline::TimelineIr;
 
+/// Optional phase value paired with every authored diagnostic collected so far.
 #[derive(Debug)]
 pub(super) struct Compilation<T> {
     value: Option<T>,

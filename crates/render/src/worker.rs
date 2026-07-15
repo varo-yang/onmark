@@ -1,3 +1,8 @@
+//! Portable, versioned request for capture of one already-planned render unit.
+//!
+//! The worker receives solved browser facts and frozen bytes; it never parses
+//! source, probes assets, or replans partitions.
+
 use std::collections::BTreeSet;
 use std::path::Path;
 

@@ -108,7 +108,11 @@ The deployment-owned S3 client uses a five-second connect timeout, a
 SDK attempts. Once `GetObject` has yielded a response body, every pending body
 read must make progress within 30 seconds. The body boundary is explicit
 because an SDK request timeout ends at a response stream, not at the end of a
-download.
+download. One absolute 13-minute work deadline covers download,
+materialization, capture, verification, and publication. The remaining two
+minutes of Lambda's maximum duration are reserved for multipart abort and
+runtime response delivery. If publication and abort both fail, the typed error
+retains both causes rather than replacing the original failure with cleanup.
 
 The execution role should be restricted to `s3:GetObject` over the approved
 worker-input and artifact prefixes, plus `s3:PutObject` and

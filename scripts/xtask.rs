@@ -1,3 +1,8 @@
+//! Repository-owned schema generation and checked-artifact drift verification.
+//!
+//! Rust wire types are the source of truth. This binary writes deterministic
+//! schemas, delegates TypeScript codec generation, and makes stale output fail.
+
 use std::env;
 use std::error::Error;
 use std::fmt;
@@ -115,6 +120,7 @@ impl fmt::Display for InvalidCommand {
 
 impl Error for InvalidCommand {}
 
+/// Fully rendered schema kept in memory for byte-exact drift comparison.
 struct SchemaArtifact {
     filename: &'static str,
     contents: String,

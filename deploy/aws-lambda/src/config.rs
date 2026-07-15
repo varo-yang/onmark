@@ -1,3 +1,8 @@
+//! Environment-owned Lambda policy and its validated resource envelopes.
+//!
+//! Ambient configuration is read once here; downstream capture, storage, and
+//! renderer boundaries receive explicit typed values.
+
 use std::env;
 use std::error::Error;
 use std::fmt;
@@ -12,6 +17,9 @@ use onmark_render::{
 use crate::invocation::{InvalidObjectPrefix, ObjectPrefix};
 
 const BROWSER_DEADLINE: Duration = Duration::from_mins(12);
+// Leave two minutes of the Lambda 15-minute ceiling for multipart abort and
+// runtime response delivery after the worker stops accepting new work.
+const INVOCATION_WORK_DEADLINE: Duration = Duration::from_mins(13);
 const MAX_CAPTURE_BYTES: usize = 64 * 1024 * 1024;
 const MAX_FRAME_ARTIFACT_FRAMES: u64 = 1_000_000;
 const MAX_FRAME_ARTIFACT_BYTES: u64 = 2 * 1024 * 1024 * 1024;
@@ -105,6 +113,10 @@ impl Configuration {
 
     pub(crate) const fn max_frame_artifact_file_bytes() -> u64 {
         MAX_FRAME_ARTIFACT_FILE_BYTES
+    }
+
+    pub(crate) const fn invocation_work_deadline() -> Duration {
+        INVOCATION_WORK_DEADLINE
     }
 
     pub(crate) const fn s3_transport_limits() -> S3TransportLimits {
@@ -229,5 +241,13 @@ mod tests {
         );
         assert_eq!(limits.body_idle_timeout(), Duration::from_secs(30));
         assert_eq!(retry.max_attempts(), 3);
+    }
+
+    #[test]
+    fn reserves_cleanup_time_below_the_lambda_ceiling() {
+        assert_eq!(
+            Configuration::invocation_work_deadline(),
+            Duration::from_mins(13)
+        );
     }
 }

@@ -1,3 +1,5 @@
+//! Fixed resource policy for one `FFmpeg` session.
+
 use std::error::Error;
 use std::fmt;
 use std::time::Duration;

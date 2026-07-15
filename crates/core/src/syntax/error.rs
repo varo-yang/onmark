@@ -1,3 +1,7 @@
+//! Syntax-local failure vocabulary before stable diagnostic translation.
+//!
+//! Third-party parser errors cannot cross this module boundary.
+
 use crate::model::SourceSpan;
 
 /// One authored markup error before the compiler assigns a stable code.

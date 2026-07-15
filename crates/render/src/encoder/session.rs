@@ -1,3 +1,8 @@
+//! Backpressured ownership of one `FFmpeg` encoding session.
+//!
+//! Successful writes reset an inactivity deadline. Every terminal path closes
+//! stdin, observes the child, and retains stderr before translating failure.
+
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 

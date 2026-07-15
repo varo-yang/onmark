@@ -1,3 +1,8 @@
+//! Owned Chromium/CDP session with bounded startup, command, and shutdown work.
+//!
+//! This module contains vendor-specific control flow so the executor can speak
+//! only in Onmark protocol values and typed browser failures.
+
 use std::path::Path;
 use std::time::Duration;
 

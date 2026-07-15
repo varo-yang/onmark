@@ -1,3 +1,9 @@
+//! Native execution of one validated render unit.
+//!
+//! Rust owns request ordering, absolute frame identity, capture, and encoding;
+//! the browser only applies the already-solved plan. Request IDs are allocated
+//! once here so protocol sequencing cannot drift across execution paths.
+
 mod error;
 mod output;
 
@@ -72,7 +78,7 @@ impl FrameCaptureExecutor {
         artifact: &Path,
         limits: FrameArtifactLimits,
     ) -> Result<FrameArtifact, RenderError> {
-        let frame_count = validate_plan(unit.browser_plan(), limits.max_frames(), artifact)?;
+        let requests = validate_plan(unit.browser_plan(), limits.max_frames(), artifact)?;
         let mut writer =
             match FrameArtifact::writer_for_capture(unit, capture_environment, artifact, limits)
                 .await
@@ -87,7 +93,7 @@ impl FrameCaptureExecutor {
             };
         let mut frames = FrameSink::Artifact(&mut writer);
 
-        self.capture_unit(unit, &mut frames, frame_count, artifact)
+        self.capture_unit(unit, &mut frames, requests, artifact)
             .await?;
         match writer.finish().await {
             Ok(artifact) => Ok(artifact),
@@ -115,11 +121,10 @@ impl FrameCaptureExecutor {
         &self,
         unit: &ExecutableUnit,
         frames: &mut FrameSink<'_>,
-        frame_count: u64,
+        requests: RequestSequence,
         output: &Path,
     ) -> Result<(), RenderError> {
         let plan = unit.browser_plan();
-        let disposal_request = disposal_request_id(frame_count, output)?;
         let browser = BrowserSession::launch(
             &self.browser_executable,
             self.sandbox,
@@ -132,7 +137,7 @@ impl FrameCaptureExecutor {
         let render_result = render_session(
             &browser,
             plan,
-            disposal_request,
+            requests,
             unit.entry_url().as_str(),
             frames,
             output,
@@ -273,7 +278,8 @@ impl RenderExecutor {
             .iter()
             .flat_map(|unit| unit.audio_inputs_rebased_to(output_origin))
             .collect();
-        let frame_rate = self.validate_sequence(units, expected_output, &audio, output)?;
+        let sequence = self.validate_sequence(units, expected_output, &audio, output)?;
+        let frame_rate = sequence.frame_rate;
 
         let staging = StagedOutput::new(output)?;
         let mut encoder = self
@@ -295,19 +301,20 @@ impl RenderExecutor {
         audio: Vec<AudioInput>,
         output: &Path,
     ) -> Result<EncodedVideo, RenderError> {
-        let frame_rate = self.validate_sequence(&units, expected_output, &audio, output)?;
+        let ValidatedSequence {
+            frame_rate,
+            requests,
+        } = self.validate_sequence(&units, expected_output, &audio, output)?;
         let staging = StagedOutput::new(output)?;
         let mut encoder = self
             .ffmpeg
             .start(staging.visual_path(), frame_rate)
             .map_err(|source| RenderError::encoder(output, source))?;
 
-        for unit in &units {
+        for (unit, requests) in units.iter().zip(requests) {
             let mut frames = FrameSink::Encoder(&mut encoder);
-            let frame_count = output_frame_count(unit.browser_plan())
-                .expect("validated render units retain ordered output intervals");
             self.capture
-                .capture_unit(unit, &mut frames, frame_count, output)
+                .capture_unit(unit, &mut frames, requests, output)
                 .await?;
         }
 
@@ -393,7 +400,7 @@ impl RenderExecutor {
         expected_output: WireInterval,
         audio: &[AudioInput],
         output: &Path,
-    ) -> Result<WireFrameRate, RenderError> {
+    ) -> Result<ValidatedSequence, RenderError> {
         let Some(first) = units.first() else {
             return Err(invalid_plan(output, "render sequence contains no units"));
         };
@@ -402,6 +409,7 @@ impl RenderExecutor {
         let bundle_id = first.bundle_id();
         let mut expected_start = expected_output.start().get();
         let mut total_frames = 0_u64;
+        let mut requests = Vec::with_capacity(units.len());
 
         for unit in units {
             let plan = unit.browser_plan();
@@ -430,14 +438,16 @@ impl RenderExecutor {
                 ));
             }
 
-            let frame_count = validate_plan(plan, self.ffmpeg.max_frames(), output)?;
-            total_frames = total_frames.checked_add(frame_count).ok_or_else(|| {
-                RenderError::new(
-                    RenderErrorKind::PlanTooLarge,
-                    output,
-                    "render sequence exceeds the configured frame limit",
-                )
-            })?;
+            let unit_requests = validate_plan(plan, self.ffmpeg.max_frames(), output)?;
+            total_frames = total_frames
+                .checked_add(unit_requests.frame_count())
+                .ok_or_else(|| {
+                    RenderError::new(
+                        RenderErrorKind::PlanTooLarge,
+                        output,
+                        "render sequence exceeds the configured frame limit",
+                    )
+                })?;
             if total_frames > self.ffmpeg.max_frames() {
                 return Err(RenderError::new(
                     RenderErrorKind::PlanTooLarge,
@@ -446,6 +456,7 @@ impl RenderExecutor {
                 ));
             }
             expected_start = plan.output().end().get();
+            requests.push(unit_requests);
         }
 
         if expected_start != expected_output.end().get() {
@@ -463,7 +474,45 @@ impl RenderExecutor {
             ));
         }
 
-        Ok(frame_rate)
+        Ok(ValidatedSequence {
+            frame_rate,
+            requests,
+        })
+    }
+}
+
+/// Execution facts whose frame count is already representable by request IDs.
+struct ValidatedSequence {
+    frame_rate: WireFrameRate,
+    requests: Vec<RequestSequence>,
+}
+
+/// Sole authority for frame and disposal request identities in one session.
+#[derive(Clone, Copy)]
+struct RequestSequence {
+    frames: u32,
+}
+
+impl RequestSequence {
+    fn new(frame_count: u64, output: &Path) -> Result<Self, RenderError> {
+        let frames = u32::try_from(frame_count).map_err(|_| request_identity_overflow(output))?;
+        FIRST_FRAME_REQUEST
+            .checked_add(frames)
+            .ok_or_else(|| request_identity_overflow(output))?;
+
+        Ok(Self { frames })
+    }
+
+    fn frame_count(self) -> u64 {
+        u64::from(self.frames)
+    }
+
+    fn frame_ids(self) -> impl Iterator<Item = RequestId> {
+        (0..self.frames).map(|offset| RequestId::new(FIRST_FRAME_REQUEST + offset))
+    }
+
+    const fn disposal(self) -> RequestId {
+        RequestId::new(FIRST_FRAME_REQUEST + self.frames)
     }
 }
 
@@ -471,30 +520,27 @@ fn validate_plan(
     plan: &BrowserPlan,
     configured_max_frames: u64,
     output: &Path,
-) -> Result<u64, RenderError> {
+) -> Result<RequestSequence, RenderError> {
     let Some(frame_count) = output_frame_count(plan) else {
         return Err(invalid_plan(output, "browser output interval is reversed"));
     };
-    let request_limit = u64::from(u32::MAX - FIRST_FRAME_REQUEST);
-    let max_frames = configured_max_frames.min(request_limit);
-
     if frame_count == 0 {
         return Err(invalid_plan(output, "browser output interval is empty"));
     }
-    if frame_count > max_frames {
+    if frame_count > configured_max_frames {
         return Err(RenderError::new(
             RenderErrorKind::PlanTooLarge,
             output,
             "browser output interval exceeds the configured frame limit",
         ));
     }
-    Ok(frame_count)
+    RequestSequence::new(frame_count, output)
 }
 
 async fn render_session(
     browser: &BrowserSession,
     plan: &BrowserPlan,
-    disposal_request: RequestId,
+    requests: RequestSequence,
     entry_url: &str,
     frames: &mut FrameSink<'_>,
     output: &Path,
@@ -506,8 +552,8 @@ async fn render_session(
     load_runtime(browser, plan, output).await?;
     prepare_runtime(browser, plan, output).await?;
 
-    render_frames(browser, frames, plan, output).await?;
-    dispose_runtime(browser, disposal_request, output).await
+    render_frames(browser, frames, plan, requests, output).await?;
+    dispose_runtime(browser, requests.disposal(), output).await
 }
 
 fn wire_interval(
@@ -559,15 +605,15 @@ async fn render_frames(
     browser: &BrowserSession,
     frames: &mut FrameSink<'_>,
     plan: &BrowserPlan,
+    requests: RequestSequence,
     output: &Path,
 ) -> Result<(), RenderError> {
     let start = plan.output().start().get();
     let end = plan.output().end().get();
 
-    for (offset, index) in (start..end).enumerate() {
+    for (index, request_id) in (start..end).zip(requests.frame_ids()) {
         let frame = WireFrame::new(index)
             .map_err(|_| invalid_plan(output, "browser output frame exceeds the wire domain"))?;
-        let request_id = frame_request_id(offset, output)?;
         seek_frame(browser, request_id, frame, output).await?;
         browser
             .wait_for_compositor_commit()
@@ -693,23 +739,6 @@ fn output_frame_count(plan: &BrowserPlan) -> Option<u64> {
         .end()
         .get()
         .checked_sub(plan.output().start().get())
-}
-
-fn frame_request_id(offset: usize, output: &Path) -> Result<RequestId, RenderError> {
-    let offset = u32::try_from(offset).map_err(|_| request_identity_overflow(output))?;
-    let request_id = FIRST_FRAME_REQUEST
-        .checked_add(offset)
-        .ok_or_else(|| request_identity_overflow(output))?;
-    Ok(RequestId::new(request_id))
-}
-
-fn disposal_request_id(frame_count: u64, output: &Path) -> Result<RequestId, RenderError> {
-    let count = u32::try_from(frame_count).map_err(|_| request_identity_overflow(output))?;
-    let request_id = FIRST_FRAME_REQUEST
-        .checked_add(count)
-        .ok_or_else(|| request_identity_overflow(output))?;
-
-    Ok(RequestId::new(request_id))
 }
 
 fn invalid_plan(output: &Path, message: &'static str) -> RenderError {

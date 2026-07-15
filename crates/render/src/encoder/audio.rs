@@ -1,3 +1,8 @@
+//! Final audio mix over an already continuous visual encode.
+//!
+//! Timeline IR supplies exact frame starts. `FFmpeg` receives rational delay
+//! expressions so this I/O boundary never rounds authored timing through `f64`.
+
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::time::Duration;

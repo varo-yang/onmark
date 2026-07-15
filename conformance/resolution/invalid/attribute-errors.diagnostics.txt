@@ -26,3 +26,5 @@ ONM-ATTR-001 error @0:334..341 attribute "strange" is not allowed on <title>
   help: remove the "strange" attribute
 ONM-ATTR-003 error @0:410..417 attribute "cue" is invalid: node ID cannot contain ASCII whitespace
   help: use a non-empty cue ID without ASCII whitespace
+ONM-TIME-001 error @0:477..479 duration "0s" is invalid: duration must be greater than zero
+  help: use an exact duration such as 3s, 500ms, or 1.5s

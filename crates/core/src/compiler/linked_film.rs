@@ -1,3 +1,8 @@
+//! Structurally valid screenplay form between binding and attribute resolution.
+//!
+//! Raw attributes and text remain attached to source spans, while unknown or
+//! misplaced elements and invalid IDs have already been excluded.
+
 use std::collections::BTreeMap;
 
 use crate::model::{ElementKind, NodeId, SourceSpan};

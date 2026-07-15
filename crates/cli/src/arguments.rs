@@ -1,3 +1,5 @@
+//! Checked command-line surface for local rendering and portable worker capture.
+
 use std::path::{Path, PathBuf};
 
 use clap::{Args, Parser, Subcommand};

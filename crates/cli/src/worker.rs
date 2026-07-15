@@ -1,4 +1,7 @@
 //! Gate-three worker command: execute solved visual facts without source compilation.
+//!
+//! The command accepts the same serialized worker request as deployment and
+//! deliberately bypasses source parsing, asset probing, and graph planning.
 
 use std::fs;
 use std::io::{self, Write as _};
