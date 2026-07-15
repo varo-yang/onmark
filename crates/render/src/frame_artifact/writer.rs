@@ -1,0 +1,270 @@
+use std::path::Path;
+
+use sha2::{Digest as _, Sha256};
+use tempfile::{NamedTempFile, TempPath};
+use tokio::fs::{File, OpenOptions};
+use tokio::io::{AsyncSeekExt as _, AsyncWriteExt as _, SeekFrom};
+
+use super::format::{FRAME_LENGTH_BYTES, FrameArtifactDescriptor, HEADER_BYTES, Header};
+use super::{FrameArtifact, FrameArtifactError, FrameArtifactErrorKind, FrameArtifactLimits};
+use crate::EncodedPng;
+
+/// The only mutable state while one worker owns an unpublished artifact.
+pub(crate) struct FrameArtifactWriter {
+    file: File,
+    staging: TempPath,
+    output: std::path::PathBuf,
+    descriptor: FrameArtifactDescriptor,
+    limits: FrameArtifactLimits,
+    frames: u64,
+    payload_bytes: u64,
+    digest: Sha256,
+}
+
+impl FrameArtifactWriter {
+    pub(super) async fn create(
+        output: &Path,
+        descriptor: FrameArtifactDescriptor,
+        limits: FrameArtifactLimits,
+    ) -> Result<Self, FrameArtifactError> {
+        if output.exists() {
+            return Err(FrameArtifactError::new(
+                FrameArtifactErrorKind::OutputExists,
+                output,
+                "frame artifact output already exists",
+            ));
+        }
+
+        let staging = NamedTempFile::new_in(output_parent(output)).map_err(|source| {
+            FrameArtifactError::io(
+                FrameArtifactErrorKind::Output,
+                output,
+                "failed to create frame artifact staging file",
+                source,
+            )
+        })?;
+        let staging = staging.into_temp_path();
+        let mut file = OpenOptions::new()
+            .write(true)
+            .open(&staging)
+            .await
+            .map_err(|source| {
+                FrameArtifactError::io(
+                    FrameArtifactErrorKind::Output,
+                    output,
+                    "failed to open frame artifact staging file",
+                    source,
+                )
+            })?;
+        file.write_all(&[0; HEADER_BYTES]).await.map_err(|source| {
+            FrameArtifactError::io(
+                FrameArtifactErrorKind::Output,
+                output,
+                "failed to reserve frame artifact header",
+                source,
+            )
+        })?;
+
+        Ok(Self {
+            file,
+            staging,
+            output: output.to_owned(),
+            descriptor,
+            limits,
+            frames: 0,
+            payload_bytes: 0,
+            digest: Sha256::new(),
+        })
+    }
+
+    /// Appends one bounded PNG record in browser output order.
+    pub(crate) async fn write_frame(
+        &mut self,
+        frame: &EncodedPng,
+    ) -> Result<(), FrameArtifactError> {
+        let bytes = frame.as_bytes();
+        let next = self.next_record(bytes)?;
+        let length = next.frame_bytes.to_be_bytes();
+
+        self.file.write_all(&length).await.map_err(|source| {
+            FrameArtifactError::io(
+                FrameArtifactErrorKind::Output,
+                &self.output,
+                "failed to write frame artifact record length",
+                source,
+            )
+        })?;
+        self.file.write_all(bytes).await.map_err(|source| {
+            FrameArtifactError::io(
+                FrameArtifactErrorKind::Output,
+                &self.output,
+                "failed to write frame artifact PNG payload",
+                source,
+            )
+        })?;
+
+        self.digest.update(length);
+        self.digest.update(bytes);
+        self.frames = next.frames;
+        self.payload_bytes = next.payload_bytes;
+        Ok(())
+    }
+
+    /// Finalizes the fixed header and publishes the staged bytes without replacement.
+    pub(crate) async fn finish(mut self) -> Result<FrameArtifact, FrameArtifactError> {
+        let expected_frames = self.descriptor.output.len().get();
+        if self.frames != expected_frames {
+            return Err(FrameArtifactError::new(
+                FrameArtifactErrorKind::Incomplete,
+                &self.output,
+                "frame artifact does not contain its planned output frame count",
+            ));
+        }
+
+        let header = Header {
+            descriptor: self.descriptor,
+            frames: self.frames,
+            payload_bytes: self.payload_bytes,
+            digest: self.digest.finalize().into(),
+        };
+        self.file.seek(SeekFrom::Start(0)).await.map_err(|source| {
+            FrameArtifactError::io(
+                FrameArtifactErrorKind::Output,
+                &self.output,
+                "failed to seek frame artifact header",
+                source,
+            )
+        })?;
+        self.file
+            .write_all(&header.encode())
+            .await
+            .map_err(|source| {
+                FrameArtifactError::io(
+                    FrameArtifactErrorKind::Output,
+                    &self.output,
+                    "failed to write frame artifact header",
+                    source,
+                )
+            })?;
+        self.file.sync_all().await.map_err(|source| {
+            FrameArtifactError::io(
+                FrameArtifactErrorKind::Output,
+                &self.output,
+                "failed to flush frame artifact staging file",
+                source,
+            )
+        })?;
+
+        let Self {
+            file,
+            staging,
+            output,
+            limits,
+            ..
+        } = self;
+        drop(file);
+        publish(staging, &output)?;
+
+        Ok(FrameArtifact::from_header(output, header, limits))
+    }
+
+    fn next_record(&self, bytes: &[u8]) -> Result<NextRecord, FrameArtifactError> {
+        if bytes.is_empty() {
+            return Err(FrameArtifactError::new(
+                FrameArtifactErrorKind::InvalidArtifact,
+                &self.output,
+                "frame artifact cannot retain an empty PNG frame",
+            ));
+        }
+
+        let frames = self.frames.checked_add(1).ok_or_else(|| {
+            FrameArtifactError::new(
+                FrameArtifactErrorKind::FrameLimit,
+                &self.output,
+                "frame artifact frame count exceeds its accounting domain",
+            )
+        })?;
+        if frames > self.limits.max_frames() {
+            return Err(FrameArtifactError::new(
+                FrameArtifactErrorKind::FrameLimit,
+                &self.output,
+                "frame artifact frame count exceeds the configured limit",
+            ));
+        }
+
+        let frame_bytes = u64::try_from(bytes.len()).map_err(|_| {
+            FrameArtifactError::new(
+                FrameArtifactErrorKind::ByteLimit,
+                &self.output,
+                "frame artifact frame size exceeds its accounting domain",
+            )
+        })?;
+        if bytes.len() > self.limits.max_frame_bytes() {
+            return Err(FrameArtifactError::new(
+                FrameArtifactErrorKind::FrameByteLimit,
+                &self.output,
+                "frame artifact PNG exceeds the configured per-frame byte limit",
+            ));
+        }
+
+        let record_bytes = FRAME_LENGTH_BYTES.checked_add(frame_bytes).ok_or_else(|| {
+            FrameArtifactError::new(
+                FrameArtifactErrorKind::ByteLimit,
+                &self.output,
+                "frame artifact record size exceeds its accounting domain",
+            )
+        })?;
+        let payload_bytes = self
+            .payload_bytes
+            .checked_add(record_bytes)
+            .ok_or_else(|| {
+                FrameArtifactError::new(
+                    FrameArtifactErrorKind::ByteLimit,
+                    &self.output,
+                    "frame artifact payload exceeds its accounting domain",
+                )
+            })?;
+        if payload_bytes > self.limits.max_bytes() {
+            return Err(FrameArtifactError::new(
+                FrameArtifactErrorKind::ByteLimit,
+                &self.output,
+                "frame artifact payload exceeds the configured byte limit",
+            ));
+        }
+
+        Ok(NextRecord {
+            frames,
+            frame_bytes,
+            payload_bytes,
+        })
+    }
+}
+
+struct NextRecord {
+    frames: u64,
+    frame_bytes: u64,
+    payload_bytes: u64,
+}
+
+fn output_parent(output: &Path) -> &Path {
+    output
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."))
+}
+
+fn publish(staging: TempPath, output: &Path) -> Result<(), FrameArtifactError> {
+    std::fs::hard_link(staging, output).map_err(|source| {
+        let kind = if output.exists() {
+            FrameArtifactErrorKind::OutputExists
+        } else {
+            FrameArtifactErrorKind::Output
+        };
+        FrameArtifactError::io(kind, output, "failed to publish frame artifact", source)
+    })?;
+
+    // The link above is the publication point. TempPath owns best-effort
+    // staging cleanup on drop, so cleanup failure cannot turn a published,
+    // verified artifact into a reported capture failure.
+    Ok(())
+}

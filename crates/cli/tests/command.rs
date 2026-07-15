@@ -4,7 +4,7 @@ use std::process::Command;
 use tempfile::tempdir;
 
 #[test]
-fn exposes_the_single_gate_one_command() {
+fn exposes_render_and_the_gate_three_worker_adapter_without_a_coordinator() {
     let output = Command::new(env!("CARGO_BIN_EXE_onmark"))
         .arg("--help")
         .output()
@@ -13,6 +13,7 @@ fn exposes_the_single_gate_one_command() {
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).expect("help output is UTF-8");
     assert!(stdout.contains("render"));
+    assert!(stdout.contains("worker"));
     assert!(!stdout.contains("coordinator"));
 }
 

@@ -1,11 +1,32 @@
 use std::error::Error;
 use std::fmt;
 
+use serde::de::Error as _;
+use serde::{Deserialize, Deserializer, Serialize};
+
 const MAX_VIEWPORT_EDGE: u32 = 8_192;
 
 /// Pixel-affecting output facts owned by one render unit.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct RenderProfile {
+    width: u32,
+    height: u32,
+}
+
+impl<'de> Deserialize<'de> for RenderProfile {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = RenderProfileWire::deserialize(deserializer)?;
+        Self::new(wire.width, wire.height).map_err(D::Error::custom)
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct RenderProfileWire {
     width: u32,
     height: u32,
 }

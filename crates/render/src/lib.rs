@@ -10,10 +10,12 @@
 mod browser;
 mod encoder;
 mod executor;
+mod frame_artifact;
 mod profile;
 mod unit;
 mod unit_root;
 mod video;
+mod worker;
 
 pub use browser::{
     BrowserError, BrowserErrorKind, BrowserLimits, BrowserSession, EncodedPng, InvalidBrowserLimits,
@@ -21,7 +23,11 @@ pub use browser::{
 pub use encoder::{
     EncodeError, EncodeErrorKind, EncodeLimits, EncodedVideo, Ffmpeg, FfmpegSession, InvalidFfmpeg,
 };
-pub use executor::{RenderError, RenderErrorKind, RenderExecutor};
+pub use executor::{FrameCaptureExecutor, RenderError, RenderErrorKind, RenderExecutor};
+pub use frame_artifact::{
+    FrameArtifact, FrameArtifactError, FrameArtifactErrorKind, FrameArtifactLimits,
+    InvalidFrameArtifactLimits,
+};
 pub use profile::{InvalidRenderProfile, RenderProfile};
 pub use unit::{
     AudioPlan, InvalidMaterializedAsset, InvalidRenderUnit, MaterializedAsset, RenderAudio,
@@ -32,3 +38,4 @@ pub use unit_root::{
     UnitRootLimits,
 };
 pub use video::{AdmittedVideo, UnsupportedVideo};
+pub use worker::{WorkerCaptureRequest, WorkerCaptureVersion};

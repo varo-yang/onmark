@@ -4,7 +4,8 @@ use std::path::{Path, PathBuf};
 
 use onmark_core::compiler;
 use onmark_core::model::{
-    AssetMetadata, Duration, FrameRate, FrozenAsset, FrozenAssetId, SourceId, Timebase,
+    AssetMetadata, AssetRef, Duration, FrameRate, FrozenAsset, FrozenAssetId, SourceId, Timebase,
+    VideoMetadata, VideoTiming,
 };
 use onmark_core::protocol::{BundleFile, BundleManifest};
 use onmark_render::{
@@ -57,6 +58,72 @@ fn materializes_the_checked_in_bundle_contract() {
 
     assert!(read(&entry).starts_with(b"<!doctype html>"));
     assert_eq!(executable.profile(), render_profile());
+}
+
+#[test]
+fn materializes_one_portable_worker_capture_request() {
+    let fixture = Fixture::new();
+    let unit = RenderUnit::whole_film(
+        &static_timeline(),
+        fixture.manifest.clone(),
+        render_profile(),
+        [],
+    )
+    .expect("the static fixture forms one render unit");
+    let request = unit.worker_capture_request();
+    let input = tempdir().expect("the worker input root is available");
+    stage_worker_bundle(input.path(), &fixture);
+
+    let executable = request
+        .materialize(input.path(), limits(4, 4_096))
+        .expect("the worker request materializes into a private executable root");
+    let entry = executable
+        .entry_url()
+        .to_file_path()
+        .expect("the worker executable entry remains local");
+
+    assert_eq!(read(&entry), b"page");
+    assert_eq!(executable.browser_plan(), request.browser_plan());
+    assert_eq!(executable.profile(), request.profile());
+}
+
+#[test]
+fn materializes_worker_video_bytes_from_the_frozen_identity_layout() {
+    let fixture = Fixture::new();
+    let unit = RenderUnit::whole_film(
+        &video_timeline(fixture.asset.frozen().clone()),
+        fixture.manifest.clone(),
+        render_profile(),
+        [fixture.asset.clone()],
+    )
+    .expect("the video fixture forms one render unit");
+    let request = unit.worker_capture_request();
+    let input = tempdir().expect("the worker input root is available");
+    stage_worker_bundle(input.path(), &fixture);
+    let source = input
+        .path()
+        .join(BundleManifest::asset_path(fixture.asset.id()));
+    let parent = source
+        .parent()
+        .expect("a canonical asset path has a parent directory");
+    fs::create_dir_all(parent).expect("the worker asset directory is writable");
+    fs::copy(fixture.asset.local_path(), &source).expect("the frozen worker asset copies");
+
+    let executable = request
+        .materialize(input.path(), limits(8, 4_096))
+        .expect("the worker request verifies and materializes its video bytes");
+    let entry = executable
+        .entry_url()
+        .to_file_path()
+        .expect("the fixture worker entry remains local");
+    let root = entry
+        .parent()
+        .expect("the fixture worker entry remains below its root");
+
+    assert_eq!(
+        read(&root.join(BundleManifest::asset_path(fixture.asset.id()))),
+        b"video",
+    );
 }
 
 #[test]
@@ -188,7 +255,16 @@ impl Fixture {
         fs::write(&asset_file, b"video").expect("the fixture asset is writable");
         let frozen = FrozenAsset::new(
             frozen_id(b"video"),
-            AssetMetadata::audio(Duration::from_nanos(1)),
+            AssetMetadata::video(
+                Duration::from_nanos(1_000_000_000),
+                VideoMetadata::new(
+                    Duration::from_nanos(1_000_000_000),
+                    "h264",
+                    "yuv420p",
+                    VideoTiming::Constant(frame_rate()),
+                )
+                .expect("the fixture video metadata is normalized"),
+            ),
         );
         let asset =
             MaterializedAsset::new(frozen, asset_file).expect("the fixture asset path is present");
@@ -239,10 +315,28 @@ fn conformance_bundle() -> PathBuf {
 }
 
 fn static_timeline() -> onmark_core::timeline::TimelineIr {
-    let parsed = compiler::parse(
-        SourceId::new(0),
+    solve_timeline(
         r#"<film><scene><shot duration="1s"><title>Frame</title></shot></scene></film>"#,
-    );
+        &BTreeMap::new(),
+    )
+}
+
+fn video_timeline(frozen: FrozenAsset) -> onmark_core::timeline::TimelineIr {
+    let assets = BTreeMap::from([(
+        AssetRef::parse("opening.mp4").expect("the fixture asset reference is valid"),
+        frozen,
+    )]);
+    solve_timeline(
+        r#"<film><scene><shot><video src="opening.mp4" /></shot></scene></film>"#,
+        &assets,
+    )
+}
+
+fn solve_timeline(
+    source: &str,
+    assets: &BTreeMap<AssetRef, FrozenAsset>,
+) -> onmark_core::timeline::TimelineIr {
+    let parsed = compiler::parse(SourceId::new(0), source);
     let (document, diagnostics) = parsed.into_parts();
     assert!(diagnostics.is_empty());
     let (film, diagnostics) = compiler::bind(document).into_parts();
@@ -251,13 +345,23 @@ fn static_timeline() -> onmark_core::timeline::TimelineIr {
     assert!(diagnostics.is_empty());
     let report = compiler::solve(
         film.expect("the fixture resolves"),
-        &BTreeMap::new(),
+        assets,
         Timebase::new(frame_rate()),
     )
-    .expect("the static fixture requires no media metadata");
+    .expect("the fixture has complete frozen metadata");
     let (timeline, diagnostics) = report.into_parts();
     assert!(diagnostics.is_empty());
     timeline.expect("the fixture solves")
+}
+
+fn stage_worker_bundle(input: &Path, fixture: &Fixture) {
+    let bundle = input.join("bundle");
+    fs::create_dir(&bundle).expect("the worker bundle directory is writable");
+    fs::copy(
+        fixture.bundle.path().join("index.html"),
+        bundle.join("index.html"),
+    )
+    .expect("the bundle payload copies into the worker layout");
 }
 
 fn render_profile() -> RenderProfile {

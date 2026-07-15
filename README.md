@@ -6,7 +6,7 @@ Onmark is a screenplay-first video compiler and rendering engine for people and 
 screenplay → deterministic Timeline IR → browser frames + audio plan → MP4
 ```
 
-Delivery gates one and two are complete. Gate one renders and independently verifies one real screenplay through the final-direction compiler, browser protocol, Chromium, and FFmpeg. Gate two partitions one media-bearing two-shot film into two independently materialized local Render Units, executes both through the same renderer, and proves their assembled decoded video and audio match the whole-film baseline. The completed foundation includes the pure compiler and versioned wire types in `onmark-core`; bounded ffprobe normalization in `onmark-media`; deterministic video and overlay presentation in `@onmark/runtime`; reusable semantic DOM bindings in `@onmark/authoring`; immutable presentation artifacts in `@onmark/bundler`; the typed Chromium-to-FFmpeg executor in `onmark-render`; and the whole-film `onmark-cli` composition root. The checked-in production presentation renders video, title, and call-to-action facts without re-solving Rust-owned time; the native executor mixes solved voice-over after browser capture and muxes it into the final MP4.
+Delivery gates one and two are complete. Gate one renders and independently verifies one real screenplay through the final-direction compiler, browser protocol, Chromium, and FFmpeg. Gate two partitions one media-bearing two-shot film into two independently materialized local Render Units, executes both through the same renderer, and proves their assembled decoded video and audio match the whole-film baseline. Gate three has begun with a local worker-artifact conformance: independent worker processes capture bounded, verified frame artifacts, then the existing single encoder and final audio path assemble them equivalently to the whole-film baseline. Cloud storage, scheduling, leases, and deployment adapters remain deliberately unimplemented. The completed foundation includes the pure compiler and versioned wire types in `onmark-core`; bounded ffprobe normalization in `onmark-media`; deterministic video and overlay presentation in `@onmark/runtime`; reusable semantic DOM bindings in `@onmark/authoring`; immutable presentation artifacts in `@onmark/bundler`; the typed Chromium-to-FFmpeg executor in `onmark-render`; and the whole-film `onmark-cli` composition root. The checked-in production presentation renders video, title, and call-to-action facts without re-solving Rust-owned time; the native executor mixes solved voice-over after browser capture and muxes it into the final MP4.
 
 ## Render
 
@@ -19,6 +19,16 @@ onmark render film.onmark --fps 30000/1001 --width 1920 --height 1080
 ```
 
 Rendering requires `onmark-bundle` and its Node.js runtime, Chromium or Google Chrome, `ffmpeg`, and `ffprobe` to be installed. Use the execution override flags shown by `onmark render --help` when they are not on the default paths.
+
+## Worker capture
+
+Gate three exposes a narrow local worker entry point for already-composed visual work:
+
+```bash
+onmark worker capture --input worker-input --output opening.onmark-frames --browser /path/to/chrome
+```
+
+`worker-input` contains a versioned `request.json`, the `bundle/` payload files named by that request's manifest, and any frozen `assets/sha256/` bytes. The worker accepts no screenplay and does not compile source. It publishes one checksum-verified, no-clobber frame artifact; a matching completed artifact is verified and reused on retry. This command proves the future worker interchange locally—it is not a cloud coordinator or a replacement for `onmark render`.
 
 ## Repository map
 

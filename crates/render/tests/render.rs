@@ -14,8 +14,8 @@ use onmark_core::render_graph::{PartitionPlan, RenderGraph};
 use onmark_media::Ffprobe;
 use onmark_render::{
     BrowserErrorKind, BrowserLimits, BrowserSession, EncodeLimits, EncodedPng, ExecutableUnit,
-    Ffmpeg, MaterializedAsset, RenderErrorKind, RenderExecutor, RenderProfile, RenderUnit,
-    UnitRootLimits,
+    Ffmpeg, FrameArtifactLimits, MaterializedAsset, RenderErrorKind, RenderExecutor, RenderProfile,
+    RenderUnit, UnitRootLimits,
 };
 use serde::Deserialize;
 use sha2::{Digest as _, Sha256};
@@ -176,6 +176,47 @@ async fn renders_two_partitions_equivalently_to_one_whole_film_unit() {
     assert_eq!(whole.frames(), TWO_UNIT_FRAME_COUNT);
     assert_eq!(partitioned.frames(), TWO_UNIT_FRAME_COUNT);
     assert_equivalent_output(&whole_output, &partitioned_output).await;
+}
+
+#[tokio::test]
+#[ignore = "requires ONMARK_CHROME, ONMARK_FFMPEG, and ONMARK_FFPROBE"]
+async fn assembles_worker_frame_artifacts_equivalently_to_the_whole_film() {
+    let directory = tempdir().expect("the test output directory must be available");
+    let fixture = GateTwoFixture::materialize(directory.path()).await;
+    let whole_output = directory.path().join("whole-film.mp4");
+    let assembled_output = directory.path().join("assembled-from-artifacts.mp4");
+    let executor = real_executor(TWO_UNIT_FRAME_COUNT);
+
+    let whole = executor
+        .render(fixture.whole_film, &whole_output)
+        .await
+        .expect("the whole-film baseline must render");
+
+    let mut artifacts = Vec::new();
+    for (index, unit) in fixture.partitioned_units.iter().enumerate() {
+        let artifact = directory
+            .path()
+            .join(format!("worker-{index}.onmark-frames"));
+        let captured = executor
+            .capture_frame_artifact(unit, &artifact, frame_artifact_limits())
+            .await
+            .expect("each independent unit must publish a verified frame artifact");
+        artifacts.push(captured);
+    }
+
+    let assembled = executor
+        .assemble_frame_artifacts(
+            &fixture.partition_plan,
+            &fixture.partitioned_units,
+            &artifacts,
+            &assembled_output,
+        )
+        .await
+        .expect("the assembler must reuse worker artifacts through one encoder");
+
+    assert_eq!(whole.frames(), TWO_UNIT_FRAME_COUNT);
+    assert_eq!(assembled.frames(), TWO_UNIT_FRAME_COUNT);
+    assert_equivalent_output(&whole_output, &assembled_output).await;
 }
 
 async fn generate_source_video(output: &Path, duration_seconds: &str) {
@@ -542,6 +583,11 @@ fn real_executor(max_frames: u64) -> RenderExecutor {
         .expect("the FFmpeg executable path is present");
 
     RenderExecutor::new(chrome(), browser_limits(Duration::from_secs(10)), ffmpeg)
+}
+
+fn frame_artifact_limits() -> FrameArtifactLimits {
+    FrameArtifactLimits::new(TWO_UNIT_FRAME_COUNT, 64 * 1024 * 1024, 8 * 1024 * 1024)
+        .expect("the fixture artifact limits are bounded")
 }
 
 fn browser_fixture() -> Url {

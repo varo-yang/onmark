@@ -6,7 +6,7 @@ use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::model::{ElementKind, FrameIndex, FrameInterval, FrameRate, FrozenAssetId};
-use crate::timeline::{TimelineIr, TimelineOverlay, TimelineText, TimelineVideo};
+use crate::timeline::{TimelineIr, TimelineOverlay, TimelineText, TimelineVersion, TimelineVideo};
 
 /// Largest integer represented exactly by every JavaScript implementation.
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
@@ -155,6 +155,86 @@ impl BrowserPlan {
     }
 }
 
+impl<'de> Deserialize<'de> for BrowserPlan {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = BrowserPlanWire::deserialize(deserializer)?;
+        if wire.timeline_version != TimelineVersion::V1.get() {
+            return Err(D::Error::custom(
+                "unsupported browser plan timeline version",
+            ));
+        }
+        if wire.videos.len() > MAX_BROWSER_VIDEOS {
+            return Err(D::Error::custom(
+                "browser plan exceeds the video-placement limit",
+            ));
+        }
+        if wire.overlays.len() > MAX_BROWSER_OVERLAYS {
+            return Err(D::Error::custom(
+                "browser plan exceeds the overlay-placement limit",
+            ));
+        }
+        if !wire.evaluation.contains_interval(wire.output) {
+            return Err(D::Error::custom(
+                "browser plan output lies outside its evaluation interval",
+            ));
+        }
+        if wire.output.is_empty() {
+            return Err(D::Error::custom("browser plan output interval is empty"));
+        }
+        if wire.videos.iter().any(|video| video.interval().is_empty()) {
+            return Err(D::Error::custom("browser video interval is empty"));
+        }
+        if wire
+            .overlays
+            .iter()
+            .any(|overlay| overlay.interval().is_empty())
+        {
+            return Err(D::Error::custom("browser overlay interval is empty"));
+        }
+        if wire
+            .videos
+            .iter()
+            .any(|video| !wire.evaluation.contains_interval(video.interval()))
+        {
+            return Err(D::Error::custom(
+                "browser video lies outside the evaluation interval",
+            ));
+        }
+        if wire
+            .overlays
+            .iter()
+            .any(|overlay| !wire.evaluation.contains_interval(overlay.interval()))
+        {
+            return Err(D::Error::custom(
+                "browser overlay lies outside the evaluation interval",
+            ));
+        }
+
+        Ok(Self {
+            timeline_version: wire.timeline_version,
+            frame_rate: wire.frame_rate,
+            evaluation: wire.evaluation,
+            output: wire.output,
+            videos: wire.videos,
+            overlays: wire.overlays,
+        })
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct BrowserPlanWire {
+    timeline_version: u16,
+    frame_rate: WireFrameRate,
+    evaluation: WireInterval,
+    output: WireInterval,
+    videos: Vec<BrowserVideo>,
+    overlays: Vec<BrowserOverlay>,
+}
+
 /// One primary video placement consumed by the browser presentation adapter.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -165,6 +245,9 @@ pub struct BrowserVideo {
         schemars(regex(pattern = r"^sha256:[0-9a-f]{64}$"))
     )]
     asset_id: Box<str>,
+    #[serde(skip)]
+    #[cfg_attr(feature = "schema", schemars(skip))]
+    asset_identity: FrozenAssetId,
     interval: WireInterval,
     source_frame_rate: WireFrameRate,
 }
@@ -174,6 +257,12 @@ impl BrowserVideo {
     #[must_use]
     pub fn asset_id(&self) -> &str {
         &self.asset_id
+    }
+
+    /// Returns the already-validated immutable asset identity.
+    #[must_use]
+    pub const fn asset_identity(&self) -> FrozenAssetId {
+        self.asset_identity
     }
 
     /// Returns the absolute frames during which the video is visible.
@@ -189,9 +278,34 @@ impl BrowserVideo {
     }
 }
 
+impl<'de> Deserialize<'de> for BrowserVideo {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = BrowserVideoWire::deserialize(deserializer)?;
+        let asset_identity = FrozenAssetId::parse(&wire.asset_id).map_err(D::Error::custom)?;
+
+        Ok(Self {
+            asset_id: wire.asset_id,
+            asset_identity,
+            interval: wire.interval,
+            source_frame_rate: wire.source_frame_rate,
+        })
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct BrowserVideoWire {
+    asset_id: Box<str>,
+    interval: WireInterval,
+    source_frame_rate: WireFrameRate,
+}
+
 /// Closed overlay roles understood by the Gate-one presentation.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum BrowserOverlayKind {
     /// Authored title content.
@@ -234,6 +348,34 @@ impl BrowserOverlay {
     }
 }
 
+impl<'de> Deserialize<'de> for BrowserOverlay {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = BrowserOverlayWire::deserialize(deserializer)?;
+        if text_exceeds_limit(&wire.text) {
+            return Err(D::Error::custom(
+                "browser overlay text exceeds the character limit",
+            ));
+        }
+
+        Ok(Self {
+            kind: wire.kind,
+            text: wire.text,
+            interval: wire.interval,
+        })
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct BrowserOverlayWire {
+    kind: BrowserOverlayKind,
+    text: Box<str>,
+    interval: WireInterval,
+}
+
 fn browser_video(
     video: &TimelineVideo,
     source_frame_rates: &BTreeMap<FrozenAssetId, FrameRate>,
@@ -246,6 +388,7 @@ fn browser_video(
 
     Ok(BrowserVideo {
         asset_id: asset_id.to_string().into_boxed_str(),
+        asset_identity: asset_id,
         interval: WireInterval::try_from(video.timing().interval())?,
         source_frame_rate: source_frame_rate.into(),
     })
@@ -263,12 +406,7 @@ fn browser_overlay(overlay: &TimelineOverlay) -> Result<BrowserOverlay, InvalidB
         .iter()
         .map(TimelineText::text)
         .collect::<String>();
-    if text
-        .chars()
-        .take(MAX_BROWSER_OVERLAY_TEXT_CHARACTERS + 1)
-        .count()
-        > MAX_BROWSER_OVERLAY_TEXT_CHARACTERS
-    {
+    if text_exceeds_limit(&text) {
         return Err(InvalidBrowserPlan::OverlayTextTooLong(element_kind));
     }
 
@@ -277,6 +415,13 @@ fn browser_overlay(overlay: &TimelineOverlay) -> Result<BrowserOverlay, InvalidB
         text: text.into_boxed_str(),
         interval: WireInterval::try_from(overlay.timing().interval())?,
     })
+}
+
+fn text_exceeds_limit(text: &str) -> bool {
+    text.chars()
+        .take(MAX_BROWSER_OVERLAY_TEXT_CHARACTERS + 1)
+        .count()
+        > MAX_BROWSER_OVERLAY_TEXT_CHARACTERS
 }
 
 /// Reason Timeline IR cannot form an exact browser-facing plan.
@@ -403,6 +548,32 @@ impl From<FrameRate> for WireFrameRate {
     }
 }
 
+impl<'de> Deserialize<'de> for WireFrameRate {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = WireFrameRateWire::deserialize(deserializer)?;
+        let rate = FrameRate::new(wire.numerator, wire.denominator)
+            .map_err(|source| D::Error::custom(source.to_string()))?;
+        if rate.numerator() != wire.numerator || rate.denominator() != wire.denominator {
+            return Err(D::Error::custom("frame rate is not in canonical form"));
+        }
+
+        Ok(Self {
+            numerator: wire.numerator,
+            denominator: wire.denominator,
+        })
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WireFrameRateWire {
+    numerator: u32,
+    denominator: u32,
+}
+
 /// One half-open browser frame interval.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -424,6 +595,38 @@ impl WireInterval {
     pub const fn end(self) -> WireFrame {
         self.end
     }
+
+    const fn contains_interval(self, other: Self) -> bool {
+        self.start.get() <= other.start.get() && other.end.get() <= self.end.get()
+    }
+
+    const fn is_empty(self) -> bool {
+        self.start.get() == self.end.get()
+    }
+}
+
+impl<'de> Deserialize<'de> for WireInterval {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = WireIntervalWire::deserialize(deserializer)?;
+        if wire.end.get() < wire.start.get() {
+            return Err(D::Error::custom("frame interval ends before it starts"));
+        }
+
+        Ok(Self {
+            start: wire.start,
+            end: wire.end,
+        })
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WireIntervalWire {
+    start: WireFrame,
+    end: WireFrame,
 }
 
 impl TryFrom<FrameInterval> for WireInterval {
@@ -527,6 +730,34 @@ mod tests {
     fn rejects_an_unsafe_deserialized_frame() {
         let encoded = (MAX_SAFE_INTEGER + 1).to_string();
         assert!(serde_json::from_str::<WireFrame>(&encoded).is_err());
+    }
+
+    #[test]
+    fn parses_only_validated_browser_plan_facts() {
+        let plan = r#"{
+            "timelineVersion":1,
+            "frameRate":{"numerator":30,"denominator":1},
+            "evaluation":{"start":0,"end":1},
+            "output":{"start":0,"end":1},
+            "videos":[],
+            "overlays":[]
+        }"#;
+
+        let parsed = serde_json::from_str::<BrowserPlan>(plan)
+            .expect("the canonical browser plan fixture is valid");
+        assert_eq!(parsed.output().end().get(), 1);
+
+        let noncanonical_rate = plan.replace(
+            "\"numerator\":30,\"denominator\":1",
+            "\"numerator\":60,\"denominator\":2",
+        );
+        assert!(serde_json::from_str::<BrowserPlan>(&noncanonical_rate).is_err());
+
+        let empty_output = plan.replace(
+            "\"output\":{\"start\":0,\"end\":1}",
+            "\"output\":{\"start\":0,\"end\":0}",
+        );
+        assert!(serde_json::from_str::<BrowserPlan>(&empty_output).is_err());
     }
 
     #[test]

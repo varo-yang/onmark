@@ -2,7 +2,6 @@ use std::fs;
 use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::time::Duration;
 
 use onmark_core::diagnostics::Diagnostic;
 use onmark_core::model::Timebase;
@@ -10,8 +9,7 @@ use onmark_core::render_graph::{PartitionPlan, RenderGraph};
 use onmark_core::timeline::TimelineIr;
 use onmark_media::Ffprobe;
 use onmark_render::{
-    BrowserLimits, EncodeLimits, EncodedVideo, ExecutableUnit, Ffmpeg, RenderExecutor,
-    RenderProfile, RenderUnit, UnitRootLimits,
+    EncodedVideo, ExecutableUnit, Ffmpeg, RenderExecutor, RenderProfile, RenderUnit,
 };
 
 use crate::arguments::{RenderArgs, source_directory};
@@ -20,16 +18,8 @@ use crate::bundler::{BundleArtifact, PresentationBundler};
 use crate::compilation;
 use crate::diagnostic;
 use crate::environment::Executables;
+use crate::execution;
 use crate::failure::CliError;
-
-const PROCESS_DEADLINE: Duration = Duration::from_mins(2);
-const ENCODER_INACTIVITY_TIMEOUT: Duration = Duration::from_mins(1);
-const MAX_CAPTURE_BYTES: usize = 64 * 1024 * 1024;
-const MAX_ENCODED_FRAMES: u64 = 1_000_000;
-const MAX_ENCODER_INPUT_BYTES: u64 = 128 * 1024 * 1024 * 1024;
-const MAX_PROCESS_STDERR_BYTES: usize = 1024 * 1024;
-const MAX_UNIT_FILES: usize = 10_000;
-const MAX_UNIT_BYTES: u64 = 256 * 1024 * 1024 * 1024;
 
 pub(super) enum RenderOutcome {
     Rejected {
@@ -160,7 +150,7 @@ fn materialize_units(
         units.push(ExecutableUnit::materialize(
             unit,
             &bundle_directory,
-            unit_root_limits(),
+            execution::unit_root_limits(),
         )?);
     }
 
@@ -192,29 +182,19 @@ fn validate_presentation(presentation: &Path) -> Result<(), CliError> {
 }
 
 fn ffprobe(executable: PathBuf) -> Ffprobe {
-    Ffprobe::new(executable, PROCESS_DEADLINE, Ffprobe::MAX_OUTPUT_BYTES)
-        .expect("the Gate-one probe policy stays within the media safety envelope")
+    Ffprobe::new(
+        executable,
+        execution::process_deadline(),
+        Ffprobe::MAX_OUTPUT_BYTES,
+    )
+    .expect("the CLI probe policy stays within the media safety envelope")
 }
 
 fn render_executor(browser: PathBuf, ffmpeg: PathBuf) -> RenderExecutor {
-    let browser_limits = BrowserLimits::new(PROCESS_DEADLINE, MAX_CAPTURE_BYTES)
-        .expect("the Gate-one browser policy stays within the render safety envelope");
-    let encode_limits = EncodeLimits::new(
-        ENCODER_INACTIVITY_TIMEOUT,
-        MAX_ENCODED_FRAMES,
-        MAX_ENCODER_INPUT_BYTES,
-        MAX_PROCESS_STDERR_BYTES,
-    )
-    .expect("the Gate-one encoder policy stays within the render safety envelope");
-    let ffmpeg = Ffmpeg::new(ffmpeg, encode_limits)
+    let ffmpeg = Ffmpeg::new(ffmpeg, execution::encode_limits())
         .expect("environment discovery returns a non-empty FFmpeg path");
 
-    RenderExecutor::new(browser, browser_limits, ffmpeg)
-}
-
-fn unit_root_limits() -> UnitRootLimits {
-    UnitRootLimits::new(MAX_UNIT_FILES, MAX_UNIT_BYTES)
-        .expect("the Gate-one unit policy stays within the render safety envelope")
+    RenderExecutor::new(browser, execution::browser_limits(), ffmpeg)
 }
 
 fn write_completed(

@@ -11,8 +11,8 @@ mod source;
 mod time;
 
 pub use asset::{
-    AssetMetadata, AudioMetadata, FrozenAsset, FrozenAssetId, InvalidVideoMetadata, VideoMetadata,
-    VideoTiming,
+    AssetMetadata, AudioMetadata, FrozenAsset, FrozenAssetId, InvalidFrozenAssetId,
+    InvalidVideoMetadata, VideoMetadata, VideoTiming,
 };
 pub use duration::{Duration, InvalidDuration};
 pub use element::ElementKind;

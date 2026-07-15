@@ -22,12 +22,59 @@ impl FrozenAssetId {
         Self(digest)
     }
 
+    /// Parses the canonical `sha256:<lowercase-hex>` identity spelling.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InvalidFrozenAssetId`] when the prefix, digest length, or
+    /// lowercase hexadecimal spelling is not canonical.
+    pub fn parse(value: &str) -> Result<Self, InvalidFrozenAssetId> {
+        let Some(hex) = value.strip_prefix("sha256:") else {
+            return Err(InvalidFrozenAssetId::MissingPrefix);
+        };
+        if hex.len() != SHA256_BYTES * 2 {
+            return Err(InvalidFrozenAssetId::InvalidLength);
+        }
+
+        let mut digest = [0; SHA256_BYTES];
+        for (index, byte) in digest.iter_mut().enumerate() {
+            let offset = index * 2;
+            let high = hex_value(hex.as_bytes()[offset])?;
+            let low = hex_value(hex.as_bytes()[offset + 1])?;
+            *byte = high << 4 | low;
+        }
+        Ok(Self::from_sha256(digest))
+    }
+
     /// Returns the SHA-256 digest bytes.
     #[must_use]
     pub const fn as_sha256(&self) -> &[u8; SHA256_BYTES] {
         &self.0
     }
 }
+
+/// Reason a frozen-asset identity spelling cannot name immutable bytes.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum InvalidFrozenAssetId {
+    /// The required `sha256:` prefix is absent.
+    MissingPrefix,
+    /// The SHA-256 digest does not have exactly 64 hexadecimal characters.
+    InvalidLength,
+    /// The digest contains a noncanonical hexadecimal byte.
+    InvalidHex,
+}
+
+impl fmt::Display for InvalidFrozenAssetId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::MissingPrefix => "frozen asset identity must start with sha256:",
+            Self::InvalidLength => "frozen asset identity must contain 64 hexadecimal characters",
+            Self::InvalidHex => "frozen asset identity must use lowercase hexadecimal characters",
+        })
+    }
+}
+
+impl Error for InvalidFrozenAssetId {}
 
 impl fmt::Display for FrozenAssetId {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -36,6 +83,14 @@ impl fmt::Display for FrozenAssetId {
             write!(formatter, "{byte:02x}")?;
         }
         Ok(())
+    }
+}
+
+fn hex_value(byte: u8) -> Result<u8, InvalidFrozenAssetId> {
+    match byte {
+        b'0'..=b'9' => Ok(byte - b'0'),
+        b'a'..=b'f' => Ok(byte - b'a' + 10),
+        _ => Err(InvalidFrozenAssetId::InvalidHex),
     }
 }
 
@@ -301,8 +356,8 @@ impl FrozenAsset {
 #[cfg(test)]
 mod tests {
     use super::{
-        AssetMetadata, AudioMetadata, FrozenAssetId, InvalidVideoMetadata, VideoMetadata,
-        VideoTiming,
+        AssetMetadata, AudioMetadata, FrozenAssetId, InvalidFrozenAssetId, InvalidVideoMetadata,
+        VideoMetadata, VideoTiming,
     };
     use crate::model::{Duration, FrameRate};
 
@@ -315,6 +370,32 @@ mod tests {
             "sha256:abababababababababababababababababababababababababababababababab",
         );
         assert_eq!(id.as_sha256(), &[0xab; 32]);
+    }
+
+    #[test]
+    fn parses_only_canonical_frozen_identity_spelling() {
+        let canonical = "sha256:abababababababababababababababababababababababababababababababab";
+
+        assert_eq!(
+            FrozenAssetId::parse(canonical)
+                .expect("the canonical fixture identity is valid")
+                .as_sha256(),
+            &[0xab; 32],
+        );
+        assert_eq!(
+            FrozenAssetId::parse("sha256:AB"),
+            Err(InvalidFrozenAssetId::InvalidLength),
+        );
+        assert_eq!(
+            FrozenAssetId::parse("sha512:abab"),
+            Err(InvalidFrozenAssetId::MissingPrefix),
+        );
+        assert_eq!(
+            FrozenAssetId::parse(
+                "sha256:Abababababababababababababababababababababababababababababababab",
+            ),
+            Err(InvalidFrozenAssetId::InvalidHex),
+        );
     }
 
     #[test]

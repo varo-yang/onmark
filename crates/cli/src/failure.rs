@@ -6,6 +6,7 @@ use std::process::ExitCode;
 
 use onmark_core::compiler::SolveError;
 use onmark_render::{InvalidRenderProfile, InvalidRenderUnit, RenderError, UnitRootError};
+use tokio::task::JoinError;
 
 use crate::assets::AssetError;
 use crate::bundler::BundleError;
@@ -14,10 +15,28 @@ use crate::environment::EnvironmentError;
 #[derive(Debug)]
 pub(super) enum CliError {
     Environment(EnvironmentError),
-    ReadScreenplay { path: PathBuf, source: io::Error },
-    InspectPresentation { path: PathBuf, source: io::Error },
+    ReadScreenplay {
+        path: PathBuf,
+        source: io::Error,
+    },
+    ReadWorkerRequest {
+        path: PathBuf,
+        source: io::Error,
+    },
+    ParseWorkerRequest {
+        path: PathBuf,
+        source: serde_json::Error,
+    },
+    WorkerTask(JoinError),
+    InspectPresentation {
+        path: PathBuf,
+        source: io::Error,
+    },
     InvalidPresentation(PathBuf),
-    CreateOutputDirectory { path: PathBuf, source: io::Error },
+    CreateOutputDirectory {
+        path: PathBuf,
+        source: io::Error,
+    },
     OutputExists(PathBuf),
     InvalidProfile(InvalidRenderProfile),
     Assets(AssetError),
@@ -31,6 +50,20 @@ pub(super) enum CliError {
 impl CliError {
     pub(super) fn read_screenplay(path: &Path, source: io::Error) -> Self {
         Self::ReadScreenplay {
+            path: path.to_owned(),
+            source,
+        }
+    }
+
+    pub(super) fn read_worker_request(path: &Path, source: io::Error) -> Self {
+        Self::ReadWorkerRequest {
+            path: path.to_owned(),
+            source,
+        }
+    }
+
+    pub(super) fn parse_worker_request(path: &Path, source: serde_json::Error) -> Self {
+        Self::ParseWorkerRequest {
             path: path.to_owned(),
             source,
         }
@@ -58,6 +91,21 @@ impl fmt::Display for CliError {
             Self::ReadScreenplay { path, .. } => {
                 write!(formatter, "failed to read screenplay {}", path.display())
             }
+            Self::ReadWorkerRequest { path, .. } => {
+                write!(
+                    formatter,
+                    "failed to read worker request {}",
+                    path.display()
+                )
+            }
+            Self::ParseWorkerRequest { path, .. } => {
+                write!(
+                    formatter,
+                    "failed to parse worker request {}",
+                    path.display()
+                )
+            }
+            Self::WorkerTask(_) => formatter.write_str("worker materialization did not finish"),
             Self::InspectPresentation { path, .. } => {
                 write!(
                     formatter,
@@ -94,8 +142,11 @@ impl Error for CliError {
         match self {
             Self::Environment(source) => Some(source),
             Self::ReadScreenplay { source, .. }
+            | Self::ReadWorkerRequest { source, .. }
             | Self::InspectPresentation { source, .. }
             | Self::CreateOutputDirectory { source, .. } => Some(source),
+            Self::ParseWorkerRequest { source, .. } => Some(source),
+            Self::WorkerTask(source) => Some(source),
             Self::InvalidPresentation(_) | Self::OutputExists(_) => None,
             Self::InvalidProfile(source) => Some(source),
             Self::Assets(source) => Some(source),

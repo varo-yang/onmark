@@ -9,14 +9,14 @@ use sha2::{Digest as _, Sha256};
 use tempfile::{Builder as TempDirBuilder, TempDir};
 
 use super::{UnitRootError, UnitRootErrorKind, UnitRootLimits};
-use crate::MaterializedAsset;
+use crate::unit_root::AssetSource;
 
 const COPY_BUFFER_BYTES: usize = 64 * 1024;
 
-pub(super) fn materialize<'a>(
+pub(super) fn materialize(
     source_root: &Path,
     manifest: &BundleManifest,
-    assets: impl Iterator<Item = &'a MaterializedAsset>,
+    assets: impl Iterator<Item = AssetSource>,
     limits: UnitRootLimits,
 ) -> Result<TempDir, UnitRootError> {
     let assets = collect_assets(source_root, manifest, assets, limits.max_files())?;
@@ -55,12 +55,12 @@ fn verify_bundle_identity(root: &Path, manifest: &BundleManifest) -> Result<(), 
     Ok(())
 }
 
-fn collect_assets<'a>(
+fn collect_assets(
     root: &Path,
     manifest: &BundleManifest,
-    assets: impl Iterator<Item = &'a MaterializedAsset>,
+    assets: impl Iterator<Item = AssetSource>,
     max_files: usize,
-) -> Result<Vec<&'a MaterializedAsset>, UnitRootError> {
+) -> Result<Vec<AssetSource>, UnitRootError> {
     let base_files = manifest.files().len().checked_add(1).ok_or_else(|| {
         failure(
             UnitRootErrorKind::FileLimit,
@@ -129,7 +129,7 @@ impl UnitWriter {
         Ok(())
     }
 
-    fn copy_assets(&mut self, assets: &[&MaterializedAsset]) -> Result<(), UnitRootError> {
+    fn copy_assets(&mut self, assets: &[AssetSource]) -> Result<(), UnitRootError> {
         for asset in assets {
             let digest = asset.id().to_string();
             self.copy(

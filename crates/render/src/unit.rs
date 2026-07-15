@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt;
-use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use onmark_core::model::{FrameIndex, FrameInterval, FrameRate, FrozenAsset, FrozenAssetId};
@@ -9,7 +8,7 @@ use onmark_core::protocol::{BrowserPlan, BundleManifest, InvalidBrowserPlan};
 use onmark_core::render_graph::RenderPartition;
 use onmark_core::timeline::{TimelineIr, TimelineVoiceOver};
 
-use crate::{AdmittedVideo, RenderProfile, UnsupportedVideo};
+use crate::{AdmittedVideo, RenderProfile, UnsupportedVideo, WorkerCaptureRequest};
 
 pub(crate) const MAX_AUDIO_TRACKS: usize = 512;
 
@@ -61,12 +60,7 @@ impl MaterializedAsset {
     /// Returns the deterministic location beneath a materialized unit root.
     #[must_use]
     pub fn unit_relative_path(&self) -> String {
-        let mut path = String::from(BundleManifest::ASSET_DIRECTORY);
-        path.push('/');
-        for byte in self.id().as_sha256() {
-            write!(path, "{byte:02x}").expect("writing into a String cannot fail");
-        }
-        path
+        BundleManifest::asset_path(self.id())
     }
 }
 
@@ -126,6 +120,10 @@ pub struct AudioPlan {
 }
 
 impl AudioPlan {
+    pub(crate) fn empty() -> Self {
+        Self { tracks: Vec::new() }
+    }
+
     /// Returns tracks in screenplay order.
     #[must_use]
     pub fn tracks(&self) -> impl ExactSizeIterator<Item = &RenderAudio> {
@@ -246,6 +244,19 @@ impl RenderUnit {
     #[must_use]
     pub const fn profile(&self) -> RenderProfile {
         self.profile
+    }
+
+    /// Projects solved visual facts into one portable worker capture request.
+    ///
+    /// Audio intentionally remains outside this request: worker capture writes
+    /// only browser frames, while final assembly mixes every voice-over once.
+    #[must_use]
+    pub fn worker_capture_request(&self) -> WorkerCaptureRequest {
+        WorkerCaptureRequest::new(
+            self.bundle_manifest.clone(),
+            self.browser_plan.clone(),
+            self.profile,
+        )
     }
 
     /// Returns required videos in deterministic frozen-identity order.
@@ -440,7 +451,7 @@ mod tests {
 
     use super::{
         BundleManifest, InvalidRenderUnit, MAX_AUDIO_TRACKS, MaterializedAsset, RenderProfile,
-        RenderUnit,
+        RenderUnit, WorkerCaptureRequest,
     };
 
     #[test]
@@ -475,6 +486,36 @@ mod tests {
                 .source_frame_rate(),
             frame_rate(),
         );
+    }
+
+    #[test]
+    fn projects_a_render_unit_into_a_portable_worker_capture_request() {
+        let frozen = video_asset(VideoTiming::Constant(frame_rate()));
+        let identity = frozen.id();
+        let timeline = video_timeline(frozen.clone());
+        let materialized = MaterializedAsset::new(frozen, "/tmp/opening.mp4")
+            .expect("the fixture path is present");
+        let unit = RenderUnit::whole_film(
+            &timeline,
+            bundle_manifest(),
+            render_profile(),
+            [materialized],
+        )
+        .expect("the fixture forms one render unit");
+
+        let request = unit.worker_capture_request();
+        let encoded =
+            serde_json::to_string(&request).expect("the portable worker request serializes");
+        let decoded: WorkerCaptureRequest =
+            serde_json::from_str(&encoded).expect("the portable worker request parses once");
+
+        assert_eq!(decoded, request);
+        assert_eq!(decoded.browser_plan().videos().len(), 1);
+        assert_eq!(
+            decoded.browser_plan().videos()[0].asset_identity(),
+            identity
+        );
+        assert_eq!(decoded.profile(), render_profile());
     }
 
     #[test]

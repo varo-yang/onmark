@@ -12,8 +12,12 @@ use onmark_core::render_graph::PartitionPlan;
 
 use self::output::StagedOutput;
 use crate::encoder::AudioInput;
+use crate::frame_artifact::FrameArtifactWriter;
 use crate::unit::MAX_AUDIO_TRACKS;
-use crate::{BrowserLimits, BrowserSession, EncodedVideo, ExecutableUnit, Ffmpeg, FfmpegSession};
+use crate::{
+    BrowserLimits, BrowserSession, EncodedPng, EncodedVideo, ExecutableUnit, Ffmpeg, FfmpegSession,
+    FrameArtifact, FrameArtifactErrorKind, FrameArtifactLimits,
+};
 
 pub use error::{RenderError, RenderErrorKind};
 
@@ -21,11 +25,113 @@ const LOAD_REQUEST: RequestId = RequestId::new(1);
 const PREPARE_REQUEST: RequestId = RequestId::new(2);
 const FIRST_FRAME_REQUEST: u32 = 3;
 
-/// Local renderer composed from Chromium and `FFmpeg`.
+/// Bounded Chromium capture boundary shared by local and worker execution.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RenderExecutor {
+pub struct FrameCaptureExecutor {
     browser_executable: PathBuf,
     browser_limits: BrowserLimits,
+}
+
+impl FrameCaptureExecutor {
+    /// Creates one browser-only capture boundary.
+    #[must_use]
+    pub fn new(browser_executable: impl Into<PathBuf>, browser_limits: BrowserLimits) -> Self {
+        Self {
+            browser_executable: browser_executable.into(),
+            browser_limits,
+        }
+    }
+
+    /// Captures one independently executable unit into a verified worker artifact.
+    ///
+    /// The artifact contains ordered PNG frames rather than an independently
+    /// encoded MP4. A later assembler can therefore retain Gate two's one
+    /// continuous visual encoder and one final audio mix across workers.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RenderError`] when the unit, browser, or artifact boundary
+    /// fails. A failed capture never publishes a partial artifact. If a
+    /// matching complete artifact already exists, it is checksum-verified and
+    /// reused without launching Chromium.
+    pub async fn capture_frame_artifact(
+        &self,
+        unit: &ExecutableUnit,
+        artifact: &Path,
+        limits: FrameArtifactLimits,
+    ) -> Result<FrameArtifact, RenderError> {
+        let frame_count = validate_plan(unit.browser_plan(), limits.max_frames(), artifact)?;
+        let mut writer = match FrameArtifact::writer_for_unit(unit, artifact, limits).await {
+            Ok(writer) => writer,
+            Err(error) if error.kind() == FrameArtifactErrorKind::OutputExists => {
+                return self.reuse_artifact(unit, artifact, limits).await;
+            }
+            Err(error) => return Err(RenderError::artifact(artifact, error)),
+        };
+        let mut frames = FrameSink::Artifact(&mut writer);
+
+        self.capture_unit(unit, &mut frames, frame_count, artifact)
+            .await?;
+        match writer.finish().await {
+            Ok(artifact) => Ok(artifact),
+            Err(error) if error.kind() == FrameArtifactErrorKind::OutputExists => {
+                self.reuse_artifact(unit, artifact, limits).await
+            }
+            Err(error) => Err(RenderError::artifact(artifact, error)),
+        }
+    }
+
+    async fn reuse_artifact(
+        &self,
+        unit: &ExecutableUnit,
+        artifact: &Path,
+        limits: FrameArtifactLimits,
+    ) -> Result<FrameArtifact, RenderError> {
+        FrameArtifact::reuse_for_unit(unit, artifact, limits)
+            .await
+            .map_err(|source| RenderError::artifact(artifact, source))
+    }
+
+    async fn capture_unit(
+        &self,
+        unit: &ExecutableUnit,
+        frames: &mut FrameSink<'_>,
+        frame_count: u64,
+        output: &Path,
+    ) -> Result<(), RenderError> {
+        let plan = unit.browser_plan();
+        let disposal_request = disposal_request_id(frame_count, output)?;
+        let browser = BrowserSession::launch(
+            &self.browser_executable,
+            unit.profile(),
+            self.browser_limits,
+        )
+        .await
+        .map_err(|source| RenderError::browser(output, source))?;
+
+        let render_result = render_session(
+            &browser,
+            plan,
+            disposal_request,
+            unit.entry_url().as_str(),
+            frames,
+            output,
+        )
+        .await;
+        let shutdown_result = browser
+            .shutdown()
+            .await
+            .map_err(|source| RenderError::browser(output, source));
+
+        render_result?;
+        shutdown_result
+    }
+}
+
+/// Local renderer composed from [`FrameCaptureExecutor`] and `FFmpeg`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RenderExecutor {
+    capture: FrameCaptureExecutor,
     ffmpeg: Ffmpeg,
 }
 
@@ -38,8 +144,7 @@ impl RenderExecutor {
         ffmpeg: Ffmpeg,
     ) -> Self {
         Self {
-            browser_executable: browser_executable.into(),
-            browser_limits,
+            capture: FrameCaptureExecutor::new(browser_executable, browser_limits),
             ffmpeg,
         }
     }
@@ -87,11 +192,73 @@ impl RenderExecutor {
         Self::validate_partition_units(partitions, &units, output)?;
         let expected_output = wire_interval(partitions.interval(), output)?;
         let output_origin = partitions.interval().start();
-        let audio = units
+        let audio: Vec<AudioInput> = units
             .iter()
             .flat_map(|unit| unit.audio_inputs_rebased_to(output_origin))
             .collect();
         self.render_sequence(units, expected_output, audio, output)
+            .await
+    }
+
+    /// Captures one independently executable unit into a verified worker artifact.
+    ///
+    /// The artifact contains ordered PNG frames rather than an independently
+    /// encoded MP4. A later assembler can therefore retain Gate two's one
+    /// continuous visual encoder and one final audio mix across workers.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RenderError`] when the unit, browser, or artifact boundary
+    /// fails. A failed capture never publishes a partial artifact.
+    pub async fn capture_frame_artifact(
+        &self,
+        unit: &ExecutableUnit,
+        artifact: &Path,
+        limits: FrameArtifactLimits,
+    ) -> Result<FrameArtifact, RenderError> {
+        self.capture
+            .capture_frame_artifact(unit, artifact, limits)
+            .await
+    }
+
+    /// Assembles independently captured worker artifacts into one MP4.
+    ///
+    /// The supplied units may be newly materialized on this assembler. They
+    /// provide the expected unit identities and the verified local audio bytes;
+    /// the browser never launches during assembly.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RenderError`] when artifacts do not match the partition plan,
+    /// fail verification while streaming, or final encoding and audio mixing
+    /// fail.
+    pub async fn assemble_frame_artifacts(
+        &self,
+        partitions: &PartitionPlan,
+        units: &[ExecutableUnit],
+        artifacts: &[FrameArtifact],
+        output: &Path,
+    ) -> Result<EncodedVideo, RenderError> {
+        Self::validate_partition_units(partitions, units, output)?;
+        Self::validate_frame_artifacts(units, artifacts, output)?;
+        let expected_output = wire_interval(partitions.interval(), output)?;
+        let output_origin = partitions.interval().start();
+        let audio: Vec<AudioInput> = units
+            .iter()
+            .flat_map(|unit| unit.audio_inputs_rebased_to(output_origin))
+            .collect();
+        let frame_rate = self.validate_sequence(units, expected_output, &audio, output)?;
+
+        let staging = StagedOutput::new(output)?;
+        let mut encoder = self
+            .ffmpeg
+            .start(staging.visual_path(), frame_rate)
+            .map_err(|source| RenderError::encoder(output, source))?;
+        for artifact in artifacts {
+            stream_artifact(artifact, &mut encoder, output).await?;
+        }
+
+        self.finish_sequence(encoder, staging, audio, frame_rate, output)
             .await
     }
 
@@ -110,9 +277,26 @@ impl RenderExecutor {
             .map_err(|source| RenderError::encoder(output, source))?;
 
         for unit in &units {
-            self.render_unit(unit, &mut encoder, output).await?;
+            let mut frames = FrameSink::Encoder(&mut encoder);
+            let frame_count = output_frame_count(unit.browser_plan())
+                .expect("validated render units retain ordered output intervals");
+            self.capture
+                .capture_unit(unit, &mut frames, frame_count, output)
+                .await?;
         }
 
+        self.finish_sequence(encoder, staging, audio, frame_rate, output)
+            .await
+    }
+
+    async fn finish_sequence(
+        &self,
+        encoder: FfmpegSession,
+        staging: StagedOutput,
+        audio: Vec<AudioInput>,
+        frame_rate: WireFrameRate,
+        output: &Path,
+    ) -> Result<EncodedVideo, RenderError> {
         let visual = encoder
             .finish()
             .await
@@ -145,6 +329,30 @@ impl RenderExecutor {
                 return Err(invalid_plan(
                     output,
                     "render units do not match the partition plan",
+                ));
+            }
+        }
+
+        Ok(())
+    }
+
+    fn validate_frame_artifacts(
+        units: &[ExecutableUnit],
+        artifacts: &[FrameArtifact],
+        output: &Path,
+    ) -> Result<(), RenderError> {
+        if units.len() != artifacts.len() {
+            return Err(invalid_plan(
+                output,
+                "worker frame artifacts do not match the partition plan",
+            ));
+        }
+
+        for (unit, artifact) in units.iter().zip(artifacts) {
+            if !artifact.matches_unit(unit) {
+                return Err(RenderError::artifact(
+                    output,
+                    FrameArtifact::identity_mismatch(artifact.path()),
                 ));
             }
         }
@@ -195,7 +403,7 @@ impl RenderExecutor {
                 ));
             }
 
-            let frame_count = self.validate_plan(plan, output)?;
+            let frame_count = validate_plan(plan, self.ffmpeg.max_frames(), output)?;
             total_frames = total_frames.checked_add(frame_count).ok_or_else(|| {
                 RenderError::new(
                     RenderErrorKind::PlanTooLarge,
@@ -230,84 +438,49 @@ impl RenderExecutor {
 
         Ok(frame_rate)
     }
+}
 
-    fn validate_plan(&self, plan: &BrowserPlan, output: &Path) -> Result<u64, RenderError> {
-        let Some(frame_count) = output_frame_count(plan) else {
-            return Err(invalid_plan(output, "browser output interval is reversed"));
-        };
-        let request_limit = u64::from(u32::MAX - FIRST_FRAME_REQUEST);
-        let max_frames = self.ffmpeg.max_frames().min(request_limit);
+fn validate_plan(
+    plan: &BrowserPlan,
+    configured_max_frames: u64,
+    output: &Path,
+) -> Result<u64, RenderError> {
+    let Some(frame_count) = output_frame_count(plan) else {
+        return Err(invalid_plan(output, "browser output interval is reversed"));
+    };
+    let request_limit = u64::from(u32::MAX - FIRST_FRAME_REQUEST);
+    let max_frames = configured_max_frames.min(request_limit);
 
-        if frame_count == 0 {
-            return Err(invalid_plan(output, "browser output interval is empty"));
-        }
-        if frame_count > max_frames {
-            return Err(RenderError::new(
-                RenderErrorKind::PlanTooLarge,
-                output,
-                "browser output interval exceeds the configured frame limit",
-            ));
-        }
-        Ok(frame_count)
+    if frame_count == 0 {
+        return Err(invalid_plan(output, "browser output interval is empty"));
     }
+    if frame_count > max_frames {
+        return Err(RenderError::new(
+            RenderErrorKind::PlanTooLarge,
+            output,
+            "browser output interval exceeds the configured frame limit",
+        ));
+    }
+    Ok(frame_count)
+}
 
-    async fn render_unit(
-        &self,
-        unit: &ExecutableUnit,
-        encoder: &mut FfmpegSession,
-        output: &Path,
-    ) -> Result<(), RenderError> {
-        let plan = unit.browser_plan();
-        let frame_count = self.validate_plan(plan, output)?;
-        let disposal_request = disposal_request_id(frame_count, output)?;
-        let browser = BrowserSession::launch(
-            &self.browser_executable,
-            unit.profile(),
-            self.browser_limits,
-        )
+async fn render_session(
+    browser: &BrowserSession,
+    plan: &BrowserPlan,
+    disposal_request: RequestId,
+    entry_url: &str,
+    frames: &mut FrameSink<'_>,
+    output: &Path,
+) -> Result<(), RenderError> {
+    browser
+        .navigate(entry_url)
         .await
         .map_err(|source| RenderError::browser(output, source))?;
+    load_runtime(browser, plan, output).await?;
+    prepare_runtime(browser, plan, output).await?;
 
-        let render_result = self
-            .render_session(
-                &browser,
-                plan,
-                disposal_request,
-                unit.entry_url().as_str(),
-                encoder,
-                output,
-            )
-            .await;
-        let shutdown_result = browser
-            .shutdown()
-            .await
-            .map_err(|source| RenderError::browser(output, source));
-
-        render_result?;
-        shutdown_result
-    }
-
-    async fn render_session(
-        &self,
-        browser: &BrowserSession,
-        plan: &BrowserPlan,
-        disposal_request: RequestId,
-        entry_url: &str,
-        encoder: &mut FfmpegSession,
-        output: &Path,
-    ) -> Result<(), RenderError> {
-        browser
-            .navigate(entry_url)
-            .await
-            .map_err(|source| RenderError::browser(output, source))?;
-        load_runtime(browser, plan, output).await?;
-        prepare_runtime(browser, plan, output).await?;
-
-        render_frames(browser, encoder, plan, output).await?;
-        dispose_runtime(browser, disposal_request, output).await?;
-
-        Ok(())
-    }
+    render_frames(browser, frames, plan, output).await?;
+    dispose_runtime(browser, disposal_request, output).await
 }
 
 fn wire_interval(
@@ -357,7 +530,7 @@ async fn dispose_runtime(
 
 async fn render_frames(
     browser: &BrowserSession,
-    encoder: &mut FfmpegSession,
+    frames: &mut FrameSink<'_>,
     plan: &BrowserPlan,
     output: &Path,
 ) -> Result<(), RenderError> {
@@ -377,12 +550,57 @@ async fn render_frames(
             .capture_png()
             .await
             .map_err(|source| RenderError::browser(output, source))?;
+        frames.write_frame(&captured, output).await?;
+    }
+    Ok(())
+}
+
+/// The two bounded destinations for a captured browser frame.
+///
+/// Direct local rendering streams one frame into `FFmpeg`; Gate three worker
+/// capture writes the same frame into a checked artifact. The enum keeps this
+/// closed policy at the capture boundary instead of introducing an unbounded
+/// callback or channel abstraction.
+enum FrameSink<'a> {
+    Encoder(&'a mut FfmpegSession),
+    Artifact(&'a mut FrameArtifactWriter),
+}
+
+async fn stream_artifact(
+    artifact: &FrameArtifact,
+    encoder: &mut FfmpegSession,
+    output: &Path,
+) -> Result<(), RenderError> {
+    let mut frames = artifact
+        .reader()
+        .await
+        .map_err(|source| RenderError::artifact(output, source))?;
+    while let Some(frame) = frames
+        .next_frame()
+        .await
+        .map_err(|source| RenderError::artifact(output, source))?
+    {
         encoder
-            .write_frame(&captured)
+            .write_frame(&frame)
             .await
             .map_err(|source| RenderError::encoder(output, source))?;
     }
     Ok(())
+}
+
+impl FrameSink<'_> {
+    async fn write_frame(&mut self, frame: &EncodedPng, output: &Path) -> Result<(), RenderError> {
+        match self {
+            Self::Encoder(encoder) => encoder
+                .write_frame(frame)
+                .await
+                .map_err(|source| RenderError::encoder(output, source)),
+            Self::Artifact(writer) => writer
+                .write_frame(frame)
+                .await
+                .map_err(|source| RenderError::artifact(output, source)),
+        }
+    }
 }
 
 async fn seek_frame(

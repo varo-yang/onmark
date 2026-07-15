@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use onmark_core::protocol::ProtocolFailure;
 
-use crate::{BrowserError, EncodeError};
+use crate::{BrowserError, EncodeError, FrameArtifactError};
 
 // A valid wire failure can name 256 resources. Keep terminal diagnostics
 // actionable without allowing one browser response to dominate them.
@@ -25,6 +25,8 @@ pub enum RenderErrorKind {
     Browser,
     /// `FFmpeg` visual encoding or audio mixing failed.
     Encoder,
+    /// A durable worker frame artifact could not be published or verified.
+    Artifact,
     /// The runtime returned a well-formed but unexpected response.
     Protocol,
 }
@@ -75,6 +77,15 @@ impl RenderError {
             output: output.to_owned(),
             message: "FFmpeg execution failed".into(),
             source: Some(Box::new(RenderErrorSource::Encoder(source))),
+        }
+    }
+
+    pub(super) fn artifact(output: &Path, source: FrameArtifactError) -> Self {
+        Self {
+            kind: RenderErrorKind::Artifact,
+            output: output.to_owned(),
+            message: "worker frame artifact failed".into(),
+            source: Some(Box::new(RenderErrorSource::Artifact(source))),
         }
     }
 
@@ -144,6 +155,7 @@ impl Error for RenderError {
 enum RenderErrorSource {
     Browser(BrowserError),
     Encoder(EncodeError),
+    Artifact(FrameArtifactError),
     Io(io::Error),
 }
 
@@ -152,6 +164,7 @@ impl fmt::Display for RenderErrorSource {
         match self {
             Self::Browser(source) => source.fmt(formatter),
             Self::Encoder(source) => source.fmt(formatter),
+            Self::Artifact(source) => source.fmt(formatter),
             Self::Io(source) => source.fmt(formatter),
         }
     }
@@ -162,6 +175,7 @@ impl Error for RenderErrorSource {
         match self {
             Self::Browser(source) => source.source(),
             Self::Encoder(source) => source.source(),
+            Self::Artifact(source) => source.source(),
             Self::Io(source) => source.source(),
         }
     }

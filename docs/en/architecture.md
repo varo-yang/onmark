@@ -192,7 +192,32 @@ promise.
 
 The coordinator stores DAG state, leases, retries, and artifact references but never proxies frames. Stateless workers exchange immutable bundles, assets, and artifacts directly with object storage. Delivery is at least once; content-addressed compare-and-commit makes publication effectively once.
 
-Continuous encoded segments are the default unit. Long, expensive, randomly seekable scenes may be divided into frame ranges. Individual frames are not remote tasks. CPU, memory, GPU, browser slots, encoder slots, codecs, disk, and network are explicit scheduling resources; all internal queues are bounded.
+Gate three starts with a deliberately narrower interchange: a worker captures a
+whole planned output interval into one bounded, checksummed frame artifact. The
+artifact is a single versioned file containing an exact output interval,
+render-profile and visual-plan identities, and one ordered PNG stream. It is published
+through a sibling staging file and no-clobber link, so a retry can verify or
+reuse an existing immutable result without ever exposing a partial one. The
+assembler verifies that each artifact belongs to its planned unit, streams the
+verified frames through the same one continuous visual encoder used by Gate two,
+then materializes and mixes all audio once at the assembled output origin.
+
+This is intentionally not a remote-frame queue: a worker owns a contiguous
+unit and publishes one artifact only after its browser session has completed.
+Nor is it an encoded-segment cache. Independently AAC-muxed MP4 segments are
+not assumed concatenable, and independently encoded visual segments need a
+separate equivalence proof before they can replace the lossless frame
+interchange. Long, expensive, randomly seekable scenes may later be divided
+into contiguous frame ranges once their render dependencies prove it safe.
+Individual frames are never remote tasks. CPU, memory, GPU, browser slots,
+encoder slots, codecs, disk, and network are explicit scheduling resources; all
+internal queues are bounded.
+
+The first implementation uses the local filesystem only to prove the process
+and artifact contract. It adds no cloud SDK, queue, database, scheduler, or
+deployment adapter. Object storage, leases, retry ownership, capability
+matching, and a Lambda/ECS/Kubernetes adapter follow only after the artifact
+conformance proves that their shared executor boundary is correct.
 
 ## Incremental rendering
 
@@ -217,9 +242,9 @@ onmark/
 ├── schemas/ conformance/ evals/ examples/ docs/
 ```
 
-The completed Gate-one milestone contains `onmark-core`, `onmark-media`, `onmark-render`, `@onmark/runtime`'s browser session, `@onmark/authoring`'s semantic DOM bindings, `@onmark/bundler`'s presentation artifact boundary, and the first `onmark-cli` whole-film composition root. Media is a separate crate because server-side compile/lint loops need probing without Chromium; this is both a distinct dependency budget and a real consumer. Runtime is a separate package because it executes inside the browser and is consumed by authoring and bundling. Authoring is a separate browser package because user presentations consume its public DOM contract independently while runtime must not depend upward on author-facing effects; its only product dependency is runtime's types-only public surface. Bundler is a separate package because it executes under Node, owns the esbuild and filesystem dependency budget, and produces a presentation directory consumed independently by native rendering. The CLI is a distinct release artifact that combines core compilation, media probing, the bundler process, and native rendering without moving their implementation details into one crate. Syntax, diagnostics, model, compiler, timeline, and protocol remain rectangular modules inside core. Render graph and planning initially join core at gate two. Worker execution belongs to render. A coordinator appears only at gate three.
+The completed Gate-one milestone contains `onmark-core`, `onmark-media`, `onmark-render`, `@onmark/runtime`'s browser session, `@onmark/authoring`'s semantic DOM bindings, `@onmark/bundler`'s presentation artifact boundary, and the first `onmark-cli` whole-film composition root. Media is a separate crate because server-side compile/lint loops need probing without Chromium; this is both a distinct dependency budget and a real consumer. Runtime is a separate package because it executes inside the browser and is consumed by authoring and bundling. Authoring is a separate browser package because user presentations consume its public DOM contract independently while runtime must not depend upward on author-facing effects; its only product dependency is runtime's types-only public surface. Bundler is a separate package because it executes under Node, owns the esbuild and filesystem dependency budget, and produces a presentation directory consumed independently by native rendering. The CLI is a distinct release artifact that combines core compilation, media probing, the bundler process, and native rendering without moving their implementation details into one crate. Syntax, diagnostics, model, compiler, timeline, and protocol remain rectangular modules inside core. Render graph and planning initially join core at gate two. Worker execution belongs to render. A coordinator may appear only after Gate-three artifact conformance.
 
-Gate one's native command is deliberately narrow: `onmark render <screenplay>`. It discovers `presentation.ts` beside the screenplay unless `--presentation` is supplied, derives the stable no-clobber output `renders/<screenplay-stem>.mp4` unless `--output` is supplied, and exposes only exact frame rate and viewport dimensions as ordinary render controls. Process paths are execution overrides, not screenplay facts. Authored diagnostics are emitted before executable preflight so an invalid screenplay never requires Chromium, Node, or `FFmpeg` merely to explain itself.
+Gate one's native command is deliberately narrow: `onmark render <screenplay>`. It discovers `presentation.ts` beside the screenplay unless `--presentation` is supplied, derives the stable no-clobber output `renders/<screenplay-stem>.mp4` unless `--output` is supplied, and exposes only exact frame rate and viewport dimensions as ordinary render controls. Process paths are execution overrides, not screenplay facts. Authored diagnostics are emitted before executable preflight so an invalid screenplay never requires Chromium, Node, or `FFmpeg` merely to explain itself. Gate three adds the deliberately separate worker entry point `onmark worker capture`: it accepts one versioned `request.json`, the `bundle/` payload files named by that manifest, and frozen `assets/sha256/` bytes, materializes them in a private root, and publishes one frame artifact. It accepts no screenplay and never recompiles source; a coordinator or object-store adapter owns request publication later.
 
 `onmark-cli` resolves every external executable before starting process work, then follows one linear path: read and compile, freeze and probe referenced assets, solve Timeline IR, bundle the presentation, compose and materialize the whole-film unit, render, and atomically publish. Freezing streams each referenced source into a private temporary file while hashing it, then probes only that private copy; identity and metadata therefore describe the same retained bytes. Hashing and probing run on explicit blocking work rather than a Tokio worker. The CLI depends on core, media, and render as its real composition inputs; `clap` owns argument parsing, `sha2` owns streaming SHA-256, `tempfile` owns private lifetimes, `serde_json` decodes the Rust-owned manifest, and Tokio owns bounded process and render async work. No CLI dependency enters the pure core.
 
@@ -301,7 +326,12 @@ AWS Lambda is an adapter, not another engine. A later independently published `@
 
 **Gate two (complete): partition and assemble correctly.** The completed slice renders two independent local units and assembles them through the existing executor. Its exit conformance renders one media-bearing two-shot film both as a whole-film unit and as two independently materialized units, then compares decoded video and audio hashes plus first-audio-packet placement. It introduces the Render Graph and evaluation/output intervals. Preroll, persistent unit caching, and dependency-based invalidation remain deferred until a real dependency or cache consumer requires them.
 
-**Gate three: leave the machine.** Execute the same plan in independent worker processes with object storage, leases, retries, idempotent publication, and capability scheduling. Validate byte-identical plans, raw-frame hashes in a locked environment, and decoded media equivalence.
+**Gate three: leave the machine.** First prove that independent worker processes
+publish and assemble bounded, verified frame artifacts through the existing
+encoder and audio path. Then add object storage, leases, retries, idempotent
+publication, and capability scheduling around that proven interchange. Validate
+byte-identical plans, raw-frame hashes in a locked environment, and decoded
+media equivalence; do not presume byte-identical MP4 containers.
 
 Every gate uses the final-direction contracts but implements only fields consumed by that gate. A failed gate blocks construction of the next gate's skeleton.
 

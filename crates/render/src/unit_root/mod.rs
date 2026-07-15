@@ -3,9 +3,9 @@ mod materializer;
 
 use std::error::Error;
 use std::fmt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use onmark_core::model::FrameIndex;
+use onmark_core::model::{FrameIndex, FrozenAssetId};
 use onmark_core::protocol::{BrowserPlan, BundleManifest};
 use tempfile::TempDir;
 use url::Url;
@@ -17,6 +17,45 @@ use crate::{AudioPlan, MaterializedAsset, RenderProfile, RenderUnit};
 
 const MAX_FILES: usize = BundleManifest::MAX_FILES + 1;
 const MAX_BYTES: u64 = 1 << 40;
+
+/// One worker-local source for frozen bytes entering a private unit root.
+///
+/// Composition uses [`MaterializedAsset`] because it still needs metadata.
+/// Materialization needs only an immutable identity and a local byte source,
+/// which keeps the worker handoff from reconstructing probe facts it does not
+/// consume.
+#[derive(Clone, Debug)]
+pub(crate) struct AssetSource {
+    id: FrozenAssetId,
+    local_path: PathBuf,
+}
+
+impl AssetSource {
+    pub(crate) fn new(id: FrozenAssetId, local_path: impl Into<PathBuf>) -> Self {
+        Self {
+            id,
+            local_path: local_path.into(),
+        }
+    }
+
+    pub(crate) const fn id(&self) -> FrozenAssetId {
+        self.id
+    }
+
+    pub(crate) fn local_path(&self) -> &Path {
+        &self.local_path
+    }
+
+    pub(crate) fn unit_relative_path(&self) -> String {
+        BundleManifest::asset_path(self.id)
+    }
+}
+
+impl From<&MaterializedAsset> for AssetSource {
+    fn from(asset: &MaterializedAsset) -> Self {
+        Self::new(asset.id(), asset.local_path())
+    }
+}
 
 /// Explicit retained-storage limits for one private execution root.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -127,6 +166,21 @@ impl ExecutableUnit {
         })
     }
 
+    pub(crate) fn from_worker_root(
+        browser_plan: BrowserPlan,
+        bundle_id: impl Into<Box<str>>,
+        profile: RenderProfile,
+        root: UnitRoot,
+    ) -> Self {
+        Self {
+            browser_plan,
+            bundle_id: bundle_id.into(),
+            profile,
+            audio: AudioPlan::empty(),
+            root,
+        }
+    }
+
     /// Returns the browser-facing projection of the verified unit.
     #[must_use]
     pub const fn browser_plan(&self) -> &BrowserPlan {
@@ -213,6 +267,20 @@ impl UnitRoot {
         bundle_directory: &Path,
         manifest: &BundleManifest,
         assets: impl IntoIterator<Item = &'a MaterializedAsset>,
+        limits: UnitRootLimits,
+    ) -> Result<Self, UnitRootError> {
+        Self::materialize_sources(
+            bundle_directory,
+            manifest,
+            assets.into_iter().map(AssetSource::from),
+            limits,
+        )
+    }
+
+    pub(crate) fn materialize_sources(
+        bundle_directory: &Path,
+        manifest: &BundleManifest,
+        assets: impl IntoIterator<Item = AssetSource>,
         limits: UnitRootLimits,
     ) -> Result<Self, UnitRootError> {
         let directory =

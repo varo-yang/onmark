@@ -43,6 +43,10 @@ impl Executables {
     }
 }
 
+pub(super) fn worker_browser(requested: &Path) -> Result<PathBuf, EnvironmentError> {
+    locate("browser", requested)
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct EnvironmentError {
     role: &'static str,

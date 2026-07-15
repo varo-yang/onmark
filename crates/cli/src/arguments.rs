@@ -17,6 +17,35 @@ pub(super) struct Cli {
 pub(super) enum Command {
     /// Compile and render one screenplay into an H.264 MP4.
     Render(RenderArgs),
+    /// Execute one already-planned worker task without recompiling source.
+    Worker(WorkerArgs),
+}
+
+#[derive(Debug, Args)]
+pub(super) struct WorkerArgs {
+    #[command(subcommand)]
+    pub(super) command: WorkerCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub(super) enum WorkerCommand {
+    /// Capture one portable worker request into a verified frame artifact.
+    Capture(WorkerCaptureArgs),
+}
+
+#[derive(Debug, Args)]
+pub(super) struct WorkerCaptureArgs {
+    /// Directory containing request.json, bundle/, and frozen assets/sha256/ bytes.
+    #[arg(long)]
+    pub(super) input: PathBuf,
+
+    /// Immutable frame-artifact destination.
+    #[arg(long)]
+    pub(super) output: PathBuf,
+
+    /// Chromium-compatible browser executable pinned by the worker environment.
+    #[arg(long)]
+    pub(super) browser: PathBuf,
 }
 
 #[derive(Debug, Args)]
@@ -113,13 +142,15 @@ mod tests {
 
     use clap::Parser;
 
-    use super::{Cli, Command};
+    use super::{Cli, Command, WorkerCommand};
 
     #[test]
     fn derives_stable_project_defaults_from_the_screenplay() {
         let cli = Cli::try_parse_from(["onmark", "render", "project/film.onmark"])
             .expect("the minimal command is valid");
-        let Command::Render(args) = cli.command;
+        let Command::Render(args) = cli.command else {
+            panic!("the fixture must parse as a render command");
+        };
 
         assert_eq!(args.presentation(), Path::new("project/presentation.ts"));
         assert_eq!(args.output(), Path::new("renders/film.mp4"));
@@ -131,12 +162,38 @@ mod tests {
     fn accepts_exact_rational_rates_and_rejects_decimals() {
         let cli = Cli::try_parse_from(["onmark", "render", "film.onmark", "--fps", "30000/1001"])
             .expect("an exact rational rate is valid");
-        let Command::Render(args) = cli.command;
+        let Command::Render(args) = cli.command else {
+            panic!("the fixture must parse as a render command");
+        };
         assert_eq!(args.frame_rate.numerator(), 30_000);
         assert_eq!(args.frame_rate.denominator(), 1_001);
 
         assert!(
             Cli::try_parse_from(["onmark", "render", "film.onmark", "--fps", "29.97",]).is_err()
         );
+    }
+
+    #[test]
+    fn accepts_one_explicit_worker_capture_contract() {
+        let cli = Cli::try_parse_from([
+            "onmark",
+            "worker",
+            "capture",
+            "--input",
+            "work",
+            "--output",
+            "artifact.onmark-frames",
+            "--browser",
+            "chrome",
+        ])
+        .expect("a complete worker capture command is valid");
+        let Command::Worker(worker) = cli.command else {
+            panic!("the fixture must parse as a worker command");
+        };
+        let WorkerCommand::Capture(capture) = worker.command;
+
+        assert_eq!(capture.input, Path::new("work"));
+        assert_eq!(capture.output, Path::new("artifact.onmark-frames"));
+        assert_eq!(capture.browser, Path::new("chrome"));
     }
 }

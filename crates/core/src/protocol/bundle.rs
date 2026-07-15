@@ -1,9 +1,12 @@
 use std::collections::BTreeSet;
 use std::error::Error;
 use std::fmt;
+use std::fmt::Write as _;
 
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize};
+
+use crate::model::FrozenAssetId;
 
 const ENTRY_DOCUMENT: &str = "index.html";
 const MANIFEST_FILE: &str = "manifest.json";
@@ -82,6 +85,17 @@ impl BundleManifest {
     pub const ASSET_DIRECTORY: &'static str = ASSET_SHA256_DIRECTORY;
     /// Maximum payload files representable by the V1 wire contract.
     pub const MAX_FILES: usize = MAX_BUNDLE_FILES;
+
+    /// Returns the deterministic path of one frozen asset beneath a unit root.
+    #[must_use]
+    pub fn asset_path(id: FrozenAssetId) -> String {
+        let mut path = String::from(Self::ASSET_DIRECTORY);
+        path.push('/');
+        for byte in id.as_sha256() {
+            write!(path, "{byte:02x}").expect("writing into a String cannot fail");
+        }
+        path
+    }
 
     /// Creates one canonical Gate-one bundle manifest.
     ///
