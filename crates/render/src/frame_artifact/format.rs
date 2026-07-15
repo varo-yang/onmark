@@ -7,17 +7,18 @@ use serde::Serialize;
 use sha2::{Digest as _, Sha256};
 
 use super::{FrameArtifactError, FrameArtifactErrorKind, FrameArtifactLimits};
-use crate::{ExecutableUnit, RawRgbaHash, RenderProfile};
+use crate::{CaptureEnvironmentId, ExecutableUnit, RawRgbaHash, RenderProfile};
 
-pub(super) const HEADER_BYTES: usize = 124;
+pub(super) const HEADER_BYTES: usize = 156;
 pub(super) const FRAME_LENGTH_BYTES: u64 = 8;
 pub(super) const RAW_RGBA_HASH_BYTES: u64 = RawRgbaHash::BYTE_LENGTH as u64;
 pub(super) const MIN_FRAME_RECORD_BYTES: u64 = FRAME_LENGTH_BYTES + 1 + RAW_RGBA_HASH_BYTES;
 
 const MAGIC: [u8; 8] = *b"ONMARKF1";
-// The magic identifies the frame-artifact family. V2 adds one raw-RGBA hash
-// beside every PNG record, so the explicit version rejects the former layout.
-const VERSION: u16 = 2;
+// The magic identifies the frame-artifact family. V3 adds a capture
+// environment identity to the fixed header, so artifacts cannot cross a
+// browser/font deployment merely because their visual plan matches.
+const VERSION: u16 = 3;
 
 /// Immutable input facts that determine one visual frame artifact.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -25,11 +26,15 @@ pub(super) struct FrameArtifactDescriptor {
     pub(super) output: FrameInterval,
     pub(super) frame_rate: FrameRate,
     pub(super) profile: RenderProfile,
+    pub(super) capture_environment: CaptureEnvironmentId,
     pub(super) visual_plan_digest: [u8; 32],
 }
 
 impl FrameArtifactDescriptor {
-    pub(super) fn from_unit(unit: &ExecutableUnit) -> Self {
+    pub(super) fn from_unit(
+        unit: &ExecutableUnit,
+        capture_environment: CaptureEnvironmentId,
+    ) -> Self {
         let plan = unit.browser_plan();
         let output = frame_interval(plan.output());
         let frame_rate = frame_rate(plan);
@@ -40,6 +45,7 @@ impl FrameArtifactDescriptor {
             output,
             frame_rate,
             profile,
+            capture_environment,
             visual_plan_digest,
         }
     }
@@ -130,6 +136,11 @@ impl Header {
             &mut cursor,
             &self.descriptor.profile.height().to_be_bytes(),
         );
+        write_bytes(
+            &mut bytes,
+            &mut cursor,
+            self.descriptor.capture_environment.as_sha256(),
+        );
         write_bytes(&mut bytes, &mut cursor, &self.descriptor.visual_plan_digest);
         write_bytes(&mut bytes, &mut cursor, &self.frames.to_be_bytes());
         write_bytes(&mut bytes, &mut cursor, &self.payload_bytes.to_be_bytes());
@@ -186,6 +197,8 @@ impl Header {
                 .map_err(|_| {
                     FrameArtifactError::invalid(path, "frame artifact render profile is invalid")
                 })?;
+        let capture_environment =
+            CaptureEnvironmentId::from_sha256(read_array(&bytes, &mut cursor));
         let visual_plan_digest = read_array::<32>(&bytes, &mut cursor);
         let frames = read_u64(&bytes, &mut cursor);
         let payload_bytes = read_u64(&bytes, &mut cursor);
@@ -197,6 +210,7 @@ impl Header {
                 output,
                 frame_rate,
                 profile,
+                capture_environment,
                 visual_plan_digest,
             },
             frames,

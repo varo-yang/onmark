@@ -41,6 +41,7 @@ async fn capture(args: WorkerCaptureArgs) -> Result<WorkerOutcome, CliError> {
     let browser = environment::worker_browser(&args.browser)?;
     create_output_directory(&args.output)?;
     let request = read_request(&args.input)?;
+    let capture_environment = request.capture_environment();
     let input = args.input.clone();
     let unit = tokio::task::spawn_blocking(move || {
         request.materialize(&input, execution::unit_root_limits())
@@ -49,7 +50,12 @@ async fn capture(args: WorkerCaptureArgs) -> Result<WorkerOutcome, CliError> {
     .map_err(CliError::WorkerTask)??;
     let capture = FrameCaptureExecutor::new(browser, execution::browser_limits());
     let artifact = capture
-        .capture_frame_artifact(&unit, &args.output, execution::frame_artifact_limits())
+        .capture_frame_artifact(
+            &unit,
+            capture_environment,
+            &args.output,
+            execution::frame_artifact_limits(),
+        )
         .await?;
 
     Ok(WorkerOutcome { artifact })

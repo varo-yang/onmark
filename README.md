@@ -28,7 +28,7 @@ Gate three exposes a narrow local worker entry point for already-composed visual
 onmark worker capture --input worker-input --output opening.onmark-frames --browser /path/to/chrome
 ```
 
-`worker-input` contains a versioned `request.json`, the `bundle/` payload files named by that request's manifest, and any frozen `assets/sha256/` bytes. The worker accepts no screenplay and does not compile source. It publishes one checksum-verified, no-clobber frame artifact; a matching completed artifact is verified and reused on retry. This command proves the future worker interchange locally—it is not a cloud coordinator or a replacement for `onmark render`.
+`worker-input` contains a versioned `request.json`, including the locked capture-environment identity, the `bundle/` payload files named by that request's manifest, and any frozen `assets/sha256/` bytes. The worker accepts no screenplay and does not compile source. It publishes one checksum-verified, no-clobber frame artifact; retry reuse requires both the planned unit and the declared capture environment to match. This command proves the future worker interchange locally—it is not a cloud coordinator or a replacement for `onmark render`.
 
 ## Repository map
 

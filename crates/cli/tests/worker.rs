@@ -10,8 +10,9 @@ use onmark_core::protocol::BundleManifest;
 use onmark_core::render_graph::{PartitionPlan, RenderGraph};
 use onmark_core::timeline::TimelineIr;
 use onmark_render::{
-    BrowserLimits, EncodeLimits, ExecutableUnit, Ffmpeg, FrameArtifact, FrameArtifactLimits,
-    RenderExecutor, RenderProfile, RenderUnit, UnitRootLimits, WorkerCaptureRequest,
+    BrowserLimits, CaptureEnvironmentId, EncodeLimits, ExecutableUnit, Ffmpeg, FrameArtifact,
+    FrameArtifactLimits, RenderExecutor, RenderProfile, RenderUnit, UnitRootLimits,
+    WorkerCaptureRequest,
 };
 use sha2::{Digest as _, Sha256};
 use tempfile::tempdir;
@@ -45,6 +46,30 @@ async fn captures_a_portable_request_in_a_separate_worker_process() {
 }
 
 #[tokio::test]
+#[ignore = "requires ONMARK_CHROME and a built @onmark/runtime package"]
+async fn refuses_to_reuse_an_artifact_from_a_different_capture_environment() {
+    let directory = tempdir().expect("the worker fixture directory is available");
+    let artifact = directory.path().join("worker.onmark-frames");
+    let first_input = directory.path().join("first-input");
+    let second_input = directory.path().join("second-input");
+    stage_input(&first_input, &static_request());
+
+    capture_with_worker(&first_input, &artifact).await;
+
+    let other_environment =
+        CaptureEnvironmentId::from_sha256([8; CaptureEnvironmentId::BYTE_LENGTH]);
+    stage_input(&second_input, &static_request_in(other_environment));
+    let output = run_worker(&second_input, &artifact).await;
+
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("capture environment"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr),
+    );
+}
+
+#[tokio::test]
 #[ignore = "requires ONMARK_CHROME, ONMARK_FFMPEG, and a built @onmark/runtime package"]
 async fn assembles_two_independent_worker_processes_equivalently_to_one_local_film() {
     let directory = tempdir().expect("the worker fixture directory is available");
@@ -60,7 +85,7 @@ async fn assembles_two_independent_worker_processes_equivalently_to_one_local_fi
     let units = partition_units(&timeline, &partitions, &manifest, profile);
     let requests: Vec<_> = units
         .iter()
-        .map(RenderUnit::worker_capture_request)
+        .map(|unit| unit.worker_capture_request(capture_environment()))
         .collect();
     let assembly_units = materialize_units(units);
     let artifacts = capture_partition_artifacts(directory.path(), &requests).await;
@@ -74,7 +99,13 @@ async fn assembles_two_independent_worker_processes_equivalently_to_one_local_fi
         .await
         .expect("the one-process whole-film baseline renders");
     let assembled = executor
-        .assemble_frame_artifacts(&partitions, &assembly_units, &artifacts, &assembled_output)
+        .assemble_frame_artifacts(
+            &partitions,
+            &assembly_units,
+            &artifacts,
+            capture_environment(),
+            &assembled_output,
+        )
         .await
         .expect("two worker artifacts assemble through the shared encoder");
 
@@ -97,10 +128,10 @@ async fn partition_workers_match_the_whole_film_raw_rgba_sequence() {
     let units = partition_units(&timeline, &partition_plan, &manifest, profile);
     let worker_requests: Vec<_> = units
         .iter()
-        .map(RenderUnit::worker_capture_request)
+        .map(|unit| unit.worker_capture_request(capture_environment()))
         .collect();
     let whole_unit = whole_film_unit(&timeline, &manifest, profile);
-    let whole_request = whole_unit.worker_capture_request();
+    let whole_request = whole_unit.worker_capture_request(capture_environment());
     let whole_artifact = capture_worker_artifact(directory.path(), "whole", &whole_request).await;
     let partition_artifacts = capture_partition_artifacts(directory.path(), &worker_requests).await;
 
@@ -156,6 +187,15 @@ fn request_frame_count(request: &WorkerCaptureRequest) -> u64 {
 }
 
 async fn capture_with_worker(input: &Path, output: &Path) {
+    let output = run_worker(input, output).await;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr),
+    );
+}
+
+async fn run_worker(input: &Path, output: &Path) -> std::process::Output {
     let child = Command::new(env!("CARGO_BIN_EXE_onmark"))
         .args([
             "worker",
@@ -168,15 +208,10 @@ async fn capture_with_worker(input: &Path, output: &Path) {
             chrome().to_str().expect("the browser path is UTF-8"),
         ])
         .output();
-    let output = timeout(PROCESS_TIMEOUT, child)
+    timeout(PROCESS_TIMEOUT, child)
         .await
         .expect("the worker process must finish before its deadline")
-        .expect("the worker command starts");
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr),
-    );
+        .expect("the worker command starts")
 }
 
 fn partition_units(
@@ -249,11 +284,15 @@ fn stage_input(input: &Path, request: &WorkerCaptureRequest) {
 }
 
 fn static_request() -> WorkerCaptureRequest {
+    static_request_in(capture_environment())
+}
+
+fn static_request_in(capture_environment: CaptureEnvironmentId) -> WorkerCaptureRequest {
     let timeline = one_shot_timeline();
     let manifest = bundle_manifest();
     RenderUnit::whole_film(&timeline, manifest, render_profile(), [])
         .expect("the static fixture forms one render unit")
-        .worker_capture_request()
+        .worker_capture_request(capture_environment)
 }
 
 fn one_shot_timeline() -> TimelineIr {
@@ -322,6 +361,10 @@ fn artifact_limits(max_frames: u64) -> FrameArtifactLimits {
 
 fn render_profile() -> RenderProfile {
     RenderProfile::new(WIDTH, HEIGHT).expect("the fixture profile is valid")
+}
+
+fn capture_environment() -> CaptureEnvironmentId {
+    CaptureEnvironmentId::from_sha256([7; CaptureEnvironmentId::BYTE_LENGTH])
 }
 
 fn unit_root_limits() -> UnitRootLimits {

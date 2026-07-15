@@ -8,7 +8,9 @@ use onmark_core::protocol::{BrowserPlan, BundleManifest, InvalidBrowserPlan};
 use onmark_core::render_graph::RenderPartition;
 use onmark_core::timeline::{TimelineIr, TimelineVoiceOver};
 
-use crate::{AdmittedVideo, RenderProfile, UnsupportedVideo, WorkerCaptureRequest};
+use crate::{
+    AdmittedVideo, CaptureEnvironmentId, RenderProfile, UnsupportedVideo, WorkerCaptureRequest,
+};
 
 pub(crate) const MAX_AUDIO_TRACKS: usize = 512;
 
@@ -248,11 +250,17 @@ impl RenderUnit {
 
     /// Projects solved visual facts into one portable worker capture request.
     ///
-    /// Audio intentionally remains outside this request: worker capture writes
-    /// only browser frames, while final assembly mixes every voice-over once.
+    /// The caller supplies the deployment-owned identity that makes captured
+    /// pixels reusable. Audio intentionally remains outside this request:
+    /// worker capture writes only browser frames, while final assembly mixes
+    /// every voice-over once.
     #[must_use]
-    pub fn worker_capture_request(&self) -> WorkerCaptureRequest {
+    pub fn worker_capture_request(
+        &self,
+        capture_environment: CaptureEnvironmentId,
+    ) -> WorkerCaptureRequest {
         WorkerCaptureRequest::new(
+            capture_environment,
             self.bundle_manifest.clone(),
             self.browser_plan.clone(),
             self.profile,
@@ -450,8 +458,8 @@ mod tests {
     use onmark_core::timeline::TimelineIr;
 
     use super::{
-        BundleManifest, InvalidRenderUnit, MAX_AUDIO_TRACKS, MaterializedAsset, RenderProfile,
-        RenderUnit, WorkerCaptureRequest,
+        BundleManifest, CaptureEnvironmentId, InvalidRenderUnit, MAX_AUDIO_TRACKS,
+        MaterializedAsset, RenderProfile, RenderUnit, WorkerCaptureRequest,
     };
 
     #[test]
@@ -503,12 +511,20 @@ mod tests {
         )
         .expect("the fixture forms one render unit");
 
-        let request = unit.worker_capture_request();
+        let environment = CaptureEnvironmentId::from_sha256([7; CaptureEnvironmentId::BYTE_LENGTH]);
+        let request = unit.worker_capture_request(environment);
         let encoded =
             serde_json::to_string(&request).expect("the portable worker request serializes");
+        let repeated = serde_json::to_string(&unit.worker_capture_request(environment))
+            .expect("the same portable worker request serializes again");
+        let wire: serde_json::Value =
+            serde_json::from_str(&encoded).expect("the portable worker request is JSON");
         let decoded: WorkerCaptureRequest =
             serde_json::from_str(&encoded).expect("the portable worker request parses once");
 
+        assert_eq!(wire["version"], 2);
+        assert_eq!(wire["captureEnvironment"], environment.to_string());
+        assert_eq!(encoded, repeated);
         assert_eq!(decoded, request);
         assert_eq!(decoded.browser_plan().videos().len(), 1);
         assert_eq!(
@@ -516,6 +532,7 @@ mod tests {
             identity
         );
         assert_eq!(decoded.profile(), render_profile());
+        assert_eq!(decoded.capture_environment(), environment);
     }
 
     #[test]

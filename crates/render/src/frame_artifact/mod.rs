@@ -13,7 +13,7 @@ use reader::{FrameArtifactFingerprintSequence, open_verified};
 pub(crate) use reader::FrameArtifactReader;
 pub(crate) use writer::FrameArtifactWriter;
 
-use crate::ExecutableUnit;
+use crate::{CaptureEnvironmentId, ExecutableUnit};
 
 const MAX_FRAMES: u64 = 10_000_000;
 const MAX_BYTES: u64 = 1 << 40;
@@ -125,8 +125,9 @@ impl Error for InvalidFrameArtifactLimits {}
 /// unit.
 ///
 /// The artifact is one file rather than a directory of frame objects: its
-/// fixed header binds the artifact to the input unit, and its length-prefixed
-/// payload lets an assembler verify and stream one frame at a time.
+/// fixed header binds the artifact to its input unit and locked capture
+/// environment, and its length-prefixed payload lets an assembler verify and
+/// stream one frame at a time.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FrameArtifact {
     path: PathBuf,
@@ -170,25 +171,42 @@ impl FrameArtifact {
         self.header.frames
     }
 
-    pub(crate) fn matches_unit(&self, unit: &ExecutableUnit) -> bool {
-        self.header.descriptor == FrameArtifactDescriptor::from_unit(unit)
+    /// Returns the locked capture environment bound into this artifact.
+    #[must_use]
+    pub const fn capture_environment(&self) -> CaptureEnvironmentId {
+        self.header.descriptor.capture_environment
     }
 
-    pub(crate) async fn writer_for_unit(
+    pub(crate) fn matches_capture(
+        &self,
         unit: &ExecutableUnit,
+        capture_environment: CaptureEnvironmentId,
+    ) -> bool {
+        self.header.descriptor == FrameArtifactDescriptor::from_unit(unit, capture_environment)
+    }
+
+    pub(crate) async fn writer_for_capture(
+        unit: &ExecutableUnit,
+        capture_environment: CaptureEnvironmentId,
         output: &Path,
         limits: FrameArtifactLimits,
     ) -> Result<FrameArtifactWriter, FrameArtifactError> {
-        FrameArtifactWriter::create(output, FrameArtifactDescriptor::from_unit(unit), limits).await
+        FrameArtifactWriter::create(
+            output,
+            FrameArtifactDescriptor::from_unit(unit, capture_environment),
+            limits,
+        )
+        .await
     }
 
-    pub(crate) async fn reuse_for_unit(
+    pub(crate) async fn reuse_for_capture(
         unit: &ExecutableUnit,
+        capture_environment: CaptureEnvironmentId,
         output: &Path,
         limits: FrameArtifactLimits,
     ) -> Result<Self, FrameArtifactError> {
         let artifact = Self::open(output, limits).await?;
-        if !artifact.matches_unit(unit) {
+        if !artifact.matches_capture(unit, capture_environment) {
             return Err(Self::identity_mismatch(output));
         }
         artifact.verify().await?;
@@ -199,7 +217,7 @@ impl FrameArtifact {
         FrameArtifactError::new(
             FrameArtifactErrorKind::IdentityMismatch,
             path,
-            "frame artifact belongs to a different render unit",
+            "frame artifact belongs to a different render unit or capture environment",
         )
     }
 
@@ -218,7 +236,8 @@ impl FrameArtifact {
         Ok(())
     }
 
-    /// Verifies that two artifact sequences have equal raw-RGBA fingerprints.
+    /// Verifies that two same-environment artifact sequences have equal
+    /// raw-RGBA fingerprints.
     ///
     /// This is a bounded equivalence check: it streams each PNG through a
     /// fixed hash buffer and retains only one fingerprint from each sequence.
@@ -227,13 +246,15 @@ impl FrameArtifact {
     ///
     /// # Errors
     ///
-    /// Returns [`FrameArtifactError`] when either artifact sequence is invalid
-    /// or their ordered raw-RGBA frame fingerprints differ.
+    /// Returns [`FrameArtifactError`] when either artifact sequence is invalid,
+    /// their capture environments differ, or their ordered raw-RGBA frame
+    /// fingerprints differ.
     pub async fn verify_raw_rgba_equivalence(
         expected: &[Self],
         actual: &[Self],
     ) -> Result<(), FrameArtifactError> {
         let path = sequence_path(expected, actual);
+        ensure_one_capture_environment(expected, actual, path)?;
         let mut expected_frames = FrameArtifactFingerprintSequence::new(expected);
         let mut actual_frames = FrameArtifactFingerprintSequence::new(actual);
         let mut position = 0_u128;
@@ -303,10 +324,12 @@ pub enum FrameArtifactErrorKind {
     FrameByteLimit,
     /// Capture ended before every planned output frame was retained.
     Incomplete,
-    /// An artifact belongs to a different planned unit.
+    /// An artifact belongs to a different planned unit or capture environment.
     IdentityMismatch,
     /// Two completed artifact sequences have different canonical pixels.
     RawRgbaMismatch,
+    /// Artifact sequences were captured in different locked environments.
+    CaptureEnvironmentMismatch,
 }
 
 /// Typed failure from the worker-frame artifact boundary.
@@ -382,6 +405,31 @@ fn sequence_path<'a>(expected: &'a [FrameArtifact], actual: &'a [FrameArtifact])
         .map_or_else(|| Path::new("."), FrameArtifact::path)
 }
 
+fn ensure_one_capture_environment(
+    expected: &[FrameArtifact],
+    actual: &[FrameArtifact],
+    path: &Path,
+) -> Result<(), FrameArtifactError> {
+    let mut environments = expected
+        .iter()
+        .chain(actual)
+        .map(FrameArtifact::capture_environment);
+    let Some(environment) = environments.next() else {
+        return Ok(());
+    };
+
+    for candidate in environments {
+        if candidate != environment {
+            return Err(FrameArtifactError::new(
+                FrameArtifactErrorKind::CaptureEnvironmentMismatch,
+                path,
+                "raw-RGBA artifact comparison requires one capture environment",
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn fingerprint_differs(path: &Path, position: u128) -> FrameArtifactError {
     FrameArtifactError::new(
         FrameArtifactErrorKind::RawRgbaMismatch,
@@ -414,7 +462,7 @@ mod tests {
 
     use super::format::{FrameArtifactDescriptor, Header};
     use super::{FrameArtifact, FrameArtifactErrorKind, FrameArtifactLimits, FrameArtifactWriter};
-    use crate::{CapturedFrame, EncodedPng, RawRgbaHash, RenderProfile};
+    use crate::{CaptureEnvironmentId, CapturedFrame, EncodedPng, RawRgbaHash, RenderProfile};
 
     #[tokio::test]
     async fn publishes_one_verified_frame_without_exposing_its_staging_file() {
@@ -428,15 +476,20 @@ mod tests {
             .await
             .expect("the frame fits the artifact limits");
 
-        let artifact = writer
+        writer
             .finish()
             .await
             .expect("the completed artifact publishes atomically");
 
-        assert_eq!(artifact.path(), path);
-        assert_eq!(artifact.output().start().get(), 4);
-        assert_eq!(artifact.frames(), 1);
-        artifact
+        let reopened = FrameArtifact::open(&path, limits())
+            .await
+            .expect("the published artifact opens through its fixed header");
+
+        assert_eq!(reopened.path(), path);
+        assert_eq!(reopened.output().start().get(), 4);
+        assert_eq!(reopened.frames(), 1);
+        assert_eq!(reopened.capture_environment(), capture_environment());
+        reopened
             .verify()
             .await
             .expect("the published artifact verifies its payload");
@@ -545,6 +598,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn rejects_raw_rgba_comparison_across_capture_environments() {
+        let directory = tempdir().expect("the fixture directory is available");
+        let expected = artifact_in_environment(
+            &directory.path().join("expected.onmark-frames"),
+            &[[1; RawRgbaHash::BYTE_LENGTH]],
+            CaptureEnvironmentId::from_sha256([7; CaptureEnvironmentId::BYTE_LENGTH]),
+        )
+        .await;
+        let actual = artifact_in_environment(
+            &directory.path().join("actual.onmark-frames"),
+            &[[1; RawRgbaHash::BYTE_LENGTH]],
+            CaptureEnvironmentId::from_sha256([8; CaptureEnvironmentId::BYTE_LENGTH]),
+        )
+        .await;
+
+        let error = FrameArtifact::verify_raw_rgba_equivalence(
+            std::slice::from_ref(&expected),
+            std::slice::from_ref(&actual),
+        )
+        .await
+        .expect_err("raw RGBA conformance requires one locked environment");
+
+        assert_eq!(
+            error.kind(),
+            FrameArtifactErrorKind::CaptureEnvironmentMismatch
+        );
+    }
+
+    #[tokio::test]
     async fn rejects_an_artifact_with_a_tampered_payload_checksum() {
         let directory = tempdir().expect("the fixture directory is available");
         let path = directory.path().join("worker.onmark-frames");
@@ -595,7 +677,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rejects_the_previous_record_layout_version() {
+    async fn rejects_the_previous_header_layout_version() {
         let directory = tempdir().expect("the fixture directory is available");
         let path = directory.path().join("worker.onmark-frames");
         let mut header = Header {
@@ -605,14 +687,14 @@ mod tests {
             digest: [0; 32],
         }
         .encode();
-        header[8..10].copy_from_slice(&1_u16.to_be_bytes());
+        header[8..10].copy_from_slice(&2_u16.to_be_bytes());
         tokio::fs::write(&path, header)
             .await
             .expect("the old-version fixture is writable");
 
         let error = FrameArtifact::open(&path, limits())
             .await
-            .expect_err("the old frame record layout must not decode as V2");
+            .expect_err("the previous frame artifact layout must not decode as V3");
 
         assert_eq!(error.kind(), FrameArtifactErrorKind::InvalidArtifact);
     }
@@ -643,13 +725,25 @@ mod tests {
     }
 
     fn descriptor_with_frames(frames: u64) -> FrameArtifactDescriptor {
+        descriptor_with_environment(frames, capture_environment())
+    }
+
+    fn descriptor_with_environment(
+        frames: u64,
+        capture_environment: CaptureEnvironmentId,
+    ) -> FrameArtifactDescriptor {
         FrameArtifactDescriptor {
             output: FrameInterval::new(FrameIndex::new(4), FrameIndex::new(4 + frames))
                 .expect("the fixture interval is ordered"),
             frame_rate: FrameRate::new(30, 1).expect("the fixture rate is valid"),
             profile: RenderProfile::new(320, 180).expect("the fixture profile is valid"),
+            capture_environment,
             visual_plan_digest: [1; 32],
         }
+    }
+
+    fn capture_environment() -> CaptureEnvironmentId {
+        CaptureEnvironmentId::from_sha256([7; CaptureEnvironmentId::BYTE_LENGTH])
     }
 
     fn captured_frame() -> CapturedFrame {
@@ -663,12 +757,23 @@ mod tests {
         path: &Path,
         raw_rgba_hashes: &[[u8; RawRgbaHash::BYTE_LENGTH]],
     ) -> FrameArtifact {
+        artifact_in_environment(path, raw_rgba_hashes, capture_environment()).await
+    }
+
+    async fn artifact_in_environment(
+        path: &Path,
+        raw_rgba_hashes: &[[u8; RawRgbaHash::BYTE_LENGTH]],
+        capture_environment: CaptureEnvironmentId,
+    ) -> FrameArtifact {
         let frames = u64::try_from(raw_rgba_hashes.len())
             .expect("the fixture frame count fits the artifact domain");
-        let mut writer =
-            FrameArtifactWriter::create(path, descriptor_with_frames(frames), limits())
-                .await
-                .expect("the artifact writer can stage fixture frames");
+        let mut writer = FrameArtifactWriter::create(
+            path,
+            descriptor_with_environment(frames, capture_environment),
+            limits(),
+        )
+        .await
+        .expect("the artifact writer can stage fixture frames");
         for raw_rgba_hash in raw_rgba_hashes {
             writer
                 .write_frame(&CapturedFrame::recorded(

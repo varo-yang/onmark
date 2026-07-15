@@ -7,7 +7,9 @@ use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::unit_root::AssetSource;
-use crate::{ExecutableUnit, RenderProfile, UnitRoot, UnitRootError, UnitRootLimits};
+use crate::{
+    CaptureEnvironmentId, ExecutableUnit, RenderProfile, UnitRoot, UnitRootError, UnitRootLimits,
+};
 
 const BUNDLE_DIRECTORY: &str = "bundle";
 
@@ -17,8 +19,8 @@ const BUNDLE_DIRECTORY: &str = "bundle";
 pub struct WorkerCaptureVersion(u16);
 
 impl WorkerCaptureVersion {
-    /// First worker capture-request contract.
-    pub const V1: Self = Self(1);
+    /// Capture request with an explicit locked-environment identity.
+    pub const V2: Self = Self(2);
 
     /// Returns the stable integer representation.
     #[must_use]
@@ -33,8 +35,8 @@ impl<'de> Deserialize<'de> for WorkerCaptureVersion {
         D: Deserializer<'de>,
     {
         let version = u16::deserialize(deserializer)?;
-        if version == Self::V1.get() {
-            return Ok(Self::V1);
+        if version == Self::V2.get() {
+            return Ok(Self::V2);
         }
         Err(D::Error::custom(
             "unsupported worker capture request version",
@@ -44,24 +46,32 @@ impl<'de> Deserialize<'de> for WorkerCaptureVersion {
 
 /// Immutable visual work handed from one composition process to one worker.
 ///
-/// The request contains only already-solved browser facts. It deliberately has
-/// no screenplay, source path, probe metadata, or audio mix: a capture worker
-/// must not recompile authored input, and final audio stays with the assembler.
+/// The request contains solved browser facts and the deployment identity under
+/// which their pixels may be reused. It deliberately has no screenplay, source
+/// path, probe metadata, or audio mix: a capture worker must not recompile
+/// authored input, and final audio stays with the assembler.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct WorkerCaptureRequest {
     version: WorkerCaptureVersion,
+    capture_environment: CaptureEnvironmentId,
     bundle: BundleManifest,
     browser_plan: BrowserPlan,
     profile: RenderProfile,
 }
 
 impl WorkerCaptureRequest {
-    /// Creates the first portable request for one already-composed render unit.
+    /// Creates one portable request for one already-composed render unit.
     #[must_use]
-    pub fn new(bundle: BundleManifest, browser_plan: BrowserPlan, profile: RenderProfile) -> Self {
+    pub fn new(
+        capture_environment: CaptureEnvironmentId,
+        bundle: BundleManifest,
+        browser_plan: BrowserPlan,
+        profile: RenderProfile,
+    ) -> Self {
         Self {
-            version: WorkerCaptureVersion::V1,
+            version: WorkerCaptureVersion::V2,
+            capture_environment,
             bundle,
             browser_plan,
             profile,
@@ -72,6 +82,12 @@ impl WorkerCaptureRequest {
     #[must_use]
     pub const fn version(&self) -> WorkerCaptureVersion {
         self.version
+    }
+
+    /// Returns the locked environment required to reuse captured pixels.
+    #[must_use]
+    pub const fn capture_environment(&self) -> CaptureEnvironmentId {
+        self.capture_environment
     }
 
     /// Returns the immutable presentation bundle needed by this worker.
@@ -143,7 +159,12 @@ impl<'de> Deserialize<'de> for WorkerCaptureRequest {
         D: Deserializer<'de>,
     {
         let wire = WorkerCaptureRequestWire::deserialize(deserializer)?;
-        Ok(Self::new(wire.bundle, wire.browser_plan, wire.profile))
+        Ok(Self::new(
+            wire.capture_environment,
+            wire.bundle,
+            wire.browser_plan,
+            wire.profile,
+        ))
     }
 }
 
@@ -152,7 +173,23 @@ impl<'de> Deserialize<'de> for WorkerCaptureRequest {
 struct WorkerCaptureRequestWire {
     #[serde(rename = "version")]
     _version: WorkerCaptureVersion,
+    capture_environment: CaptureEnvironmentId,
     bundle: BundleManifest,
     browser_plan: BrowserPlan,
     profile: RenderProfile,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::WorkerCaptureVersion;
+
+    #[test]
+    fn rejects_the_pre_environment_request_version() {
+        assert!(serde_json::from_str::<WorkerCaptureVersion>("1").is_err());
+        assert_eq!(
+            serde_json::from_str::<WorkerCaptureVersion>("2")
+                .expect("the environment-bound version parses"),
+            WorkerCaptureVersion::V2,
+        );
+    }
 }

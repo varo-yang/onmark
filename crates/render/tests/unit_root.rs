@@ -9,8 +9,8 @@ use onmark_core::model::{
 };
 use onmark_core::protocol::{BundleFile, BundleManifest};
 use onmark_render::{
-    ExecutableUnit, InvalidUnitRootLimits, MaterializedAsset, RenderProfile, RenderUnit, UnitRoot,
-    UnitRootErrorKind, UnitRootLimits,
+    CaptureEnvironmentId, ExecutableUnit, InvalidUnitRootLimits, MaterializedAsset, RenderProfile,
+    RenderUnit, UnitRoot, UnitRootErrorKind, UnitRootLimits,
 };
 use serde::Serialize;
 use sha2::{Digest as _, Sha256};
@@ -70,7 +70,7 @@ fn materializes_one_portable_worker_capture_request() {
         [],
     )
     .expect("the static fixture forms one render unit");
-    let request = unit.worker_capture_request();
+    let request = unit.worker_capture_request(capture_environment());
     let input = tempdir().expect("the worker input root is available");
     stage_worker_bundle(input.path(), &fixture);
 
@@ -97,7 +97,7 @@ fn materializes_worker_video_bytes_from_the_frozen_identity_layout() {
         [fixture.asset.clone()],
     )
     .expect("the video fixture forms one render unit");
-    let request = unit.worker_capture_request();
+    let request = unit.worker_capture_request(capture_environment());
     let input = tempdir().expect("the worker input root is available");
     stage_worker_bundle(input.path(), &fixture);
     let source = input
@@ -366,6 +366,10 @@ fn stage_worker_bundle(input: &Path, fixture: &Fixture) {
 
 fn render_profile() -> RenderProfile {
     RenderProfile::new(320, 180).expect("the fixture render profile is valid")
+}
+
+fn capture_environment() -> CaptureEnvironmentId {
+    CaptureEnvironmentId::from_sha256([7; CaptureEnvironmentId::BYTE_LENGTH])
 }
 
 fn frame_rate() -> FrameRate {

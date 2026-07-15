@@ -15,8 +15,8 @@ use crate::encoder::AudioInput;
 use crate::frame_artifact::FrameArtifactWriter;
 use crate::unit::MAX_AUDIO_TRACKS;
 use crate::{
-    BrowserLimits, BrowserSession, EncodedVideo, ExecutableUnit, Ffmpeg, FfmpegSession,
-    FrameArtifact, FrameArtifactErrorKind, FrameArtifactLimits,
+    BrowserLimits, BrowserSession, CaptureEnvironmentId, EncodedVideo, ExecutableUnit, Ffmpeg,
+    FfmpegSession, FrameArtifact, FrameArtifactErrorKind, FrameArtifactLimits,
 };
 
 pub use error::{RenderError, RenderErrorKind};
@@ -52,22 +52,28 @@ impl FrameCaptureExecutor {
     ///
     /// Returns [`RenderError`] when the unit, browser, or artifact boundary
     /// fails. A failed capture never publishes a partial artifact. If a
-    /// matching complete artifact already exists, it is checksum-verified and
-    /// reused without launching Chromium.
+    /// matching complete artifact for the same capture environment already
+    /// exists, it is checksum-verified and reused without launching Chromium.
     pub async fn capture_frame_artifact(
         &self,
         unit: &ExecutableUnit,
+        capture_environment: CaptureEnvironmentId,
         artifact: &Path,
         limits: FrameArtifactLimits,
     ) -> Result<FrameArtifact, RenderError> {
         let frame_count = validate_plan(unit.browser_plan(), limits.max_frames(), artifact)?;
-        let mut writer = match FrameArtifact::writer_for_unit(unit, artifact, limits).await {
-            Ok(writer) => writer,
-            Err(error) if error.kind() == FrameArtifactErrorKind::OutputExists => {
-                return self.reuse_artifact(unit, artifact, limits).await;
-            }
-            Err(error) => return Err(RenderError::artifact(artifact, error)),
-        };
+        let mut writer =
+            match FrameArtifact::writer_for_capture(unit, capture_environment, artifact, limits)
+                .await
+            {
+                Ok(writer) => writer,
+                Err(error) if error.kind() == FrameArtifactErrorKind::OutputExists => {
+                    return self
+                        .reuse_artifact(unit, capture_environment, artifact, limits)
+                        .await;
+                }
+                Err(error) => return Err(RenderError::artifact(artifact, error)),
+            };
         let mut frames = FrameSink::Artifact(&mut writer);
 
         self.capture_unit(unit, &mut frames, frame_count, artifact)
@@ -75,7 +81,8 @@ impl FrameCaptureExecutor {
         match writer.finish().await {
             Ok(artifact) => Ok(artifact),
             Err(error) if error.kind() == FrameArtifactErrorKind::OutputExists => {
-                self.reuse_artifact(unit, artifact, limits).await
+                self.reuse_artifact(unit, capture_environment, artifact, limits)
+                    .await
             }
             Err(error) => Err(RenderError::artifact(artifact, error)),
         }
@@ -84,10 +91,11 @@ impl FrameCaptureExecutor {
     async fn reuse_artifact(
         &self,
         unit: &ExecutableUnit,
+        capture_environment: CaptureEnvironmentId,
         artifact: &Path,
         limits: FrameArtifactLimits,
     ) -> Result<FrameArtifact, RenderError> {
-        FrameArtifact::reuse_for_unit(unit, artifact, limits)
+        FrameArtifact::reuse_for_capture(unit, capture_environment, artifact, limits)
             .await
             .map_err(|source| RenderError::artifact(artifact, source))
     }
@@ -213,11 +221,12 @@ impl RenderExecutor {
     pub async fn capture_frame_artifact(
         &self,
         unit: &ExecutableUnit,
+        capture_environment: CaptureEnvironmentId,
         artifact: &Path,
         limits: FrameArtifactLimits,
     ) -> Result<FrameArtifact, RenderError> {
         self.capture
-            .capture_frame_artifact(unit, artifact, limits)
+            .capture_frame_artifact(unit, capture_environment, artifact, limits)
             .await
     }
 
@@ -229,18 +238,19 @@ impl RenderExecutor {
     ///
     /// # Errors
     ///
-    /// Returns [`RenderError`] when artifacts do not match the partition plan,
-    /// fail verification while streaming, or final encoding and audio mixing
-    /// fail.
+    /// Returns [`RenderError`] when artifacts do not match the partition plan
+    /// and capture environment, fail verification while streaming, or final
+    /// encoding and audio mixing fail.
     pub async fn assemble_frame_artifacts(
         &self,
         partitions: &PartitionPlan,
         units: &[ExecutableUnit],
         artifacts: &[FrameArtifact],
+        capture_environment: CaptureEnvironmentId,
         output: &Path,
     ) -> Result<EncodedVideo, RenderError> {
         Self::validate_partition_units(partitions, units, output)?;
-        Self::validate_frame_artifacts(units, artifacts, output)?;
+        Self::validate_frame_artifacts(units, artifacts, capture_environment, output)?;
         let expected_output = wire_interval(partitions.interval(), output)?;
         let output_origin = partitions.interval().start();
         let audio: Vec<AudioInput> = units
@@ -339,6 +349,7 @@ impl RenderExecutor {
     fn validate_frame_artifacts(
         units: &[ExecutableUnit],
         artifacts: &[FrameArtifact],
+        capture_environment: CaptureEnvironmentId,
         output: &Path,
     ) -> Result<(), RenderError> {
         if units.len() != artifacts.len() {
@@ -349,7 +360,7 @@ impl RenderExecutor {
         }
 
         for (unit, artifact) in units.iter().zip(artifacts) {
-            if !artifact.matches_unit(unit) {
+            if !artifact.matches_capture(unit, capture_environment) {
                 return Err(RenderError::artifact(
                     output,
                     FrameArtifact::identity_mismatch(artifact.path()),

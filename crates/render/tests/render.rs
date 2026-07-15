@@ -13,9 +13,9 @@ use onmark_core::protocol::{
 use onmark_core::render_graph::{PartitionPlan, RenderGraph};
 use onmark_media::Ffprobe;
 use onmark_render::{
-    BrowserErrorKind, BrowserLimits, BrowserSession, EncodeLimits, EncodedPng, ExecutableUnit,
-    Ffmpeg, FrameArtifactLimits, MaterializedAsset, RawRgbaHash, RenderErrorKind, RenderExecutor,
-    RenderProfile, RenderUnit, UnitRootLimits,
+    BrowserErrorKind, BrowserLimits, BrowserSession, CaptureEnvironmentId, EncodeLimits,
+    EncodedPng, ExecutableUnit, Ffmpeg, FrameArtifactLimits, MaterializedAsset, RawRgbaHash,
+    RenderErrorKind, RenderExecutor, RenderProfile, RenderUnit, UnitRootLimits,
 };
 use serde::Deserialize;
 use sha2::{Digest as _, Sha256};
@@ -192,7 +192,12 @@ async fn assembles_worker_frame_artifacts_equivalently_to_the_whole_film() {
             .path()
             .join(format!("worker-{index}.onmark-frames"));
         let captured = executor
-            .capture_frame_artifact(unit, &artifact, frame_artifact_limits())
+            .capture_frame_artifact(
+                unit,
+                capture_environment(),
+                &artifact,
+                frame_artifact_limits(),
+            )
             .await
             .expect("each independent unit must publish a verified frame artifact");
         artifacts.push(captured);
@@ -203,6 +208,7 @@ async fn assembles_worker_frame_artifacts_equivalently_to_the_whole_film() {
             &fixture.partition_plan,
             &fixture.partitioned_units,
             &artifacts,
+            capture_environment(),
             &assembled_output,
         )
         .await
@@ -582,6 +588,10 @@ fn browser_limits(deadline: Duration) -> BrowserLimits {
 
 fn render_profile() -> RenderProfile {
     RenderProfile::new(WIDTH, HEIGHT).expect("the fixture render profile is valid")
+}
+
+fn capture_environment() -> CaptureEnvironmentId {
+    CaptureEnvironmentId::from_sha256([7; CaptureEnvironmentId::BYTE_LENGTH])
 }
 
 fn real_executor(max_frames: u64) -> RenderExecutor {

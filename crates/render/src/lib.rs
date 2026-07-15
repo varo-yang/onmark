@@ -9,6 +9,7 @@
 
 mod browser;
 mod encoder;
+mod environment;
 mod executor;
 mod frame_artifact;
 mod profile;
@@ -24,6 +25,7 @@ pub use browser::{
 pub use encoder::{
     EncodeError, EncodeErrorKind, EncodeLimits, EncodedVideo, Ffmpeg, FfmpegSession, InvalidFfmpeg,
 };
+pub use environment::{CaptureEnvironmentId, InvalidCaptureEnvironmentId};
 pub use executor::{FrameCaptureExecutor, RenderError, RenderErrorKind, RenderExecutor};
 pub use frame_artifact::{
     FrameArtifact, FrameArtifactError, FrameArtifactErrorKind, FrameArtifactLimits,
