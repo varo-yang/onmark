@@ -14,6 +14,7 @@ use crate::unit_root::AssetSource;
 const COPY_BUFFER_BYTES: usize = 64 * 1024;
 
 pub(super) fn materialize(
+    private_root_parent: Option<&Path>,
     source_root: &Path,
     manifest: &BundleManifest,
     assets: impl Iterator<Item = AssetSource>,
@@ -22,7 +23,12 @@ pub(super) fn materialize(
     let assets = collect_assets(source_root, manifest, assets, limits.max_files())?;
     verify_bundle_identity(source_root, manifest)?;
     let manifest_bytes = encoded_manifest_bytes(manifest);
-    let mut writer = UnitWriter::create(source_root, limits.max_bytes(), manifest_bytes)?;
+    let mut writer = UnitWriter::create(
+        private_root_parent,
+        source_root,
+        limits.max_bytes(),
+        manifest_bytes,
+    )?;
 
     writer.copy_bundle(source_root, manifest)?;
     writer.copy_assets(&assets)?;
@@ -98,18 +104,23 @@ struct UnitWriter {
 
 impl UnitWriter {
     fn create(
+        private_root_parent: Option<&Path>,
         source_root: &Path,
         max_bytes: u64,
         manifest_bytes: u64,
     ) -> Result<Self, UnitRootError> {
         let mut budget = ByteBudget::new(max_bytes);
         budget.consume(&source_root.join(BundleManifest::FILE_NAME), manifest_bytes)?;
-        let directory = TempDirBuilder::new()
-            .prefix("onmark-unit-")
-            .tempdir()
-            .map_err(|source| {
+        let mut builder = TempDirBuilder::new();
+        builder.prefix("onmark-unit-");
+        let directory = match private_root_parent {
+            Some(parent) => builder.tempdir_in(parent).map_err(|source| {
+                UnitRootError::io(parent, "failed to create a private unit root", source)
+            })?,
+            None => builder.tempdir().map_err(|source| {
                 UnitRootError::io(source_root, "failed to create a private unit root", source)
-            })?;
+            })?,
+        };
         Ok(Self { directory, budget })
     }
 

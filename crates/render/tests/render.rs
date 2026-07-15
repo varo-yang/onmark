@@ -13,9 +13,9 @@ use onmark_core::protocol::{
 use onmark_core::render_graph::{PartitionPlan, RenderGraph};
 use onmark_media::Ffprobe;
 use onmark_render::{
-    BrowserErrorKind, BrowserLimits, BrowserSession, CaptureEnvironmentId, EncodeLimits,
-    EncodedPng, ExecutableUnit, Ffmpeg, FrameArtifactLimits, MaterializedAsset, RawRgbaHash,
-    RenderErrorKind, RenderExecutor, RenderProfile, RenderUnit, UnitRootLimits,
+    BrowserErrorKind, BrowserLimits, BrowserSession, CaptureEnvironmentId, ChromiumSandbox,
+    EncodeLimits, EncodedPng, ExecutableUnit, Ffmpeg, FrameArtifactLimits, MaterializedAsset,
+    RawRgbaHash, RenderErrorKind, RenderExecutor, RenderProfile, RenderUnit, UnitRootLimits,
 };
 use serde::Deserialize;
 use sha2::{Digest as _, Sha256};
@@ -60,6 +60,7 @@ async fn rejects_units_that_do_not_match_the_partition_plan_before_launching_bro
 async fn rejects_a_page_that_never_installs_the_runtime_host() {
     let session = BrowserSession::launch(
         chrome(),
+        ChromiumSandbox::Enabled,
         render_profile(),
         browser_limits(Duration::from_secs(5)),
     )
@@ -82,6 +83,7 @@ async fn rejects_a_page_that_never_installs_the_runtime_host() {
 async fn bounds_a_runtime_adapter_that_never_finishes_loading() {
     let session = BrowserSession::launch(
         chrome(),
+        ChromiumSandbox::Enabled,
         render_profile(),
         browser_limits(Duration::from_secs(5)),
     )
@@ -300,6 +302,7 @@ async fn freeze_asset(path: &Path) -> FrozenAsset {
 async fn capture_protocol_fingerprint(fixture: &Url) -> RawRgbaHash {
     let session = BrowserSession::launch(
         chrome(),
+        ChromiumSandbox::Enabled,
         render_profile(),
         browser_limits(Duration::from_secs(10)),
     )

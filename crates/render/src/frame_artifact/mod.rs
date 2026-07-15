@@ -8,6 +8,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use format::{FrameArtifactDescriptor, Header};
+pub use format::{FrameArtifactId, InvalidFrameArtifactId};
 use reader::{FrameArtifactFingerprintSequence, open_verified};
 
 pub(crate) use reader::FrameArtifactReader;
@@ -175,6 +176,12 @@ impl FrameArtifact {
     #[must_use]
     pub const fn capture_environment(&self) -> CaptureEnvironmentId {
         self.header.descriptor.capture_environment
+    }
+
+    /// Returns the stable identity of this artifact's visual contract.
+    #[must_use]
+    pub fn id(&self) -> FrameArtifactId {
+        self.header.descriptor.id()
     }
 
     pub(crate) fn matches_capture(
@@ -461,8 +468,26 @@ mod tests {
     use tempfile::tempdir;
 
     use super::format::{FrameArtifactDescriptor, Header};
-    use super::{FrameArtifact, FrameArtifactErrorKind, FrameArtifactLimits, FrameArtifactWriter};
+    use super::{
+        FrameArtifact, FrameArtifactErrorKind, FrameArtifactId, FrameArtifactLimits,
+        FrameArtifactWriter,
+    };
     use crate::{CaptureEnvironmentId, CapturedFrame, EncodedPng, RawRgbaHash, RenderProfile};
+
+    #[test]
+    fn preserves_the_canonical_frame_artifact_id_spelling_at_the_wire_boundary() {
+        let spelling = "sha256:abababababababababababababababababababababababababababababababab";
+        let id = FrameArtifactId::parse(spelling).expect("the fixture identity is canonical");
+        let encoded = serde_json::to_string(&id).expect("the identity serializes as one string");
+        let decoded: FrameArtifactId =
+            serde_json::from_str(&encoded).expect("the identity parses from its wire spelling");
+
+        assert_eq!(id.to_string(), spelling);
+        assert_eq!(encoded, format!("\"{spelling}\""));
+        assert_eq!(decoded, id);
+        assert!(FrameArtifactId::parse("sha256:AB").is_err());
+        assert!(FrameArtifactId::parse("sha512:ab").is_err());
+    }
 
     #[tokio::test]
     async fn publishes_one_verified_frame_without_exposing_its_staging_file() {
@@ -493,6 +518,28 @@ mod tests {
             .verify()
             .await
             .expect("the published artifact verifies its payload");
+    }
+
+    #[tokio::test]
+    async fn gives_the_same_identity_to_the_request_and_completed_artifact() {
+        let directory = tempdir().expect("the fixture directory is available");
+        let path = directory.path().join("worker.onmark-frames");
+        let descriptor = descriptor();
+        let expected = descriptor.id();
+        let mut writer = FrameArtifactWriter::create(&path, descriptor, limits())
+            .await
+            .expect("the artifact writer can stage one frame");
+        writer
+            .write_frame(&captured_frame())
+            .await
+            .expect("the frame fits the artifact limits");
+
+        let artifact = writer
+            .finish()
+            .await
+            .expect("the completed artifact publishes atomically");
+
+        assert_eq!(artifact.id(), expected);
     }
 
     #[tokio::test]

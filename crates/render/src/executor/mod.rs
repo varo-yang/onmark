@@ -15,8 +15,9 @@ use crate::encoder::AudioInput;
 use crate::frame_artifact::FrameArtifactWriter;
 use crate::unit::MAX_AUDIO_TRACKS;
 use crate::{
-    BrowserLimits, BrowserSession, CaptureEnvironmentId, EncodedVideo, ExecutableUnit, Ffmpeg,
-    FfmpegSession, FrameArtifact, FrameArtifactErrorKind, FrameArtifactLimits,
+    BrowserLimits, BrowserSession, CaptureEnvironmentId, ChromiumSandbox, EncodedVideo,
+    ExecutableUnit, Ffmpeg, FfmpegSession, FrameArtifact, FrameArtifactErrorKind,
+    FrameArtifactLimits,
 };
 
 pub use error::{RenderError, RenderErrorKind};
@@ -29,15 +30,25 @@ const FIRST_FRAME_REQUEST: u32 = 3;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FrameCaptureExecutor {
     browser_executable: PathBuf,
+    sandbox: ChromiumSandbox,
     browser_limits: BrowserLimits,
 }
 
 impl FrameCaptureExecutor {
     /// Creates one browser-only capture boundary.
+    ///
+    /// Local callers retain [`ChromiumSandbox::Enabled`]. A deployment adapter
+    /// may select the disabled policy only when its independently audited outer
+    /// boundary owns process isolation.
     #[must_use]
-    pub fn new(browser_executable: impl Into<PathBuf>, browser_limits: BrowserLimits) -> Self {
+    pub fn new(
+        browser_executable: impl Into<PathBuf>,
+        sandbox: ChromiumSandbox,
+        browser_limits: BrowserLimits,
+    ) -> Self {
         Self {
             browser_executable: browser_executable.into(),
+            sandbox,
             browser_limits,
         }
     }
@@ -111,6 +122,7 @@ impl FrameCaptureExecutor {
         let disposal_request = disposal_request_id(frame_count, output)?;
         let browser = BrowserSession::launch(
             &self.browser_executable,
+            self.sandbox,
             unit.profile(),
             self.browser_limits,
         )
@@ -152,7 +164,11 @@ impl RenderExecutor {
         ffmpeg: Ffmpeg,
     ) -> Self {
         Self {
-            capture: FrameCaptureExecutor::new(browser_executable, browser_limits),
+            capture: FrameCaptureExecutor::new(
+                browser_executable,
+                ChromiumSandbox::Enabled,
+                browser_limits,
+            ),
             ffmpeg,
         }
     }

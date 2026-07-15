@@ -1,9 +1,11 @@
+use std::fmt;
 use std::io;
 use std::path::Path;
 
 use onmark_core::model::{FrameIndex, FrameInterval, FrameRate};
 use onmark_core::protocol::BrowserPlan;
-use serde::Serialize;
+use serde::de::Error as _;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sha2::{Digest as _, Sha256};
 
 use super::{FrameArtifactError, FrameArtifactErrorKind, FrameArtifactLimits};
@@ -19,6 +21,134 @@ const MAGIC: [u8; 8] = *b"ONMARKF1";
 // environment identity to the fixed header, so artifacts cannot cross a
 // browser/font deployment merely because their visual plan matches.
 const VERSION: u16 = 3;
+const ID_DOMAIN: &[u8] = b"onmark-frame-artifact-id\0";
+
+/// Deterministic identity of one frame-artifact capture contract.
+///
+/// This identifies the immutable visual inputs and locked capture environment,
+/// not the encoded PNG payload. Deployments use it to choose an object key;
+/// the artifact's internal checksum still verifies the published bytes.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct FrameArtifactId(
+    #[cfg_attr(
+        feature = "schema",
+        schemars(with = "String", regex(pattern = r"^sha256:[0-9a-f]{64}$"))
+    )]
+    [u8; 32],
+);
+
+impl FrameArtifactId {
+    const SHA256_BYTES: usize = 32;
+
+    /// Parses the canonical `sha256:<lowercase-hex>` spelling.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InvalidFrameArtifactId`] when the prefix, digest length, or
+    /// lowercase hexadecimal spelling is not canonical.
+    pub fn parse(value: &str) -> Result<Self, InvalidFrameArtifactId> {
+        let Some(hex) = value.strip_prefix("sha256:") else {
+            return Err(InvalidFrameArtifactId::MissingPrefix);
+        };
+        if hex.len() != Self::SHA256_BYTES * 2 {
+            return Err(InvalidFrameArtifactId::InvalidLength);
+        }
+
+        let mut digest = [0; Self::SHA256_BYTES];
+        for (index, byte) in digest.iter_mut().enumerate() {
+            let offset = index * 2;
+            let high = hex_value(hex.as_bytes()[offset])?;
+            let low = hex_value(hex.as_bytes()[offset + 1])?;
+            *byte = high << 4 | low;
+        }
+        Ok(Self(digest))
+    }
+
+    /// Returns the canonical SHA-256 digest bytes.
+    #[must_use]
+    pub const fn as_sha256(&self) -> &[u8; 32] {
+        &self.0
+    }
+
+    pub(crate) fn from_facts(
+        plan: &BrowserPlan,
+        bundle_id: &str,
+        profile: RenderProfile,
+        capture_environment: CaptureEnvironmentId,
+    ) -> Self {
+        FrameArtifactDescriptor::from_facts(plan, bundle_id, profile, capture_environment).id()
+    }
+
+    fn from_descriptor(descriptor: &FrameArtifactDescriptor) -> Self {
+        let mut digest = Sha256::new();
+        digest.update(ID_DOMAIN);
+        digest.update(VERSION.to_be_bytes());
+        digest.update(descriptor.capture_environment.as_sha256());
+        digest.update(descriptor.visual_plan_digest);
+        Self(digest.finalize().into())
+    }
+}
+
+impl fmt::Display for FrameArtifactId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("sha256:")?;
+        for byte in self.as_sha256() {
+            write!(formatter, "{byte:02x}")?;
+        }
+        Ok(())
+    }
+}
+
+impl Serialize for FrameArtifactId {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.collect_str(self)
+    }
+}
+
+impl<'de> Deserialize<'de> for FrameArtifactId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Self::parse(&value).map_err(D::Error::custom)
+    }
+}
+
+/// Reason a frame-artifact identity spelling cannot name one capture contract.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum InvalidFrameArtifactId {
+    /// The required `sha256:` prefix is absent.
+    MissingPrefix,
+    /// The SHA-256 digest does not have exactly 64 hexadecimal characters.
+    InvalidLength,
+    /// The digest contains a noncanonical hexadecimal byte.
+    InvalidHex,
+}
+
+impl fmt::Display for InvalidFrameArtifactId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::MissingPrefix => "frame artifact identity must start with sha256:",
+            Self::InvalidLength => "frame artifact identity must contain 64 hexadecimal characters",
+            Self::InvalidHex => "frame artifact identity must use lowercase hexadecimal characters",
+        })
+    }
+}
+
+impl std::error::Error for InvalidFrameArtifactId {}
+
+fn hex_value(byte: u8) -> Result<u8, InvalidFrameArtifactId> {
+    match byte {
+        b'0'..=b'9' => Ok(byte - b'0'),
+        b'a'..=b'f' => Ok(byte - b'a' + 10),
+        _ => Err(InvalidFrameArtifactId::InvalidHex),
+    }
+}
 
 /// Immutable input facts that determine one visual frame artifact.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -35,11 +165,23 @@ impl FrameArtifactDescriptor {
         unit: &ExecutableUnit,
         capture_environment: CaptureEnvironmentId,
     ) -> Self {
-        let plan = unit.browser_plan();
+        Self::from_facts(
+            unit.browser_plan(),
+            unit.bundle_id(),
+            unit.profile(),
+            capture_environment,
+        )
+    }
+
+    fn from_facts(
+        plan: &BrowserPlan,
+        bundle_id: &str,
+        profile: RenderProfile,
+        capture_environment: CaptureEnvironmentId,
+    ) -> Self {
         let output = frame_interval(plan.output());
         let frame_rate = frame_rate(plan);
-        let profile = unit.profile();
-        let visual_plan_digest = visual_plan_digest(plan, unit.bundle_id(), profile);
+        let visual_plan_digest = visual_plan_digest(plan, bundle_id, profile);
 
         Self {
             output,
@@ -48,6 +190,10 @@ impl FrameArtifactDescriptor {
             capture_environment,
             visual_plan_digest,
         }
+    }
+
+    pub(super) fn id(&self) -> FrameArtifactId {
+        FrameArtifactId::from_descriptor(self)
     }
 }
 

@@ -1,0 +1,48 @@
+{
+  "$defs": {
+    "CaptureInvocationVersion": {
+      "const": 1,
+      "description": "Version of the Lambda invocation contract.",
+      "format": "uint16",
+      "maximum": 65535,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "ObjectPrefix": {
+      "additionalProperties": false,
+      "description": "One S3 bucket and canonical object-key prefix.\n\nPrefixes name remote namespaces only. They never become local paths, so\nrequest-controlled spelling cannot escape the handler's private `/tmp`\nworkspace.",
+      "properties": {
+        "bucket": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "prefix": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "bucket",
+        "prefix"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://onmark.dev/schemas/aws-capture-invocation-v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "One immutable worker input published beneath an S3 prefix.",
+  "properties": {
+    "input": {
+      "$ref": "#/$defs/ObjectPrefix"
+    },
+    "version": {
+      "$ref": "#/$defs/CaptureInvocationVersion"
+    }
+  },
+  "required": [
+    "version",
+    "input"
+  ],
+  "title": "CaptureInvocation",
+  "type": "object"
+}

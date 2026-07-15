@@ -5,14 +5,12 @@ use std::io::{self, Write as _};
 use std::path::Path;
 use std::process::ExitCode;
 
-use onmark_render::{FrameArtifact, FrameCaptureExecutor, WorkerCaptureRequest};
+use onmark_render::{ChromiumSandbox, FrameArtifact, FrameCaptureExecutor, WorkerCaptureRequest};
 
 use crate::arguments::{WorkerArgs, WorkerCaptureArgs, WorkerCommand};
 use crate::environment;
 use crate::execution;
 use crate::failure::CliError;
-
-const REQUEST_FILE: &str = "request.json";
 
 pub(super) struct WorkerOutcome {
     artifact: FrameArtifact,
@@ -48,7 +46,11 @@ async fn capture(args: WorkerCaptureArgs) -> Result<WorkerOutcome, CliError> {
     })
     .await
     .map_err(CliError::WorkerTask)??;
-    let capture = FrameCaptureExecutor::new(browser, execution::browser_limits());
+    let capture = FrameCaptureExecutor::new(
+        browser,
+        ChromiumSandbox::Enabled,
+        execution::browser_limits(),
+    );
     let artifact = capture
         .capture_frame_artifact(
             &unit,
@@ -62,7 +64,7 @@ async fn capture(args: WorkerCaptureArgs) -> Result<WorkerOutcome, CliError> {
 }
 
 fn read_request(input: &Path) -> Result<WorkerCaptureRequest, CliError> {
-    let path = input.join(REQUEST_FILE);
+    let path = input.join(WorkerCaptureRequest::FILE_NAME);
     let source =
         fs::read_to_string(&path).map_err(|source| CliError::read_worker_request(&path, source))?;
     serde_json::from_str(&source).map_err(|source| CliError::parse_worker_request(&path, source))

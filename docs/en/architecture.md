@@ -13,7 +13,8 @@ Onmark is a screenplay-first, browser-rendered video compiler and execution engi
 3. Local and distributed rendering execute the same `ExecutionPlan` and worker state machine.
 4. Partitions follow pixel and temporal dependencies, not blindly chosen shot boundaries.
 5. Chromium draws resolved frames; it does not solve time or discover work.
-6. Every expensive artifact is content-addressed.
+6. Every expensive artifact has an explicit deterministic identity; immutable
+   byte artifacts also retain content hashes.
 
 ## TypeScript and Rust boundary
 
@@ -192,7 +193,7 @@ output is an experimental property, not a blanket promise.
 
 ## Distributed execution (production target)
 
-The coordinator stores DAG state, leases, retries, and artifact references but never proxies frames. Stateless workers exchange immutable bundles, assets, and artifacts directly with object storage. Delivery is at least once; content-addressed compare-and-commit makes publication effectively once.
+The coordinator stores DAG state, leases, retries, and artifact references but never proxies frames. Stateless workers exchange immutable bundles, assets, and artifacts directly with object storage. Delivery is at least once; deterministic contract identity plus compare-and-verify publication makes it effectively once.
 
 Gate three starts with a deliberately narrower interchange: a worker captures a
 whole planned output interval into one bounded, checksummed frame artifact. The
@@ -217,11 +218,25 @@ Individual frames are never remote tasks. CPU, memory, GPU, browser slots,
 encoder slots, codecs, disk, and network are explicit scheduling resources; all
 internal queues are bounded.
 
-The first implementation uses the local filesystem only to prove the process
-and artifact contract. It adds no cloud SDK, queue, database, scheduler, or
-deployment adapter. Object storage, leases, retry ownership, capability
-matching, and a Lambda/ECS/Kubernetes adapter follow only after the artifact
-conformance proves that their shared executor boundary is correct.
+The first implementation used the local filesystem only to prove the process
+and artifact contract. After that conformance passed, `deploy/aws-lambda`
+became the first narrow cloud adapter. Its Rust binary owns only versioned
+Lambda invocation/result JSON, bounded S3 materialization, and conditional
+publication of the existing `onmark-render` frame artifact. It uses no generic
+object-store trait because S3's multipart `If-None-Match: *` completion,
+precondition reuse verification against this capture's raw-RGBA sequence, and
+bounded conflict retry are the actual semantics it needs. AWS types stop at
+that deployment package; they never enter core or render.
+
+The adapter has no coordinator, queue, lease database, global retry owner,
+capability scheduler, infrastructure definition, or production Lambda image.
+Its input chooses only an immutable worker-input S3 prefix. The deployed image
+owns the output namespace, browser binary, locked capture-environment identity,
+and limits. Its handler explicitly selects `ChromiumSandbox::Disabled` as a
+candidate for Lambda's outer isolation boundary; that choice is neither an
+automatic launch fallback nor invocation-controlled. A real Lambda experiment
+must establish the corresponding process-isolation and launch contract before
+an image or infrastructure template is added.
 
 ## Incremental rendering
 
@@ -242,11 +257,11 @@ onmark/
 ├── packages/
 │   ├── runtime/ authoring/ bundler/
 ├── scripts/     # repository-only generation and quality checks
-├── deploy/aws-lambda/  # only after Gate-three artifact conformance
+├── deploy/aws-lambda/  # Rust Lambda/S3 adapter after artifact conformance
 ├── schemas/ conformance/ evals/ examples/ docs/
 ```
 
-The completed Gate-one milestone contains `onmark-core`, `onmark-media`, `onmark-render`, `@onmark/runtime`'s browser session, `@onmark/authoring`'s semantic DOM bindings, `@onmark/bundler`'s presentation artifact boundary, and the first `onmark-cli` whole-film composition root. Media is a separate crate because server-side compile/lint loops need probing without Chromium; this is both a distinct dependency budget and a real consumer. Runtime is a separate package because it executes inside the browser and is consumed by authoring and bundling. Authoring is a separate browser package because user presentations consume its public DOM contract independently while runtime must not depend upward on author-facing effects; its only product dependency is runtime's types-only public surface. Bundler is a separate package because it executes under Node, owns the esbuild and filesystem dependency budget, and produces a presentation directory consumed independently by native rendering. The CLI is a distinct release artifact that combines core compilation, media probing, the bundler process, and native rendering without moving their implementation details into one crate. Syntax, diagnostics, model, compiler, timeline, and protocol remain rectangular modules inside core. Render graph and planning initially join core at gate two. Worker execution belongs to render. A coordinator may appear only after Gate-three artifact conformance.
+The completed Gate-one milestone contains `onmark-core`, `onmark-media`, `onmark-render`, `@onmark/runtime`'s browser session, `@onmark/authoring`'s semantic DOM bindings, `@onmark/bundler`'s presentation artifact boundary, and the first `onmark-cli` whole-film composition root. Media is a separate crate because server-side compile/lint loops need probing without Chromium; this is both a distinct dependency budget and a real consumer. Runtime is a separate package because it executes inside the browser and is consumed by authoring and bundling. Authoring is a separate browser package because user presentations consume its public DOM contract independently while runtime must not depend upward on author-facing effects; its only product dependency is runtime's types-only public surface. Bundler is a separate package because it executes under Node, owns the esbuild and filesystem dependency budget, and produces a presentation directory consumed independently by native rendering. The CLI is a distinct release artifact that combines core compilation, media probing, the bundler process, and native rendering without moving their implementation details into one crate. `onmark-aws-lambda` is a distinct Rust release artifact because Lambda is a different runtime and its handler owns the `aws-config`, `aws-sdk-s3`, and `lambda_runtime` dependency budget. It may consume `onmark-render`'s portable worker request and `onmark-core`'s canonical bundle layout, but neither dependency knows about AWS. Syntax, diagnostics, model, compiler, timeline, and protocol remain rectangular modules inside core. Render graph and planning initially join core at gate two. Worker execution belongs to render. A coordinator may appear only after the remote artifact adapter has passed conformance.
 
 Gate one's native command is deliberately narrow: `onmark render <screenplay>`. It discovers `presentation.ts` beside the screenplay unless `--presentation` is supplied, derives the stable no-clobber output `renders/<screenplay-stem>.mp4` unless `--output` is supplied, and exposes only exact frame rate and viewport dimensions as ordinary render controls. Process paths are execution overrides, not screenplay facts. Authored diagnostics are emitted before executable preflight so an invalid screenplay never requires Chromium, Node, or `FFmpeg` merely to explain itself. Gate three adds the deliberately separate worker entry point `onmark worker capture`: it accepts one versioned `request.json`, including the deployment-owned SHA-256 identity of its locked capture environment, the `bundle/` payload files named by that manifest, and frozen `assets/sha256/` bytes. The identity covers the image's Chromium, fonts, launch configuration, and other pixel-affecting host facts; the renderer deliberately does not guess it from one executable path or browser-version string. The worker materializes inputs in a private root and publishes one frame artifact. Reuse and assembly require that environment identity alongside the unit identity. The command accepts no screenplay and never recompiles source; a coordinator or object-store adapter owns request publication later.
 
@@ -258,7 +273,7 @@ Core's internal dependency DAG is CI-enforced: `model` depends on nothing; `synt
 
 `onmark-core` uses `xmlparser` only inside `syntax` for pure, span-preserving XML-compatible fragment tokenization. Onmark owns tree construction, nesting checks, duplicate-attribute checks, reference decoding, and all authored semantics. Parser errors are translated at the syntax boundary and the dependency performs no IO. Test targets may use `proptest` for time algebra and `syn` for the cooperative module dependency-law check; neither development dependency is linked into library consumers or runtime artifacts.
 
-The `protocol` module uses `serde` for stable browser and bundle-manifest JSON boundaries. Its optional `schema` feature exposes `schemars` only to repository generation; product binaries do not enable it. All repository-only automation lives under `scripts/`; it is not a product package or a miscellaneous application layer. Its Cargo manifest exists solely to give the Rust schema generator a pinned build-only dependency budget and a stable `cargo xtask` entry point. That binary is consumed only by developers and CI and may depend on core with the `schema` feature, `schemars`, and `serde_json`; product crates and packages never depend on it. The adjacent Node generator may use the pinned schema-to-TypeScript and validation toolchain. `cargo xtask schema` writes the versioned schemas, then invokes that generator. `json-schema-to-typescript` emits reviewable browser types into runtime and the manifest type into bundler; Ajv emits standalone browser validation code at build time. TypeScript checks both generated consumers. Oxlint, a narrow repository-shape check, and Prettier are repository-only development gates and never enter the browser artifact. The browser runtime does not compile schemas dynamically. Exact tool versions are pinned in the lockfiles and `mise.toml`, and CI rejects stale generated artifacts.
+The `protocol` module uses `serde` for stable browser and bundle-manifest JSON boundaries. Its optional `schema` feature exposes `schemars` only to repository generation; product binaries do not enable it. All repository-only automation lives under `scripts/`; it is not a product package or a miscellaneous application layer. Its Cargo manifest exists solely to give the Rust schema generator a pinned build-only dependency budget and a stable `cargo xtask` entry point. That binary is consumed only by developers and CI and may depend on core and `onmark-aws-lambda` with their `schema` features, `schemars`, and `serde_json`; it disables the Lambda package's default runtime feature, so schema generation does not link AWS. Product crates and packages never depend on it. The Lambda dependency exists solely to publish that deployment boundary's schemas, not to smuggle AWS into core. The adjacent Node generator may use the pinned schema-to-TypeScript and validation toolchain. `cargo xtask schema` writes every versioned schema, then invokes that generator. `json-schema-to-typescript` emits reviewable browser types into runtime and the manifest type into bundler; Ajv emits standalone browser validation code at build time. The Lambda schemas intentionally have no TypeScript codec until a real TypeScript caller exists. Oxlint, a narrow repository-shape check, and Prettier are repository-only development gates and never enter the browser artifact. The browser runtime does not compile schemas dynamically. Exact tool versions are pinned in the lockfiles and `mise.toml`, and CI rejects stale generated artifacts.
 
 `onmark-media` depends on core plus `serde` and `serde_json` for a private ffprobe response boundary. It starts the configured ffprobe executable directly with an argument array, never through a shell; wrappers that leave descendant processes holding the output pipes are outside this executable contract. Process lifetime and retained stdout/stderr bytes are explicitly bounded under that direct-child contract, both pipes are drained concurrently, and explicit shutdown reports process-control failures while `Drop` remains a best-effort termination fallback. Private ffprobe response types are translated once into core-owned `AssetMetadata`; JSON values and third-party error types do not define the stable API, while underlying errors remain available through the standard error source chain for debugging. Gate-one probing requests bounded stream-level facts for every stream: `codec_type` records audio presence and selects the first visual stream, while `nb_frames` identifies stills. It classifies a visual stream as constant only when ffprobe's parseable `avg_frame_rate` and `r_frame_rate` normalize to the same exact rational rate; disagreement or unavailable values are conservatively variable. The one-MiB stdout ceiling therefore remains independent of media duration.
 
@@ -310,7 +325,13 @@ GitHub-hosted Ubuntu does not expose a usable Chromium sandbox to the installed
 Chrome for Testing binary. The real-process job therefore supplies a
 runner-local launcher that adds `--no-sandbox`; this exception belongs only to
 the disposable CI worker. Product and local browser launches keep Chromium's
-sandbox enabled by default.
+sandbox enabled by default. An adapter may explicitly disable Chromium's
+internal sandbox only when an independently audited outer container or microVM
+owns equivalent process isolation. That deployment-owned choice is part of the
+locked capture environment, is never selected by authored input or a worker
+invocation, and must be proven in its real execution environment before it is
+treated as a production launch contract. A failed Chromium launch never causes
+an automatic downgrade.
 
 Gate-one native browser operations and decoded-video waits accept at most a one-day deadline, keeping every platform timer inside an explicit supported horizon.
 
@@ -320,11 +341,36 @@ On the TypeScript side, runtime is the foundation. Authoring consumes runtime's 
 
 `@onmark/bundler` is the Node-only product build boundary, not repository automation. It may depend on Node built-ins, the public `@onmark/authoring` and `@onmark/runtime` entry points, and the pinned `esbuild` production dependency; browser packages never depend back on it. Gate one compiles one ESM presentation, substitutes the pinned authoring and runtime entries, emits a fixed document shell, and records every presentation payload file in a stable SHA-256 manifest. The package exposes the same operation through the narrow `onmark-bundle` executable so the native CLI does not import Node or esbuild types. That child process receives explicit entry, output, and retained-byte-limit arguments, writes no success payload to stdout, and reports a stable failure category on stderr. The native caller applies its own process deadline, drains diagnostics continuously while retaining only a bounded tail, and parses the resulting manifest back through the Rust-owned wire type. The manifest shape and layout constants are generated from the Rust protocol contract rather than handwritten again in TypeScript. The build has an explicit retained-output byte ceiling, writes through a private sibling staging directory, and refuses an output path observed to exist before compilation or publication. The final directory rename prevents readers from observing a normally completed partial build, but portable Node filesystem APIs do not make the preceding absence check a cross-process no-clobber transaction. The current boundary deliberately has no watch mode, plugin API, cache, development server, or asset materialization policy. Esbuild's internal working memory remains governed by the pinned third-party implementation rather than the retained-output ceiling.
 
-Rust wire types are the source of truth. `cargo xtask schema` generates checked-in versioned JSON Schema and TypeScript types/codecs, and CI requires regeneration to produce no diff. Generated files are never hand-edited, and Rust does not regenerate a second Rust model from its own schema. Before the first external Gate-one release, v1 is refined in place so the initial public contract does not preserve experimental fields; after publication, an incompatible wire change requires a new protocol version and migration fixture. The `BrowserPlan` carries the output frame rate, evaluation/output intervals, primary-video placements, and title/call-to-action overlays consumed by the production presentation adapter. Video placements identify immutable bytes, an absolute visible interval, and the admitted CFR source rate needed to verify decoded-frame selection; overlay placements carry only their semantic role, decoded text, and compiler-solved absolute interval. Materialized URLs remain render-owned facts, while DOM structure and CSS remain presentation-owned effects. This is the browser-facing projection of one Render Unit, not the Render Graph or partition plan itself. It may contain only facts consumed in the browser; output paths, cache keys, `FFmpeg` arguments, source spans, and materialization policy remain outside it. VFR timestamp maps and further component facts are added only when the production adapter consumes them.
+Rust wire types are the source of truth. `cargo xtask schema` generates checked-in versioned JSON Schema, and CI requires regeneration to produce no diff. A schema with a real TypeScript consumer also generates checked-in types/codecs; the browser and bundle contracts do so today, while the Lambda invocation deliberately has no speculative TypeScript caller. Generated files are never hand-edited, and Rust does not regenerate a second Rust model from its own schema. Before the first external Gate-one release, v1 is refined in place so the initial public contract does not preserve experimental fields; after publication, an incompatible wire change requires a new protocol version and migration fixture. The `BrowserPlan` carries the output frame rate, evaluation/output intervals, primary-video placements, and title/call-to-action overlays consumed by the production presentation adapter. Video placements identify immutable bytes, an absolute visible interval, and the admitted CFR source rate needed to verify decoded-frame selection; overlay placements carry only their semantic role, decoded text, and compiler-solved absolute interval. Materialized URLs remain render-owned facts, while DOM structure and CSS remain presentation-owned effects. This is the browser-facing projection of one Render Unit, not the Render Graph or partition plan itself. It may contain only facts consumed in the browser; output paths, cache keys, `FFmpeg` arguments, source spans, and materialization policy remain outside it. VFR timestamp maps and further component facts are added only when the production adapter consumes them.
 
 Protocol V1 carries at most 10,000 video placements and 10,000 overlay placements; one overlay inscription carries at most 65,536 Unicode characters. One failure carries at most 4,096 message characters and 256 pending-resource descriptions of at most 1,024 characters each; the producer owns their deterministic order. The runtime-host property name and these resource limits are generated from Rust-owned schema metadata, so native execution, browser runtime, and validation do not maintain handwritten copies.
 
-AWS Lambda is an adapter, not another engine. A later independently published `@onmark/aws-lambda` surface owns invocation types, infrastructure definitions, the thin handler, and a container image with the pinned Rust binary, Chromium, FFmpeg, and fonts. The handler materializes a Render Unit, calls the same `onmark-render` executor, uploads an immutable artifact, and returns a structured result. AWS SDK types may not enter core. Other backends such as ECS or Kubernetes follow the same adapter rule.
+AWS Lambda is an adapter, not another engine. The checked-in Rust
+`onmark-aws-lambda` binary owns V1 invocation/result schemas, the thin handler,
+and S3 operations. It downloads one portable worker layout, checks that the
+request's capture environment equals the deployed image identity, materializes
+the Render Unit through `onmark-render`, verifies the finished artifact, and
+conditionally publishes it by its renderer-owned identity. A `412` means
+"download, verify, and compare the already-published raw-RGBA artifact"; a
+bounded `409` retry is only a conditional-publication transport retry, not a
+distributed retry policy.
+
+The deployment config owns S3 transport budgets: a five-second connection
+timeout, a 45-second attempt timeout, a 90-second operation timeout, and at
+most three SDK attempts. Since `GetObject` returns a response stream after the
+SDK operation has completed, every pending body read separately has a
+30-second progress deadline. This prevents a stalled stream from becoming an
+unbounded worker wait without pretending that it is a scheduler or lease
+policy.
+
+This JSON contract has checked-in Rust-generated schemas. It intentionally has
+no generated TypeScript SDK because no TypeScript caller exists yet; creating a
+coordinator client merely to satisfy symmetry would prebuild a later Gate-three
+control plane. AWS SDK types may not enter core or render. Container-image and
+infrastructure definitions remain experimental until Lambda proves the outer
+isolation and Chromium launch contract. Other backends such as ECS or Kubernetes
+follow the same adapter rule and consume the same worker request and artifact
+format.
 
 ## Delivery gates
 

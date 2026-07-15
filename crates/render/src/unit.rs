@@ -533,6 +533,14 @@ mod tests {
         );
         assert_eq!(decoded.profile(), render_profile());
         assert_eq!(decoded.capture_environment(), environment);
+        assert_eq!(decoded.artifact_id(), request.artifact_id());
+        assert_ne!(
+            request.artifact_id(),
+            unit.worker_capture_request(CaptureEnvironmentId::from_sha256(
+                [8; CaptureEnvironmentId::BYTE_LENGTH]
+            ))
+            .artifact_id()
+        );
     }
 
     #[test]

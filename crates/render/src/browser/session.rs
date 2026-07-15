@@ -23,6 +23,19 @@ const READINESS_POLL_INTERVAL: Duration = Duration::from_millis(10);
 const COMPOSITOR_COMMIT: &str =
     "new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))";
 
+/// Chromium's process-sandbox policy at one execution boundary.
+///
+/// Local rendering keeps Chromium's own sandbox enabled. A deployment adapter
+/// may disable it only when an independently audited outer sandbox owns the
+/// process-isolation contract. A failed launch never changes this choice.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ChromiumSandbox {
+    /// Retain Chromium's standard namespace or setuid sandbox.
+    Enabled,
+    /// Let an independently isolated worker boundary own process isolation.
+    Disabled,
+}
+
 /// One owned Chromium process and its single Gate-one page.
 #[derive(Debug)]
 pub struct BrowserSession {
@@ -44,11 +57,18 @@ impl BrowserSession {
     /// startup, or initial page creation fails.
     pub async fn launch(
         executable: impl AsRef<Path>,
+        sandbox: ChromiumSandbox,
         render_profile: RenderProfile,
         limits: BrowserLimits,
     ) -> Result<Self, BrowserError> {
         let profile = browser_profile()?;
-        let config = browser_config(executable.as_ref(), profile.path(), render_profile, limits)?;
+        let config = browser_config(
+            executable.as_ref(),
+            sandbox,
+            profile.path(),
+            render_profile,
+            limits,
+        )?;
         let (mut browser, mut handler) = Browser::launch(config)
             .await
             .map_err(|source| BrowserError::cdp(BrowserErrorKind::Launch, source))?;
@@ -239,11 +259,12 @@ fn browser_profile() -> Result<TempDir, BrowserError> {
 
 fn browser_config(
     executable: &Path,
+    sandbox: ChromiumSandbox,
     profile: &Path,
     render_profile: RenderProfile,
     limits: BrowserLimits,
 ) -> Result<BrowserConfig, BrowserError> {
-    BrowserConfig::builder()
+    let config = BrowserConfig::builder()
         .chrome_executable(executable)
         .user_data_dir(profile)
         .new_headless_mode()
@@ -259,7 +280,13 @@ fn browser_config(
         .launch_timeout(limits.deadline())
         .request_timeout(limits.deadline())
         .disable_cache()
-        .surface_invalid_messages()
+        .surface_invalid_messages();
+    let config = match sandbox {
+        ChromiumSandbox::Enabled => config,
+        ChromiumSandbox::Disabled => config.no_sandbox(),
+    };
+
+    config
         // Chromiumoxide adds the `--` prefix to argument keys.
         .arg("allow-file-access-from-files")
         .build()

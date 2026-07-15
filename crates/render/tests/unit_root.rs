@@ -61,7 +61,7 @@ fn materializes_the_checked_in_bundle_contract() {
 }
 
 #[test]
-fn materializes_one_portable_worker_capture_request() {
+fn materializes_one_portable_worker_capture_request_inside_its_private_parent() {
     let fixture = Fixture::new();
     let unit = RenderUnit::whole_film(
         &static_timeline(),
@@ -71,11 +71,14 @@ fn materializes_one_portable_worker_capture_request() {
     )
     .expect("the static fixture forms one render unit");
     let request = unit.worker_capture_request(capture_environment());
+    let expected_plan = request.browser_plan().clone();
+    let expected_profile = request.profile();
     let input = tempdir().expect("the worker input root is available");
+    let private = tempdir().expect("the worker private parent is available");
     stage_worker_bundle(input.path(), &fixture);
 
     let executable = request
-        .materialize(input.path(), limits(4, 4_096))
+        .materialize_in(input.path(), private.path(), limits(4, 4_096))
         .expect("the worker request materializes into a private executable root");
     let entry = executable
         .entry_url()
@@ -83,8 +86,9 @@ fn materializes_one_portable_worker_capture_request() {
         .expect("the worker executable entry remains local");
 
     assert_eq!(read(&entry), b"page");
-    assert_eq!(executable.browser_plan(), request.browser_plan());
-    assert_eq!(executable.profile(), request.profile());
+    assert!(entry.starts_with(private.path()));
+    assert_eq!(executable.browser_plan(), &expected_plan);
+    assert_eq!(executable.profile(), expected_profile);
 }
 
 #[test]

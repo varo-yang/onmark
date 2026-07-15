@@ -8,10 +8,9 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::unit_root::AssetSource;
 use crate::{
-    CaptureEnvironmentId, ExecutableUnit, RenderProfile, UnitRoot, UnitRootError, UnitRootLimits,
+    CaptureEnvironmentId, ExecutableUnit, FrameArtifactId, RenderProfile, UnitRoot, UnitRootError,
+    UnitRootLimits,
 };
-
-const BUNDLE_DIRECTORY: &str = "bundle";
 
 /// Version of the worker capture-request contract.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -61,6 +60,11 @@ pub struct WorkerCaptureRequest {
 }
 
 impl WorkerCaptureRequest {
+    /// Fixed request filename beneath every portable worker-input root.
+    pub const FILE_NAME: &'static str = "request.json";
+    /// Fixed directory containing immutable presentation payload files.
+    pub const BUNDLE_DIRECTORY: &'static str = "bundle";
+
     /// Creates one portable request for one already-composed render unit.
     #[must_use]
     pub fn new(
@@ -108,6 +112,31 @@ impl WorkerCaptureRequest {
         self.profile
     }
 
+    /// Returns the deployment-independent address of this capture result.
+    ///
+    /// The address commits to the solved browser plan, immutable bundle,
+    /// render profile, and locked capture environment. Storage location stays
+    /// deployment-owned, so this request can move between local and remote
+    /// workers without changing its identity.
+    #[must_use]
+    pub fn artifact_id(&self) -> FrameArtifactId {
+        FrameArtifactId::from_facts(
+            &self.browser_plan,
+            self.bundle.bundle_id(),
+            self.profile,
+            self.capture_environment,
+        )
+    }
+
+    /// Returns required frozen visual assets in deterministic identity order.
+    ///
+    /// A remote adapter uses these identities to materialize the exact bytes
+    /// named by the browser plan before handing this request to the renderer.
+    #[must_use]
+    pub fn required_asset_ids(&self) -> impl ExactSizeIterator<Item = FrozenAssetId> {
+        asset_ids(&self.browser_plan).into_iter()
+    }
+
     /// Materializes verified worker-local inputs from the portable layout.
     ///
     /// `input_root/bundle` must contain the exact bundle payload described by
@@ -121,36 +150,72 @@ impl WorkerCaptureRequest {
     /// Returns [`UnitRootError`] when bundle or asset bytes, limits, or local
     /// filesystem operations violate the verified private-root contract.
     pub fn materialize(
-        &self,
+        self,
         input_root: &Path,
         limits: UnitRootLimits,
     ) -> Result<ExecutableUnit, UnitRootError> {
-        let assets = self
-            .asset_ids()
+        self.materialize_with_root_parent(input_root, None, limits)
+    }
+
+    /// Materializes the portable layout into a caller-owned private parent.
+    ///
+    /// Deployment adapters use this form to keep downloaded inputs, copied
+    /// unit bytes, and captured output under one audited scratch-disk policy.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`UnitRootError`] when bundle or asset bytes, resource limits,
+    /// or filesystem operations violate the verified private-root contract.
+    pub fn materialize_in(
+        self,
+        input_root: &Path,
+        private_root_parent: &Path,
+        limits: UnitRootLimits,
+    ) -> Result<ExecutableUnit, UnitRootError> {
+        self.materialize_with_root_parent(input_root, Some(private_root_parent), limits)
+    }
+
+    fn materialize_with_root_parent(
+        self,
+        input_root: &Path,
+        private_root_parent: Option<&Path>,
+        limits: UnitRootLimits,
+    ) -> Result<ExecutableUnit, UnitRootError> {
+        let Self {
+            bundle: manifest,
+            browser_plan,
+            profile,
+            ..
+        } = self;
+        let assets = asset_ids(&browser_plan)
             .into_iter()
             .map(|id| AssetSource::new(id, input_root.join(BundleManifest::asset_path(id))));
-        let root = UnitRoot::materialize_sources(
-            &input_root.join(BUNDLE_DIRECTORY),
-            &self.bundle,
-            assets,
-            limits,
-        )?;
+        let bundle_directory = input_root.join(Self::BUNDLE_DIRECTORY);
+        let root = match private_root_parent {
+            Some(parent) => UnitRoot::materialize_sources_in(
+                parent,
+                &bundle_directory,
+                &manifest,
+                assets,
+                limits,
+            )?,
+            None => UnitRoot::materialize_sources(&bundle_directory, &manifest, assets, limits)?,
+        };
 
         Ok(ExecutableUnit::from_worker_root(
-            self.browser_plan.clone(),
-            self.bundle.bundle_id(),
-            self.profile,
+            browser_plan,
+            manifest.bundle_id(),
+            profile,
             root,
         ))
     }
+}
 
-    fn asset_ids(&self) -> BTreeSet<FrozenAssetId> {
-        self.browser_plan
-            .videos()
-            .iter()
-            .map(BrowserVideo::asset_identity)
-            .collect()
-    }
+fn asset_ids(plan: &BrowserPlan) -> BTreeSet<FrozenAssetId> {
+    plan.videos()
+        .iter()
+        .map(BrowserVideo::asset_identity)
+        .collect()
 }
 
 impl<'de> Deserialize<'de> for WorkerCaptureRequest {

@@ -1,0 +1,83 @@
+{
+  "$defs": {
+    "ArtifactLocation": {
+      "additionalProperties": false,
+      "description": "One immutable frame artifact reachable through S3.",
+      "properties": {
+        "artifactId": {
+          "$ref": "#/$defs/FrameArtifactId"
+        },
+        "bucket": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "frames": {
+          "format": "uint64",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "key": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "bucket",
+        "key",
+        "artifactId",
+        "frames"
+      ],
+      "type": "object"
+    },
+    "CaptureInvocationVersion": {
+      "const": 1,
+      "description": "Version of the Lambda invocation contract.",
+      "format": "uint16",
+      "maximum": 65535,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "FrameArtifactId": {
+      "description": "Deterministic identity of one frame-artifact capture contract.\n\nThis identifies the immutable visual inputs and locked capture environment,\nnot the encoded PNG payload. Deployments use it to choose an object key;\nthe artifact's internal checksum still verifies the published bytes.",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "Publication": {
+      "description": "Whether this invocation committed a new object or reused a verified one.",
+      "oneOf": [
+        {
+          "const": "published",
+          "description": "This invocation conditionally committed a new immutable artifact.",
+          "type": "string"
+        },
+        {
+          "const": "reused",
+          "description": "A concurrent or prior invocation had already committed the same artifact.",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$id": "https://onmark.dev/schemas/aws-capture-result-v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Structured result of one frame-capture invocation.",
+  "properties": {
+    "artifact": {
+      "$ref": "#/$defs/ArtifactLocation"
+    },
+    "publication": {
+      "$ref": "#/$defs/Publication"
+    },
+    "version": {
+      "$ref": "#/$defs/CaptureInvocationVersion"
+    }
+  },
+  "required": [
+    "version",
+    "artifact",
+    "publication"
+  ],
+  "title": "CaptureResult",
+  "type": "object"
+}

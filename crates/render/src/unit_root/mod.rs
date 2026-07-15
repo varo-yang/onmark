@@ -283,8 +283,39 @@ impl UnitRoot {
         assets: impl IntoIterator<Item = AssetSource>,
         limits: UnitRootLimits,
     ) -> Result<Self, UnitRootError> {
-        let directory =
-            materializer::materialize(bundle_directory, manifest, assets.into_iter(), limits)?;
+        Self::materialize_sources_at(None, bundle_directory, manifest, assets, limits)
+    }
+
+    pub(crate) fn materialize_sources_in(
+        private_root_parent: &Path,
+        bundle_directory: &Path,
+        manifest: &BundleManifest,
+        assets: impl IntoIterator<Item = AssetSource>,
+        limits: UnitRootLimits,
+    ) -> Result<Self, UnitRootError> {
+        Self::materialize_sources_at(
+            Some(private_root_parent),
+            bundle_directory,
+            manifest,
+            assets,
+            limits,
+        )
+    }
+
+    fn materialize_sources_at(
+        private_root_parent: Option<&Path>,
+        bundle_directory: &Path,
+        manifest: &BundleManifest,
+        assets: impl IntoIterator<Item = AssetSource>,
+        limits: UnitRootLimits,
+    ) -> Result<Self, UnitRootError> {
+        let directory = materializer::materialize(
+            private_root_parent,
+            bundle_directory,
+            manifest,
+            assets.into_iter(),
+            limits,
+        )?;
         let entry = directory.path().join(manifest.entry_point());
         let entry_url = Url::from_file_path(&entry).map_err(|()| {
             UnitRootError::without_source(

@@ -5,6 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command as ProcessCommand, ExitCode};
 
+use onmark_aws_lambda::{CaptureInvocation, CaptureResult};
 use onmark_core::protocol::{BrowserRequest, BrowserResponse, BundleManifest};
 use schemars::{JsonSchema, schema_for};
 use serde_json::Value;
@@ -26,11 +27,11 @@ fn run() -> Result<(), Box<dyn Error>> {
         .expect("scripts is nested directly below the repository root");
 
     match command {
-        Command::Schema(mode) => generate_protocol(repository, mode),
+        Command::Schema(mode) => generate_schemas(repository, mode),
     }
 }
 
-fn generate_protocol(repository: &Path, mode: GenerationMode) -> Result<(), Box<dyn Error>> {
+fn generate_schemas(repository: &Path, mode: GenerationMode) -> Result<(), Box<dyn Error>> {
     let schemas = [
         SchemaArtifact::new::<BrowserRequest>(
             "https://onmark.dev/schemas/browser-request-v1.schema.json",
@@ -43,6 +44,14 @@ fn generate_protocol(repository: &Path, mode: GenerationMode) -> Result<(), Box<
         SchemaArtifact::new::<BundleManifest>(
             "https://onmark.dev/schemas/bundle-manifest-v1.schema.json",
             "bundle-manifest-v1.schema.json",
+        )?,
+        SchemaArtifact::new::<CaptureInvocation>(
+            "https://onmark.dev/schemas/aws-capture-invocation-v1.schema.json",
+            "aws-capture-invocation-v1.schema.json",
+        )?,
+        SchemaArtifact::new::<CaptureResult>(
+            "https://onmark.dev/schemas/aws-capture-result-v1.schema.json",
+            "aws-capture-result-v1.schema.json",
         )?,
     ];
     let directory = repository.join("schemas");

@@ -21,7 +21,8 @@ use onmark_core::protocol::{
 };
 use onmark_media::Ffprobe;
 use onmark_render::{
-    AdmittedVideo, BrowserLimits, BrowserSession, EncodedPng, RenderProfile, UnsupportedVideo,
+    AdmittedVideo, BrowserLimits, BrowserSession, ChromiumSandbox, EncodedPng, RenderProfile,
+    UnsupportedVideo,
 };
 use serde::Deserialize;
 use tempfile::{NamedTempFile, tempdir};
@@ -116,9 +117,14 @@ struct MeasuredFrames<T> {
 }
 
 async fn capture_seek_sequence(fixture: &Url, plan: &BrowserPlan) -> MeasuredFrames<EncodedPng> {
-    let session = BrowserSession::launch(chrome(), render_profile(), browser_limits())
-        .await
-        .expect("Chrome must launch");
+    let session = BrowserSession::launch(
+        chrome(),
+        ChromiumSandbox::Enabled,
+        render_profile(),
+        browser_limits(),
+    )
+    .await
+    .expect("Chrome must launch");
     let capture_result = capture_video_frames(&session, fixture, plan).await;
     let shutdown_result = session.shutdown().await;
 
