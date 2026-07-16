@@ -12,6 +12,8 @@ import {
 } from "../src/index.js";
 import { FakeVideoElement } from "./fake-video-element.js";
 
+// ── Presentation lifecycle ──
+
 test("presents videos and overlays on their Rust-owned intervals", async () => {
   const recorder = new PresentationRecorder();
   const adapter = new PresentationRuntimeAdapter(recorder.bindings, 100);
@@ -32,10 +34,13 @@ test("presents videos and overlays on their Rust-owned intervals", async () => {
     ],
   );
 
-  const firstFrame = adapter.prepare(runtimeFrameAt(10, plan.frameRate));
+  await adapter.prepare(runtimeFrameAt(10, plan.frameRate));
+  const firstFrame = adapter.seek(runtimeFrameAt(10, plan.frameRate));
   recorder.videos[0]?.element.emit("seeked");
-  recorder.videos[0]?.element.present(0);
   await firstFrame;
+  const firstConfirmation = adapter.confirm(runtimeFrameAt(10, plan.frameRate));
+  recorder.videos[0]?.element.present(0);
+  await firstConfirmation;
   assert.deepEqual(recorder.visibility(), {
     videos: [true, false],
     overlays: [true, false],
@@ -43,8 +48,12 @@ test("presents videos and overlays on their Rust-owned intervals", async () => {
 
   const secondFrame = adapter.seek(runtimeFrameAt(20, plan.frameRate));
   recorder.videos[1]?.element.emit("seeked");
-  recorder.videos[1]?.element.present(0);
   await secondFrame;
+  const secondConfirmation = adapter.confirm(
+    runtimeFrameAt(20, plan.frameRate),
+  );
+  recorder.videos[1]?.element.present(0);
+  await secondConfirmation;
   assert.deepEqual(recorder.visibility(), {
     videos: [false, true],
     overlays: [true, true],
@@ -74,6 +83,8 @@ test("releases earlier effects when a later binding fails", async () => {
 
   assert.equal(recorder.allDisposed(), true);
 });
+
+// ── Test presentation boundary ──
 
 interface RecordedVideo {
   readonly element: FakeVideoElement;

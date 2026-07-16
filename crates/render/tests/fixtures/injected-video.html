@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Onmark pre-extracted video-frame injection experiment</title>
+    <style>
+      html,
+      body,
+      canvas {
+        height: 100%;
+        margin: 0;
+        width: 100%;
+      }
+
+      body {
+        overflow: hidden;
+      }
+
+      canvas {
+        inset: 0;
+        position: fixed;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas aria-label="Injected video frame"></canvas>
+    <script type="module">
+      // Disposable experiment for measuring one-pass native extraction plus
+      // browser image injection without changing the production adapter.
+      import {
+        RuntimeAdapterError,
+        installRuntimeHost,
+      } from "../../../../packages/runtime/dist/src/index.js";
+
+      const canvas = requiredElement("canvas", HTMLCanvasElement);
+      const context = canvas.getContext("2d", { alpha: false });
+      if (context === null) {
+        throw new TypeError(
+          "the injection experiment requires a 2D canvas context",
+        );
+      }
+      const frameRoot = new URL(requiredParameter("frames"));
+      const image = new Image();
+      let stagedFrame;
+
+      installRuntimeHost({
+        async load(plan) {
+          if (plan.videos.length !== 1) {
+            throw new RuntimeAdapterError(
+              "operation",
+              "the injection experiment requires exactly one video placement",
+            );
+          }
+        },
+        async prepare() {},
+        async seek(frame) {
+          if (stagedFrame !== undefined) {
+            throw new RuntimeAdapterError(
+              "operation",
+              "the injection experiment already has a staged frame",
+            );
+          }
+          image.src = new URL(frameName(frame.index), frameRoot).href;
+          await image.decode();
+          canvas.width = window.innerWidth;
+          canvas.height = window.innerHeight;
+          context.drawImage(image, 0, 0, canvas.width, canvas.height);
+          stagedFrame = frame.index;
+        },
+        async confirm(frame) {
+          if (stagedFrame !== frame.index) {
+            throw new RuntimeAdapterError(
+              "operation",
+              "the injection experiment can only confirm its staged frame",
+            );
+          }
+          stagedFrame = undefined;
+        },
+        async dispose() {
+          stagedFrame = undefined;
+          image.removeAttribute("src");
+          context.clearRect(0, 0, canvas.width, canvas.height);
+        },
+      });
+
+      function frameName(index) {
+        return `frame-${String(index).padStart(5, "0")}.png`;
+      }
+
+      function requiredElement(selector, constructor) {
+        const element = document.querySelector(selector);
+        if (!(element instanceof constructor)) {
+          throw new TypeError(
+            `the injection experiment requires one ${selector}`,
+          );
+        }
+        return element;
+      }
+
+      function requiredParameter(name) {
+        const value = new URL(location.href).searchParams.get(name);
+        if (value === null || value.length === 0) {
+          throw new TypeError(`the injection experiment requires ${name}`);
+        }
+        return value;
+      }
+    </script>
+  </body>
+</html>

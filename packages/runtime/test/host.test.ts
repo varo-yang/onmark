@@ -17,6 +17,7 @@ const adapter: RuntimeAdapter = {
   async load(_plan: RuntimePlan): Promise<void> {},
   async prepare(_frame: RuntimeFrame): Promise<void> {},
   async seek(_frame: RuntimeFrame): Promise<void> {},
+  async confirm(_frame: RuntimeFrame): Promise<void> {},
   async dispose(): Promise<void> {},
 };
 

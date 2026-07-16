@@ -13,6 +13,7 @@ publish = false
 schema = ["onmark-core/schema", "dep:schemars"]
 
 [dependencies]
+base64 = "0.22.1"
 chromiumoxide = { version = "0.9.1", default-features = false }
 futures = "0.3"
 onmark-core = { path = "../core" }

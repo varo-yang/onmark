@@ -18,7 +18,7 @@ const selection = {
 
 // ── Decoded-video resource ──
 
-test("loads and confirms one exact decoded source frame", async () => {
+test("stages a seek before confirming the compositor-presented frame", async () => {
   const element = new FakeVideoElement();
   const video = new DecodedVideo(element, 100);
 
@@ -28,24 +28,30 @@ test("loads and confirms one exact decoded source frame", async () => {
   element.emit("loadeddata");
   await loading;
 
-  const presenting = video.present(selection);
+  const staging = video.stage(selection);
   assert.equal(element.currentTime, selection.seekTimeSeconds);
   element.emit("seeked");
+  await staging;
+
+  const confirming = video.confirm(selection);
   element.present(selection.mediaTimeSeconds);
-  await presenting;
+  await confirming;
 });
 
 test("reuses an already confirmed source frame without seeking again", async () => {
   const element = new FakeVideoElement();
   const video = await loadedVideo(element);
 
-  const first = video.present(selection);
+  const first = video.stage(selection);
   element.emit("seeked");
-  element.present(selection.mediaTimeSeconds);
   await first;
+  const confirmation = video.confirm(selection);
+  element.present(selection.mediaTimeSeconds);
+  await confirmation;
   const seekCount = element.seekCount;
 
-  await video.present(selection);
+  await video.stage(selection);
+  await video.confirm(selection);
 
   assert.equal(element.seekCount, seekCount);
   assert.equal(element.pendingFrameCallbacks, 0);
@@ -55,12 +61,14 @@ test("waits past unrelated decoded frames and removes every observer", async () 
   const element = new FakeVideoElement();
   const video = await loadedVideo(element);
 
-  const presenting = video.present(selection);
+  const staging = video.stage(selection);
   element.emit("seeked");
+  await staging;
+  const confirming = video.confirm(selection);
   element.present(0);
   assert.equal(element.pendingFrameCallbacks, 1);
   element.present(selection.mediaTimeSeconds);
-  await presenting;
+  await confirming;
 
   assert.equal(element.listenerCount, 0);
   assert.equal(element.pendingFrameCallbacks, 0);
@@ -71,7 +79,12 @@ test("reports bounded readiness failures and cleans the pending frame wait", asy
   const video = await loadedVideo(element, 5);
 
   await assert.rejects(
-    video.present(selection),
+    async () => {
+      const staging = video.stage(selection);
+      element.emit("seeked");
+      await staging;
+      await video.confirm(selection);
+    },
     (error: unknown) =>
       error instanceof RuntimeAdapterError &&
       error.kind === "readinessTimeout" &&
@@ -97,7 +110,7 @@ test("cleans media observers after synchronous browser failures", async () => {
   const seekingVideo = await loadedVideo(seekingElement);
   seekingElement.frameCallbackError = new Error("callback unavailable");
 
-  await assert.rejects(seekingVideo.present(selection), RuntimeAdapterError);
+  await assert.rejects(seekingVideo.stage(selection), RuntimeAdapterError);
   assert.equal(seekingElement.listenerCount, 0);
   assert.equal(seekingElement.pendingFrameCallbacks, 0);
 });
@@ -110,7 +123,7 @@ test("releases media bytes and makes disposal terminal", async () => {
 
   assert.equal(element.hasSource, false);
   assert.equal(element.loadCount, 2);
-  await assert.rejects(video.present(selection), RuntimeAdapterError);
+  await assert.rejects(video.stage(selection), RuntimeAdapterError);
 });
 
 test("rejects readiness deadlines outside the browser timer budget", () => {

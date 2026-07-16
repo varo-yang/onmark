@@ -10,16 +10,7 @@ use std::path::{Path, PathBuf};
 
 use crate::arguments::RenderArgs;
 
-const BROWSER_CANDIDATES: &[&str] = &[
-    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    "/Applications/Chromium.app/Contents/MacOS/Chromium",
-    "google-chrome",
-    "google-chrome-stable",
-    "chromium",
-    "chromium-browser",
-    "chrome",
-    "msedge",
-];
+const DEFAULT_BROWSER: &str = "chrome-headless-shell";
 
 /// Validated browser, `FFmpeg`, ffprobe, and bundler paths for one command.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -34,7 +25,7 @@ impl Executables {
     pub(super) fn discover(args: &RenderArgs) -> Result<Self, EnvironmentError> {
         let browser = match &args.browser {
             Some(browser) => locate("browser", browser)?,
-            None => locate_browser()?,
+            None => locate("browser", Path::new(DEFAULT_BROWSER))?,
         };
         let bundler = locate("presentation bundler", &args.bundler)?;
         let ffmpeg = locate("FFmpeg", &args.ffmpeg)?;
@@ -75,18 +66,6 @@ impl fmt::Display for EnvironmentError {
 }
 
 impl Error for EnvironmentError {}
-
-fn locate_browser() -> Result<PathBuf, EnvironmentError> {
-    for candidate in BROWSER_CANDIDATES {
-        if let Some(path) = executable_path(Path::new(candidate)) {
-            return Ok(path);
-        }
-    }
-    Err(EnvironmentError {
-        role: "browser",
-        requested: PathBuf::from("Chromium or Google Chrome"),
-    })
-}
 
 fn locate(role: &'static str, requested: &Path) -> Result<PathBuf, EnvironmentError> {
     executable_path(requested).ok_or_else(|| EnvironmentError {

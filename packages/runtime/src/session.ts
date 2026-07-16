@@ -35,8 +35,10 @@ export interface RuntimeAdapter {
   load(plan: RuntimePlan): Promise<void>;
   /** Resolves only after resources at the evaluation start are stable. */
   prepare(frame: RuntimeFrame): Promise<void>;
-  /** Resolves only after one exact frame is stable for native capture. */
+  /** Stages one exact frame and registers media presentation observers. */
   seek(frame: RuntimeFrame): Promise<void>;
+  /** Verifies media presentation after native compositor capture. */
+  confirm(frame: RuntimeFrame): Promise<void>;
   /** Releases all resources owned by this adapter. */
   dispose(): Promise<void>;
 }
@@ -112,6 +114,8 @@ export class RuntimeSession {
         );
       case "seek":
         return this.#seek(request.requestId, request.command.frame);
+      case "confirm":
+        return this.#confirm(request.requestId, request.command.frame);
       case "dispose":
         return this.#dispose(request.requestId);
     }
@@ -190,10 +194,33 @@ export class RuntimeSession {
 
     try {
       await this.#adapter.seek(runtimeFrameAt(frame, this.#state.frameRate));
-      return response(requestId, { type: "frameReady", frame });
     } catch (error) {
       return readinessFailure(requestId, "seekFailed", error);
     }
+
+    this.#state = { ...this.#state, kind: "staged", frame };
+    return response(requestId, { type: "frameStaged", frame });
+  }
+
+  async #confirm(requestId: number, frame: number): Promise<BrowserResponse> {
+    if (this.#state.kind !== "staged") {
+      return invalidRequest(
+        requestId,
+        "confirm requires a staged browser frame",
+      );
+    }
+    if (frame !== this.#state.frame) {
+      return invalidRequest(requestId, "confirm must use the staged frame");
+    }
+
+    try {
+      await this.#adapter.confirm(runtimeFrameAt(frame, this.#state.frameRate));
+    } catch (error) {
+      return readinessFailure(requestId, "confirmFailed", error);
+    }
+
+    this.#state = { ...this.#state, kind: "ready" };
+    return response(requestId, { type: "frameReady", frame });
   }
 
   async #dispose(requestId: number): Promise<BrowserResponse> {
@@ -219,6 +246,7 @@ type SessionState =
   | { readonly kind: "empty" }
   | LoadedState
   | ReadyState
+  | StagedState
   | { readonly kind: "disposed" };
 
 interface LoadedState {
@@ -233,6 +261,14 @@ interface ReadyState {
   readonly evaluationStart: number;
   readonly evaluationEnd: number;
   readonly frameRate: RuntimePlan["frameRate"];
+}
+
+interface StagedState {
+  readonly kind: "staged";
+  readonly evaluationStart: number;
+  readonly evaluationEnd: number;
+  readonly frameRate: RuntimePlan["frameRate"];
+  readonly frame: number;
 }
 
 type BrowserEvent = BrowserResponse["event"];

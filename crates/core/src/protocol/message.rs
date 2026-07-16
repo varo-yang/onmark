@@ -139,6 +139,11 @@ pub enum BrowserCommand {
         /// Frame selected by the native executor.
         frame: WireFrame,
     },
+    /// Confirm that the compositor presented the staged media frame.
+    Confirm {
+        /// Frame whose captured presentation is being confirmed.
+        frame: WireFrame,
+    },
     /// Release page-owned resources for this session.
     Dispose,
 }
@@ -210,9 +215,14 @@ pub enum BrowserEvent {
         /// Frame at which preparation completed.
         evaluation_start: WireFrame,
     },
-    /// One requested frame is stable and may be captured.
+    /// One requested frame has been staged for the compositor.
+    FrameStaged {
+        /// Exact frame represented by staged browser state.
+        frame: WireFrame,
+    },
+    /// The captured compositor frame passed runtime media confirmation.
     FrameReady {
-        /// Exact frame now represented by browser state.
+        /// Exact frame confirmed by browser media state.
         frame: WireFrame,
     },
     /// The browser rejected a command or could not reach readiness.
@@ -392,6 +402,8 @@ pub enum ProtocolFailureCode {
     PrepareFailed,
     /// The requested frame could not be evaluated.
     SeekFailed,
+    /// The staged frame could not be confirmed after compositor capture.
+    ConfirmFailed,
     /// One or more resources missed the readiness deadline.
     ReadinessTimeout,
     /// The runtime violated an internal invariant.

@@ -2,7 +2,11 @@
 // Rust owns every interval; presentation callbacks own DOM and layout effects.
 
 import type { RuntimeFrame } from "./clock.js";
-import { videoFrameSelection, type RuntimeVideo } from "./media.js";
+import {
+  videoFrameSelection,
+  type RuntimeVideo,
+  type VideoFrameSelection,
+} from "./media.js";
 import {
   RuntimeAdapterError,
   type RuntimeAdapter,
@@ -53,6 +57,16 @@ interface LoadedPresentation {
   readonly overlays: readonly BoundOverlay[];
 }
 
+interface StagedVideo {
+  readonly video: BoundVideo;
+  readonly selection: VideoFrameSelection;
+}
+
+interface StagedPresentation {
+  readonly frame: RuntimeFrame;
+  readonly videos: readonly StagedVideo[];
+}
+
 type PresentationState =
   | { readonly kind: "empty" }
   | LoadedPresentation
@@ -62,6 +76,7 @@ type PresentationState =
 export class PresentationRuntimeAdapter implements RuntimeAdapter {
   readonly #bindings: PresentationBindings;
   readonly #videoTimeoutMilliseconds: number;
+  #staged: StagedPresentation | undefined;
   #state: PresentationState = { kind: "empty" };
 
   constructor(
@@ -101,12 +116,46 @@ export class PresentationRuntimeAdapter implements RuntimeAdapter {
     };
   }
 
-  prepare(frame: RuntimeFrame): Promise<void> {
-    return this.#present(frame);
+  async prepare(_frame: RuntimeFrame): Promise<void> {
+    this.#loadedState("prepare");
   }
 
-  seek(frame: RuntimeFrame): Promise<void> {
-    return this.#present(frame);
+  async seek(frame: RuntimeFrame): Promise<void> {
+    const state = this.#loadedState("seek");
+    if (this.#staged !== undefined) {
+      throw new RuntimeAdapterError(
+        "operation",
+        "presentation cannot stage another frame before confirmation",
+      );
+    }
+
+    try {
+      hideVideos(state.videos);
+      const videos = await stageVideos(frame, state);
+      presentOverlays(frame, state.overlays);
+      this.#staged = { frame, videos };
+    } catch (error) {
+      discardStagedVideos(state.videos);
+      throw RuntimeAdapterError.fromUnknown(error, "frame staging failed");
+    }
+  }
+
+  async confirm(frame: RuntimeFrame): Promise<void> {
+    this.#loadedState("confirm");
+    const staged = this.#staged;
+    if (staged === undefined || staged.frame.index !== frame.index) {
+      throw new RuntimeAdapterError(
+        "operation",
+        "presentation confirmation requires the staged frame",
+      );
+    }
+
+    try {
+      await confirmVideos(staged.videos);
+      this.#staged = undefined;
+    } catch (error) {
+      throw RuntimeAdapterError.fromUnknown(error, "frame confirmation failed");
+    }
   }
 
   async dispose(): Promise<void> {
@@ -115,6 +164,7 @@ export class PresentationRuntimeAdapter implements RuntimeAdapter {
     }
     const loaded = this.#state.kind === "loaded" ? this.#state : undefined;
     this.#state = { kind: "disposed" };
+    this.#staged = undefined;
 
     const failure = releasePresentation(
       loaded?.videos ?? [],
@@ -150,31 +200,24 @@ export class PresentationRuntimeAdapter implements RuntimeAdapter {
     }
   }
 
-  async #present(frame: RuntimeFrame): Promise<void> {
+  #loadedState(operation: string): LoadedPresentation {
     if (this.#state.kind !== "loaded") {
       throw new RuntimeAdapterError(
         "operation",
-        "frame presentation requires the loaded state",
+        `presentation ${operation} requires the loaded state`,
       );
     }
-
-    try {
-      hideVideos(this.#state.videos);
-      await presentVideos(frame, this.#state);
-      presentOverlays(frame, this.#state.overlays);
-    } catch (error) {
-      throw RuntimeAdapterError.fromUnknown(error, "frame presentation failed");
-    }
+    return this.#state;
   }
 }
 
 // ── Frame application ──
 
-async function presentVideos(
+async function stageVideos(
   frame: RuntimeFrame,
   state: LoadedPresentation,
-): Promise<void> {
-  const visible: BoundVideo[] = [];
+): Promise<readonly StagedVideo[]> {
+  const staged: StagedVideo[] = [];
   for (const video of state.videos) {
     const selection = videoFrameSelection(
       frame,
@@ -184,11 +227,24 @@ async function presentVideos(
     if (selection === undefined) {
       continue;
     }
-    await video.resource.present(selection);
-    visible.push(video);
+    await video.resource.stage(selection);
+    staged.push({ video, selection });
   }
-  for (const video of visible) {
+  for (const { video } of staged) {
     video.presentation.setVisible(true);
+  }
+  return staged;
+}
+
+async function confirmVideos(videos: readonly StagedVideo[]): Promise<void> {
+  for (const { video, selection } of videos) {
+    await video.resource.confirm(selection);
+  }
+}
+
+function discardStagedVideos(videos: readonly BoundVideo[]): void {
+  for (const video of videos) {
+    video.resource.discardStagedFrame();
   }
 }
 

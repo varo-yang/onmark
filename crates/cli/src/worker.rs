@@ -8,7 +8,9 @@ use std::io::{self, Write as _};
 use std::path::Path;
 use std::process::ExitCode;
 
-use onmark_render::{ChromiumSandbox, FrameArtifact, FrameCaptureExecutor, WorkerCaptureRequest};
+use onmark_render::{
+    BrowserLaunchPolicy, FrameArtifact, FrameCaptureExecutor, WorkerCaptureRequest,
+};
 
 use crate::arguments::{WorkerArgs, WorkerCaptureArgs, WorkerCommand};
 use crate::environment;
@@ -51,7 +53,7 @@ async fn capture(args: WorkerCaptureArgs) -> Result<WorkerOutcome, CliError> {
     .map_err(CliError::WorkerTask)??;
     let capture = FrameCaptureExecutor::new(
         browser,
-        ChromiumSandbox::Enabled,
+        BrowserLaunchPolicy::local(),
         execution::browser_limits(),
     );
     let artifact = capture

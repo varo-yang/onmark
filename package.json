@@ -12,6 +12,7 @@
     "typecheck": "pnpm --recursive typecheck && tsc --project conformance/browser/tsconfig.json"
   },
   "devDependencies": {
+    "@puppeteer/browsers": "3.0.6",
     "@types/node": "24.10.1",
     "ajv": "8.20.0",
     "json-schema-to-typescript": "15.0.4",

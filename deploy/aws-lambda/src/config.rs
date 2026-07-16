@@ -6,7 +6,7 @@
 use std::env;
 use std::error::Error;
 use std::fmt;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::Duration;
 
 use onmark_render::{
@@ -14,6 +14,7 @@ use onmark_render::{
     UnitRootLimits,
 };
 
+use crate::browser::{BrowserArchiveDigest, BrowserPackage, InvalidBrowserArchiveDigest};
 use crate::invocation::{InvalidObjectPrefix, ObjectPrefix};
 
 const BROWSER_DEADLINE: Duration = Duration::from_mins(12);
@@ -40,18 +41,20 @@ const S3_MAX_ATTEMPTS: u32 = 3;
 
 const ARTIFACT_BUCKET: &str = "ONMARK_ARTIFACT_BUCKET";
 const ARTIFACT_PREFIX: &str = "ONMARK_ARTIFACT_PREFIX";
+const BROWSER_ARCHIVE: &str = "ONMARK_BROWSER_ARCHIVE";
+const BROWSER_ARCHIVE_SHA256: &str = "ONMARK_BROWSER_ARCHIVE_SHA256";
 const BROWSER_BINARY: &str = "ONMARK_BROWSER_BINARY";
 const CAPTURE_ENVIRONMENT: &str = "ONMARK_CAPTURE_ENVIRONMENT";
 
-/// Configuration fixed by one Lambda container deployment.
+/// Configuration fixed by one Lambda deployment.
 ///
 /// Invocation payloads choose only an immutable worker-input prefix. The
 /// browser binary, capture-environment identity, resource limits, and output
-/// namespace belong to the deployed image and cannot be changed by callers.
+/// namespace belong to the deployed artifact and cannot be changed by callers.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct Configuration {
     artifact_destination: ObjectPrefix,
-    browser_binary: PathBuf,
+    browser: BrowserPackage,
     capture_environment: CaptureEnvironmentId,
 }
 
@@ -61,13 +64,17 @@ impl Configuration {
         let prefix = env::var(ARTIFACT_PREFIX).unwrap_or_default();
         let artifact_destination =
             ObjectPrefix::new(bucket, prefix).map_err(ConfigurationError::ArtifactPrefix)?;
-        let browser_binary = PathBuf::from(required_nonblank(BROWSER_BINARY)?);
+        let browser = browser_package(
+            optional_nonblank(BROWSER_BINARY)?,
+            optional_nonblank(BROWSER_ARCHIVE)?,
+            optional_nonblank(BROWSER_ARCHIVE_SHA256)?,
+        )?;
         let capture_environment = CaptureEnvironmentId::parse(&required(CAPTURE_ENVIRONMENT)?)
             .map_err(ConfigurationError::CaptureEnvironment)?;
 
         Ok(Self {
             artifact_destination,
-            browser_binary,
+            browser,
             capture_environment,
         })
     }
@@ -76,8 +83,8 @@ impl Configuration {
         &self.artifact_destination
     }
 
-    pub(crate) fn browser_binary(&self) -> &Path {
-        &self.browser_binary
+    pub(crate) const fn browser(&self) -> &BrowserPackage {
+        &self.browser
     }
 
     pub(crate) const fn capture_environment(&self) -> CaptureEnvironmentId {
@@ -167,6 +174,10 @@ impl S3TransportLimits {
 pub(crate) enum ConfigurationError {
     Missing(&'static str),
     Blank(&'static str),
+    MissingBrowser,
+    ConflictingBrowser,
+    IncompleteBrowserArchive,
+    BrowserArchiveDigest(InvalidBrowserArchiveDigest),
     ArtifactPrefix(InvalidObjectPrefix),
     CaptureEnvironment(InvalidCaptureEnvironmentId),
 }
@@ -182,6 +193,16 @@ impl fmt::Display for ConfigurationError {
                 formatter,
                 "required Lambda environment variable {name} must not be blank"
             ),
+            Self::MissingBrowser => formatter.write_str(
+                "Lambda requires either ONMARK_BROWSER_BINARY or ONMARK_BROWSER_ARCHIVE",
+            ),
+            Self::ConflictingBrowser => formatter.write_str(
+                "ONMARK_BROWSER_BINARY and ONMARK_BROWSER_ARCHIVE are mutually exclusive",
+            ),
+            Self::IncompleteBrowserArchive => formatter.write_str(
+                "ONMARK_BROWSER_ARCHIVE and ONMARK_BROWSER_ARCHIVE_SHA256 must be set together",
+            ),
+            Self::BrowserArchiveDigest(source) => source.fmt(formatter),
             Self::ArtifactPrefix(source) => source.fmt(formatter),
             Self::CaptureEnvironment(source) => source.fmt(formatter),
         }
@@ -191,7 +212,12 @@ impl fmt::Display for ConfigurationError {
 impl Error for ConfigurationError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
-            Self::Missing(_) | Self::Blank(_) => None,
+            Self::Missing(_)
+            | Self::Blank(_)
+            | Self::MissingBrowser
+            | Self::ConflictingBrowser
+            | Self::IncompleteBrowserArchive => None,
+            Self::BrowserArchiveDigest(source) => Some(source),
             Self::ArtifactPrefix(source) => Some(source),
             Self::CaptureEnvironment(source) => Some(source),
         }
@@ -202,8 +228,33 @@ fn required(name: &'static str) -> Result<String, ConfigurationError> {
     env::var(name).map_err(|_| ConfigurationError::Missing(name))
 }
 
-fn required_nonblank(name: &'static str) -> Result<String, ConfigurationError> {
-    nonblank(name, required(name)?)
+fn optional_nonblank(name: &'static str) -> Result<Option<String>, ConfigurationError> {
+    env::var(name)
+        .ok()
+        .map(|value| nonblank(name, value))
+        .transpose()
+}
+
+fn browser_package(
+    binary: Option<String>,
+    archive: Option<String>,
+    digest: Option<String>,
+) -> Result<BrowserPackage, ConfigurationError> {
+    match (binary, archive, digest) {
+        (Some(binary), None, None) => Ok(BrowserPackage::expanded(PathBuf::from(binary))),
+        (None, Some(archive), Some(digest)) => {
+            let digest = BrowserArchiveDigest::parse(&digest)
+                .map_err(ConfigurationError::BrowserArchiveDigest)?;
+            Ok(BrowserPackage::archive(PathBuf::from(archive), digest))
+        }
+        (None, None, None) => Err(ConfigurationError::MissingBrowser),
+        (Some(_), Some(_), _) | (Some(_), None, Some(_)) => {
+            Err(ConfigurationError::ConflictingBrowser)
+        }
+        (None, Some(_), None) | (None, None, Some(_)) => {
+            Err(ConfigurationError::IncompleteBrowserArchive)
+        }
+    }
 }
 
 fn nonblank(name: &'static str, value: String) -> Result<String, ConfigurationError> {
@@ -217,7 +268,7 @@ fn nonblank(name: &'static str, value: String) -> Result<String, ConfigurationEr
 mod tests {
     use std::time::Duration;
 
-    use super::{BROWSER_BINARY, Configuration, ConfigurationError, nonblank};
+    use super::{BROWSER_BINARY, Configuration, ConfigurationError, browser_package, nonblank};
 
     #[test]
     fn rejects_a_blank_browser_binary() {
@@ -225,6 +276,26 @@ mod tests {
             .expect_err("a browser binary cannot be blank");
 
         assert!(matches!(error, ConfigurationError::Blank(BROWSER_BINARY)));
+    }
+
+    #[test]
+    fn requires_one_complete_browser_source() {
+        assert!(matches!(
+            browser_package(None, None, None),
+            Err(ConfigurationError::MissingBrowser),
+        ));
+        assert!(matches!(
+            browser_package(
+                Some("/browser".into()),
+                Some("/browser.tar.zst".into()),
+                None
+            ),
+            Err(ConfigurationError::ConflictingBrowser),
+        ));
+        assert!(matches!(
+            browser_package(None, Some("/browser.tar.zst".into()), None),
+            Err(ConfigurationError::IncompleteBrowserArchive),
+        ));
     }
 
     #[test]

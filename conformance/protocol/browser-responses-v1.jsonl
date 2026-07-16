@@ -1,5 +1,6 @@
 {"version":1,"requestId":1,"event":{"type":"loaded"}}
 {"version":1,"requestId":2,"event":{"type":"prepared","evaluationStart":0}}
-{"version":1,"requestId":3,"event":{"type":"frameReady","frame":15}}
-{"version":1,"requestId":3,"event":{"type":"failed","code":"readinessTimeout","message":"frame 15 did not become ready","pendingResources":["font:Inter"]}}
-{"version":1,"requestId":4,"event":{"type":"disposed"}}
+{"version":1,"requestId":3,"event":{"type":"frameStaged","frame":15}}
+{"version":1,"requestId":4,"event":{"type":"frameReady","frame":15}}
+{"version":1,"requestId":4,"event":{"type":"failed","code":"readinessTimeout","message":"frame 15 did not become ready","pendingResources":["video-frame"]}}
+{"version":1,"requestId":5,"event":{"type":"disposed"}}

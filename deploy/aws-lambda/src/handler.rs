@@ -3,11 +3,14 @@
 //! The handler sequences existing render boundaries; it does not fork compiler,
 //! planner, browser, or artifact semantics for deployment.
 
+use std::future::Future;
 use std::path::Path;
+use std::time::Instant;
 
-use onmark_render::{ChromiumSandbox, FrameCaptureExecutor, WorkerCaptureRequest};
+use onmark_render::{FrameCaptureMetrics, WorkerCaptureRequest};
 use tempfile::TempDir;
 
+use crate::browser::BrowserRuntime;
 use crate::config::Configuration;
 use crate::deadline::InvocationDeadline;
 use crate::download::InputMaterialization;
@@ -17,11 +20,10 @@ use crate::publication::ArtifactPublication;
 use crate::storage::S3Storage;
 
 /// One sequential Lambda capture worker backed by the shared renderer.
-#[derive(Clone)]
 pub(crate) struct CaptureHandler {
     configuration: Configuration,
     storage: S3Storage,
-    capture: FrameCaptureExecutor,
+    browser: BrowserRuntime,
 }
 
 impl CaptureHandler {
@@ -34,16 +36,15 @@ impl CaptureHandler {
             .load()
             .await;
         let storage = S3Storage::new(aws_sdk_s3::Client::new(&sdk), transport);
-        let capture = FrameCaptureExecutor::new(
-            configuration.browser_binary().to_owned(),
-            ChromiumSandbox::Disabled,
+        let browser = BrowserRuntime::new(
+            configuration.browser().clone(),
             Configuration::browser_limits(),
         );
 
         Ok(Self {
             configuration,
             storage,
-            capture,
+            browser,
         })
     }
 
@@ -57,8 +58,8 @@ impl CaptureHandler {
         })?;
         // The deadline owns each large phase future on the heap so one
         // long-lived Lambda handler does not retain every state machine.
-        let request = deadline
-            .run(self.storage.read_request(invocation.input()))
+        let request = InvocationPhase::ReadRequest
+            .measure(deadline.run(self.storage.read_request(invocation.input())))
             .await?;
         self.require_capture_environment(&request)?;
         let expected_artifact = request.artifact_id();
@@ -69,23 +70,32 @@ impl CaptureHandler {
             max_files: Configuration::max_input_files(),
             max_bytes: Configuration::max_input_bytes(),
         };
-        deadline
-            .run(self.storage.materialize_inputs(materialization))
+        InvocationPhase::MaterializeInputs
+            .measure(deadline.run(self.storage.materialize_inputs(materialization)))
             .await?;
 
-        let unit = deadline
-            .run(Self::materialize_unit(request, workspace.path()))
+        let unit = InvocationPhase::MaterializeUnit
+            .measure(deadline.run(Self::materialize_unit(request, workspace.path())))
+            .await?;
+        let capture = InvocationPhase::PrepareBrowser
+            .measure(deadline.run(self.browser.executor()))
             .await?;
         let artifact_path = workspace.path().join("capture.onmark-frames");
-        let artifact = deadline
-            .run(self.capture.capture_frame_artifact(
+        let capture_report = InvocationPhase::CaptureArtifact
+            .measure(deadline.run(capture.capture_frame_artifact_report(
                 &unit,
                 self.configuration.capture_environment(),
                 &artifact_path,
                 Configuration::frame_artifact_limits(),
-            ))
+            )))
             .await?;
-        deadline.run(artifact.verify()).await?;
+        if let Some(metrics) = capture_report.metrics() {
+            log_capture_metrics(metrics);
+        }
+        let artifact = capture_report.into_artifact();
+        InvocationPhase::VerifyArtifact
+            .measure(deadline.run(artifact.verify()))
+            .await?;
         Self::require_artifact_identity(expected_artifact, &artifact)?;
 
         let publication = ArtifactPublication {
@@ -96,7 +106,9 @@ impl CaptureHandler {
             max_download_bytes: Configuration::max_frame_artifact_file_bytes(),
             deadline,
         };
-        let (location, status) = self.storage.publish(publication).await?;
+        let (location, status) = InvocationPhase::PublishArtifact
+            .measure(self.storage.publish(publication))
+            .await?;
 
         Ok(CaptureResult::new(location, status))
     }
@@ -138,5 +150,58 @@ impl CaptureHandler {
             return Err(DeploymentError::ArtifactIdentity { expected, actual });
         }
         Ok(())
+    }
+}
+
+fn log_capture_metrics(metrics: FrameCaptureMetrics) {
+    lambda_runtime::tracing::info!(
+        frames = metrics.frames(),
+        launch_ms = metrics.launch().as_millis(),
+        runtime_setup_ms = metrics.runtime_setup().as_millis(),
+        seek_ms = metrics.seek().as_millis(),
+        readback_ms = metrics.readback().as_millis(),
+        fingerprint_ms = metrics.fingerprint().as_millis(),
+        confirm_ms = metrics.confirm().as_millis(),
+        write_ms = metrics.write().as_millis(),
+        shutdown_ms = metrics.shutdown().as_millis(),
+        "browser capture cost attributed",
+    );
+}
+
+#[derive(Clone, Copy, Debug)]
+enum InvocationPhase {
+    ReadRequest,
+    MaterializeInputs,
+    MaterializeUnit,
+    PrepareBrowser,
+    CaptureArtifact,
+    VerifyArtifact,
+    PublishArtifact,
+}
+
+impl InvocationPhase {
+    async fn measure<T, E>(self, future: impl Future<Output = Result<T, E>>) -> Result<T, E> {
+        let started = Instant::now();
+        let result = future.await;
+        let elapsed = started.elapsed();
+        lambda_runtime::tracing::info!(
+            phase = self.name(),
+            elapsed_ms = elapsed.as_millis(),
+            succeeded = result.is_ok(),
+            "capture worker phase finished",
+        );
+        result
+    }
+
+    const fn name(self) -> &'static str {
+        match self {
+            Self::ReadRequest => "read_request",
+            Self::MaterializeInputs => "materialize_inputs",
+            Self::MaterializeUnit => "materialize_unit",
+            Self::PrepareBrowser => "prepare_browser",
+            Self::CaptureArtifact => "capture_artifact",
+            Self::VerifyArtifact => "verify_artifact",
+            Self::PublishArtifact => "publish_artifact",
+        }
     }
 }

@@ -23,6 +23,7 @@ const ENTRY_SOURCE = `
     async load() {},
     async prepare() {},
     async seek() {},
+    async confirm() {},
     async dispose() {},
   });
 `;

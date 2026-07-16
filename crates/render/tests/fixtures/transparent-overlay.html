@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Onmark transparent presentation-layer experiment</title>
+    <style>
+      html,
+      body,
+      canvas {
+        background: transparent;
+        height: 100%;
+        margin: 0;
+        width: 100%;
+      }
+
+      body {
+        overflow: hidden;
+      }
+
+      canvas {
+        inset: 0;
+        position: fixed;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas aria-label="Transparent presentation layer"></canvas>
+    <script type="module">
+      // Disposable experiment for isolating transparent presentation capture.
+      // The native layer supplies media; this page owns only browser visuals.
+      import {
+        RuntimeAdapterError,
+        installRuntimeHost,
+      } from "../../../../packages/runtime/dist/src/index.js";
+      import { drawMovingOverlay } from "./moving-overlay.js";
+
+      const canvas = requiredCanvas();
+      const context = canvas.getContext("2d", { alpha: true });
+      if (context === null) {
+        throw new TypeError(
+          "the transparent-layer experiment requires a 2D canvas context",
+        );
+      }
+      let stagedFrame;
+
+      installRuntimeHost({
+        async load() {},
+        async prepare() {},
+        async seek(frame) {
+          if (stagedFrame !== undefined) {
+            throw new RuntimeAdapterError(
+              "operation",
+              "the transparent-layer experiment already has a staged frame",
+            );
+          }
+          draw(frame.index);
+          stagedFrame = frame.index;
+        },
+        async confirm(frame) {
+          if (stagedFrame !== frame.index) {
+            throw new RuntimeAdapterError(
+              "operation",
+              "the transparent-layer experiment can only confirm its staged frame",
+            );
+          }
+          stagedFrame = undefined;
+        },
+        async dispose() {
+          stagedFrame = undefined;
+          context.clearRect(0, 0, canvas.width, canvas.height);
+        },
+      });
+
+      function draw(index) {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        context.clearRect(0, 0, canvas.width, canvas.height);
+
+        drawMovingOverlay(context, index, canvas.width, canvas.height);
+      }
+
+      function requiredCanvas() {
+        const element = document.querySelector("canvas");
+        if (!(element instanceof HTMLCanvasElement)) {
+          throw new TypeError(
+            "the transparent-layer experiment requires one canvas",
+          );
+        }
+        return element;
+      }
+    </script>
+  </body>
+</html>

@@ -52,14 +52,17 @@ interface RuntimeAdapter {
   load(plan: RuntimePlan): Promise<void>;
   prepare(frame: RuntimeFrame): Promise<void>;
   seek(frame: RuntimeFrame): Promise<void>;
+  confirm(frame: RuntimeFrame): Promise<void>;
   dispose(): Promise<void>;
 }
 ```
 
 `load` 收到已接受 `BrowserPlan` 的递归冻结快照。它可以创建资源，但不能保留一份可变的
 author-owned plan。`prepare` 恰好在 `plan.evaluation.start` 运行一次，且只能在该帧所需资源
-稳定后 resolve。`seek` 只会在 prepare 成功后运行，且只能在请求的精确帧可捕获时 resolve。
-即使 cleanup 报错，`dispose` 也是终止相位。
+稳定后 resolve。`seek` 只会在 prepare 成功后运行；它应用请求的 DOM 状态、预先注册
+decoded-media observer，并在媒体完成 seek 后 resolve，但不能等待 compositor presentation。
+`confirm` 在 native capture 后运行，只有 browser media 证明该 capture 呈现了 staged source
+frame 才能 resolve。即使 cleanup 报错，`dispose` 也是终止相位。
 
 `seek` 不接受自由时间 `t`，而是接收 `RuntimeFrame`：
 
@@ -75,17 +78,28 @@ interface RuntimeFrame {
 
 ## Runtime 握手
 
-presentation 必须用 `installRuntimeHost` 安装一个 runtime host。native renderer
-等待该 host 后，发送版本化 browser protocol：
+presentation 必须用 `installRuntimeHost` 安装一个 runtime host。navigation 与 host discovery
+完成后，native renderer 会先在 compositor time zero 发送一次关闭 display updates 的 hidden
+BeginFrame，以初始化 Chromium 可复制的 surface；它发生在 `Load` 之前，因此不会 evaluate
+authored plan state。真实 capture 使用另一个固定的正 compositor baseline。随后才发送版本化
+browser protocol：
 
 ```text
-Load(plan) -> Prepare(evaluationStart) -> Seek(frame)* -> Dispose
+Load(plan) -> Prepare(evaluationStart)
+  -> (Seek(frame) -> FrameStaged(frame)
+      -> native BeginFrame capture
+      -> Confirm(frame) -> FrameReady(frame))*
+  -> Dispose
 ```
 
-`FrameReady(frame)` 表示 runtime 已为这个精确帧应用选中的状态。它不表示
-presentation 自己算出了时间。capture 前，native executor 会进行一次有界的两个
-animation-frame compositor commit wait；该等待不选择时间，只确保 Chromium 已将选中的
-状态提交到 capture surface。
+这个拆分来自 Chromium decoded-media 的真实约束：`requestVideoFrameCallback` 必须在它要
+观察的 compositor frame 之前注册；但在 CDP BeginFrameControl target 上，如果先等 callback
+再发送 `BeginFrame`，两边会形成死锁。因此 `FrameStaged(frame)` 只表示 browser state 已能
+进入 compositor。native 随后为每个 output frame 只发送一次同时 commit 与 capture PNG 的
+`HeadlessExperimental.beginFrame`。no-damage response 复用上一张 PNG；只有空的首帧 capture
+会获得一次有界的亚毫秒重试。`Confirm(frame)` 让预先注册的 callback 完成；
+`FrameReady(frame)` 表示刚才 capture 的帧已经通过精确 decoded-media confirmation。确认失败
+时，captured payload 在进入 encoder 或 frame artifact 前就会被丢弃。
 
 ## 所有权
 

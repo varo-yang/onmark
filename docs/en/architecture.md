@@ -180,7 +180,7 @@ and is mixed outside browser frame capture.
 
 The sole clock derives from frame index and rational timebase. Wall time and free-running animation or media clocks may not determine output.
 
-The runtime protocol includes `Load`, `Prepare`, `Seek`, `FrameReady`, and `Dispose`. `FrameReady(frame)` is a logical stability barrier: after receiving it, the native executor waits two bounded animation-frame turns for Chromium to commit the selected state to its compositor, then captures the frame. Direct rendering retains that PNG as its encoder payload. Worker capture additionally decodes it into the configured exact 8-bit RGBA viewport and hashes those canonical pixel bytes. A worker artifact records that raw-pixel hash beside each ordered PNG record, so independent captures can be compared without treating PNG compression bytes as visual truth. The commit barrier never selects a frame or contributes a clock; it only closes the logical-runtime-to-native-capture race. The runtime does not publish an independently invented state hash. Inside the runtime, `RuntimeFrame` retains the exact integral frame identity and derives floating-point seconds from the Rust-owned rational frame rate only for browser API calls; those seconds never become scheduling or protocol truth. Components declare temporal behavior such as `stateless`, `warmup(n)`, `sequential`, `global`, or `neighbor(radius)`. Unknown components default to `sequential`: parallel seekability must be proven, not guessed. Native APIs and audited adapters may safely provide stronger declarations. Detection may recommend an adapter but may not silently relax correctness.
+The runtime protocol includes `Load`, `Prepare`, `Seek`, `FrameStaged`, `Confirm`, `FrameReady`, and `Dispose`. Native rendering uses the separately distributed `chrome-headless-shell` and creates every render target with CDP BeginFrameControl. Immediately after navigation, before `Load` exposes any authored plan state, native execution issues one hidden initialization BeginFrame at compositor time zero with display updates disabled. Chromium requests screenshot readback before issuing the associated external frame, so this clock-only warm-up establishes a copyable surface without evaluating authored state. Real captures begin at a fixed positive compositor baseline; the exact absolute frame and rational frame rate contribute only a deterministic offset from that baseline. `Seek(frame)` then applies browser state, registers decoded-media observers, and returns `FrameStaged(frame)` after media seeking without waiting for compositor presentation. Native issues one `HeadlessExperimental.beginFrame` command that both commits and captures a lossless PNG. Headless shell may omit `screenshotData` when the compositor reports no visual damage; native then reuses the last valid PNG. If this happens before any PNG exists, native permits exactly one retry at a bounded sub-millisecond compositor offset and fails rather than looping if the retry is still empty. `Confirm(frame)` lets the pre-registered media observer prove that the captured compositor frame presented the selected source frame; only then does the runtime return `FrameReady(frame)`, and only then may native execution write the captured payload. This ordering avoids the deadlock caused by waiting for `requestVideoFrameCallback` before advancing a BeginFrame-controlled compositor. Neither the initialization clock nor the capture baseline becomes scheduling or protocol truth. Each output frame still owns one normal capture command, replacing both animation-frame polling and a separate `Page.captureScreenshot` round trip. Direct rendering retains the PNG as its encoder payload. Worker capture additionally decodes it into the configured exact 8-bit RGBA viewport and hashes those canonical pixel bytes. A worker artifact records that raw-pixel hash beside each ordered PNG record, so independent captures can be compared without treating PNG compression bytes as visual truth. The runtime does not publish an independently invented state hash. Inside the runtime, `RuntimeFrame` retains the exact integral frame identity and derives floating-point seconds from the Rust-owned rational frame rate only for browser API calls. Components declare temporal behavior such as `stateless`, `warmup(n)`, `sequential`, `global`, or `neighbor(radius)`. Unknown components default to `sequential`: parallel seekability must be proven, not guessed. Native APIs and audited adapters may safely provide stronger declarations. Detection may recommend an adapter but may not silently relax correctness.
 
 Determinism is layered. Canonically encoded Timeline IR and Execution Plans
 must be byte-identical once those encodings exist. The current in-memory
@@ -234,15 +234,32 @@ inside its upload owner, so expiry still attempts abort; a cleanup failure is
 reported alongside, rather than instead of, the original failure. Two minutes
 remain beneath Lambda's platform ceiling for abort and response delivery.
 
+The adapter emits one structured completion event for each expensive phase,
+including elapsed milliseconds and success state, under the Lambda request
+identity. A direct synchronous conformance invocation disables client retries
+and gives the client a read timeout longer than the worker deadline. Otherwise
+the AWS CLI's shorter transport timeout can start a second, wasteful capture
+while the first invocation is still running; immutable publication remains
+correct, but idempotence is not permission to duplicate browser work.
+
 The adapter has no coordinator, queue, lease database, global retry owner,
-capability scheduler, infrastructure definition, or production Lambda image.
+capability scheduler, infrastructure definition, or published Lambda release.
 Its input chooses only an immutable worker-input S3 prefix. The deployed image
-owns the output namespace, browser binary, locked capture-environment identity,
-and limits. Its handler explicitly selects `ChromiumSandbox::Disabled` as a
-candidate for Lambda's outer isolation boundary; that choice is neither an
-automatic launch fallback nor invocation-controlled. A real Lambda experiment
-must establish the corresponding process-isolation and launch contract before
-an image or infrastructure template is added.
+or ZIP owns the output namespace, browser payload, locked capture-environment
+identity, and limits. Its handler explicitly selects
+`BrowserLaunchPolicy::isolated_worker()`, which assigns process isolation to
+Lambda and selects the measured single-process, no-zygote, in-process
+SwiftShader topology. That choice is neither an automatic launch fallback nor
+invocation-controlled. The real arm64 experiment described below establishes
+this narrow launch contract. Its preferred measured form is a compact browser
+archive inside the function ZIP. The handler begins Runtime API polling before
+browser I/O, verifies and expands the archive during the first bounded
+invocation, and retains that private installation for warm invocations. An
+already-expanded executable remains a supported deployment input. The
+deployment package's dedicated packager owns the reviewed deterministic ZIP
+shape described below;
+cross-compilation, release publication, and infrastructure templates remain
+separate concerns.
 
 ## Incremental rendering
 
@@ -267,9 +284,9 @@ onmark/
 ├── schemas/ conformance/ evals/ examples/ docs/
 ```
 
-The completed Gate-one milestone contains `onmark-core`, `onmark-media`, `onmark-render`, `@onmark/runtime`'s browser session, `@onmark/authoring`'s semantic DOM bindings, `@onmark/bundler`'s presentation artifact boundary, and the first `onmark-cli` whole-film composition root. Media is a separate crate because server-side compile/lint loops need probing without Chromium; this is both a distinct dependency budget and a real consumer. Runtime is a separate package because it executes inside the browser and is consumed by authoring and bundling. Authoring is a separate browser package because user presentations consume its public DOM contract independently while runtime must not depend upward on author-facing effects; its only product dependency is runtime's types-only public surface. Bundler is a separate package because it executes under Node, owns the esbuild and filesystem dependency budget, and produces a presentation directory consumed independently by native rendering. The CLI is a distinct release artifact that combines core compilation, media probing, the bundler process, and native rendering without moving their implementation details into one crate. `onmark-aws-lambda` is a distinct Rust release artifact because Lambda is a different runtime and its handler owns the `aws-config`, `aws-sdk-s3`, and `lambda_runtime` dependency budget. It may consume `onmark-render`'s portable worker request and `onmark-core`'s canonical bundle layout, but neither dependency knows about AWS. Syntax, diagnostics, model, compiler, timeline, and protocol remain rectangular modules inside core. Render graph and planning initially join core at gate two. Worker execution belongs to render. A coordinator may appear only after the remote artifact adapter has passed conformance.
+The completed Gate-one milestone contains `onmark-core`, `onmark-media`, `onmark-render`, `@onmark/runtime`'s browser session, `@onmark/authoring`'s semantic DOM bindings, `@onmark/bundler`'s presentation artifact boundary, and the first `onmark-cli` whole-film composition root. Media is a separate crate because server-side compile/lint loops need probing without Chromium; this is both a distinct dependency budget and a real consumer. Runtime is a separate package because it executes inside the browser and is consumed by authoring and bundling. Authoring is a separate browser package because user presentations consume its public DOM contract independently while runtime must not depend upward on author-facing effects; its only product dependency is runtime's types-only public surface. Bundler is a separate package because it executes under Node, owns the esbuild and filesystem dependency budget, and produces a presentation directory consumed independently by native rendering. The CLI is a distinct release artifact that combines core compilation, media probing, the bundler process, and native rendering without moving their implementation details into one crate. `onmark-aws-lambda` is a distinct Rust release artifact because Lambda is a different runtime and its handler owns the `aws-config`, `aws-sdk-s3`, and `lambda_runtime` dependency budget. Its deployment-only browser boundary additionally uses `sha2`, `tar`, and `zstd` to verify and expand one bounded immutable payload. The package-only `onmark-aws-lambda-package` binary adds deterministic ZIP encoding without linking the AWS runtime; it is a deployment-operator tool, not repository automation or an authored-video command. Those archive types and policies stop at the adapter; `onmark-render` receives only an executable path and discovers optional adjacent runtime sidecars for the Chromium child. The adapter may consume `onmark-render`'s portable worker request and `onmark-core`'s canonical bundle layout, but neither dependency knows about AWS or Lambda packaging. Syntax, diagnostics, model, compiler, timeline, and protocol remain rectangular modules inside core. Render graph and planning initially join core at gate two. Worker execution belongs to render. A coordinator may appear only after the remote artifact adapter has passed conformance.
 
-Gate one's native command is deliberately narrow: `onmark render <screenplay>`. It discovers `presentation.ts` beside the screenplay unless `--presentation` is supplied, derives the stable no-clobber output `renders/<screenplay-stem>.mp4` unless `--output` is supplied, and exposes only exact frame rate and viewport dimensions as ordinary render controls. Process paths are execution overrides, not screenplay facts. Authored diagnostics are emitted before executable preflight so an invalid screenplay never requires Chromium, Node, or `FFmpeg` merely to explain itself. Gate three adds the deliberately separate worker entry point `onmark worker capture`: it accepts one versioned `request.json`, including the deployment-owned SHA-256 identity of its locked capture environment, the `bundle/` payload files named by that manifest, and frozen `assets/sha256/` bytes. The identity covers the image's Chromium, fonts, launch configuration, and other pixel-affecting host facts; the renderer deliberately does not guess it from one executable path or browser-version string. The worker materializes inputs in a private root and publishes one frame artifact. Reuse and assembly require that environment identity alongside the unit identity. The command accepts no screenplay and never recompiles source; a coordinator or object-store adapter owns request publication later.
+Gate one's native command is deliberately narrow: `onmark render <screenplay>`. It discovers `presentation.ts` beside the screenplay unless `--presentation` is supplied, derives the stable no-clobber output `renders/<screenplay-stem>.mp4` unless `--output` is supplied, and exposes only exact frame rate and viewport dimensions as ordinary render controls. Process paths are execution overrides, not screenplay facts. Authored diagnostics are emitted before executable preflight so an invalid screenplay never requires Chromium, Node, or `FFmpeg` merely to explain itself. Gate three adds the deliberately separate worker entry point `onmark worker capture`: it accepts one versioned `request.json`, including the deployment-owned SHA-256 identity of its locked capture environment, the `bundle/` payload files named by that manifest, and frozen `assets/sha256/` bytes. The identity covers the deployment's Chromium, fonts, launch configuration, and other pixel-affecting host facts; the renderer deliberately does not guess it from one executable path or browser-version string. The worker materializes inputs in a private root and publishes one frame artifact. Reuse and assembly require that environment identity alongside the unit identity. The command accepts no screenplay and never recompiles source; a coordinator or object-store adapter owns request publication later.
 
 `onmark-cli` resolves every external executable before starting process work, then follows one linear path: read and compile, freeze and probe referenced assets, solve Timeline IR, bundle the presentation, compose and materialize the whole-film unit, render, and atomically publish. Freezing streams each referenced source into a private temporary file while hashing it, then probes only that private copy; identity and metadata therefore describe the same retained bytes. Hashing and probing run on explicit blocking work rather than a Tokio worker. The CLI depends on core, media, and render as its real composition inputs; `clap` owns argument parsing, `sha2` owns streaming SHA-256, `tempfile` owns private lifetimes, `serde_json` decodes the Rust-owned manifest, and Tokio owns bounded process and render async work. No CLI dependency enters the pure core.
 
@@ -279,15 +296,17 @@ Core's internal dependency DAG is CI-enforced: `model` depends on nothing; `synt
 
 `onmark-core` uses `xmlparser` only inside `syntax` for pure, span-preserving XML-compatible fragment tokenization. Onmark owns tree construction, nesting checks, duplicate-attribute checks, reference decoding, and all authored semantics. Parser errors are translated at the syntax boundary and the dependency performs no IO. Test targets may use `proptest` for time algebra and `syn` for the cooperative module dependency-law check; neither development dependency is linked into library consumers or runtime artifacts.
 
-The `protocol` module uses `serde` for stable browser and bundle-manifest JSON boundaries. Its optional `schema` feature exposes `schemars` only to repository generation; product binaries do not enable it. All repository-only automation lives under `scripts/`; it is not a product package or a miscellaneous application layer. Its Cargo manifest exists solely to give the Rust schema generator a pinned build-only dependency budget and a stable `cargo xtask` entry point. That binary is consumed only by developers and CI and may depend on core and `onmark-aws-lambda` with their `schema` features, `schemars`, and `serde_json`; it disables the Lambda package's default runtime feature, so schema generation does not link AWS. Product crates and packages never depend on it. The Lambda dependency exists solely to publish that deployment boundary's schemas, not to smuggle AWS into core. The adjacent Node generator may use the pinned schema-to-TypeScript and validation toolchain. `cargo xtask schema` writes every versioned schema, then invokes that generator. `json-schema-to-typescript` emits reviewable browser types into runtime and the manifest type into bundler; Ajv emits standalone browser validation code at build time. The Lambda schemas intentionally have no TypeScript codec until a real TypeScript caller exists. Oxlint, a narrow repository-shape check, and Prettier are repository-only development gates and never enter the browser artifact. The browser runtime does not compile schemas dynamically. Exact tool versions are pinned in the lockfiles and `mise.toml`, and CI rejects stale generated artifacts.
+The `protocol` module uses `serde` for stable browser and bundle-manifest JSON boundaries. Its optional `schema` feature exposes `schemars` only to repository generation; product binaries do not enable it. All repository-only automation lives under `scripts/`; it is not a product package or a miscellaneous application layer. Its Cargo manifest exists solely to give the Rust schema generator a pinned build-only dependency budget and a stable `cargo xtask` entry point. That binary is consumed only by developers and CI and may depend on core and `onmark-aws-lambda` with their `schema` features, `schemars`, and `serde_json`; it disables the Lambda package's default runtime feature, so schema generation does not link AWS. Product crates and packages never depend on it. The Lambda dependency exists solely to publish that deployment boundary's schemas, not to smuggle AWS into core. The adjacent Node generator may use the pinned schema-to-TypeScript and validation toolchain. `cargo xtask schema` writes every versioned schema, then invokes that generator. `json-schema-to-typescript` emits reviewable browser types into runtime and the manifest type into bundler; Ajv emits standalone browser validation code at build time. The Lambda schemas intentionally have no TypeScript codec until a real TypeScript caller exists. Oxlint, a narrow repository-shape check, Prettier, and the pinned `@puppeteer/browsers` installer are repository-only development tools and never enter a product artifact. Real-process CI uses that installer only to fetch the exact Chrome for Testing headless-shell build under test. The browser runtime does not compile schemas dynamically. Exact tool versions are pinned in the lockfiles and `mise.toml`, and CI rejects stale generated artifacts.
 
 `onmark-media` depends on core plus `serde` and `serde_json` for a private ffprobe response boundary. It starts the configured ffprobe executable directly with an argument array, never through a shell; wrappers that leave descendant processes holding the output pipes are outside this executable contract. Process lifetime and retained stdout/stderr bytes are explicitly bounded under that direct-child contract, both pipes are drained concurrently, and explicit shutdown reports process-control failures while `Drop` remains a best-effort termination fallback. Private ffprobe response types are translated once into core-owned `AssetMetadata`; JSON values and third-party error types do not define the stable API, while underlying errors remain available through the standard error source chain for debugging. Gate-one probing requests bounded stream-level facts for every stream: `codec_type` records audio presence and selects the first visual stream, while `nb_frames` identifies stills. It classifies a visual stream as constant only when ffprobe's parseable `avg_frame_rate` and `r_frame_rate` normalize to the same exact rational rate; disagreement or unavailable values are conservatively variable. The one-MiB stdout ceiling therefore remains independent of media duration.
 
 `onmark-render` owns the heavy Chromium and `FFmpeg` dependency budget. It uses
-`chromiumoxide` only as a CDP transport and process launcher, `png` only to
-decode a captured screenshot into canonical RGBA for its renderer-owned
-fingerprint, and `tokio` and `futures` only within this asynchronous execution
-boundary. `tempfile` gives
+`chromiumoxide` only as a CDP transport. Onmark launches and reaps headless
+shell itself so stderr remains continuously drained into a bounded diagnostic
+tail after the `DevTools` endpoint appears. It uses `base64` only to decode
+CDP's required screenshot envelope, `png` only to decode a captured screenshot
+into canonical RGBA for its renderer-owned fingerprint, and `tokio` and
+`futures` only within this asynchronous execution boundary. `tempfile` gives
 every browser session an isolated profile, owns a private same-filesystem output
 staging directory, and retains one private RAII unit root.
 
@@ -316,28 +335,30 @@ itself establish that lifecycle barrier.
 Gate one captures one PNG at a time and writes it directly to `FFmpeg`'s
 `image2pipe`; there is no frame queue or whole-video buffer. The fixed H.264
 `yuv420p` profile rejects odd viewport dimensions before either process starts.
-Conformance launches Chrome for Testing and `FFmpeg` against the production
-presentation adapter, crosses the typed `Load`/`Prepare`/`Seek` handshake,
-probes the resulting H.264 MP4, and verifies decoded motion. The checked-in bundle fixture
-carries real payload bytes, is rebuilt byte-for-byte in the bundler test, and
-crosses the generated Node/native manifest contract through native
-materialization. The outermost CLI conformance starts two independent
-whole-film sessions and compares their complete decoded raw-frame hash
-sequences before checking no-clobber publication. CI owns explicit browser and
-media-tool versions for these tests; local execution remains opt-in because it
-requires those external processes.
+Conformance launches a pinned Chrome for Testing `chrome-headless-shell` and
+`FFmpeg` against the production presentation adapter, crosses the typed
+`Load`/`Prepare`/`Seek`/`Confirm` handshake, probes the resulting H.264 MP4, and verifies
+decoded motion. The checked-in bundle fixture carries real payload bytes, is
+rebuilt byte-for-byte in the bundler test, and crosses the generated
+Node/native manifest contract through native materialization. The outermost
+CLI conformance starts two independent whole-film sessions and compares their
+complete decoded raw-frame hash sequences before checking no-clobber
+publication. CI owns explicit browser and media-tool versions for these tests;
+local execution remains opt-in because it requires those external processes.
 
 GitHub-hosted Ubuntu does not expose a usable Chromium sandbox to the installed
-Chrome for Testing binary. The real-process job therefore supplies a
-runner-local launcher that adds `--no-sandbox`; this exception belongs only to
-the disposable CI worker. Product and local browser launches keep Chromium's
-sandbox enabled by default. An adapter may explicitly disable Chromium's
-internal sandbox only when an independently audited outer container or microVM
-owns equivalent process isolation. That deployment-owned choice is part of the
-locked capture environment, is never selected by authored input or a worker
-invocation, and must be proven in its real execution environment before it is
-treated as a production launch contract. A failed Chromium launch never causes
-an automatic downgrade.
+Chrome for Testing headless-shell binary. The real-process job therefore
+supplies a runner-local launcher that adds `--no-sandbox`; this exception
+belongs only to the disposable CI worker. Product and local browser launches
+keep Chromium's sandbox enabled by default. An adapter may select
+`BrowserLaunchPolicy::isolated_worker()` only when an independently audited
+outer container or microVM owns equivalent process isolation. That policy also
+keeps the renderer and SwiftShader GPU in one process and disables the
+unavailable zygote rather than disabling graphics. The deployment-owned choice
+is part of the locked capture environment, is never selected by authored input
+or a worker invocation, and must be proven in its real execution environment
+before it is treated as a production launch contract. A failed Chromium launch
+never causes an automatic downgrade.
 
 Gate-one native browser operations and decoded-video waits accept at most a one-day deadline, keeping every platform timer inside an explicit supported horizon.
 
@@ -354,12 +375,40 @@ Protocol V1 carries at most 10,000 video placements and 10,000 overlay placement
 AWS Lambda is an adapter, not another engine. The checked-in Rust
 `onmark-aws-lambda` binary owns V1 invocation/result schemas, the thin handler,
 and S3 operations. It downloads one portable worker layout, checks that the
-request's capture environment equals the deployed image identity, materializes
+request's capture environment equals the deployment identity, materializes
 the Render Unit through `onmark-render`, verifies the finished artifact, and
 conditionally publishes it by its renderer-owned identity. A `412` means
 "download, verify, and compare the already-published raw-RGBA artifact"; a
 bounded `409` retry is only a conditional-publication transport retry, not a
 distributed retry policy.
+
+The deployment supplies either an already-expanded headless shell or one
+zstd-compressed tar archive plus its canonical SHA-256 digest. Archive
+materialization is bounded by compressed bytes, expanded bytes, and entry
+count, and rejects traversal, duplicate paths, links, special files, digest
+drift, and a non-executable shell. Optional fonts receive a private fontconfig
+file and cache. The renderer scopes that file, adjacent shared libraries, and
+the SwiftShader manifest to the Chromium child; no process-global environment
+is mutated. Browser preparation is lazy and one-time per Lambda execution
+environment, so the Runtime API starts before heavy browser I/O and warm
+invocations reuse the verified private installation.
+
+The package-only `onmark-aws-lambda-package` binary consumes a prebuilt
+`provided.al2023.arm64` bootstrap and an expanded browser root. It sorts
+portable browser paths, rejects links and special files, normalizes tar
+ownership, modes, and timestamps, applies a fixed single-threaded zstd policy,
+and fixes ZIP order, timestamps, permissions, and compression levels. Its
+sibling-staged output directory contains the ZIP and a canonical manifest with
+SHA-256 identities for the bootstrap, browser archive, and final package. A
+final directory rename hides normally completed partial output, but portable
+filesystem APIs cannot turn the preceding absence check into a cross-process
+no-clobber transaction. The
+capture-environment identity conservatively covers the bootstrap, browser
+archive, target, and isolated-worker launch policy. This proves identical
+outputs for identical locked inputs; cross-compilation remains the job of a
+pinned Linux arm64 builder such as Cargo Lambda, not of the packager. Packaging
+rejects non-Linux-arm64 executables and reserves ten MiB beneath Lambda's 250
+MiB unzipped-package ceiling.
 
 The deployment config owns S3 transport budgets: a five-second connection
 timeout, a 45-second attempt timeout, a 90-second operation timeout, and at
@@ -372,15 +421,50 @@ policy.
 This JSON contract has checked-in Rust-generated schemas. It intentionally has
 no generated TypeScript SDK because no TypeScript caller exists yet; creating a
 coordinator client merely to satisfy symmetry would prebuild a later Gate-three
-control plane. AWS SDK types may not enter core or render. Container-image and
-infrastructure definitions remain experimental until Lambda proves the outer
-isolation and Chromium launch contract. Other backends such as ECS or Kubernetes
+control plane. AWS SDK and browser-archive types may not enter core or render.
+One real arm64 Lambda experiment used a 92.4 MB function ZIP at 4,096 MiB to
+prove outer isolation, constrained-process BeginFrame capture, and immutable
+reuse for a locked 30-frame 320×180 title-only fixture. Three independent cold
+environments completed in 3.005, 2.277, and 3.069 seconds with 455–457 MB peak
+memory; one immediate warm reuse completed in 1.325 seconds. Repeating one cold
+run at two GiB completed in 3.069 seconds with 454 MB peak, while one GiB took
+5.080 seconds with 451 MB peak. Two GiB is therefore the measured latency/cost
+knee for this small fixture, not yet a production default. A controlled 249 MiB
+expanded browser in a fresh container-image layer instead made capture take
+30.9 seconds, and pre-runtime archive expansion exhausted Lambda's ten-second
+initialization window. These measurements select ZIP delivery plus
+invocation-owned preparation for this environment; they do not generalize to
+other workloads. The reviewed packager replaces the hand-built ZIP procedure,
+but release publication and infrastructure definitions remain experimental
+until separately reviewed. Other backends such as GCP, ECS, or Kubernetes
 follow the same adapter rule and consume the same worker request and artifact
-format.
+format. They own their own SDK, transport semantics, and release artifact;
+Lambda environment variables, ZIP layout, and S3 policy are not a generic cloud
+interface.
+
+A separate decoded-media experiment measures the steady capture path rather
+than package delivery. One 1,920×1,080 H.264 fixture produced 60 output frames at
+30 fps with identical canonical raw-RGBA fingerprints across current independent
+cold environments. Individual warm capture samples were 22.07 seconds at two
+GiB, 13.00 seconds at four GiB, and 7.91 seconds at eight GiB; corresponding warm
+costs were 47.11, 58.72, and 73.46 GB-seconds. Peak memory remained 600–616 MB,
+so the configured tier primarily bought CPU: two GiB minimized measured cost,
+eight GiB minimized latency, and four GiB was the compromise. At eight GiB, 60
+frames spent 2.96 seconds in runtime staging and media seek, 3.83 seconds in
+BeginFrame screenshot readback, and 0.79 seconds in PNG decoding plus canonical
+fingerprinting. Confirmation and artifact writes together remained below 0.2
+seconds. These single samples identify seek and screenshot transport as the next
+optimization targets; they do not freeze a production memory tier.
+
+The earlier 66-second observation was a correctness failure, not a cold-start
+measurement: the old frame handshake waited until its deadline, then the AWS
+CLI's default 60-second read timeout retried while the first invocation was
+still running. Synchronous conformance disables client retries and owns a read
+timeout longer than the worker deadline.
 
 ## Delivery gates
 
-**Gate one (complete): render one real video reliably.** The completed milestone includes the minimal language, frozen asset catalog, media probing, Rust timing, versioned Timeline IR, immutable presentation bundle, deterministic browser clock, frame handshake, and a single-process whole-film Render Unit through Chromium/FFmpeg. It executes and muxes authored voice-over rather than silently dropping it. Its exit conformance builds the release CLI, renders the same screenplay through two independent Chromium/FFmpeg sessions, compares decoded video and audio frame hashes, verifies motion and stream facts, and proves no-clobber publication.
+**Gate one (complete): render one real video reliably.** The completed milestone includes the minimal language, frozen asset catalog, media probing, Rust timing, versioned Timeline IR, immutable presentation bundle, deterministic browser clock, frame handshake, and one whole-film Render Unit through Chromium/FFmpeg. It executes and muxes authored voice-over rather than silently dropping it. Its exit conformance builds the release CLI, renders the same screenplay through two independent Chromium/FFmpeg sessions, compares decoded video and audio frame hashes, verifies motion and stream facts, and proves no-clobber publication.
 
 **Gate two (complete): partition and assemble correctly.** The completed slice renders two independent local units and assembles them through the existing executor. Its exit conformance renders one media-bearing two-shot film both as a whole-film unit and as two independently materialized units, then compares decoded video and audio hashes plus first-audio-packet placement. It introduces the Render Graph and evaluation/output intervals. Preroll, persistent unit caching, and dependency-based invalidation remain deferred until a real dependency or cache consumer requires them.
 
@@ -395,16 +479,16 @@ Every gate uses the final-direction contracts but implements only fields consume
 
 ## Open experimental questions
 
-CDP versus WebDriver BiDi, capture mechanism, layered alpha caching, wire encoding, coordinator storage, adapter seekability, and environment-locking granularity require prototypes and measurements. The pure compiler boundary, deterministic protocol, dependency-driven partitioning, and local/distributed symmetry are foundational decisions.
+Layered alpha caching, wire encoding, coordinator storage, adapter seekability, and environment-locking granularity require prototypes and measurements. Gate-three native capture has selected headless shell's CDP BeginFrameControl; revisiting that boundary requires stronger correctness and performance evidence, not API novelty alone. The pure compiler boundary, deterministic protocol, dependency-driven partitioning, and local/distributed symmetry are foundational decisions.
 
-The first Gate-one capture spike gives positive but deliberately narrow evidence for application-controlled `FrameReady` followed by CDP `Page.captureScreenshot`: repeated DOM, CSS, and Canvas frames produced identical raw RGBA hashes across independent Chrome processes on one locked machine. This selects the next experiment, not the final transport contract; decoded media, WebGL, asynchronous components, cross-environment equality, and production lifecycle remain unproven.
+The first Gate-one capture spike gave positive but deliberately narrow evidence for application-controlled `FrameReady` followed by CDP `Page.captureScreenshot`: repeated DOM, CSS, and Canvas frames produced identical raw RGBA hashes across independent Chrome processes on one locked machine. Gate three replaces that provisional transport with `chrome-headless-shell` BeginFrameControl so compositor commit and screenshot share one explicit frame boundary. Decoded media, WebGL, asynchronous components, cross-environment equality, and production lifecycle still require their own evidence.
 
 The decoded-media experiment covers 30 fps CFR, `30000/1001` CFR, and an
 alternating-frame-interval VFR H.264 fixture, each with a 30-frame GOP and three
 B-frames. Native `<video>` seeking across the non-monotonic sequence
 `17 → 3 → 29 → 17` produced byte-identical PNG captures in two independent
-Chromium sessions once `requestVideoFrameCallback.mediaTime` confirmed the
-source frame selected at each output-frame midpoint. VFR expectations come
+Chromium sessions once a pre-capture `requestVideoFrameCallback` registration
+confirmed the captured source frame after `BeginFrame`. VFR expectations come
 from the probed source-frame timestamps rather than assuming source and output
 frames align. Independent `FFmpeg` extraction at the selected source-frame
 timestamps was also byte-stable across repeated runs. Seeking to an exact CFR
@@ -422,6 +506,42 @@ therefore keeps one decode/color path authoritative for a render and treats it
 as part of the locked environment. Codec and color diversity, longer random
 sequences, persistent native-decoder cost, and injection overhead remain open
 measurements.
+
+A later Linux arm64 A/B measured the complete pre-extraction alternative rather
+than process-per-frame extraction alone. The locked v149 headless shell rendered
+60 sequential 1,920×1,080 frames from one generated 30 fps H.264 source. Native
+browser seek plus `BeginFrame` capture completed in 3.89 seconds with a 292 MiB
+incremental process-tree RSS peak. One-pass `FFmpeg` 7.0.2 extraction produced
+23.4 MB of lossless PNGs in 0.23 seconds; loading those files through one reused
+browser image and capturing the same 60 frames took another 2.34–2.38 seconds,
+but incremental RSS reached 944–949 MiB across repeated samples. Four sampled
+frames differed in 16,665,272 of
+33,177,600 RGBA channels, with mean absolute delta 7.21 and maximum delta 198.
+The experiment therefore rejects pre-extracted PNG injection as the default:
+its roughly one-third latency reduction does not justify a threefold memory
+increase and an implicit decode/color-path change. A future streaming native
+decoder may reopen the question only with bounded browser transport, explicit
+color policy, and equal-or-better end-to-end evidence.
+
+The follow-up Linux arm64 experiment tested that streaming shape without
+injecting media back into Chromium. For the same 60-frame 1,920×1,080 workload,
+Chromium captured a sparse transparent presentation layer, exited, and one
+single-threaded `FFmpeg` 7.0.2 process decoded the H.264 base, composited the PNG
+layer, and streamed RGBA output. Transparent capture took 1.16–1.22 seconds;
+native composition took 0.27–0.34 seconds; their sequential total was
+1.46–1.52 seconds versus 3.77–3.84 seconds for the authoritative browser-media
+path. The two stages peaked at 220–221 MiB and 215–238 MiB incremental RSS,
+respectively, and the 60 transparent PNGs occupied 2.96 MB. With the same
+Chromium-decoded base on both sides, straight-alpha composition differed in
+only 6,240 of 33,177,600 sampled channels, with mean absolute delta 0.0002 and
+maximum delta 2. Explicitly tagging the source as BT.709 limited range reduced
+the complete native-path mean delta from 6.82 to 0.67, but 4,938,423 sampled
+channels still differed and isolated maxima reached 202 because Chromium and
+`FFmpeg` do not share one decode/chroma-reconstruction implementation. The
+layered path therefore proves a compelling performance and memory candidate,
+not raw-pixel equivalence. Production keeps Chromium authoritative until
+frozen asset metadata owns color facts and a presentation capability proves
+that media and browser visuals are separable; it is never a hidden fallback.
 
 Gate one therefore admits CFR H.264 visual assets only and uses the locked
 Chromium decoder as the authoritative visual decode/color path. The adapter

@@ -11,7 +11,7 @@ use aws_sdk_s3::error::ProvideErrorMetadata;
 use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart};
 use onmark_render::{FrameArtifact, FrameArtifactLimits};
-use tokio::io::AsyncReadExt as _;
+use tokio::io::{AsyncRead, AsyncReadExt as _};
 
 use crate::deadline::InvocationDeadline;
 use crate::download::{DownloadBudget, S3Object};
@@ -221,7 +221,7 @@ impl<'client> MultipartUpload<'client> {
         let mut buffer = vec![0; MULTIPART_PART_BYTES];
 
         loop {
-            let read = input.read(&mut buffer).await.map_err(|source| {
+            let read = read_part(&mut input, &mut buffer).await.map_err(|source| {
                 DeploymentError::filesystem("read frame artifact", artifact, source)
             })?;
             if read == 0 {
@@ -348,9 +348,82 @@ impl<'client> MultipartUpload<'client> {
     }
 }
 
+async fn read_part(
+    input: &mut (impl AsyncRead + Unpin),
+    buffer: &mut [u8],
+) -> std::io::Result<usize> {
+    let mut filled = 0;
+    while filled < buffer.len() {
+        let read = input.read(&mut buffer[filled..]).await?;
+        if read == 0 {
+            break;
+        }
+        filled += read;
+    }
+    Ok(filled)
+}
+
 fn service_code<E>(error: &aws_sdk_s3::error::SdkError<E>) -> Option<&str>
 where
     E: ProvideErrorMetadata,
 {
     error.as_service_error().and_then(|error| error.code())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::pin::Pin;
+    use std::task::{Context, Poll};
+
+    use tokio::io::{AsyncRead, ReadBuf};
+
+    use super::read_part;
+
+    struct ShortReader<'bytes> {
+        bytes: &'bytes [u8],
+        chunk: usize,
+    }
+
+    impl AsyncRead for ShortReader<'_> {
+        fn poll_read(
+            mut self: Pin<&mut Self>,
+            _context: &mut Context<'_>,
+            output: &mut ReadBuf<'_>,
+        ) -> Poll<std::io::Result<()>> {
+            let read = self.chunk.min(self.bytes.len()).min(output.remaining());
+            output.put_slice(&self.bytes[..read]);
+            self.bytes = &self.bytes[read..];
+            Poll::Ready(Ok(()))
+        }
+    }
+
+    #[tokio::test]
+    async fn fills_every_nonfinal_part_across_short_reads() {
+        let mut input = ShortReader {
+            bytes: b"abcdefghij",
+            chunk: 3,
+        };
+        let mut part = [0; 8];
+
+        assert_eq!(
+            read_part(&mut input, &mut part)
+                .await
+                .expect("the in-memory reader cannot fail"),
+            8
+        );
+        assert_eq!(&part, b"abcdefgh");
+        assert_eq!(
+            read_part(&mut input, &mut part)
+                .await
+                .expect("the in-memory reader cannot fail"),
+            2
+        );
+        assert_eq!(&part[..2], b"ij");
+        assert_eq!(
+            read_part(&mut input, &mut part)
+                .await
+                .expect("the in-memory reader cannot fail"),
+            0
+        );
+    }
 }

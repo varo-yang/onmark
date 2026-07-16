@@ -16,7 +16,14 @@ export type BrowserEvent =
     }
   | {
       /**
-       * Exact frame now represented by browser state.
+       * Exact frame represented by staged browser state.
+       */
+      frame: number;
+      type: "frameStaged";
+    }
+  | {
+      /**
+       * Exact frame confirmed by browser media state.
        */
       frame: number;
       type: "frameReady";
@@ -31,6 +38,7 @@ export type BrowserEvent =
         | "loadFailed"
         | "prepareFailed"
         | "seekFailed"
+        | "confirmFailed"
         | "readinessTimeout"
         | "internal";
       /**

@@ -13,7 +13,7 @@ use onmark_core::protocol::{
 use onmark_core::render_graph::{PartitionPlan, RenderGraph};
 use onmark_media::Ffprobe;
 use onmark_render::{
-    BrowserErrorKind, BrowserLimits, BrowserSession, CaptureEnvironmentId, ChromiumSandbox,
+    BrowserErrorKind, BrowserLaunchPolicy, BrowserLimits, BrowserSession, CaptureEnvironmentId,
     EncodeLimits, EncodedPng, ExecutableUnit, Ffmpeg, FrameArtifactLimits, MaterializedAsset,
     RawRgbaHash, RenderErrorKind, RenderExecutor, RenderProfile, RenderUnit, UnitRootLimits,
 };
@@ -56,16 +56,16 @@ async fn rejects_units_that_do_not_match_the_partition_plan_before_launching_bro
 }
 
 #[tokio::test]
-#[ignore = "requires ONMARK_CHROME"]
+#[ignore = "requires ONMARK_HEADLESS_SHELL"]
 async fn rejects_a_page_that_never_installs_the_runtime_host() {
     let session = BrowserSession::launch(
-        chrome(),
-        ChromiumSandbox::Enabled,
+        headless_shell(),
+        BrowserLaunchPolicy::local(),
         render_profile(),
         browser_limits(Duration::from_secs(5)),
     )
     .await
-    .expect("Chrome must launch");
+    .expect("headless shell must launch");
     let fixture = render_fixture("missing-runtime.html");
 
     let error = session
@@ -75,20 +75,20 @@ async fn rejects_a_page_that_never_installs_the_runtime_host() {
     let shutdown = session.shutdown().await;
 
     assert_eq!(error.kind(), BrowserErrorKind::RuntimeHost);
-    shutdown.expect("Chrome must shut down after a readiness failure");
+    shutdown.expect("headless shell must shut down after a readiness failure");
 }
 
 #[tokio::test]
-#[ignore = "requires ONMARK_CHROME and a built @onmark/runtime package"]
+#[ignore = "requires ONMARK_HEADLESS_SHELL and a built @onmark/runtime package"]
 async fn bounds_a_runtime_adapter_that_never_finishes_loading() {
     let session = BrowserSession::launch(
-        chrome(),
-        ChromiumSandbox::Enabled,
+        headless_shell(),
+        BrowserLaunchPolicy::local(),
         render_profile(),
         browser_limits(Duration::from_secs(5)),
     )
     .await
-    .expect("Chrome must launch");
+    .expect("headless shell must launch");
     let fixture = render_fixture("stalled-runtime.html");
     session
         .navigate(fixture.as_str())
@@ -108,11 +108,11 @@ async fn bounds_a_runtime_adapter_that_never_finishes_loading() {
     let shutdown = session.shutdown().await;
 
     assert_eq!(error.kind(), BrowserErrorKind::Protocol);
-    shutdown.expect("Chrome must shut down after a protocol timeout");
+    shutdown.expect("headless shell must shut down after a protocol timeout");
 }
 
 #[tokio::test]
-#[ignore = "requires ONMARK_CHROME and a built @onmark/runtime package"]
+#[ignore = "requires ONMARK_HEADLESS_SHELL and a built @onmark/runtime package"]
 async fn captures_stable_raw_rgba_frames_across_independent_browser_sessions() {
     let fixture = browser_fixture();
     let first = capture_protocol_fingerprint(&fixture).await;
@@ -125,7 +125,7 @@ async fn captures_stable_raw_rgba_frames_across_independent_browser_sessions() {
 }
 
 #[tokio::test]
-#[ignore = "requires ONMARK_CHROME, ONMARK_FFMPEG, and ONMARK_FFPROBE"]
+#[ignore = "requires ONMARK_HEADLESS_SHELL, ONMARK_FFMPEG, and ONMARK_FFPROBE"]
 async fn renders_the_gate_one_plan_to_a_verified_mp4() {
     let directory = tempdir().expect("the test output directory must be available");
     let source = directory.path().join("source.mp4");
@@ -148,7 +148,7 @@ async fn renders_the_gate_one_plan_to_a_verified_mp4() {
 }
 
 #[tokio::test]
-#[ignore = "requires ONMARK_CHROME, ONMARK_FFMPEG, and ONMARK_FFPROBE"]
+#[ignore = "requires ONMARK_HEADLESS_SHELL, ONMARK_FFMPEG, and ONMARK_FFPROBE"]
 async fn renders_two_partitions_equivalently_to_one_whole_film_unit() {
     let directory = tempdir().expect("the test output directory must be available");
     let fixture = GateTwoFixture::materialize(directory.path()).await;
@@ -175,7 +175,7 @@ async fn renders_two_partitions_equivalently_to_one_whole_film_unit() {
 }
 
 #[tokio::test]
-#[ignore = "requires ONMARK_CHROME, ONMARK_FFMPEG, and ONMARK_FFPROBE"]
+#[ignore = "requires ONMARK_HEADLESS_SHELL, ONMARK_FFMPEG, and ONMARK_FFPROBE"]
 async fn assembles_worker_frame_artifacts_equivalently_to_the_whole_film() {
     let directory = tempdir().expect("the test output directory must be available");
     let fixture = GateTwoFixture::materialize(directory.path()).await;
@@ -301,18 +301,18 @@ async fn freeze_asset(path: &Path) -> FrozenAsset {
 
 async fn capture_protocol_fingerprint(fixture: &Url) -> RawRgbaHash {
     let session = BrowserSession::launch(
-        chrome(),
-        ChromiumSandbox::Enabled,
+        headless_shell(),
+        BrowserLaunchPolicy::local(),
         render_profile(),
         browser_limits(Duration::from_secs(10)),
     )
     .await
-    .expect("Chrome must launch");
+    .expect("headless shell must launch");
     let result = exercise_protocol(&session, fixture).await;
     let shutdown = session.shutdown().await;
 
     let fingerprint = result.expect("the real browser protocol must capture deterministic frames");
-    shutdown.expect("Chrome must shut down cleanly");
+    shutdown.expect("headless shell must shut down cleanly");
     fingerprint
 }
 
@@ -321,12 +321,18 @@ async fn exercise_protocol(
     fixture: &Url,
 ) -> Result<RawRgbaHash, Box<dyn Error>> {
     load_and_prepare(session, fixture).await?;
-    let first = session.capture_frame().await?;
+    let first = session
+        .capture_frame(frame(0), gate_one_plan().frame_rate())
+        .await?;
 
     seek(session, 3, 15).await?;
-    let selected = session.capture_frame().await?;
+    let selected = session
+        .capture_frame(frame(15), gate_one_plan().frame_rate())
+        .await?;
     seek(session, 4, 15).await?;
-    let repeated = session.capture_frame().await?;
+    let repeated = session
+        .capture_frame(frame(15), gate_one_plan().frame_rate())
+        .await?;
 
     assert_png(first.png());
     assert_ne!(first.raw_rgba_hash(), selected.raw_rgba_hash());
@@ -575,8 +581,8 @@ fn timestamp_micros(timestamp: &str) -> i64 {
     if negative { -micros } else { micros }
 }
 
-fn chrome() -> PathBuf {
-    required_path("ONMARK_CHROME")
+fn headless_shell() -> PathBuf {
+    required_path("ONMARK_HEADLESS_SHELL")
 }
 
 fn required_path(variable: &str) -> PathBuf {
@@ -608,7 +614,11 @@ fn real_executor(max_frames: u64) -> RenderExecutor {
     let ffmpeg = Ffmpeg::new(required_path("ONMARK_FFMPEG"), limits)
         .expect("the FFmpeg executable path is present");
 
-    RenderExecutor::new(chrome(), browser_limits(Duration::from_secs(10)), ffmpeg)
+    RenderExecutor::new(
+        headless_shell(),
+        browser_limits(Duration::from_secs(10)),
+        ffmpeg,
+    )
 }
 
 fn frame_artifact_limits() -> FrameArtifactLimits {

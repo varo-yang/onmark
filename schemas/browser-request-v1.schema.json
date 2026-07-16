@@ -62,6 +62,25 @@
         },
         {
           "additionalProperties": false,
+          "description": "Confirm that the compositor presented the staged media frame.",
+          "properties": {
+            "frame": {
+              "$ref": "#/$defs/WireFrame",
+              "description": "Frame whose captured presentation is being confirmed."
+            },
+            "type": {
+              "const": "confirm",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "frame"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "Release page-owned resources for this session.",
           "properties": {
             "type": {

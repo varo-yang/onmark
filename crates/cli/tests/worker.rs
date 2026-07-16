@@ -25,7 +25,7 @@ const FRAME_COUNT: u64 = 60;
 const PROCESS_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[tokio::test]
-#[ignore = "requires ONMARK_CHROME and a built @onmark/runtime package"]
+#[ignore = "requires ONMARK_HEADLESS_SHELL and a built @onmark/runtime package"]
 async fn captures_a_portable_request_in_a_separate_worker_process() {
     let directory = tempdir().expect("the worker fixture directory is available");
     let input = directory.path().join("input");
@@ -46,7 +46,7 @@ async fn captures_a_portable_request_in_a_separate_worker_process() {
 }
 
 #[tokio::test]
-#[ignore = "requires ONMARK_CHROME and a built @onmark/runtime package"]
+#[ignore = "requires ONMARK_HEADLESS_SHELL and a built @onmark/runtime package"]
 async fn refuses_to_reuse_an_artifact_from_a_different_capture_environment() {
     let directory = tempdir().expect("the worker fixture directory is available");
     let artifact = directory.path().join("worker.onmark-frames");
@@ -70,7 +70,7 @@ async fn refuses_to_reuse_an_artifact_from_a_different_capture_environment() {
 }
 
 #[tokio::test]
-#[ignore = "requires ONMARK_CHROME, ONMARK_FFMPEG, and a built @onmark/runtime package"]
+#[ignore = "requires ONMARK_HEADLESS_SHELL, ONMARK_FFMPEG, and a built @onmark/runtime package"]
 async fn assembles_two_independent_worker_processes_equivalently_to_one_local_film() {
     let directory = tempdir().expect("the worker fixture directory is available");
     let timeline = two_shot_timeline();
@@ -118,7 +118,7 @@ async fn assembles_two_independent_worker_processes_equivalently_to_one_local_fi
 }
 
 #[tokio::test]
-#[ignore = "requires ONMARK_CHROME and a built @onmark/runtime package"]
+#[ignore = "requires ONMARK_HEADLESS_SHELL and a built @onmark/runtime package"]
 async fn partition_workers_match_the_whole_film_raw_rgba_sequence() {
     let directory = tempdir().expect("the worker fixture directory is available");
     let timeline = two_shot_timeline();
@@ -205,7 +205,9 @@ async fn run_worker(input: &Path, output: &Path) -> std::process::Output {
             "--output",
             output.to_str().expect("the fixture path is UTF-8"),
             "--browser",
-            chrome().to_str().expect("the browser path is UTF-8"),
+            headless_shell()
+                .to_str()
+                .expect("the browser path is UTF-8"),
         ])
         .output();
     timeout(PROCESS_TIMEOUT, child)
@@ -379,7 +381,7 @@ fn executor() -> RenderExecutor {
             .expect("the fixture encoder limits are bounded");
     let ffmpeg = Ffmpeg::new(ffmpeg(), encode_limits).expect("the fixture FFmpeg path is valid");
 
-    RenderExecutor::new(chrome(), browser_limits, ffmpeg)
+    RenderExecutor::new(headless_shell(), browser_limits, ffmpeg)
 }
 
 fn bundle_manifest() -> BundleManifest {
@@ -396,8 +398,8 @@ fn bundle() -> PathBuf {
         .join("conformance/protocol/bundle-v1")
 }
 
-fn chrome() -> PathBuf {
-    required_path("ONMARK_CHROME")
+fn headless_shell() -> PathBuf {
+    required_path("ONMARK_HEADLESS_SHELL")
 }
 
 fn ffmpeg() -> PathBuf {

@@ -15,12 +15,16 @@ use onmark_render::{
 };
 use tokio::task::JoinError;
 
+use crate::browser::BrowserInstallationError;
 use crate::config::ConfigurationError;
+
+const REPORTED_CAUSE_LIMIT: usize = 16;
 
 /// Typed infrastructure failure at the Lambda deployment boundary.
 #[derive(Debug)]
 pub(crate) enum DeploymentError {
     Configuration(ConfigurationError),
+    BrowserInstallation(BrowserInstallationError),
     S3 {
         operation: &'static str,
         bucket: Box<str>,
@@ -87,6 +91,51 @@ pub(crate) enum DeploymentError {
         failure: Box<DeploymentError>,
         abort: Box<DeploymentError>,
     },
+}
+
+/// Deployment failure rendered with its retained cause chain for Lambda.
+///
+/// `lambda_runtime` serializes only the returned error's `Display` text. This
+/// boundary view preserves the typed errors internally while making nested
+/// Chromium, filesystem, and transport causes observable to an invoker.
+#[derive(Debug)]
+pub(crate) struct ReportedDeploymentError(DeploymentError);
+
+impl ReportedDeploymentError {
+    pub(crate) const fn new(error: DeploymentError) -> Self {
+        Self(error)
+    }
+}
+
+impl fmt::Display for ReportedDeploymentError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut error: &(dyn Error + 'static) = &self.0;
+        let mut previous = None;
+
+        for _ in 0..REPORTED_CAUSE_LIMIT {
+            let message = error.to_string();
+            if previous.as_deref() != Some(message.as_str()) {
+                if previous.is_some() {
+                    formatter.write_str(": ")?;
+                }
+                formatter.write_str(&message)?;
+            }
+            previous = Some(message);
+
+            let Some(source) = error.source() else {
+                return Ok(());
+            };
+            error = source;
+        }
+
+        formatter.write_str(": further causes omitted")
+    }
+}
+
+impl Error for ReportedDeploymentError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        Some(&self.0)
+    }
 }
 
 /// The deployment role of one S3 object whose retained bytes are bounded.
@@ -237,6 +286,7 @@ impl fmt::Display for DeploymentError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Configuration(source) => source.fmt(formatter),
+            Self::BrowserInstallation(source) => source.fmt(formatter),
             Self::S3 {
                 operation,
                 bucket,
@@ -330,6 +380,7 @@ impl Error for DeploymentError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Configuration(source) => Some(source),
+            Self::BrowserInstallation(source) => Some(source),
             Self::S3 { source, .. } => Some(source.as_ref()),
             Self::Filesystem { source, .. } => Some(source),
             Self::Request { source, .. } => Some(source),
@@ -357,6 +408,12 @@ impl From<ConfigurationError> for DeploymentError {
     }
 }
 
+impl From<BrowserInstallationError> for DeploymentError {
+    fn from(source: BrowserInstallationError) -> Self {
+        Self::BrowserInstallation(source)
+    }
+}
+
 impl From<UnitRootError> for DeploymentError {
     fn from(source: UnitRootError) -> Self {
         Self::Materialize(source)
@@ -378,9 +435,25 @@ impl From<FrameArtifactError> for DeploymentError {
 #[cfg(test)]
 mod tests {
     use std::error::Error as _;
+    use std::io;
     use std::time::Duration;
 
-    use super::DeploymentError;
+    use super::{DeploymentError, ReportedDeploymentError};
+
+    #[test]
+    fn lambda_report_retains_nested_failure_context_without_wrapper_repetition() {
+        let error = DeploymentError::s3_body(
+            "read worker input",
+            "fixture-bucket",
+            "fixture-key",
+            io::Error::other("fixture body failed"),
+        );
+
+        assert_eq!(
+            ReportedDeploymentError::new(error).to_string(),
+            "failed to read worker input s3://fixture-bucket/fixture-key: fixture body failed",
+        );
+    }
 
     #[test]
     fn preserves_publication_and_abort_failures_together() {

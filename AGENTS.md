@@ -4,9 +4,10 @@ Onmark is a screenplay-first, browser-rendered video compiler and execution engi
 
 **Current phase:** gates one and two are complete. Gate three is active. Local
 worker-artifact equivalence and the narrow Lambda/S3 capture adapter are
-implemented. The remaining deployment claim is a real Lambda Chromium
-conformance run; do not build a coordinator, queue, lease database, scheduler,
-or infrastructure product surface before that experiment is proven.
+implemented, and a real arm64 Lambda run has proved the locked Chromium capture
+path. The current goal is to harden that measured deployment boundary; do not
+build a coordinator, queue, lease database, scheduler, or infrastructure
+product surface before it is stable.
 
 ## Read before changing code
 

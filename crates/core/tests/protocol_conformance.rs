@@ -28,7 +28,8 @@ fn gate_one_browser_requests_match_the_versioned_wire_contract() {
             },
         ),
         request(3, BrowserCommand::Seek { frame: frame(15) }),
-        request(4, BrowserCommand::Dispose),
+        request(4, BrowserCommand::Confirm { frame: frame(15) }),
+        request(5, BrowserCommand::Dispose),
     ];
 
     assert_or_update(
@@ -42,7 +43,7 @@ fn gate_one_browser_responses_match_the_versioned_wire_contract() {
     let timeout = ProtocolFailure::new(
         ProtocolFailureCode::ReadinessTimeout,
         "frame 15 did not become ready",
-        vec![Box::from("font:Inter")],
+        vec![Box::from("video-frame")],
     )
     .expect("the fixture failure is actionable");
     let responses = [
@@ -53,9 +54,10 @@ fn gate_one_browser_responses_match_the_versioned_wire_contract() {
                 evaluation_start: frame(0),
             },
         ),
-        response(3, BrowserEvent::FrameReady { frame: frame(15) }),
-        response(3, BrowserEvent::Failed(timeout)),
-        response(4, BrowserEvent::Disposed),
+        response(3, BrowserEvent::FrameStaged { frame: frame(15) }),
+        response(4, BrowserEvent::FrameReady { frame: frame(15) }),
+        response(4, BrowserEvent::Failed(timeout)),
+        response(5, BrowserEvent::Disposed),
     ];
 
     assert_or_update(

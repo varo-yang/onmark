@@ -38,11 +38,30 @@
         },
         {
           "additionalProperties": false,
-          "description": "One requested frame is stable and may be captured.",
+          "description": "One requested frame has been staged for the compositor.",
           "properties": {
             "frame": {
               "$ref": "#/$defs/WireFrame",
-              "description": "Exact frame now represented by browser state."
+              "description": "Exact frame represented by staged browser state."
+            },
+            "type": {
+              "const": "frameStaged",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "frame"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The captured compositor frame passed runtime media confirmation.",
+          "properties": {
+            "frame": {
+              "$ref": "#/$defs/WireFrame",
+              "description": "Exact frame confirmed by browser media state."
             },
             "type": {
               "const": "frameReady",
@@ -134,6 +153,11 @@
         {
           "const": "seekFailed",
           "description": "The requested frame could not be evaluated.",
+          "type": "string"
+        },
+        {
+          "const": "confirmFailed",
+          "description": "The staged frame could not be confirmed after compositor capture.",
           "type": "string"
         },
         {

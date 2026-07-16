@@ -66,22 +66,32 @@ test("executes the Gate-one protocol in order", async () => {
     {
       version: 1,
       requestId: 3,
+      event: { type: "frameStaged", frame: 15 },
+    },
+  );
+  assert.deepEqual(
+    await session.dispatch(request(4, { type: "confirm", frame: 15 })),
+    {
+      version: 1,
+      requestId: 4,
       event: { type: "frameReady", frame: 15 },
     },
   );
-  assert.deepEqual(await session.dispatch(request(4, { type: "dispose" })), {
+  assert.deepEqual(await session.dispatch(request(5, { type: "dispose" })), {
     version: 1,
-    requestId: 4,
+    requestId: 5,
     event: { type: "disposed" },
   });
   assert.deepEqual(adapter.operations, [
     "load",
     "prepare:10",
     "seek:15",
+    "confirm:15",
     "dispose",
   ]);
   assert.deepEqual(adapter.preparedFrame, { index: 10, timeSeconds: 1 / 3 });
   assert.deepEqual(adapter.seekFrames, [{ index: 15, timeSeconds: 0.5 }]);
+  assert.deepEqual(adapter.confirmedFrames, [{ index: 15, timeSeconds: 0.5 }]);
 });
 
 test("rejects commands that violate session state or evaluation bounds", async () => {
@@ -104,7 +114,22 @@ test("rejects commands that violate session state or evaluation bounds", async (
     request(5, { type: "seek", frame: 20 }),
   );
   assertFailure(outside, "invalidRequest");
-  assert.deepEqual(adapter.operations, ["load", "prepare:10"]);
+
+  const beforeStage = await session.dispatch(
+    request(6, { type: "confirm", frame: 10 }),
+  );
+  assertFailure(beforeStage, "invalidRequest");
+
+  await session.dispatch(request(7, { type: "seek", frame: 10 }));
+  const secondSeek = await session.dispatch(
+    request(8, { type: "seek", frame: 11 }),
+  );
+  const wrongConfirmation = await session.dispatch(
+    request(9, { type: "confirm", frame: 11 }),
+  );
+  assertFailure(secondSeek, "invalidRequest");
+  assertFailure(wrongConfirmation, "invalidRequest");
+  assert.deepEqual(adapter.operations, ["load", "prepare:10", "seek:10"]);
 });
 
 // ── Concurrency, failures, and ownership ──
@@ -344,9 +369,11 @@ class RecordingAdapter implements RuntimeAdapter {
   loadError: Error | undefined;
   prepareError: Error | undefined;
   seekError: Error | undefined;
+  confirmError: Error | undefined;
   disposeError: Error | undefined;
   preparedFrame: RuntimeFrame | undefined;
   readonly seekFrames: RuntimeFrame[] = [];
+  readonly confirmedFrames: RuntimeFrame[] = [];
 
   async load(plan: RuntimePlan): Promise<void> {
     this.operations.push("load");
@@ -372,6 +399,14 @@ class RecordingAdapter implements RuntimeAdapter {
     this.seekFrames.push(frame);
     if (this.seekError !== undefined) {
       throw this.seekError;
+    }
+  }
+
+  async confirm(frame: RuntimeFrame): Promise<void> {
+    this.operations.push(`confirm:${frame.index}`);
+    this.confirmedFrames.push(frame);
+    if (this.confirmError !== undefined) {
+      throw this.confirmError;
     }
   }
 

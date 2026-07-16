@@ -4,6 +4,7 @@ use std::error::Error;
 use std::fmt;
 use std::io;
 
+use base64::DecodeError;
 use chromiumoxide::error::CdpError;
 use tokio::task::JoinError;
 
@@ -76,6 +77,14 @@ impl BrowserError {
         }
     }
 
+    pub(super) fn base64(source: DecodeError) -> Self {
+        Self {
+            kind: BrowserErrorKind::Capture,
+            message: Some("headless shell returned invalid screenshot data".into()),
+            source: Some(BrowserErrorSource::Base64(source)),
+        }
+    }
+
     pub(super) fn png(message: impl Into<Box<str>>, source: png::DecodingError) -> Self {
         Self {
             kind: BrowserErrorKind::Capture,
@@ -84,11 +93,34 @@ impl BrowserError {
         }
     }
 
-    pub(super) fn cdp(kind: BrowserErrorKind, source: CdpError) -> Self {
+    pub(super) fn cdp_with_diagnostics(
+        kind: BrowserErrorKind,
+        source: CdpError,
+        diagnostics: Option<Box<str>>,
+    ) -> Self {
         Self {
             kind,
-            message: None,
+            message: diagnostics.map(|diagnostics| {
+                format!("headless-shell stderr tail:\n{diagnostics}").into_boxed_str()
+            }),
             source: Some(BrowserErrorSource::Cdp(source)),
+        }
+    }
+
+    pub(super) fn process(
+        kind: BrowserErrorKind,
+        message: impl Into<String>,
+        diagnostics: Option<Box<str>>,
+    ) -> Self {
+        let message = message.into();
+        let message = match diagnostics {
+            Some(diagnostics) => format!("{message}; headless-shell stderr tail:\n{diagnostics}"),
+            None => message,
+        };
+        Self {
+            kind,
+            message: Some(message.into_boxed_str()),
+            source: None,
         }
     }
 
@@ -153,6 +185,7 @@ impl fmt::Display for BrowserErrorKind {
 
 #[derive(Debug)]
 enum BrowserErrorSource {
+    Base64(DecodeError),
     Cdp(CdpError),
     Png(png::DecodingError),
     Io(io::Error),
@@ -163,6 +196,7 @@ enum BrowserErrorSource {
 impl fmt::Display for BrowserErrorSource {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Base64(source) => source.fmt(formatter),
             Self::Cdp(source) => source.fmt(formatter),
             Self::Png(source) => source.fmt(formatter),
             Self::Io(source) => source.fmt(formatter),
@@ -175,6 +209,7 @@ impl fmt::Display for BrowserErrorSource {
 impl Error for BrowserErrorSource {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
+            Self::Base64(source) => source.source(),
             Self::Cdp(source) => source.source(),
             Self::Png(source) => source.source(),
             Self::Io(source) => source.source(),

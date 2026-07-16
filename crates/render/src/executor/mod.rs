@@ -8,6 +8,7 @@ mod error;
 mod output;
 
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use onmark_core::model::FrameIndex;
 use onmark_core::protocol::{
@@ -21,7 +22,7 @@ use crate::encoder::AudioInput;
 use crate::frame_artifact::FrameArtifactWriter;
 use crate::unit::MAX_AUDIO_TRACKS;
 use crate::{
-    BrowserLimits, BrowserSession, CaptureEnvironmentId, ChromiumSandbox, EncodedVideo,
+    BrowserLaunchPolicy, BrowserLimits, BrowserSession, CaptureEnvironmentId, EncodedVideo,
     ExecutableUnit, Ffmpeg, FfmpegSession, FrameArtifact, FrameArtifactErrorKind,
     FrameArtifactLimits,
 };
@@ -32,29 +33,131 @@ const LOAD_REQUEST: RequestId = RequestId::new(1);
 const PREPARE_REQUEST: RequestId = RequestId::new(2);
 const FIRST_FRAME_REQUEST: u32 = 3;
 
+/// Aggregate wall-time attribution for one browser capture session.
+///
+/// These measurements explain executor cost; frame identity and scheduling
+/// remain derived exclusively from the render plan.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct FrameCaptureMetrics {
+    frames: u64,
+    launch: Duration,
+    runtime_setup: Duration,
+    seek: Duration,
+    readback: Duration,
+    fingerprint: Duration,
+    confirm: Duration,
+    write: Duration,
+    shutdown: Duration,
+}
+
+impl FrameCaptureMetrics {
+    /// Returns the number of frames written by the measured session.
+    #[must_use]
+    pub const fn frames(self) -> u64 {
+        self.frames
+    }
+
+    /// Returns Chromium process and CDP connection time.
+    #[must_use]
+    pub const fn launch(self) -> Duration {
+        self.launch
+    }
+
+    /// Returns navigation, compositor initialization, load, and prepare time.
+    #[must_use]
+    pub const fn runtime_setup(self) -> Duration {
+        self.runtime_setup
+    }
+
+    /// Returns aggregate runtime staging and media-seek time.
+    #[must_use]
+    pub const fn seek(self) -> Duration {
+        self.seek
+    }
+
+    /// Returns aggregate `BeginFrame`, screenshot readback, and Base64 decode time.
+    #[must_use]
+    pub const fn readback(self) -> Duration {
+        self.readback
+    }
+
+    /// Returns aggregate PNG decode and canonical raw-RGBA hashing time.
+    #[must_use]
+    pub const fn fingerprint(self) -> Duration {
+        self.fingerprint
+    }
+
+    /// Returns aggregate decoded-media confirmation time.
+    #[must_use]
+    pub const fn confirm(self) -> Duration {
+        self.confirm
+    }
+
+    /// Returns aggregate frame-sink write time.
+    #[must_use]
+    pub const fn write(self) -> Duration {
+        self.write
+    }
+
+    /// Returns browser and CDP shutdown time.
+    #[must_use]
+    pub const fn shutdown(self) -> Duration {
+        self.shutdown
+    }
+}
+
+/// One completed worker artifact together with capture-cost attribution.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FrameCaptureReport {
+    artifact: FrameArtifact,
+    metrics: Option<FrameCaptureMetrics>,
+}
+
+impl FrameCaptureReport {
+    /// Returns the completed immutable artifact.
+    #[must_use]
+    pub const fn artifact(&self) -> &FrameArtifact {
+        &self.artifact
+    }
+
+    /// Returns aggregate timings when this call performed a capture.
+    ///
+    /// A reused artifact has no capture session and therefore no timings.
+    #[must_use]
+    pub const fn metrics(&self) -> Option<FrameCaptureMetrics> {
+        self.metrics
+    }
+
+    /// Transfers ownership of the completed artifact.
+    #[must_use]
+    pub fn into_artifact(self) -> FrameArtifact {
+        self.artifact
+    }
+}
+
 /// Bounded Chromium capture boundary shared by local and worker execution.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FrameCaptureExecutor {
     browser_executable: PathBuf,
-    sandbox: ChromiumSandbox,
+    launch_policy: BrowserLaunchPolicy,
     browser_limits: BrowserLimits,
 }
 
 impl FrameCaptureExecutor {
     /// Creates one browser-only capture boundary.
     ///
-    /// Local callers retain [`ChromiumSandbox::Enabled`]. A deployment adapter
-    /// may select the disabled policy only when its independently audited outer
-    /// boundary owns process isolation.
+    /// Local callers retain [`BrowserLaunchPolicy::local`]. A deployment
+    /// adapter may select an isolated-worker policy only when its independently
+    /// audited outer boundary owns process isolation.
     #[must_use]
     pub fn new(
         browser_executable: impl Into<PathBuf>,
-        sandbox: ChromiumSandbox,
+        launch_policy: BrowserLaunchPolicy,
         browser_limits: BrowserLimits,
     ) -> Self {
         Self {
             browser_executable: browser_executable.into(),
-            sandbox,
+            launch_policy,
             browser_limits,
         }
     }
@@ -78,6 +181,24 @@ impl FrameCaptureExecutor {
         artifact: &Path,
         limits: FrameArtifactLimits,
     ) -> Result<FrameArtifact, RenderError> {
+        self.capture_frame_artifact_report(unit, capture_environment, artifact, limits)
+            .await
+            .map(FrameCaptureReport::into_artifact)
+    }
+
+    /// Captures one worker artifact and reports bounded phase timings.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RenderError`] under the same conditions as
+    /// [`Self::capture_frame_artifact`].
+    pub async fn capture_frame_artifact_report(
+        &self,
+        unit: &ExecutableUnit,
+        capture_environment: CaptureEnvironmentId,
+        artifact: &Path,
+        limits: FrameArtifactLimits,
+    ) -> Result<FrameCaptureReport, RenderError> {
         let requests = validate_plan(unit.browser_plan(), limits.max_frames(), artifact)?;
         let mut writer =
             match FrameArtifact::writer_for_capture(unit, capture_environment, artifact, limits)
@@ -85,24 +206,33 @@ impl FrameCaptureExecutor {
             {
                 Ok(writer) => writer,
                 Err(error) if error.kind() == FrameArtifactErrorKind::OutputExists => {
-                    return self
+                    let artifact = self
                         .reuse_artifact(unit, capture_environment, artifact, limits)
-                        .await;
+                        .await?;
+                    return Ok(FrameCaptureReport {
+                        artifact,
+                        metrics: None,
+                    });
                 }
                 Err(error) => return Err(RenderError::artifact(artifact, error)),
             };
         let mut frames = FrameSink::Artifact(&mut writer);
 
-        self.capture_unit(unit, &mut frames, requests, artifact)
+        let metrics = self
+            .capture_unit(unit, &mut frames, requests, artifact)
             .await?;
-        match writer.finish().await {
-            Ok(artifact) => Ok(artifact),
+        let artifact = match writer.finish().await {
+            Ok(artifact) => artifact,
             Err(error) if error.kind() == FrameArtifactErrorKind::OutputExists => {
                 self.reuse_artifact(unit, capture_environment, artifact, limits)
-                    .await
+                    .await?
             }
-            Err(error) => Err(RenderError::artifact(artifact, error)),
-        }
+            Err(error) => return Err(RenderError::artifact(artifact, error)),
+        };
+        Ok(FrameCaptureReport {
+            artifact,
+            metrics: Some(metrics),
+        })
     }
 
     async fn reuse_artifact(
@@ -123,16 +253,21 @@ impl FrameCaptureExecutor {
         frames: &mut FrameSink<'_>,
         requests: RequestSequence,
         output: &Path,
-    ) -> Result<(), RenderError> {
+    ) -> Result<FrameCaptureMetrics, RenderError> {
         let plan = unit.browser_plan();
+        let launch_started = Instant::now();
         let browser = BrowserSession::launch(
             &self.browser_executable,
-            self.sandbox,
+            self.launch_policy,
             unit.profile(),
             self.browser_limits,
         )
         .await
         .map_err(|source| RenderError::browser(output, source))?;
+        let mut metrics = FrameCaptureMetrics {
+            launch: launch_started.elapsed(),
+            ..FrameCaptureMetrics::default()
+        };
 
         let render_result = render_session(
             &browser,
@@ -140,16 +275,20 @@ impl FrameCaptureExecutor {
             requests,
             unit.entry_url().as_str(),
             frames,
+            &mut metrics,
             output,
         )
         .await;
+        let shutdown_started = Instant::now();
         let shutdown_result = browser
             .shutdown()
             .await
             .map_err(|source| RenderError::browser(output, source));
+        metrics.shutdown = shutdown_started.elapsed();
 
         render_result?;
-        shutdown_result
+        shutdown_result?;
+        Ok(metrics)
     }
 }
 
@@ -171,7 +310,7 @@ impl RenderExecutor {
         Self {
             capture: FrameCaptureExecutor::new(
                 browser_executable,
-                ChromiumSandbox::Enabled,
+                BrowserLaunchPolicy::local(),
                 browser_limits,
             ),
             ffmpeg,
@@ -493,11 +632,20 @@ struct RequestSequence {
     frames: u32,
 }
 
+#[derive(Clone, Copy)]
+struct FrameRequests {
+    seek: RequestId,
+    confirm: RequestId,
+}
+
 impl RequestSequence {
     fn new(frame_count: u64, output: &Path) -> Result<Self, RenderError> {
         let frames = u32::try_from(frame_count).map_err(|_| request_identity_overflow(output))?;
+        let frame_requests = frames
+            .checked_mul(2)
+            .ok_or_else(|| request_identity_overflow(output))?;
         FIRST_FRAME_REQUEST
-            .checked_add(frames)
+            .checked_add(frame_requests)
             .ok_or_else(|| request_identity_overflow(output))?;
 
         Ok(Self { frames })
@@ -507,12 +655,18 @@ impl RequestSequence {
         u64::from(self.frames)
     }
 
-    fn frame_ids(self) -> impl Iterator<Item = RequestId> {
-        (0..self.frames).map(|offset| RequestId::new(FIRST_FRAME_REQUEST + offset))
+    fn frame_requests(self) -> impl Iterator<Item = FrameRequests> {
+        (0..self.frames).map(|offset| {
+            let seek = FIRST_FRAME_REQUEST + offset * 2;
+            FrameRequests {
+                seek: RequestId::new(seek),
+                confirm: RequestId::new(seek + 1),
+            }
+        })
     }
 
     const fn disposal(self) -> RequestId {
-        RequestId::new(FIRST_FRAME_REQUEST + self.frames)
+        RequestId::new(FIRST_FRAME_REQUEST + self.frames * 2)
     }
 }
 
@@ -543,16 +697,23 @@ async fn render_session(
     requests: RequestSequence,
     entry_url: &str,
     frames: &mut FrameSink<'_>,
+    metrics: &mut FrameCaptureMetrics,
     output: &Path,
 ) -> Result<(), RenderError> {
+    let setup_started = Instant::now();
     browser
         .navigate(entry_url)
         .await
         .map_err(|source| RenderError::browser(output, source))?;
+    browser
+        .prime_compositor()
+        .await
+        .map_err(|source| RenderError::browser(output, source))?;
     load_runtime(browser, plan, output).await?;
     prepare_runtime(browser, plan, output).await?;
+    metrics.runtime_setup = setup_started.elapsed();
 
-    render_frames(browser, frames, plan, requests, output).await?;
+    render_frames(browser, frames, plan, requests, metrics, output).await?;
     dispose_runtime(browser, requests.disposal(), output).await
 }
 
@@ -606,20 +767,28 @@ async fn render_frames(
     frames: &mut FrameSink<'_>,
     plan: &BrowserPlan,
     requests: RequestSequence,
+    metrics: &mut FrameCaptureMetrics,
     output: &Path,
 ) -> Result<(), RenderError> {
     let start = plan.output().start().get();
     let end = plan.output().end().get();
 
-    for (index, request_id) in (start..end).zip(requests.frame_ids()) {
+    for (index, request_ids) in (start..end).zip(requests.frame_requests()) {
         let frame = WireFrame::new(index)
             .map_err(|_| invalid_plan(output, "browser output frame exceeds the wire domain"))?;
-        seek_frame(browser, request_id, frame, output).await?;
-        browser
-            .wait_for_compositor_commit()
-            .await
-            .map_err(|source| RenderError::browser(output, source))?;
-        frames.capture_and_write(browser, output).await?;
+        let seek_started = Instant::now();
+        stage_frame(browser, request_ids.seek, frame, output).await?;
+        metrics.seek += seek_started.elapsed();
+        frames
+            .capture_confirm_and_write(
+                browser,
+                request_ids.confirm,
+                frame,
+                plan.frame_rate(),
+                metrics,
+                output,
+            )
+            .await?;
     }
     Ok(())
 }
@@ -658,43 +827,72 @@ async fn stream_artifact(
 }
 
 impl FrameSink<'_> {
-    async fn capture_and_write(
+    async fn capture_confirm_and_write(
         &mut self,
         browser: &BrowserSession,
+        confirm_request: RequestId,
+        frame: WireFrame,
+        frame_rate: WireFrameRate,
+        metrics: &mut FrameCaptureMetrics,
         output: &Path,
     ) -> Result<(), RenderError> {
+        let readback_started = Instant::now();
+        let png = browser
+            .capture_png(frame, frame_rate)
+            .await
+            .map_err(|source| RenderError::browser(output, source))?;
+        metrics.readback += readback_started.elapsed();
+
+        let confirm_started = Instant::now();
+        confirm_frame(browser, confirm_request, frame, output).await?;
+        metrics.confirm += confirm_started.elapsed();
+
         match self {
             Self::Encoder(encoder) => {
-                let frame = browser
-                    .capture_png()
-                    .await
-                    .map_err(|source| RenderError::browser(output, source))?;
+                let write_started = Instant::now();
                 encoder
-                    .write_frame(&frame)
+                    .write_frame(&png)
                     .await
-                    .map_err(|source| RenderError::encoder(output, source))
+                    .map_err(|source| RenderError::encoder(output, source))?;
+                metrics.write += write_started.elapsed();
             }
             Self::Artifact(writer) => {
-                let frame = browser
-                    .capture_frame()
-                    .await
+                let fingerprint_started = Instant::now();
+                let captured = crate::CapturedFrame::from_png(png, browser.render_profile())
                     .map_err(|source| RenderError::browser(output, source))?;
+                metrics.fingerprint += fingerprint_started.elapsed();
+                let write_started = Instant::now();
                 writer
-                    .write_frame(&frame)
+                    .write_frame(&captured)
                     .await
-                    .map_err(|source| RenderError::artifact(output, source))
+                    .map_err(|source| RenderError::artifact(output, source))?;
+                metrics.write += write_started.elapsed();
             }
         }
+        metrics.frames += 1;
+        Ok(())
     }
 }
 
-async fn seek_frame(
+async fn stage_frame(
     browser: &BrowserSession,
     request_id: RequestId,
     frame: WireFrame,
     output: &Path,
 ) -> Result<(), RenderError> {
     let request = BrowserRequest::new(request_id, BrowserCommand::Seek { frame });
+    let expected = BrowserEvent::FrameStaged { frame };
+
+    dispatch_expected(browser, request, expected, output).await
+}
+
+async fn confirm_frame(
+    browser: &BrowserSession,
+    request_id: RequestId,
+    frame: WireFrame,
+    output: &Path,
+) -> Result<(), RenderError> {
+    let request = BrowserRequest::new(request_id, BrowserCommand::Confirm { frame });
     let expected = BrowserEvent::FrameReady { frame };
 
     dispatch_expected(browser, request, expected, output).await

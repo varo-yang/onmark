@@ -43,6 +43,7 @@
         installRuntimeHost,
         videoFrameSelection,
       } from "../../../../packages/runtime/dist/src/index.js";
+      import { drawMovingOverlay } from "./moving-overlay.js";
 
       const FRAME_TOLERANCE_SECONDS = 0.000001;
       const READINESS_DEADLINE_MS = 5_000;
@@ -60,8 +61,11 @@
         new URL(location.href).searchParams.get("expected"),
       );
       const materializedAsset = requiredParameter("asset");
+      const drawsOverlay =
+        new URL(location.href).searchParams.get("overlay") === "true";
 
       let frameRate;
+      let pendingFrame;
       let placement;
       installRuntimeHost({
         async load(plan) {
@@ -81,19 +85,37 @@
           video.load();
           await loaded;
         },
-        async prepare(frame) {
-          await present(frame);
-        },
+        async prepare() {},
         async seek(frame) {
-          await present(frame);
+          if (pendingFrame !== undefined) {
+            throw new RuntimeAdapterError(
+              "operation",
+              "the video experiment already has a staged frame",
+            );
+          }
+          pendingFrame = await stage(frame);
+        },
+        async confirm(frame) {
+          if (pendingFrame?.index !== frame.index) {
+            throw new RuntimeAdapterError(
+              "operation",
+              "the video experiment can only confirm its staged frame",
+            );
+          }
+          try {
+            await pendingFrame.presented;
+          } finally {
+            pendingFrame = undefined;
+          }
         },
         async dispose() {
+          pendingFrame = undefined;
           video.removeAttribute("src");
           video.load();
         },
       });
 
-      async function present(frame) {
+      async function stage(frame) {
         // Chrome selected the preceding decoded frame at exact boundaries;
         // seeking inside the selected source frame preserves its identity.
         const selection = videoFrameSelection(frame, placement, frameRate);
@@ -123,7 +145,14 @@
         const presented = waitForPresentedFrame(expectedMediaTime);
         const seeked = waitForVideoEvent("seeked", "video seek did not finish");
         video.currentTime = selection.seekTimeSeconds;
-        await Promise.all([seeked, presented]);
+        await seeked;
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+        if (drawsOverlay) {
+          drawMovingOverlay(context, frame.index, canvas.width, canvas.height);
+        }
+        return { index: frame.index, presented };
       }
 
       function waitForPresentedFrame(timeSeconds) {
@@ -151,9 +180,6 @@
             ) {
               active = false;
               window.clearTimeout(deadline);
-              canvas.width = window.innerWidth;
-              canvas.height = window.innerHeight;
-              context.drawImage(video, 0, 0, canvas.width, canvas.height);
               resolve();
               return;
             }

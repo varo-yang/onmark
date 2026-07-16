@@ -161,7 +161,7 @@ impl Fixture {
             .arg("--height")
             .arg(HEIGHT.to_string());
         for (flag, variable) in [
-            ("--browser", "ONMARK_CHROME"),
+            ("--browser", "ONMARK_HEADLESS_SHELL"),
             ("--bundler", "ONMARK_BUNDLER"),
             ("--ffmpeg", "ONMARK_FFMPEG"),
             ("--ffprobe", "ONMARK_FFPROBE"),

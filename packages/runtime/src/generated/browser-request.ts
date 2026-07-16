@@ -23,6 +23,13 @@ export type BrowserCommand =
       type: "seek";
     }
   | {
+      /**
+       * Exact frame integer accepted by JavaScript without rounding.
+       */
+      frame: number;
+      type: "confirm";
+    }
+  | {
       type: "dispose";
     };
 /**

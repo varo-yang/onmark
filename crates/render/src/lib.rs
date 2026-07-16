@@ -19,14 +19,17 @@ mod video;
 mod worker;
 
 pub use browser::{
-    BrowserError, BrowserErrorKind, BrowserLimits, BrowserSession, CapturedFrame, ChromiumSandbox,
-    EncodedPng, InvalidBrowserLimits, RawRgbaHash,
+    BrowserError, BrowserErrorKind, BrowserLaunchPolicy, BrowserLimits, BrowserSession,
+    CapturedFrame, EncodedPng, InvalidBrowserLimits, RawRgbaHash,
 };
 pub use encoder::{
     EncodeError, EncodeErrorKind, EncodeLimits, EncodedVideo, Ffmpeg, FfmpegSession, InvalidFfmpeg,
 };
 pub use environment::{CaptureEnvironmentId, InvalidCaptureEnvironmentId};
-pub use executor::{FrameCaptureExecutor, RenderError, RenderErrorKind, RenderExecutor};
+pub use executor::{
+    FrameCaptureExecutor, FrameCaptureMetrics, FrameCaptureReport, RenderError, RenderErrorKind,
+    RenderExecutor,
+};
 pub use frame_artifact::{
     FrameArtifact, FrameArtifactError, FrameArtifactErrorKind, FrameArtifactId,
     FrameArtifactLimits, InvalidFrameArtifactId, InvalidFrameArtifactLimits,

@@ -62,7 +62,7 @@ pub struct CapturedFrame {
 }
 
 impl CapturedFrame {
-    pub(super) fn from_png(png: EncodedPng, profile: RenderProfile) -> Result<Self, BrowserError> {
+    pub(crate) fn from_png(png: EncodedPng, profile: RenderProfile) -> Result<Self, BrowserError> {
         let raw_rgba_hash = raw_rgba_hash(&png, profile)?;
         Ok(Self { png, raw_rgba_hash })
     }

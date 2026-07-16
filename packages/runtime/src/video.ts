@@ -32,6 +32,7 @@ type VideoState = "empty" | "loaded" | "disposed";
 export class DecodedVideo {
   readonly #element: BrowserVideoElement;
   readonly #timeoutMilliseconds: number;
+  #pendingFrame: StagedFrame | undefined;
   #presentedMediaTime: number | undefined;
   #state: VideoState = "empty";
 
@@ -64,20 +65,71 @@ export class DecodedVideo {
     }
   }
 
-  /** Seeks and resolves only after the selected source frame is presented. */
-  async present(selection: VideoFrameSelection): Promise<void> {
-    this.#requireState("loaded", "present");
+  /** Seeks while registering the callback that will observe compositor output. */
+  async stage(selection: VideoFrameSelection): Promise<void> {
+    this.#requireState("loaded", "stage");
     requireSelection(selection);
     if (selection.mediaTimeSeconds === this.#presentedMediaTime) {
       return;
     }
 
-    await new FrameReadiness(
+    if (this.#pendingFrame !== undefined) {
+      throw new RuntimeAdapterError(
+        "operation",
+        "video cannot stage another frame before confirmation",
+      );
+    }
+
+    const pending = StagedFrame.observe(this.#element, selection);
+    const readiness = new SeekReadiness(
       this.#element,
-      selection,
       this.#timeoutMilliseconds,
-    ).wait();
+    );
+    this.#pendingFrame = pending;
+    try {
+      await readiness.seek(selection.seekTimeSeconds);
+    } catch (error) {
+      readiness.cancel();
+      pending.cancel();
+      this.#pendingFrame = undefined;
+      throw error;
+    }
+  }
+
+  /** Confirms that the compositor presented the previously staged frame. */
+  async confirm(selection: VideoFrameSelection): Promise<void> {
+    this.#requireState("loaded", "confirm");
+    requireSelection(selection);
+    if (selection.mediaTimeSeconds === this.#presentedMediaTime) {
+      return;
+    }
+
+    const pending = this.#pendingFrame;
+    if (pending === undefined || !pending.matches(selection)) {
+      throw new RuntimeAdapterError(
+        "operation",
+        "video confirmation requires the staged frame",
+      );
+    }
+
+    try {
+      await pending.confirm(this.#timeoutMilliseconds);
+    } catch (error) {
+      throw RuntimeAdapterError.fromUnknown(
+        error,
+        "video frame confirmation failed",
+      );
+    } finally {
+      pending.cancel();
+      this.#pendingFrame = undefined;
+    }
     this.#presentedMediaTime = selection.mediaTimeSeconds;
+  }
+
+  /** Cancels one staged frame that will not be captured. */
+  discardStagedFrame(): void {
+    this.#pendingFrame?.cancel();
+    this.#pendingFrame = undefined;
   }
 
   /** Releases the media resource and makes this controller terminal. */
@@ -86,6 +138,7 @@ export class DecodedVideo {
       return;
     }
     this.#state = "disposed";
+    this.discardStagedFrame();
     this.#presentedMediaTime = undefined;
     const failure = releaseElement(this.#element);
     if (failure !== undefined) {
@@ -196,69 +249,50 @@ class LoadedDataReadiness {
   }
 }
 
-class FrameReadiness {
+class SeekReadiness {
   readonly #deadline: ReturnType<typeof setTimeout>;
   readonly #element: BrowserVideoElement;
   readonly #promise: Promise<void>;
   readonly #reject: (error: RuntimeAdapterError) => void;
   readonly #resolve: () => void;
-  readonly #selection: VideoFrameSelection;
-  #frameCallback: number | undefined;
-  #framePresented = false;
-  #seekFinished = false;
   #settled = false;
 
-  constructor(
-    element: BrowserVideoElement,
-    selection: VideoFrameSelection,
-    timeoutMilliseconds: number,
-  ) {
+  constructor(element: BrowserVideoElement, timeoutMilliseconds: number) {
     this.#element = element;
-    this.#selection = selection;
     const pending = Promise.withResolvers<void>();
     this.#promise = pending.promise;
     this.#reject = pending.reject;
     this.#resolve = pending.resolve;
     this.#deadline = setTimeout(this.#timeout, timeoutMilliseconds);
+    element.addEventListener("seeked", this.#complete);
+    element.addEventListener("error", this.#failed);
   }
 
-  wait(): Promise<void> {
-    this.#element.addEventListener("seeked", this.#seeked);
-    this.#element.addEventListener("error", this.#failed);
+  seek(timeSeconds: number): Promise<void> {
     try {
-      this.#requestFrame();
-      this.#element.currentTime = this.#selection.seekTimeSeconds;
+      this.#element.currentTime = timeSeconds;
     } catch (error) {
-      this.#operationFailed(error);
+      this.#fail(error);
     }
     return this.#promise;
   }
 
-  readonly #seeked = (): void => {
-    this.#seekFinished = true;
-    this.#completeWhenReady();
-  };
-
-  readonly #inspectFrame: FrameCallback = (_now, metadata): void => {
-    this.#frameCallback = undefined;
-    this.#framePresented =
-      Math.abs(metadata.mediaTime - this.#selection.mediaTimeSeconds) <=
-      FRAME_TOLERANCE_SECONDS;
-    if (this.#framePresented) {
-      this.#completeWhenReady();
-      return;
+  cancel(): void {
+    if (this.#settle()) {
+      this.#resolve();
     }
-    try {
-      this.#requestFrame();
-    } catch (error) {
-      this.#operationFailed(error);
+  }
+
+  readonly #complete = (): void => {
+    if (this.#settle()) {
+      this.#resolve();
     }
   };
 
   readonly #failed = (): void => {
-    this.#operationFailed(
-      new RuntimeAdapterError("operation", "video seek failed"),
-    );
+    if (this.#settle()) {
+      this.#reject(new RuntimeAdapterError("operation", "video seek failed"));
+    }
   };
 
   readonly #timeout = (): void => {
@@ -266,31 +300,17 @@ class FrameReadiness {
       this.#reject(
         new RuntimeAdapterError(
           "readinessTimeout",
-          "decoded video frame did not become ready",
-          ["video-frame"],
+          "video seek did not finish before its readiness deadline",
+          ["video:seeked"],
         ),
       );
     }
   };
 
-  #completeWhenReady(): void {
-    if (this.#seekFinished && this.#framePresented && this.#settle()) {
-      this.#resolve();
-    }
-  }
-
-  #operationFailed(error: unknown): void {
+  #fail(error: unknown): void {
     if (this.#settle()) {
-      this.#reject(
-        RuntimeAdapterError.fromUnknown(error, "video frame callback failed"),
-      );
+      this.#reject(RuntimeAdapterError.fromUnknown(error, "video seek failed"));
     }
-  }
-
-  #requestFrame(): void {
-    this.#frameCallback = this.#element.requestVideoFrameCallback(
-      this.#inspectFrame,
-    );
   }
 
   #settle(): boolean {
@@ -299,12 +319,160 @@ class FrameReadiness {
     }
     this.#settled = true;
     clearTimeout(this.#deadline);
-    this.#element.removeEventListener("seeked", this.#seeked);
+    this.#element.removeEventListener("seeked", this.#complete);
+    this.#element.removeEventListener("error", this.#failed);
+    return true;
+  }
+}
+
+type FrameObservation =
+  | { readonly kind: "presented" }
+  | { readonly kind: "failed"; readonly error: RuntimeAdapterError };
+
+class StagedFrame {
+  readonly #element: BrowserVideoElement;
+  readonly #observation: Promise<FrameObservation>;
+  readonly #resolve: (observation: FrameObservation) => void;
+  readonly #selection: VideoFrameSelection;
+  #frameCallback: number | undefined;
+  #settled = false;
+
+  private constructor(
+    element: BrowserVideoElement,
+    selection: VideoFrameSelection,
+  ) {
+    this.#element = element;
+    this.#selection = selection;
+    const pending = Promise.withResolvers<FrameObservation>();
+    this.#observation = pending.promise;
+    this.#resolve = pending.resolve;
+    element.addEventListener("error", this.#failed);
+  }
+
+  static observe(
+    element: BrowserVideoElement,
+    selection: VideoFrameSelection,
+  ): StagedFrame {
+    const staged = new StagedFrame(element, selection);
+    try {
+      staged.#requestFrame();
+      return staged;
+    } catch (error) {
+      staged.cancel();
+      throw RuntimeAdapterError.fromUnknown(
+        error,
+        "video frame callback failed",
+      );
+    }
+  }
+
+  matches(selection: VideoFrameSelection): boolean {
+    return (
+      selection.mediaTimeSeconds === this.#selection.mediaTimeSeconds &&
+      selection.seekTimeSeconds === this.#selection.seekTimeSeconds
+    );
+  }
+
+  async confirm(timeoutMilliseconds: number): Promise<void> {
+    const observation = await observedBeforeDeadline(
+      this.#observation,
+      timeoutMilliseconds,
+    );
+    if (observation.kind === "failed") {
+      throw observation.error;
+    }
+  }
+
+  cancel(): void {
+    if (!this.#settle()) {
+      return;
+    }
+    this.#resolve({
+      kind: "failed",
+      error: new RuntimeAdapterError(
+        "operation",
+        "staged video frame was discarded",
+      ),
+    });
+  }
+
+  readonly #inspectFrame: FrameCallback = (_now, metadata): void => {
+    this.#frameCallback = undefined;
+    const exactFrame =
+      Math.abs(metadata.mediaTime - this.#selection.mediaTimeSeconds) <=
+      FRAME_TOLERANCE_SECONDS;
+    if (exactFrame) {
+      this.#finish({ kind: "presented" });
+      return;
+    }
+
+    try {
+      this.#requestFrame();
+    } catch (error) {
+      this.#finish({
+        kind: "failed",
+        error: RuntimeAdapterError.fromUnknown(
+          error,
+          "video frame callback failed",
+        ),
+      });
+    }
+  };
+
+  readonly #failed = (): void => {
+    this.#finish({
+      kind: "failed",
+      error: new RuntimeAdapterError("operation", "video seek failed"),
+    });
+  };
+
+  #requestFrame(): void {
+    this.#frameCallback = this.#element.requestVideoFrameCallback(
+      this.#inspectFrame,
+    );
+  }
+
+  #finish(observation: FrameObservation): void {
+    if (this.#settle()) {
+      this.#resolve(observation);
+    }
+  }
+
+  #settle(): boolean {
+    if (this.#settled) {
+      return false;
+    }
+    this.#settled = true;
     this.#element.removeEventListener("error", this.#failed);
     if (this.#frameCallback !== undefined) {
       this.#element.cancelVideoFrameCallback(this.#frameCallback);
     }
     return true;
+  }
+}
+
+async function observedBeforeDeadline(
+  observation: Promise<FrameObservation>,
+  timeoutMilliseconds: number,
+): Promise<FrameObservation> {
+  let deadline: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<FrameObservation>((resolve) => {
+    deadline = setTimeout(() => {
+      resolve({
+        kind: "failed",
+        error: new RuntimeAdapterError(
+          "readinessTimeout",
+          "decoded video frame did not become ready",
+          ["video-frame"],
+        ),
+      });
+    }, timeoutMilliseconds);
+  });
+
+  try {
+    return await Promise.race([observation, timeout]);
+  } finally {
+    clearTimeout(deadline);
   }
 }
 

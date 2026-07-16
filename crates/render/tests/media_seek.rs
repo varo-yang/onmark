@@ -4,10 +4,17 @@
 //! measures selection and repeatability without turning an experimental media
 //! path into a product API.
 
+#[path = "media_seek/decoder.rs"]
+mod decoder;
+#[path = "media_seek/measurement.rs"]
+mod measurement;
+#[path = "media_seek/pixels.rs"]
+mod pixels;
+
 use std::collections::BTreeMap;
 use std::env;
 use std::error::Error;
-use std::io::Write as _;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -21,23 +28,36 @@ use onmark_core::protocol::{
 };
 use onmark_media::Ffprobe;
 use onmark_render::{
-    AdmittedVideo, BrowserLimits, BrowserSession, ChromiumSandbox, EncodedPng, RenderProfile,
+    AdmittedVideo, BrowserLaunchPolicy, BrowserLimits, BrowserSession, EncodedPng, RenderProfile,
     UnsupportedVideo,
 };
 use serde::Deserialize;
-use tempfile::{NamedTempFile, tempdir};
+use tempfile::{TempDir, tempdir};
 use tokio::process::Command;
 use tokio::time::timeout;
 use url::Url;
 
+use decoder::{compose_sequence, decode_sequence};
+use measurement::{Measurement, measure};
+use pixels::{
+    PixelDifference, compare_encoded_frames, compare_pixels, composite_pixels,
+    decode_browser_frames,
+};
+
 const WIDTH: u32 = 320;
 const HEIGHT: u32 = 180;
 const SEEK_SEQUENCE: [u64; 4] = [17, 3, 29, 17];
+// Performance covers one two-second sequence; color sampling retains only four
+// PNGs so the test does not manufacture the memory growth it is measuring.
+const COLOR_SAMPLE_SEQUENCE: [u64; 4] = [0, 17, 29, 59];
+const BENCHMARK_FRAME_COUNT: u64 = 60;
 const PROCESS_DEADLINE: Duration = Duration::from_secs(20);
 const MAX_REFERENCE_BYTES: usize = 8 * 1024 * 1024;
+const WIDTH_ENVIRONMENT: &str = "ONMARK_MEDIA_EXPERIMENT_WIDTH";
+const HEIGHT_ENVIRONMENT: &str = "ONMARK_MEDIA_EXPERIMENT_HEIGHT";
 
 #[tokio::test]
-#[ignore = "requires ONMARK_CHROME, ONMARK_FFMPEG, ONMARK_FFPROBE, and built runtime"]
+#[ignore = "requires ONMARK_HEADLESS_SHELL, ONMARK_FFMPEG, ONMARK_FFPROBE, and built runtime"]
 async fn validates_admission_and_cfr_decode_paths() {
     run_case(
         "cfr-30",
@@ -59,6 +79,239 @@ async fn validates_admission_and_cfr_decode_paths() {
     .await;
 }
 
+#[tokio::test]
+#[ignore = "requires Linux ONMARK_HEADLESS_SHELL, ONMARK_FFMPEG, and built runtime"]
+async fn compares_native_seek_with_alternative_media_paths() {
+    let fixture = StrategyFixture::build().await;
+    let measurements = measure_strategies(&fixture).await;
+    let evidence = compare_strategies(&fixture, &measurements).await;
+
+    report_strategies(&measurements, &evidence);
+}
+
+struct StrategyFixture {
+    directory: TempDir,
+    frame_rate: FrameRate,
+    indices: Vec<u64>,
+    media: PathBuf,
+    expected: BTreeMap<u64, ExpectedFrame>,
+    plan: BrowserPlan,
+}
+
+impl StrategyFixture {
+    async fn build() -> Self {
+        let directory = tempdir().expect("the benchmark directory must be available");
+        let frame_rate = FrameRate::new(30, 1).expect("the benchmark rate is valid");
+        let indices = (0..BENCHMARK_FRAME_COUNT).collect::<Vec<_>>();
+        let media = directory.path().join("benchmark.mp4");
+        generate_video(&media, frame_rate, FixtureTiming::Constant).await;
+
+        let expected = expected_cfr_frames(frame_rate, &indices);
+        let plan = browser_plan(frame_rate);
+        Self {
+            directory,
+            frame_rate,
+            indices,
+            media,
+            expected,
+            plan,
+        }
+    }
+
+    fn root(&self) -> &Path {
+        self.directory.path()
+    }
+
+    fn native_fixture(&self) -> Url {
+        decoded_video_fixture(&self.media, &self.expected)
+    }
+}
+
+struct StrategyMeasurements {
+    native: Measurement<MeasuredFrames<EncodedPng>>,
+    extraction: Measurement<ExtractedFrameSequence>,
+    injected: Measurement<MeasuredFrames<EncodedPng>>,
+    continuous: Measurement<Vec<Vec<u8>>>,
+    overlay: Measurement<MeasuredFrames<EncodedPng>>,
+    composed: Measurement<Vec<Vec<u8>>>,
+    overlay_pattern: PathBuf,
+    overlay_bytes: u64,
+}
+
+async fn measure_strategies(fixture: &StrategyFixture) -> StrategyMeasurements {
+    let native_fixture = fixture.native_fixture();
+    let native = measure(capture_frame_sequence(
+        &native_fixture,
+        &fixture.plan,
+        &fixture.indices,
+        FrameRetention::Discard,
+    ))
+    .await;
+
+    let extraction_directory = fixture.root().join("frames");
+    let extraction = measure(extract_frame_sequence(
+        &fixture.media,
+        fixture.frame_rate,
+        BENCHMARK_FRAME_COUNT,
+        &extraction_directory,
+    ))
+    .await;
+    let injected_fixture = injected_video_fixture(&extraction_directory);
+    let injected = measure(capture_frame_sequence(
+        &injected_fixture,
+        &fixture.plan,
+        &fixture.indices,
+        FrameRetention::Discard,
+    ))
+    .await;
+
+    let continuous = measure(decode_sequence(
+        &fixture.media,
+        fixture.frame_rate,
+        experiment_dimensions(),
+        &[],
+    ))
+    .await;
+
+    let overlay_fixture = transparent_overlay_fixture();
+    let overlay = measure(capture_transparent_frame_sequence(
+        &overlay_fixture,
+        &fixture.plan,
+        &fixture.indices,
+        FrameRetention::Retain,
+    ))
+    .await;
+    let overlay_directory = fixture.root().join("overlay");
+    let overlay_bytes = write_overlay_sequence(&overlay.output.frames, &overlay_directory);
+    let overlay_pattern = overlay_directory.join("frame-%05d.png");
+    let composed = measure(compose_sequence(
+        &fixture.media,
+        &overlay_pattern,
+        fixture.frame_rate,
+        experiment_dimensions(),
+        &[],
+    ))
+    .await;
+
+    StrategyMeasurements {
+        native,
+        extraction,
+        injected,
+        continuous,
+        overlay,
+        composed,
+        overlay_pattern,
+        overlay_bytes,
+    }
+}
+
+struct StrategyEvidence {
+    injected: PixelDifference,
+    continuous: PixelDifference,
+    split_composition: PixelDifference,
+    alpha_composition: PixelDifference,
+    native_layer_composition: PixelDifference,
+    native_pixels: Vec<Vec<u8>>,
+    continuous_frames: Vec<Vec<u8>>,
+}
+
+async fn compare_strategies(
+    fixture: &StrategyFixture,
+    measurements: &StrategyMeasurements,
+) -> StrategyEvidence {
+    let native_fixture = fixture.native_fixture();
+    let native_frames = capture_frame_sequence(
+        &native_fixture,
+        &fixture.plan,
+        &COLOR_SAMPLE_SEQUENCE,
+        FrameRetention::Retain,
+    )
+    .await;
+    let extraction_directory = fixture.root().join("frames");
+    let injected_fixture = injected_video_fixture(&extraction_directory);
+    let injected_frames = capture_frame_sequence(
+        &injected_fixture,
+        &fixture.plan,
+        &COLOR_SAMPLE_SEQUENCE,
+        FrameRetention::Retain,
+    )
+    .await;
+    let injected = compare_encoded_frames(&native_frames.frames, &injected_frames.frames).await;
+
+    let continuous_frames = decode_sequence(
+        &fixture.media,
+        fixture.frame_rate,
+        experiment_dimensions(),
+        &COLOR_SAMPLE_SEQUENCE,
+    )
+    .await;
+    let native_pixels = decode_browser_frames(&native_frames.frames).await;
+    let continuous = compare_pixels(&native_pixels, &continuous_frames);
+
+    let overlay_samples =
+        sample_encoded_frames(&measurements.overlay.output.frames, &COLOR_SAMPLE_SEQUENCE);
+    let overlay_pixels = decode_browser_frames(&overlay_samples).await;
+    assert_transparent_presentation(&overlay_pixels);
+
+    let composited_fixture = composited_video_fixture(&fixture.media, &fixture.expected);
+    let composited_frames = capture_frame_sequence(
+        &composited_fixture,
+        &fixture.plan,
+        &COLOR_SAMPLE_SEQUENCE,
+        FrameRetention::Retain,
+    )
+    .await;
+    let composited_pixels = decode_browser_frames(&composited_frames.frames).await;
+    let split_pixels = composite_pixels(&continuous_frames, &overlay_pixels);
+    let split_composition = compare_pixels(&composited_pixels, &split_pixels);
+    let browser_split_pixels = composite_pixels(&native_pixels, &overlay_pixels);
+    let alpha_composition = compare_pixels(&composited_pixels, &browser_split_pixels);
+
+    let native_composed_frames = compose_sequence(
+        &fixture.media,
+        &measurements.overlay_pattern,
+        fixture.frame_rate,
+        experiment_dimensions(),
+        &COLOR_SAMPLE_SEQUENCE,
+    )
+    .await;
+    let native_layer_composition = compare_pixels(&composited_pixels, &native_composed_frames);
+
+    StrategyEvidence {
+        injected,
+        continuous,
+        split_composition,
+        alpha_composition,
+        native_layer_composition,
+        native_pixels,
+        continuous_frames,
+    }
+}
+
+fn report_strategies(measurements: &StrategyMeasurements, evidence: &StrategyEvidence) {
+    report_native_strategy(&measurements.native);
+    report_preextracted_strategy(&measurements.extraction, &measurements.injected);
+    report_continuous_strategy(&measurements.continuous);
+    report_transparent_strategy(
+        &measurements.overlay,
+        &measurements.composed,
+        measurements.overlay_bytes,
+    );
+    report_path_difference("preextract-inject", evidence.injected);
+    report_path_difference("continuous-decode", evidence.continuous);
+    report_sample_differences(
+        "continuous-decode",
+        &evidence.native_pixels,
+        &evidence.continuous_frames,
+    );
+    report_path_difference("split-composition", evidence.split_composition);
+    report_path_difference("alpha-composition", evidence.alpha_composition);
+    report_path_difference(
+        "native-layer-composition",
+        evidence.native_layer_composition,
+    );
+}
+
 async fn run_case(name: &str, frame_rate: FrameRate, timing: FixtureTiming) {
     let directory = tempdir().expect("the experiment directory must be available");
     let media = directory.path().join(format!("{name}.mp4"));
@@ -69,7 +322,7 @@ async fn run_case(name: &str, frame_rate: FrameRate, timing: FixtureTiming) {
     assert_eq!(source_frame_rate, frame_rate);
 
     let source_frames = probe_source_frames(&media).await;
-    let expected = expected_frames(frame_rate, &source_frames);
+    let expected = expected_frames(frame_rate, &source_frames, &SEEK_SEQUENCE);
     let fixture = decoded_video_fixture(&media, &expected);
     let plan = browser_plan(frame_rate);
 
@@ -117,19 +370,60 @@ struct MeasuredFrames<T> {
 }
 
 async fn capture_seek_sequence(fixture: &Url, plan: &BrowserPlan) -> MeasuredFrames<EncodedPng> {
+    capture_frame_sequence(fixture, plan, &SEEK_SEQUENCE, FrameRetention::Retain).await
+}
+
+#[derive(Clone, Copy)]
+enum FrameRetention {
+    Discard,
+    Retain,
+}
+
+async fn capture_frame_sequence(
+    fixture: &Url,
+    plan: &BrowserPlan,
+    indices: &[u64],
+    retention: FrameRetention,
+) -> MeasuredFrames<EncodedPng> {
     let session = BrowserSession::launch(
-        chrome(),
-        ChromiumSandbox::Enabled,
+        headless_shell(),
+        browser_launch_policy(),
         render_profile(),
         browser_limits(),
     )
     .await
-    .expect("Chrome must launch");
-    let capture_result = capture_video_frames(&session, fixture, plan).await;
+    .expect("headless shell must launch");
+    let capture_result = capture_video_frames(&session, fixture, plan, indices, retention).await;
     let shutdown_result = session.shutdown().await;
 
     let frames = capture_result.expect("the browser must seek every decoded frame");
-    shutdown_result.expect("Chrome must shut down after the seek experiment");
+    shutdown_result.expect("headless shell must shut down after the seek experiment");
+    frames
+}
+
+async fn capture_transparent_frame_sequence(
+    fixture: &Url,
+    plan: &BrowserPlan,
+    indices: &[u64],
+    retention: FrameRetention,
+) -> MeasuredFrames<EncodedPng> {
+    let session = BrowserSession::launch(
+        headless_shell(),
+        browser_launch_policy(),
+        render_profile(),
+        browser_limits(),
+    )
+    .await
+    .expect("headless shell must launch");
+    session
+        .use_transparent_capture_surface()
+        .await
+        .expect("Chromium must expose a transparent capture surface");
+    let capture_result = capture_video_frames(&session, fixture, plan, indices, retention).await;
+    let shutdown_result = session.shutdown().await;
+
+    let frames = capture_result.expect("the browser must capture every presentation frame");
+    shutdown_result.expect("headless shell must shut down after transparent capture");
     frames
 }
 
@@ -137,23 +431,30 @@ async fn capture_video_frames(
     session: &BrowserSession,
     fixture: &Url,
     plan: &BrowserPlan,
+    indices: &[u64],
+    retention: FrameRetention,
 ) -> Result<MeasuredFrames<EncodedPng>, Box<dyn Error>> {
     load_and_prepare(session, fixture, plan).await?;
 
-    let mut frames = Vec::with_capacity(SEEK_SEQUENCE.len());
-    let mut elapsed = Vec::with_capacity(SEEK_SEQUENCE.len());
-    for (offset, index) in SEEK_SEQUENCE.into_iter().enumerate() {
-        let request_id = u32::try_from(offset + 3).expect("the seek fixture is small");
+    let mut frames = Vec::with_capacity(indices.len());
+    let mut elapsed = Vec::with_capacity(indices.len());
+    for (offset, index) in indices.iter().copied().enumerate() {
+        let request_offset = u32::try_from(offset * 2).expect("the seek fixture is small");
         let started = Instant::now();
-        seek(session, request_id, index).await?;
-        frames.push(session.capture_png().await?);
+        stage(session, RequestId::new(3 + request_offset), index).await?;
+        let frame = WireFrame::new(index).expect("the seek fixture is browser-safe");
+        let captured = session.capture_png(frame, plan.frame_rate()).await?;
+        if matches!(retention, FrameRetention::Retain) {
+            frames.push(captured);
+        }
+        confirm(session, RequestId::new(4 + request_offset), index).await?;
         elapsed.push(started.elapsed());
     }
 
-    let dispose_id = u32::try_from(SEEK_SEQUENCE.len() + 3).expect("the seek fixture is small");
+    let request_count = u32::try_from(indices.len() * 2).expect("the seek fixture is small");
     let disposed = session
         .dispatch(&BrowserRequest::new(
-            RequestId::new(dispose_id),
+            RequestId::new(3 + request_count),
             BrowserCommand::Dispose,
         ))
         .await?;
@@ -190,11 +491,37 @@ async fn load_and_prepare(
     Ok(())
 }
 
-async fn seek(session: &BrowserSession, request_id: u32, index: u64) -> Result<(), Box<dyn Error>> {
+async fn stage(
+    session: &BrowserSession,
+    request_id: RequestId,
+    index: u64,
+) -> Result<(), Box<dyn Error>> {
     let response = session
         .dispatch(&BrowserRequest::new(
-            RequestId::new(request_id),
+            request_id,
             BrowserCommand::Seek {
+                frame: frame(index),
+            },
+        ))
+        .await?;
+    assert_eq!(
+        response.event(),
+        &BrowserEvent::FrameStaged {
+            frame: frame(index),
+        },
+    );
+    Ok(())
+}
+
+async fn confirm(
+    session: &BrowserSession,
+    request_id: RequestId,
+    index: u64,
+) -> Result<(), Box<dyn Error>> {
+    let response = session
+        .dispatch(&BrowserRequest::new(
+            request_id,
+            BrowserCommand::Confirm {
                 frame: frame(index),
             },
         ))
@@ -217,14 +544,15 @@ enum FixtureTiming {
 // ── Media fixtures and native reference ──
 
 async fn generate_video(output: &Path, frame_rate: FrameRate, timing: FixtureTiming) {
+    let (width, height) = experiment_dimensions();
     let source = match timing {
         FixtureTiming::Constant => format!(
-            "testsrc2=size={WIDTH}x{HEIGHT}:rate={}/{}:duration=2.5",
+            "testsrc2=size={width}x{height}:rate={}/{}:duration=2.5",
             frame_rate.numerator(),
             frame_rate.denominator(),
         ),
         FixtureTiming::AlternatingVfr => {
-            format!("testsrc2=size={WIDTH}x{HEIGHT}:rate=30:duration=1.7")
+            format!("testsrc2=size={width}x{height}:rate=30:duration=1.7")
         }
     };
     let mut command = Command::new(required_path("ONMARK_FFMPEG"));
@@ -239,6 +567,14 @@ async fn generate_video(output: &Path, frame_rate: FrameRate, timing: FixtureTim
             "libx264",
             "-pix_fmt",
             "yuv420p",
+            "-colorspace",
+            "bt709",
+            "-color_primaries",
+            "bt709",
+            "-color_trc",
+            "bt709",
+            "-color_range",
+            "tv",
             "-g",
             "30",
             "-bf",
@@ -326,9 +662,14 @@ struct ExpectedFrame {
     media_time: f64,
 }
 
-fn expected_frames(frame_rate: FrameRate, source_frames: &[f64]) -> BTreeMap<u64, ExpectedFrame> {
-    std::iter::once(0)
-        .chain(SEEK_SEQUENCE)
+fn expected_frames(
+    frame_rate: FrameRate,
+    source_frames: &[f64],
+    indices: &[u64],
+) -> BTreeMap<u64, ExpectedFrame> {
+    indices
+        .iter()
+        .copied()
         .map(|index| {
             let sample_time = (index as f64 + 0.5) * f64::from(frame_rate.denominator())
                 / f64::from(frame_rate.numerator());
@@ -338,6 +679,18 @@ fn expected_frames(frame_rate: FrameRate, source_frames: &[f64]) -> BTreeMap<u64
                 .take_while(|source_time| *source_time <= sample_time)
                 .last()
                 .expect("every sampled output frame must contain a source frame");
+            (index, ExpectedFrame { media_time })
+        })
+        .collect()
+}
+
+fn expected_cfr_frames(frame_rate: FrameRate, indices: &[u64]) -> BTreeMap<u64, ExpectedFrame> {
+    indices
+        .iter()
+        .copied()
+        .map(|index| {
+            let media_time = index as f64 * f64::from(frame_rate.denominator())
+                / f64::from(frame_rate.numerator());
             (index, ExpectedFrame { media_time })
         })
         .collect()
@@ -391,65 +744,53 @@ async fn extract_reference_frame(media: &Path, sample_time: f64) -> Vec<u8> {
     extracted.stdout
 }
 
-async fn decode_browser_frames(frames: &[EncodedPng]) -> Vec<Vec<u8>> {
-    let mut decoded = Vec::with_capacity(frames.len());
-
-    for frame in frames {
-        decoded.push(decode_browser_frame(frame).await);
-    }
-
-    decoded
-}
-
-async fn decode_browser_frame(frame: &EncodedPng) -> Vec<u8> {
-    let mut encoded = NamedTempFile::new().expect("the PNG staging file must be available");
-    encoded
-        .write_all(frame.as_bytes())
-        .expect("the captured PNG must fit its staging file");
-    encoded.flush().expect("the staged PNG must be readable");
-
-    let decoded = Command::new(required_path("ONMARK_FFMPEG"))
-        .args(["-nostdin", "-v", "error", "-i"])
-        .arg(encoded.path())
-        .args(["-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgba", "-"])
-        .output();
-    let decoded = timeout(PROCESS_DEADLINE, decoded)
-        .await
-        .expect("PNG decoding must finish before its deadline")
-        .expect("FFmpeg must decode the browser capture");
-    assert_process_succeeded("browser PNG decoding", &decoded);
-    decoded.stdout
-}
-
 #[derive(Clone, Copy, Debug)]
-struct PixelDifference {
-    differing_channels: usize,
-    maximum_delta: u8,
-    mean_absolute_delta: f64,
+struct ExtractedFrameSequence {
+    bytes: u64,
 }
 
-fn compare_pixels(browser: &[Vec<u8>], native: &[Vec<u8>]) -> PixelDifference {
-    let browser = browser.concat();
-    let native = native.concat();
-    assert_eq!(browser.len(), native.len(), "RGBA frame domains must match");
-    let channel_count = native.len();
+async fn extract_frame_sequence(
+    media: &Path,
+    frame_rate: FrameRate,
+    frame_count: u64,
+    output: &Path,
+) -> ExtractedFrameSequence {
+    std::fs::create_dir(output).expect("the extraction directory must be creatable");
+    let frame_rate = format!("{}/{}", frame_rate.numerator(), frame_rate.denominator(),);
+    let frame_filter = format!("fps={frame_rate}");
+    let frame_count_argument = frame_count.to_string();
+    let pattern = output.join("frame-%05d.png");
+    let extracted = Command::new(required_path("ONMARK_FFMPEG"))
+        .args(["-nostdin", "-v", "error", "-i"])
+        .arg(media)
+        .args([
+            "-vf",
+            &frame_filter,
+            "-frames:v",
+            &frame_count_argument,
+            "-compression_level",
+            "1",
+            "-start_number",
+            "0",
+            "-y",
+        ])
+        .arg(&pattern)
+        .output();
+    let extracted = timeout(PROCESS_DEADLINE, extracted)
+        .await
+        .expect("frame extraction must finish before its deadline")
+        .expect("FFmpeg must extract the benchmark frame sequence");
+    assert_process_succeeded("frame-sequence extraction", &extracted);
 
-    let mut differing_channels = 0;
-    let mut maximum_delta = 0;
-    let mut total_delta = 0_u64;
-    for (browser, native) in browser.into_iter().zip(native) {
-        let delta = browser.abs_diff(native);
-        differing_channels += usize::from(delta != 0);
-        maximum_delta = maximum_delta.max(delta);
-        total_delta += u64::from(delta);
-    }
-    let mean_absolute_delta = total_delta as f64 / channel_count as f64;
-
-    PixelDifference {
-        differing_channels,
-        maximum_delta,
-        mean_absolute_delta,
-    }
+    let bytes = (0..frame_count)
+        .map(|index| output.join(format!("frame-{index:05}.png")))
+        .map(|frame| {
+            std::fs::metadata(frame)
+                .expect("FFmpeg must produce every requested frame")
+                .len()
+        })
+        .sum();
+    ExtractedFrameSequence { bytes }
 }
 
 fn report_measurement(
@@ -459,13 +800,90 @@ fn report_measurement(
     difference: PixelDifference,
 ) {
     println!(
-        "{name}: browser={:.2}ms native={:.2}ms differing={} max_delta={} mean_delta={:.4}",
+        "{name}: browser={:.2}ms native={:.2}ms channels={} differing={} max_delta={} mean_delta={:.4}",
         mean_milliseconds(browser),
         mean_milliseconds(native),
+        difference.channels,
         difference.differing_channels,
         difference.maximum_delta,
         difference.mean_absolute_delta,
     );
+}
+
+fn report_native_strategy(native: &Measurement<MeasuredFrames<EncodedPng>>) {
+    let (width, height) = experiment_dimensions();
+    println!(
+        "native-seek: size={width}x{height} frames={BENCHMARK_FRAME_COUNT} total={:.2}ms frame={:.2}ms peak+={}KiB",
+        native.elapsed.as_secs_f64() * 1_000.0,
+        mean_milliseconds(&native.output.elapsed),
+        native.incremental_peak_rss_kib(),
+    );
+}
+
+fn report_preextracted_strategy(
+    extraction: &Measurement<ExtractedFrameSequence>,
+    injected: &Measurement<MeasuredFrames<EncodedPng>>,
+) {
+    let injected_total = extraction.elapsed + injected.elapsed;
+    println!(
+        "preextract-inject: total={:.2}ms extract={:.2}ms inject={:.2}ms frame={:.2}ms extract_peak+={}KiB inject_peak+={}KiB files={} bytes",
+        injected_total.as_secs_f64() * 1_000.0,
+        extraction.elapsed.as_secs_f64() * 1_000.0,
+        injected.elapsed.as_secs_f64() * 1_000.0,
+        mean_milliseconds(&injected.output.elapsed),
+        extraction.incremental_peak_rss_kib(),
+        injected.incremental_peak_rss_kib(),
+        extraction.output.bytes,
+    );
+}
+
+fn report_continuous_strategy(continuous: &Measurement<Vec<Vec<u8>>>) {
+    println!(
+        "continuous-decode: total={:.2}ms frame={:.2}ms peak+={}KiB",
+        continuous.elapsed.as_secs_f64() * 1_000.0,
+        continuous.elapsed.as_secs_f64() * 1_000.0 / BENCHMARK_FRAME_COUNT as f64,
+        continuous.incremental_peak_rss_kib(),
+    );
+}
+
+fn report_transparent_strategy(
+    overlay: &Measurement<MeasuredFrames<EncodedPng>>,
+    composed: &Measurement<Vec<Vec<u8>>>,
+    overlay_bytes: u64,
+) {
+    let sequential_total = overlay.elapsed + composed.elapsed;
+    println!(
+        "native-layer-composition: total={:.2}ms overlay={:.2}ms compose={:.2}ms overlay_frame={:.2}ms overlay_peak+={}KiB compose_peak+={}KiB layer_bytes={}",
+        sequential_total.as_secs_f64() * 1_000.0,
+        overlay.elapsed.as_secs_f64() * 1_000.0,
+        composed.elapsed.as_secs_f64() * 1_000.0,
+        mean_milliseconds(&overlay.output.elapsed),
+        overlay.incremental_peak_rss_kib(),
+        composed.incremental_peak_rss_kib(),
+        overlay_bytes,
+    );
+}
+
+fn report_path_difference(path: &str, difference: PixelDifference) {
+    println!(
+        "{path}-difference: samples={} channels={} differing={} max_delta={} mean_delta={:.4}",
+        COLOR_SAMPLE_SEQUENCE.len(),
+        difference.channels,
+        difference.differing_channels,
+        difference.maximum_delta,
+        difference.mean_absolute_delta,
+    );
+}
+
+fn report_sample_differences(path: &str, expected: &[Vec<u8>], actual: &[Vec<u8>]) {
+    for ((index, expected), actual) in COLOR_SAMPLE_SEQUENCE.iter().zip(expected).zip(actual) {
+        let difference =
+            compare_pixels(std::slice::from_ref(expected), std::slice::from_ref(actual));
+        println!(
+            "{path}-frame-{index}: differing={} max_delta={} mean_delta={:.4}",
+            difference.differing_channels, difference.maximum_delta, difference.mean_absolute_delta,
+        );
+    }
 }
 
 fn mean_milliseconds(values: &[Duration]) -> f64 {
@@ -499,6 +917,69 @@ fn decoded_video_fixture(media: &Path, expected: &BTreeMap<u64, ExpectedFrame>) 
         .append_pair("asset", &asset_id)
         .append_pair("expected", &expected);
     fixture
+}
+
+fn composited_video_fixture(media: &Path, expected: &BTreeMap<u64, ExpectedFrame>) -> Url {
+    let mut fixture = decoded_video_fixture(media, expected);
+    fixture.query_pairs_mut().append_pair("overlay", "true");
+    fixture
+}
+
+fn injected_video_fixture(frames: &Path) -> Url {
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/injected-video.html");
+    let mut fixture = Url::from_file_path(fixture).expect("the fixture path is absolute");
+    let frames = Url::from_directory_path(frames).expect("the frame directory path is absolute");
+    fixture
+        .query_pairs_mut()
+        .append_pair("frames", frames.as_str());
+    fixture
+}
+
+fn transparent_overlay_fixture() -> Url {
+    let fixture =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/transparent-overlay.html");
+    Url::from_file_path(fixture).expect("the fixture path is absolute")
+}
+
+fn write_overlay_sequence(frames: &[EncodedPng], output: &Path) -> u64 {
+    fs::create_dir(output).expect("the overlay directory must be creatable");
+    frames
+        .iter()
+        .enumerate()
+        .map(|(index, frame)| {
+            let path = output.join(format!("frame-{index:05}.png"));
+            fs::write(path, frame.as_bytes()).expect("every overlay frame must be writable");
+            u64::try_from(frame.as_bytes().len()).expect("overlay bytes must fit their accounting")
+        })
+        .sum()
+}
+
+fn sample_encoded_frames(frames: &[EncodedPng], indices: &[u64]) -> Vec<EncodedPng> {
+    indices
+        .iter()
+        .map(|index| {
+            let index = usize::try_from(*index).expect("sample indices must fit this process");
+            frames
+                .get(index)
+                .expect("every sampled overlay frame must exist")
+                .clone()
+        })
+        .collect()
+}
+
+fn assert_transparent_presentation(frames: &[Vec<u8>]) {
+    for frame in frames {
+        let has_transparent = frame.iter().skip(3).step_by(4).any(|alpha| *alpha == 0);
+        let has_visible = frame.iter().skip(3).step_by(4).any(|alpha| *alpha > 0);
+        assert!(
+            has_transparent,
+            "the presentation sample must retain transparent pixels",
+        );
+        assert!(
+            has_visible,
+            "the presentation sample must retain visible pixels",
+        );
+    }
 }
 
 fn browser_plan(frame_rate: FrameRate) -> BrowserPlan {
@@ -549,8 +1030,16 @@ fn frame(index: u64) -> WireFrame {
     WireFrame::new(index).expect("fixture frames are browser-safe")
 }
 
-fn chrome() -> PathBuf {
-    required_path("ONMARK_CHROME")
+fn headless_shell() -> PathBuf {
+    required_path("ONMARK_HEADLESS_SHELL")
+}
+
+fn browser_launch_policy() -> BrowserLaunchPolicy {
+    if env::var_os("ONMARK_ISOLATED_WORKER").is_some() {
+        BrowserLaunchPolicy::isolated_worker()
+    } else {
+        BrowserLaunchPolicy::local()
+    }
 }
 
 fn required_path(variable: &str) -> PathBuf {
@@ -565,7 +1054,29 @@ fn browser_limits() -> BrowserLimits {
 }
 
 fn render_profile() -> RenderProfile {
-    RenderProfile::new(WIDTH, HEIGHT).expect("the fixture render profile is valid")
+    let (width, height) = experiment_dimensions();
+    RenderProfile::new(width, height).expect("the fixture render profile is valid")
+}
+
+fn experiment_dimensions() -> (u32, u32) {
+    (
+        experiment_dimension(WIDTH_ENVIRONMENT, WIDTH),
+        experiment_dimension(HEIGHT_ENVIRONMENT, HEIGHT),
+    )
+}
+
+fn experiment_dimension(variable: &str, default: u32) -> u32 {
+    let Some(value) = env::var_os(variable) else {
+        return default;
+    };
+    let value = value
+        .to_str()
+        .unwrap_or_else(|| panic!("{variable} must contain UTF-8"));
+    let dimension = value
+        .parse::<u32>()
+        .unwrap_or_else(|_| panic!("{variable} must be a positive integer"));
+    assert!(dimension > 0, "{variable} must be a positive integer");
+    dimension
 }
 
 #[derive(Debug, Deserialize)]

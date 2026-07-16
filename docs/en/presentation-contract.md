@@ -55,6 +55,7 @@ interface RuntimeAdapter {
   load(plan: RuntimePlan): Promise<void>;
   prepare(frame: RuntimeFrame): Promise<void>;
   seek(frame: RuntimeFrame): Promise<void>;
+  confirm(frame: RuntimeFrame): Promise<void>;
   dispose(): Promise<void>;
 }
 ```
@@ -63,8 +64,12 @@ interface RuntimeAdapter {
 It may create resources, but it must not retain a mutable author-owned plan.
 `prepare` runs exactly once at `plan.evaluation.start` and must resolve only
 when resources needed at that frame are stable. `seek` runs only after a
-successful prepare and must resolve only when its exact requested frame is
-stable for capture. `dispose` is terminal even if cleanup reports a failure.
+successful prepare. It applies the requested DOM state, registers decoded-media
+observers, and resolves once browser media has finished seeking; it must not
+wait for compositor presentation. `confirm` runs after native capture and
+resolves only when browser media reports that the staged source frame was the
+one presented by that capture. `dispose` is terminal even if cleanup reports a
+failure.
 
 `seek` does not accept a free time `t`. It receives a `RuntimeFrame`:
 
@@ -83,17 +88,33 @@ an alternate scheduling clock or a source of timing decisions.
 ## Runtime handshake
 
 The presentation must install exactly one runtime host with `installRuntimeHost`.
-Native rendering waits for that host, then sends the versioned browser protocol:
+After navigation and host discovery, native rendering first issues one hidden
+BeginFrame at compositor time zero with display updates disabled. This
+initializes Chromium's copyable surface before `Load`, so no authored plan
+state is evaluated. Real captures use a separate fixed positive compositor
+baseline. Native then sends the versioned browser protocol:
 
 ```text
-Load(plan) -> Prepare(evaluationStart) -> Seek(frame)* -> Dispose
+Load(plan) -> Prepare(evaluationStart)
+  -> (Seek(frame) -> FrameStaged(frame)
+      -> native BeginFrame capture
+      -> Confirm(frame) -> FrameReady(frame))*
+  -> Dispose
 ```
 
-`FrameReady(frame)` means the runtime has applied its selected state for that
-exact frame. It does not mean the presentation computed time. Before capture,
-the native executor makes one bounded two-animation-frame compositor commit
-wait. That wait never selects time: it only ensures Chromium has committed the
-selected state to the capture surface.
+The split handshake is required by Chromium's decoded-media contract.
+`requestVideoFrameCallback` must be registered before the compositor frame that
+it observes, but waiting for that callback before issuing `BeginFrame` would
+deadlock a target controlled by CDP BeginFrameControl. `FrameStaged(frame)`
+therefore means browser state is ready to enter the compositor. Native then
+issues exactly one capture-bearing `HeadlessExperimental.beginFrame` command
+for each output frame. It commits and captures the PNG. A no-damage response
+reuses the preceding PNG; only an empty first capture receives one bounded
+sub-millisecond retry. `Confirm(frame)` lets
+the already-registered callback run;
+`FrameReady(frame)` means the captured frame has passed exact decoded-media
+confirmation. A confirmation failure discards the captured payload before it
+can enter an encoder or frame artifact.
 
 ## Ownership
 

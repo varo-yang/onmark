@@ -4,15 +4,26 @@
 //! only in Onmark protocol values and typed browser failures.
 
 use std::path::Path;
+use std::sync::Mutex;
 use std::time::Duration;
 
-use chromiumoxide::browser::{Browser, BrowserConfig};
-use chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat;
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64;
+use chromiumoxide::browser::Browser;
+use chromiumoxide::cdp::browser_protocol::dom::Rgba;
+use chromiumoxide::cdp::browser_protocol::emulation::SetDefaultBackgroundColorOverrideParams;
+use chromiumoxide::cdp::browser_protocol::headless_experimental::{
+    BeginFrameParams, BeginFrameReturns, ScreenshotParams, ScreenshotParamsFormat,
+};
+use chromiumoxide::cdp::browser_protocol::target::CreateTargetParams;
 use chromiumoxide::error::CdpError;
 use chromiumoxide::handler::viewport::Viewport;
-use chromiumoxide::page::{Page, ScreenshotParams};
+use chromiumoxide::handler::{Handler, HandlerConfig};
+use chromiumoxide::page::Page;
 use futures::StreamExt as _;
-use onmark_core::protocol::{BrowserRequest, BrowserResponse, RUNTIME_HOST_NAME};
+use onmark_core::protocol::{
+    BrowserRequest, BrowserResponse, RUNTIME_HOST_NAME, WireFrame, WireFrameRate,
+};
 use tempfile::TempDir;
 use tokio::task::JoinHandle;
 use tokio::time::{Instant, sleep, timeout, timeout_at};
@@ -20,41 +31,35 @@ use tokio::time::{Instant, sleep, timeout, timeout_at};
 use super::error::{BrowserError, BrowserErrorKind};
 use super::frame::{CapturedFrame, EncodedPng};
 use super::limits::BrowserLimits;
+use super::process::{BrowserDiagnostics, BrowserLaunchPolicy, ChromiumProcess};
 use crate::RenderProfile;
 
 const READINESS_POLL_INTERVAL: Duration = Duration::from_millis(10);
-// The first callback lets frame-ready DOM work enter the compositor. The
-// second runs after that rendering opportunity, before native capture.
-const COMPOSITOR_COMMIT: &str =
-    "new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))";
+const COMPOSITOR_BASE_TIME_MILLIS: f64 = 1_000.0;
+const FIRST_CAPTURE_RETRY_OFFSET_MILLIS: f64 = 0.001;
 
-/// Chromium's process-sandbox policy at one execution boundary.
-///
-/// Local rendering keeps Chromium's own sandbox enabled. A deployment adapter
-/// may disable it only when an independently audited outer sandbox owns the
-/// process-isolation contract. A failed launch never changes this choice.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ChromiumSandbox {
-    /// Retain Chromium's standard namespace or setuid sandbox.
-    Enabled,
-    /// Let an independently isolated worker boundary own process isolation.
-    Disabled,
-}
-
-/// One owned Chromium process and its single Gate-one page.
+/// One owned headless-shell process and its single render page.
 #[derive(Debug)]
 pub struct BrowserSession {
     browser: Browser,
     page: Page,
     handler: JoinHandle<Result<(), CdpError>>,
+    process: ChromiumProcess,
+    diagnostics: BrowserDiagnostics,
+    // Headless shell omits screenshotData when a frame has no visual damage.
+    last_capture: Mutex<Option<EncodedPng>>,
     limits: BrowserLimits,
     render_profile: RenderProfile,
-    // Retained so Chrome's private profile outlives the process.
+    // Retained so headless shell's private profile outlives the process.
     _profile: TempDir,
 }
 
 impl BrowserSession {
-    /// Launches a bounded headless Chromium session using an explicit executable.
+    pub(crate) const fn render_profile(&self) -> RenderProfile {
+        self.render_profile
+    }
+
+    /// Launches a bounded headless-shell session using an explicit executable.
     ///
     /// # Errors
     ///
@@ -62,33 +67,55 @@ impl BrowserSession {
     /// startup, or initial page creation fails.
     pub async fn launch(
         executable: impl AsRef<Path>,
-        sandbox: ChromiumSandbox,
+        launch_policy: BrowserLaunchPolicy,
         render_profile: RenderProfile,
         limits: BrowserLimits,
     ) -> Result<Self, BrowserError> {
+        let target = render_target().map_err(BrowserError::configuration)?;
         let profile = browser_profile()?;
-        let config = browser_config(
+        let (mut process, endpoint) = ChromiumProcess::launch(
             executable.as_ref(),
-            sandbox,
+            launch_policy,
             profile.path(),
             render_profile,
-            limits,
-        )?;
-        let (mut browser, mut handler) = Browser::launch(config)
-            .await
-            .map_err(|source| BrowserError::cdp(BrowserErrorKind::Launch, source))?;
-        let handler = tokio::spawn(async move {
-            while let Some(event) = handler.next().await {
-                event?;
+            limits.deadline(),
+        )
+        .await?;
+        let diagnostics = process.diagnostics();
+        let connection =
+            Browser::connect_with_config(endpoint, handler_config(render_profile, limits)).await;
+        let (mut browser, handler) = match connection {
+            Ok(connection) => connection,
+            Err(source) => {
+                let error = BrowserError::cdp_with_diagnostics(
+                    BrowserErrorKind::Launch,
+                    source,
+                    diagnostics.snapshot(),
+                );
+                process.abort(limits.deadline()).await;
+                return Err(error);
             }
-            Ok(())
-        });
-
-        let page = match browser.new_page("about:blank").await {
+        };
+        let mut handler = Box::pin(drive_handler(handler));
+        let page = tokio::select! {
+            biased;
+            result = &mut handler => {
+                process.abort(limits.deadline()).await;
+                return Err(handler_exit_error(result, diagnostics.snapshot()));
+            }
+            result = browser.new_page(target) => result,
+        };
+        let handler = tokio::spawn(handler);
+        let page = match page {
             Ok(page) => page,
             Err(source) => {
-                cleanup_failed_launch(&mut browser, handler, limits.deadline()).await;
-                return Err(BrowserError::cdp(BrowserErrorKind::PageCreation, source));
+                let error = BrowserError::cdp_with_diagnostics(
+                    BrowserErrorKind::PageCreation,
+                    source,
+                    diagnostics.snapshot(),
+                );
+                cleanup_failed_launch(&mut browser, handler, &mut process, limits.deadline()).await;
+                return Err(error);
             }
         };
 
@@ -96,6 +123,9 @@ impl BrowserSession {
             browser,
             page,
             handler,
+            process,
+            diagnostics,
+            last_capture: Mutex::new(None),
             limits,
             render_profile,
             _profile: profile,
@@ -112,12 +142,11 @@ impl BrowserSession {
         self.page
             .goto(url)
             .await
-            .map_err(|source| BrowserError::cdp(BrowserErrorKind::Navigation, source))?;
+            .map_err(|source| self.cdp_error(BrowserErrorKind::Navigation, source))?;
         let navigation_result = timeout(self.limits.deadline(), self.page.wait_for_navigation())
             .await
             .map_err(|_| BrowserError::without_source(BrowserErrorKind::Navigation))?;
-        navigation_result
-            .map_err(|source| BrowserError::cdp(BrowserErrorKind::Navigation, source))?;
+        navigation_result.map_err(|source| self.cdp_error(BrowserErrorKind::Navigation, source))?;
         self.wait_for_runtime_host().await
     }
 
@@ -138,37 +167,124 @@ impl BrowserSession {
         let result = timeout(self.limits.deadline(), evaluation)
             .await
             .map_err(|_| BrowserError::without_source(BrowserErrorKind::Protocol))?
-            .map_err(|source| BrowserError::cdp(BrowserErrorKind::Protocol, source))?;
+            .map_err(|source| self.cdp_error(BrowserErrorKind::Protocol, source))?;
         result
             .into_value()
             .map_err(|source| BrowserError::json(BrowserErrorKind::Protocol, source))
     }
 
-    /// Captures the current viewport as PNG without writing it to disk.
+    /// Initializes the target surface before any authored browser state is loaded.
+    ///
+    /// Headless shell requests screenshot readback before it issues the
+    /// associated external `BeginFrame`. A newly navigated target therefore
+    /// needs one non-capturing frame before its surface can be copied.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`BrowserError`] when the compositor frame cannot complete.
+    pub(crate) async fn prime_compositor(&self) -> Result<(), BrowserError> {
+        self.page
+            .execute(compositor_prime_parameters())
+            .await
+            .map(|_| ())
+            .map_err(|source| self.cdp_error(BrowserErrorKind::Capture, source))
+    }
+
+    /// Keeps the target's root surface transparent for layered capture.
+    ///
+    /// CSS transparency alone is insufficient because Chromium normally
+    /// composites the root layer over an opaque browser background.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`BrowserError`] when Chromium rejects the capture-surface
+    /// override.
+    pub async fn use_transparent_capture_surface(&self) -> Result<(), BrowserError> {
+        let color = Rgba {
+            r: 0,
+            g: 0,
+            b: 0,
+            a: Some(0.0),
+        };
+        self.page
+            .execute(SetDefaultBackgroundColorOverrideParams { color: Some(color) })
+            .await
+            .map(|_| ())
+            .map_err(|source| self.cdp_error(BrowserErrorKind::Capture, source))
+    }
+
+    /// Commits and captures one authored frame as PNG without writing it to disk.
+    ///
+    /// Rust supplies a deterministic compositor timestamp from the exact
+    /// authored frame offset. Headless shell commits and captures that frame in
+    /// one CDP command, so no wall clock or animation-frame polling enters capture.
     ///
     /// # Errors
     ///
     /// Returns [`BrowserError`] when capture fails or exceeds the configured
     /// retained-byte budget.
-    pub async fn capture_png(&self) -> Result<EncodedPng, BrowserError> {
-        let parameters = ScreenshotParams::builder()
-            .format(CaptureScreenshotFormat::Png)
-            .from_surface(true)
-            .capture_beyond_viewport(false)
-            .full_page(false)
-            .build();
-        let bytes = self
-            .page
-            .screenshot(parameters)
+    pub async fn capture_png(
+        &self,
+        frame: WireFrame,
+        frame_rate: WireFrameRate,
+    ) -> Result<EncodedPng, BrowserError> {
+        let response = self
+            .capture(begin_frame_parameters(frame, frame_rate))
+            .await?;
+        if let Some(screenshot) = response.screenshot_data {
+            return self.decode_and_remember(screenshot);
+        }
+        if let Some(previous) = self.previous_capture()? {
+            return Ok(previous);
+        }
+
+        let retry = self
+            .capture(first_capture_retry_parameters(frame, frame_rate))
+            .await?;
+        let screenshot = retry.screenshot_data.ok_or_else(|| {
+            BrowserError::capture_pixels("headless shell did not return the first screenshot")
+        })?;
+        self.decode_and_remember(screenshot)
+    }
+
+    async fn capture(
+        &self,
+        parameters: BeginFrameParams,
+    ) -> Result<BeginFrameReturns, BrowserError> {
+        self.page
+            .execute(parameters)
             .await
-            .map_err(|source| BrowserError::cdp(BrowserErrorKind::Capture, source))?;
+            .map(|response| response.result)
+            .map_err(|source| self.cdp_error(BrowserErrorKind::Capture, source))
+    }
+
+    fn decode_and_remember(&self, screenshot: impl AsRef<str>) -> Result<EncodedPng, BrowserError> {
+        let encoded: &str = screenshot.as_ref();
+        if encoded.len() > maximum_base64_length(self.limits.max_capture_bytes()) {
+            return Err(BrowserError::without_source(
+                BrowserErrorKind::CaptureTooLarge,
+            ));
+        }
+        let bytes = BASE64.decode(encoded).map_err(BrowserError::base64)?;
 
         if bytes.len() > self.limits.max_capture_bytes() {
             return Err(BrowserError::without_source(
                 BrowserErrorKind::CaptureTooLarge,
             ));
         }
-        Ok(EncodedPng::new(bytes))
+        let capture = EncodedPng::new(bytes);
+        *self.capture_cache()? = Some(capture.clone());
+        Ok(capture)
+    }
+
+    fn previous_capture(&self) -> Result<Option<EncodedPng>, BrowserError> {
+        Ok(self.capture_cache()?.clone())
+    }
+
+    fn capture_cache(&self) -> Result<std::sync::MutexGuard<'_, Option<EncodedPng>>, BrowserError> {
+        self.last_capture
+            .lock()
+            .map_err(|_| BrowserError::capture_pixels("browser capture cache is unavailable"))
     }
 
     /// Captures one encoder PNG together with canonical raw-RGBA evidence.
@@ -178,28 +294,15 @@ impl BrowserSession {
     /// Returns [`BrowserError`] when Chromium cannot capture the viewport, the
     /// retained PNG exceeds its bound, or the decoded pixels do not match the
     /// configured render profile.
-    pub async fn capture_frame(&self) -> Result<CapturedFrame, BrowserError> {
-        CapturedFrame::from_png(self.capture_png().await?, self.render_profile)
-    }
-
-    /// Waits for the compositor to commit the current logical browser frame.
-    ///
-    /// `FrameReady` proves that the runtime selected its decoded resources.
-    /// Two animation-frame turns then put the native capture boundary after
-    /// the corresponding compositor commit without making browser time part
-    /// of frame selection.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`BrowserError`] when Chromium cannot evaluate the commit
-    /// barrier before the configured capture deadline.
-    pub(crate) async fn wait_for_compositor_commit(&self) -> Result<(), BrowserError> {
-        let evaluation = self.page.evaluate_expression(COMPOSITOR_COMMIT);
-        timeout(self.limits.deadline(), evaluation)
-            .await
-            .map_err(|_| BrowserError::without_source(BrowserErrorKind::Capture))?
-            .map_err(|source| BrowserError::cdp(BrowserErrorKind::Capture, source))?;
-        Ok(())
+    pub async fn capture_frame(
+        &self,
+        frame: WireFrame,
+        frame_rate: WireFrameRate,
+    ) -> Result<CapturedFrame, BrowserError> {
+        CapturedFrame::from_png(
+            self.capture_png(frame, frame_rate).await?,
+            self.render_profile,
+        )
     }
 
     /// Closes Chromium and waits for both the process and CDP handler to exit.
@@ -210,10 +313,15 @@ impl BrowserSession {
     /// have completed.
     pub async fn shutdown(mut self) -> Result<(), BrowserError> {
         let deadline = self.limits.deadline();
-        let browser_result = shutdown_browser(&mut self.browser, deadline).await;
-        let handler_result = shutdown_handler(self.handler, deadline).await;
+        let browser_result = close_browser(&mut self.browser, deadline, &self.diagnostics).await;
+        if browser_result.is_err() {
+            self.process.request_stop();
+        }
+        let process_result = self.process.shutdown(deadline).await;
+        let handler_result = shutdown_handler(self.handler, deadline, &self.diagnostics).await;
 
         browser_result?;
+        process_result?;
         handler_result
     }
 
@@ -242,10 +350,34 @@ impl BrowserSession {
             .await
             .map_err(|_| BrowserError::without_source(BrowserErrorKind::RuntimeHost))?;
         let remote = evaluation_result
-            .map_err(|source| BrowserError::cdp(BrowserErrorKind::RuntimeHost, source))?;
+            .map_err(|source| self.cdp_error(BrowserErrorKind::RuntimeHost, source))?;
         remote
             .into_value()
             .map_err(|source| BrowserError::json(BrowserErrorKind::RuntimeHost, source))
+    }
+
+    fn cdp_error(&self, kind: BrowserErrorKind, source: CdpError) -> BrowserError {
+        BrowserError::cdp_with_diagnostics(kind, source, self.diagnostics.snapshot())
+    }
+}
+
+async fn drive_handler(mut handler: Handler) -> Result<(), CdpError> {
+    while let Some(event) = handler.next().await {
+        event?;
+    }
+    Ok(())
+}
+
+fn handler_exit_error(result: Result<(), CdpError>, diagnostics: Option<Box<str>>) -> BrowserError {
+    match result {
+        Ok(()) => BrowserError::process(
+            BrowserErrorKind::Handler,
+            "headless-shell protocol handler exited unexpectedly",
+            diagnostics,
+        ),
+        Err(source) => {
+            BrowserError::cdp_with_diagnostics(BrowserErrorKind::Handler, source, diagnostics)
+        }
     }
 }
 
@@ -262,103 +394,222 @@ fn browser_profile() -> Result<TempDir, BrowserError> {
         .map_err(|source| BrowserError::io(BrowserErrorKind::Profile, source))
 }
 
-fn browser_config(
-    executable: &Path,
-    sandbox: ChromiumSandbox,
-    profile: &Path,
-    render_profile: RenderProfile,
-    limits: BrowserLimits,
-) -> Result<BrowserConfig, BrowserError> {
-    let config = BrowserConfig::builder()
-        .chrome_executable(executable)
-        .user_data_dir(profile)
-        .new_headless_mode()
-        .window_size(render_profile.width(), render_profile.height())
-        .viewport(Viewport {
+fn handler_config(render_profile: RenderProfile, limits: BrowserLimits) -> HandlerConfig {
+    HandlerConfig {
+        ignore_https_errors: true,
+        ignore_invalid_messages: false,
+        viewport: Some(Viewport {
             width: render_profile.width(),
             height: render_profile.height(),
             device_scale_factor: Some(1.0),
             emulating_mobile: false,
             is_landscape: render_profile.width() >= render_profile.height(),
             has_touch: false,
-        })
-        .launch_timeout(limits.deadline())
-        .request_timeout(limits.deadline())
-        .disable_cache()
-        .surface_invalid_messages();
-    let config = match sandbox {
-        ChromiumSandbox::Enabled => config,
-        ChromiumSandbox::Disabled => config.no_sandbox(),
-    };
+        }),
+        context_ids: Vec::new(),
+        request_timeout: limits.deadline(),
+        request_intercept: false,
+        cache_enabled: false,
+    }
+}
 
-    config
-        // Chromiumoxide adds the `--` prefix to argument keys.
-        .arg("allow-file-access-from-files")
+fn render_target() -> Result<CreateTargetParams, String> {
+    CreateTargetParams::builder()
+        .url("about:blank")
+        .enable_begin_frame_control(true)
         .build()
-        .map_err(BrowserError::configuration)
+}
+
+fn begin_frame_parameters(frame: WireFrame, frame_rate: WireFrameRate) -> BeginFrameParams {
+    capture_parameters(frame, frame_rate, 0.0)
+}
+
+fn first_capture_retry_parameters(frame: WireFrame, frame_rate: WireFrameRate) -> BeginFrameParams {
+    capture_parameters(frame, frame_rate, FIRST_CAPTURE_RETRY_OFFSET_MILLIS)
+}
+
+fn capture_parameters(
+    frame: WireFrame,
+    frame_rate: WireFrameRate,
+    time_offset_millis: f64,
+) -> BeginFrameParams {
+    let screenshot = ScreenshotParams::builder()
+        .format(ScreenshotParamsFormat::Png)
+        .optimize_for_speed(true)
+        .build();
+
+    BeginFrameParams::builder()
+        .frame_time_ticks(
+            COMPOSITOR_BASE_TIME_MILLIS + frame_time_millis(frame, frame_rate) + time_offset_millis,
+        )
+        .interval(frame_interval_millis(frame_rate))
+        .screenshot(screenshot)
+        .build()
+}
+
+fn compositor_prime_parameters() -> BeginFrameParams {
+    BeginFrameParams::builder()
+        .frame_time_ticks(0.0)
+        .no_display_updates(true)
+        .build()
+}
+
+#[allow(clippy::cast_precision_loss)]
+fn frame_time_millis(frame: WireFrame, frame_rate: WireFrameRate) -> f64 {
+    frame.get() as f64 * f64::from(frame_rate.denominator()) * 1_000.0
+        / f64::from(frame_rate.numerator())
+}
+
+fn frame_interval_millis(frame_rate: WireFrameRate) -> f64 {
+    f64::from(frame_rate.denominator()) * 1_000.0 / f64::from(frame_rate.numerator())
+}
+
+fn maximum_base64_length(decoded_bytes: usize) -> usize {
+    decoded_bytes.div_ceil(3).saturating_mul(4)
 }
 
 async fn cleanup_failed_launch(
     browser: &mut Browser,
     handler: JoinHandle<Result<(), CdpError>>,
+    process: &mut ChromiumProcess,
     deadline: Duration,
 ) {
-    let _ = shutdown_browser(browser, deadline).await;
+    let _ = timeout(deadline, browser.close()).await;
+    process.abort(deadline).await;
     handler.abort();
     let _ = handler.await;
 }
 
-async fn shutdown_browser(browser: &mut Browser, deadline: Duration) -> Result<(), BrowserError> {
-    match timeout(deadline, browser.close()).await {
-        Ok(Ok(_)) => finish_graceful_shutdown(browser, deadline).await,
-        Ok(Err(source)) => {
-            force_stop_browser(browser, deadline).await;
-            Err(BrowserError::cdp(BrowserErrorKind::Shutdown, source))
-        }
-        Err(_) => {
-            force_stop_browser(browser, deadline).await;
-            Err(BrowserError::without_source(BrowserErrorKind::Shutdown))
-        }
-    }
-}
-
-async fn finish_graceful_shutdown(
+async fn close_browser(
     browser: &mut Browser,
     deadline: Duration,
+    diagnostics: &BrowserDiagnostics,
 ) -> Result<(), BrowserError> {
-    let result = wait_for_browser(browser, deadline).await;
-    if result.is_err() {
-        force_stop_browser(browser, deadline).await;
-    }
-    result
-}
-
-async fn wait_for_browser(browser: &mut Browser, deadline: Duration) -> Result<(), BrowserError> {
-    let waited = timeout(deadline, browser.wait())
+    timeout(deadline, browser.close())
         .await
-        .map_err(|_| BrowserError::without_source(BrowserErrorKind::Shutdown))?;
-    waited
+        .map_err(|_| {
+            BrowserError::process(
+                BrowserErrorKind::Shutdown,
+                "CDP browser close missed its deadline",
+                diagnostics.snapshot(),
+            )
+        })?
         .map(|_| ())
-        .map_err(|source| BrowserError::io(BrowserErrorKind::Shutdown, source))
-}
-
-async fn force_stop_browser(browser: &mut Browser, deadline: Duration) {
-    let _ = timeout(deadline, browser.kill()).await;
-    let _ = timeout(deadline, browser.wait()).await;
+        .map_err(|source| {
+            BrowserError::cdp_with_diagnostics(
+                BrowserErrorKind::Shutdown,
+                source,
+                diagnostics.snapshot(),
+            )
+        })
 }
 
 async fn shutdown_handler(
     mut handler: JoinHandle<Result<(), CdpError>>,
     deadline: Duration,
+    diagnostics: &BrowserDiagnostics,
 ) -> Result<(), BrowserError> {
     let Ok(joined) = timeout(deadline, &mut handler).await else {
         handler.abort();
         let _ = handler.await;
-        return Err(BrowserError::without_source(
+        return Err(BrowserError::process(
             BrowserErrorKind::HandlerTimeout,
+            "CDP handler missed its cleanup deadline",
+            diagnostics.snapshot(),
         ));
     };
     let handler_result =
         joined.map_err(|source| BrowserError::join(BrowserErrorKind::Handler, source))?;
-    handler_result.map_err(|source| BrowserError::cdp(BrowserErrorKind::Handler, source))
+    handler_result.map_err(|source| {
+        BrowserError::cdp_with_diagnostics(
+            BrowserErrorKind::Handler,
+            source,
+            diagnostics.snapshot(),
+        )
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use chromiumoxide::error::CdpError;
+    use onmark_core::model::FrameRate;
+    use onmark_core::protocol::{WireFrame, WireFrameRate};
+
+    use super::{
+        begin_frame_parameters, compositor_prime_parameters, first_capture_retry_parameters,
+        handler_exit_error, maximum_base64_length, render_target,
+    };
+    use crate::BrowserErrorKind;
+
+    #[test]
+    fn render_target_enables_headless_shell_frame_control() {
+        let target = render_target().expect("the fixed render target must be valid");
+
+        assert_eq!(target.url, "about:blank");
+        assert_eq!(target.enable_begin_frame_control, Some(true));
+    }
+
+    #[test]
+    fn begin_frame_offsets_authored_time_from_the_capture_baseline() {
+        let frame = WireFrame::new(15).expect("the fixture frame is browser-safe");
+        let rate = WireFrameRate::from(
+            FrameRate::new(30, 1).expect("the fixture rate is canonical and nonzero"),
+        );
+        let parameters = begin_frame_parameters(frame, rate);
+        let screenshot = parameters
+            .screenshot
+            .expect("every compositor frame must carry its capture");
+
+        assert_eq!(parameters.frame_time_ticks, Some(1_500.0));
+        assert_eq!(screenshot.format, Some(super::ScreenshotParamsFormat::Png));
+        assert_eq!(screenshot.optimize_for_speed, Some(true));
+    }
+
+    #[test]
+    fn compositor_prime_advances_only_the_hidden_initialization_clock() {
+        let parameters = compositor_prime_parameters();
+
+        assert_eq!(parameters.frame_time_ticks, Some(0.0));
+        assert_eq!(parameters.no_display_updates, Some(true));
+        assert_eq!(parameters.interval, None);
+        assert_eq!(parameters.screenshot, None);
+    }
+
+    #[test]
+    fn first_capture_retry_advances_the_compositor_by_a_bounded_epsilon() {
+        let frame = WireFrame::new(15).expect("the fixture frame is browser-safe");
+        let rate = WireFrameRate::from(
+            FrameRate::new(30, 1).expect("the fixture rate is canonical and nonzero"),
+        );
+        let initial = begin_frame_parameters(frame, rate);
+        let retry = first_capture_retry_parameters(frame, rate);
+
+        assert_eq!(initial.frame_time_ticks, Some(1_500.0));
+        assert_eq!(retry.frame_time_ticks, Some(1_500.001));
+        assert_eq!(retry.interval, initial.interval);
+        assert_eq!(retry.screenshot, initial.screenshot);
+    }
+
+    #[test]
+    fn bounds_the_base64_envelope_before_allocating_decoded_bytes() {
+        assert_eq!(maximum_base64_length(1), 4);
+        assert_eq!(maximum_base64_length(3), 4);
+        assert_eq!(maximum_base64_length(4), 8);
+    }
+
+    #[test]
+    fn reports_a_protocol_handler_failure_during_browser_startup() {
+        let error = handler_exit_error(Err(CdpError::NoResponse), None);
+
+        assert_eq!(error.kind(), BrowserErrorKind::Handler);
+        assert!(std::error::Error::source(&error).is_some());
+    }
+
+    #[test]
+    fn reports_an_unexpected_clean_handler_exit_during_browser_startup() {
+        let error = handler_exit_error(Ok(()), None);
+
+        assert_eq!(error.kind(), BrowserErrorKind::Handler);
+        assert!(std::error::Error::source(&error).is_none());
+    }
 }

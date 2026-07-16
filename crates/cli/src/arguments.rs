@@ -45,7 +45,7 @@ pub(super) struct WorkerCaptureArgs {
     #[arg(long)]
     pub(super) output: PathBuf,
 
-    /// Chromium-compatible browser executable pinned by the worker environment.
+    /// Chrome for Testing headless-shell executable pinned by the worker environment.
     #[arg(long)]
     pub(super) browser: PathBuf,
 }
@@ -75,7 +75,7 @@ pub(super) struct RenderArgs {
     #[arg(long, default_value_t = 1_080)]
     pub(super) height: u32,
 
-    /// Chromium-compatible browser executable.
+    /// Chrome for Testing headless-shell executable.
     #[arg(long, help_heading = "Execution overrides")]
     pub(super) browser: Option<PathBuf>,
 
