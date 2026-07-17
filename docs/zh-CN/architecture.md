@@ -601,13 +601,13 @@ Screenplay → Timeline IR → Browser Runtime → Chromium → FFmpeg → MP4
 
 范围只有：最小剧本语言、冻结素材 catalog、素材探测、Rust 时间求解、versioned Timeline IR、不可变 presentation bundle、TS 确定性时钟、FrameReady handshake，以及一个 whole-film Render Unit 的真实视频。Gate 一验证了视频 seek、异步稳定、捕获方式和音频 mux；字体与图片的更多组合仍是 presentation 能力实验，不构成已冻结的 Gate 一语言表面。Gate 一执行并 mux 作者写下的 voice-over，不能静默丢弃音频。
 
-退出一致性测试会构建 release CLI，让同一份剧本经过两组独立 Chromium/FFmpeg session 渲染，比较解码后的音视频逐帧 hash，验证画面运动与 stream facts，并证明最终发布不会覆盖已有输出。
+native 一致性测试会比较独立 browser session 的 canonical raw-RGBA fingerprint。退出一致性测试还会构建 release CLI，将同一份剧本渲染两次，分别验证每份 H.264/AAC 输出的帧数、画面运动、stream facts、音频落点，并证明最终发布不会覆盖已有输出。它不会把两次独立有损编码的 MP4 误当成 raw-frame identity contract。
 
 这一关不建设 coordinator、lease、远程 worker、能力调度和分层缓存。
 
 ### 第二关（已完成）：正确地切开并总装
 
-已完成的切片把同一影片编译成两个独立的本地 Render Unit，经既有 executor 捕获并总装。退出一致性测试会让同一条含媒体的两镜头影片分别作为 whole-film unit 与两个独立 materialize 的 unit 渲染，再比较解码后的视频与音频 hash，以及首个音频 packet 的落点。它实现 Render Graph 与 `evaluation/output` 区间。转场预卷、持久 unit cache 和依赖闭包失效要等真实依赖或缓存消费者出现后再实现；不提前搭它们的空架子。
+已完成的切片把同一影片编译成两个独立的本地 Render Unit，经既有 executor 捕获并总装。native 一致性测试会在编码前比较 whole-film 与 partitioned canonical raw-RGBA sequence；release CLI 一致性测试则分别验证总装后的 H.264/AAC 输出帧数、画面运动、stream facts 与首个音频 packet 落点。它实现 Render Graph 与 `evaluation/output` 区间。转场预卷、持久 unit cache 和依赖闭包失效要等真实依赖或缓存消费者出现后再实现；不提前搭它们的空架子。
 
 ### 第三关（已完成）：离开本机仍然成立
 
