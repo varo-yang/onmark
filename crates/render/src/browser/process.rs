@@ -53,7 +53,6 @@ const STANDARD_ARGUMENTS: &[&str] = &[
 ];
 const DISABLED_SANDBOX_ARGUMENTS: &[&str] = &["--no-sandbox", "--disable-setuid-sandbox"];
 const CAPTURE_BACKEND_ARGUMENTS: &[&str] = &[
-    "--disable-accelerated-video-decode",
     "--ignore-gpu-blocklist",
     "--use-gl=angle",
     "--use-angle=swiftshader",
@@ -460,10 +459,6 @@ mod tests {
 
         assert!(has_argument(&arguments, "--use-angle=swiftshader"));
         assert!(has_argument(&arguments, "--enable-unsafe-swiftshader"));
-        assert!(has_argument(
-            &arguments,
-            "--disable-accelerated-video-decode"
-        ));
         assert!(!has_argument(&arguments, "--no-sandbox"));
         assert!(!has_argument(&arguments, "--single-process"));
         assert!(!has_argument(&arguments, "--in-process-gpu"));
