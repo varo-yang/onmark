@@ -22,19 +22,11 @@
         position: fixed;
         z-index: 1;
       }
-
-      video {
-        height: 1px;
-        opacity: 0.01;
-        position: fixed;
-        width: 1px;
-        z-index: 0;
-      }
     </style>
   </head>
   <body>
     <canvas aria-label="Decoded video frame"></canvas>
-    <video muted playsinline></video>
+    <video hidden muted playsinline></video>
     <script type="module">
       // Disposable experiment for measuring native browser media seeking. It
       // deliberately uses only the public runtime adapter boundary.
