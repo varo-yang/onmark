@@ -24,10 +24,11 @@
       }
 
       video {
-        height: 1px;
+        height: 100%;
+        inset: 0;
         opacity: 0.01;
         position: fixed;
-        width: 1px;
+        width: 100%;
         /* rVFC observes presented frames, so the probe must survive compositor
            occlusion while the canvas remains the measured presentation. */
         z-index: 2;
