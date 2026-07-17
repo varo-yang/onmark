@@ -321,18 +321,24 @@ async fn exercise_protocol(
     fixture: &Url,
 ) -> Result<RawRgbaHash, Box<dyn Error>> {
     load_and_prepare(session, fixture).await?;
+
+    stage(session, 3, 0).await?;
     let first = session
         .capture_frame(frame(0), gate_one_plan().frame_rate())
         .await?;
+    confirm(session, 4, 0).await?;
 
-    seek(session, 3, 15).await?;
+    stage(session, 5, 15).await?;
     let selected = session
         .capture_frame(frame(15), gate_one_plan().frame_rate())
         .await?;
-    seek(session, 4, 15).await?;
+    confirm(session, 6, 15).await?;
+
+    stage(session, 7, 15).await?;
     let repeated = session
         .capture_frame(frame(15), gate_one_plan().frame_rate())
         .await?;
+    confirm(session, 8, 15).await?;
 
     assert_png(first.png());
     assert_ne!(first.raw_rgba_hash(), selected.raw_rgba_hash());
@@ -367,11 +373,37 @@ async fn load_and_prepare(session: &BrowserSession, fixture: &Url) -> Result<(),
     Ok(())
 }
 
-async fn seek(session: &BrowserSession, request_id: u32, index: u64) -> Result<(), Box<dyn Error>> {
+async fn stage(
+    session: &BrowserSession,
+    request_id: u32,
+    index: u64,
+) -> Result<(), Box<dyn Error>> {
     let response = session
         .dispatch(&BrowserRequest::new(
             RequestId::new(request_id),
             BrowserCommand::Seek {
+                frame: frame(index),
+            },
+        ))
+        .await?;
+    assert_eq!(
+        response.event(),
+        &BrowserEvent::FrameStaged {
+            frame: frame(index),
+        },
+    );
+    Ok(())
+}
+
+async fn confirm(
+    session: &BrowserSession,
+    request_id: u32,
+    index: u64,
+) -> Result<(), Box<dyn Error>> {
+    let response = session
+        .dispatch(&BrowserRequest::new(
+            RequestId::new(request_id),
+            BrowserCommand::Confirm {
                 frame: frame(index),
             },
         ))
