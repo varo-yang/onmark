@@ -142,9 +142,12 @@
           );
         }
 
-        const presented = waitForPresentedFrame(expectedMediaTime);
         const seeked = waitForVideoEvent("seeked", "video seek did not finish");
         video.currentTime = selection.seekTimeSeconds;
+        // Register against the seek that is now in flight. Registering before
+        // currentTime changes can attach the callback to the loaded frame and
+        // miss a first out-of-order presentation.
+        const presented = waitForPresentedFrame(expectedMediaTime);
         await seeked;
         canvas.width = window.innerWidth;
         canvas.height = window.innerHeight;

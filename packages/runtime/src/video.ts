@@ -80,17 +80,21 @@ export class DecodedVideo {
       );
     }
 
-    const pending = StagedFrame.observe(this.#element, selection);
     const readiness = new SeekReadiness(
       this.#element,
       this.#timeoutMilliseconds,
     );
-    this.#pendingFrame = pending;
+    let pending: StagedFrame | undefined;
     try {
-      await readiness.seek(selection.seekTimeSeconds);
+      const seeked = readiness.seek(selection.seekTimeSeconds);
+      // Observe the seek now in flight. Registering against the loaded frame
+      // can miss the first presentation when rendering begins out of order.
+      pending = StagedFrame.observe(this.#element, selection);
+      this.#pendingFrame = pending;
+      await seeked;
     } catch (error) {
       readiness.cancel();
-      pending.cancel();
+      pending?.cancel();
       this.#pendingFrame = undefined;
       throw error;
     }

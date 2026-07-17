@@ -17,6 +17,7 @@ export class FakeVideoElement implements BrowserVideoElement {
   #hasSource = false;
   #src = "";
   readonly #loadAutomatically: boolean;
+  readonly #frameCallbackTimes: number[] = [];
   frameCallbackError: Error | undefined;
   loadCount = 0;
   loadError: Error | undefined;
@@ -28,6 +29,10 @@ export class FakeVideoElement implements BrowserVideoElement {
 
   get currentTime(): number {
     return this.#currentTime;
+  }
+
+  get frameCallbackTimes(): readonly number[] {
+    return this.#frameCallbackTimes;
   }
 
   set currentTime(value: number) {
@@ -98,6 +103,7 @@ export class FakeVideoElement implements BrowserVideoElement {
     }
     const handle = this.#nextFrameCallback;
     this.#nextFrameCallback += 1;
+    this.#frameCallbackTimes.push(this.#currentTime);
     this.#frameCallbacks.set(handle, callback);
     return handle;
   }
