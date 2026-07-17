@@ -1,3 +1,5 @@
+//! Stable solved frame facts and timing diagnostics.
+
 mod conformance;
 
 use std::collections::BTreeMap;
@@ -5,12 +7,14 @@ use std::fmt::Write as _;
 use std::fs;
 
 use onmark_core::compiler;
+use onmark_core::diagnostics::DiagnosticCode;
 use onmark_core::model::{
     AssetMetadata, AssetRef, Duration, EventRef, FrameInterval, FrameRate, FrozenAsset,
     FrozenAssetId, SourceId, Timebase, VideoMetadata, VideoTiming,
 };
 use onmark_core::timeline::{
-    TimelineContent, TimelineElement, TimelineIr, TimelineTiming, TimingReason,
+    TimelineContent, TimelineElement, TimelineIr, TimelineScene, TimelineShot, TimelineTiming,
+    TimingReason,
 };
 
 use conformance::{assert_or_update, fixture, render_diagnostics};
@@ -33,6 +37,51 @@ fn timing_errors_match_stable_diagnostics() {
     let expected_path = fixture("timeline", "invalid/timing-errors.diagnostics.txt");
     let assets = frozen_assets([("clip.mp4", "2s")]);
     let report = solve_fixture(&source_path, &assets).expect("all referenced assets were probed");
+
+    assert!(report.timeline().is_none());
+    assert_or_update(&expected_path, &render_diagnostics(report.diagnostics()));
+}
+
+#[test]
+fn an_empty_film_reports_an_authored_timing_error() {
+    let source_path = fixture("timeline", "invalid/empty-film.onmark");
+    let expected_path = fixture("timeline", "invalid/empty-film.diagnostics.txt");
+    let report = solve_fixture(&source_path, &BTreeMap::new())
+        .expect("the empty fixture references no external assets");
+
+    assert!(report.timeline().is_none());
+    assert_or_update(&expected_path, &render_diagnostics(report.diagnostics()));
+}
+
+#[test]
+fn an_unrelated_cue_failure_does_not_conceal_an_empty_film() {
+    let source_path = fixture("timeline", "invalid/empty-film-with-overflowing-cue.onmark");
+    let expected_path = fixture(
+        "timeline",
+        "invalid/empty-film-with-overflowing-cue.diagnostics.txt",
+    );
+    let rate = FrameRate::new(u32::MAX, 1).expect("the maximum frame rate is valid");
+    let source = fs::read_to_string(&source_path).expect("the timeline fixture must be readable");
+    let (document, diagnostics) = compiler::parse(SourceId::new(0), &source).into_parts();
+    assert!(diagnostics.is_empty());
+    let (film, diagnostics) = compiler::bind(document).into_parts();
+    assert!(diagnostics.is_empty());
+    let (film, diagnostics) =
+        compiler::resolve(film.expect("the fixture contains one film")).into_parts();
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(
+        diagnostics
+            .iter()
+            .next()
+            .map(|diagnostic| diagnostic.code()),
+        Some(DiagnosticCode::UnusedCue),
+    );
+    let report = compiler::solve(
+        film.expect("warnings preserve the resolved fixture"),
+        &BTreeMap::new(),
+        Timebase::new(rate),
+    )
+    .expect("the fixture references no external assets");
 
     assert!(report.timeline().is_none());
     assert_or_update(&expected_path, &render_diagnostics(report.diagnostics()));
@@ -192,25 +241,37 @@ impl TimelineRenderer {
         }
 
         for scene in timeline.scenes() {
-            writeln!(
-                self.output,
-                "  scene {} {}",
-                element(scene.element()),
-                timing(scene.timing()),
-            )?;
+            self.render_scene(scene)?;
+        }
 
-            for shot in scene.shots() {
-                writeln!(
-                    self.output,
-                    "    shot {} {}",
-                    element(shot.element()),
-                    timing(shot.timing()),
-                )?;
+        Ok(())
+    }
 
-                for content in shot.content() {
-                    self.render_content(content)?;
-                }
-            }
+    fn render_scene(&mut self, scene: &TimelineScene) -> std::fmt::Result {
+        writeln!(
+            self.output,
+            "  scene {} {}",
+            element(scene.element()),
+            timing(scene.timing()),
+        )?;
+
+        for shot in scene.shots() {
+            self.render_shot(shot)?;
+        }
+
+        Ok(())
+    }
+
+    fn render_shot(&mut self, shot: &TimelineShot) -> std::fmt::Result {
+        writeln!(
+            self.output,
+            "    shot {} {}",
+            element(shot.element()),
+            timing(shot.timing()),
+        )?;
+
+        for content in shot.content() {
+            self.render_content(content)?;
         }
 
         Ok(())

@@ -1,3 +1,5 @@
+//! Opt-in real-process conformance for capture, partitioning, and assembly.
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::error::Error;
@@ -316,7 +318,7 @@ async fn freeze_asset(path: &Path) -> FrozenAsset {
 }
 
 async fn capture_protocol_fingerprint(fixture: &Url) -> RawRgbaHash {
-    let session = BrowserSession::launch(
+    let mut session = BrowserSession::launch(
         headless_shell(),
         BrowserLaunchPolicy::local(),
         render_profile(),
@@ -324,7 +326,7 @@ async fn capture_protocol_fingerprint(fixture: &Url) -> RawRgbaHash {
     )
     .await
     .expect("headless shell must launch");
-    let result = exercise_protocol(&session, fixture).await;
+    let result = exercise_protocol(&mut session, fixture).await;
     let shutdown = session.shutdown().await;
 
     let fingerprint = result.expect("the real browser protocol must capture deterministic frames");
@@ -333,7 +335,7 @@ async fn capture_protocol_fingerprint(fixture: &Url) -> RawRgbaHash {
 }
 
 async fn exercise_protocol(
-    session: &BrowserSession,
+    session: &mut BrowserSession,
     fixture: &Url,
 ) -> Result<RawRgbaHash, Box<dyn Error>> {
     load_and_prepare(session, fixture).await?;

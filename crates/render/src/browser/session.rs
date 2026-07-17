@@ -4,7 +4,6 @@
 //! only in Onmark protocol values and typed browser failures.
 
 use std::path::Path;
-use std::sync::Mutex;
 use std::time::Duration;
 
 use base64::Engine as _;
@@ -48,7 +47,9 @@ pub struct BrowserSession {
     process: ChromiumProcess,
     diagnostics: BrowserDiagnostics,
     // Headless shell omits screenshotData when a frame has no visual damage.
-    last_capture: Mutex<Option<EncodedPng>>,
+    // The capture phase owns this cache through `&mut self`; it is not shared
+    // across requests or tasks.
+    last_capture: Option<EncodedPng>,
     limits: BrowserLimits,
     render_profile: RenderProfile,
     // Retained so headless shell's private profile outlives the process.
@@ -126,7 +127,7 @@ impl BrowserSession {
             handler,
             process,
             diagnostics,
-            last_capture: Mutex::new(None),
+            last_capture: None,
             limits,
             render_profile,
             _profile: profile,
@@ -227,7 +228,7 @@ impl BrowserSession {
     /// Returns [`BrowserError`] when capture fails or exceeds the configured
     /// retained-byte budget.
     pub async fn capture_png(
-        &self,
+        &mut self,
         frame: WireFrame,
         frame_rate: WireFrameRate,
     ) -> Result<EncodedPng, BrowserError> {
@@ -236,7 +237,7 @@ impl BrowserSession {
     }
 
     pub(crate) async fn capture_png_after_placement_boundary(
-        &self,
+        &mut self,
         frame: WireFrame,
         frame_rate: WireFrameRate,
     ) -> Result<EncodedPng, BrowserError> {
@@ -252,7 +253,7 @@ impl BrowserSession {
     }
 
     async fn capture_png_with_fallback(
-        &self,
+        &mut self,
         frame: WireFrame,
         frame_rate: WireFrameRate,
         missing: MissingScreenshot,
@@ -264,7 +265,7 @@ impl BrowserSession {
             return self.decode_and_remember(screenshot);
         }
         let previous = match missing {
-            MissingScreenshot::ReusePrevious => self.previous_capture()?,
+            MissingScreenshot::ReusePrevious => self.last_capture.clone(),
             MissingScreenshot::RetryOnce => None,
         };
         if let Some(previous) = previous {
@@ -291,7 +292,10 @@ impl BrowserSession {
             .map_err(|source| self.cdp_error(BrowserErrorKind::Capture, source))
     }
 
-    fn decode_and_remember(&self, screenshot: impl AsRef<str>) -> Result<EncodedPng, BrowserError> {
+    fn decode_and_remember(
+        &mut self,
+        screenshot: impl AsRef<str>,
+    ) -> Result<EncodedPng, BrowserError> {
         let encoded: &str = screenshot.as_ref();
         if encoded.len() > maximum_base64_length(self.limits.max_capture_bytes()) {
             return Err(BrowserError::without_source(
@@ -306,18 +310,8 @@ impl BrowserSession {
             ));
         }
         let capture = EncodedPng::new(bytes);
-        *self.capture_cache()? = Some(capture.clone());
+        self.last_capture = Some(capture.clone());
         Ok(capture)
-    }
-
-    fn previous_capture(&self) -> Result<Option<EncodedPng>, BrowserError> {
-        Ok(self.capture_cache()?.clone())
-    }
-
-    fn capture_cache(&self) -> Result<std::sync::MutexGuard<'_, Option<EncodedPng>>, BrowserError> {
-        self.last_capture
-            .lock()
-            .map_err(|_| BrowserError::capture_pixels("browser capture cache is unavailable"))
     }
 
     /// Captures one encoder PNG together with canonical raw-RGBA evidence.
@@ -328,7 +322,7 @@ impl BrowserSession {
     /// retained PNG exceeds its bound, or the decoded pixels do not match the
     /// configured render profile.
     pub async fn capture_frame(
-        &self,
+        &mut self,
         frame: WireFrame,
         frame_rate: WireFrameRate,
     ) -> Result<CapturedFrame, BrowserError> {

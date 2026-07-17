@@ -1,3 +1,5 @@
+//! Stable structural-binding facts and authored diagnostics.
+
 mod conformance;
 
 use std::fmt::Write as _;
@@ -116,11 +118,7 @@ impl LinkedFilmRenderer {
     }
 
     fn render_content(&mut self, content: &LinkedShotContent) -> std::fmt::Result {
-        let element = match content {
-            LinkedShotContent::Video(video) => video.element(),
-            LinkedShotContent::VoiceOver(voice_over) => voice_over.element(),
-            LinkedShotContent::Overlay(overlay) => overlay.element(),
-        };
+        let element = content.element();
 
         writeln!(self.output, "      {} id={}", element.kind(), id(element))
     }

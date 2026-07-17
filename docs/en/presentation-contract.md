@@ -68,8 +68,8 @@ successful prepare. It applies the requested DOM state, registers decoded-media
 observers, and resolves once browser media has finished seeking; it must not
 wait for compositor presentation. `confirm` runs after native capture and
 resolves only when browser media reports that the staged source frame reached
-the compositor before native accepts the captured payload. `dispose` is
-terminal even if cleanup reports a failure.
+the compositor before native accepts the captured payload. `dispose` is terminal
+even if cleanup reports a failure.
 
 `seek` does not accept a free time `t`. It receives a `RuntimeFrame`:
 
@@ -87,14 +87,14 @@ an alternate scheduling clock or a source of timing decisions.
 
 ## Runtime handshake
 
-The presentation must install exactly one runtime host with `installRuntimeHost`.
-`Load` creates every video and overlay node in the plan. Inactive nodes retain
-their stable binding identity but remain outside layout and compositing until
-their solved interval makes them visible. This prevents placements outside a
-Render Unit from changing its pixels. After `Prepare`, native rendering sends
-one awaited, visual, non-capturing BeginFrame at a fixed pre-baseline timestamp
-to initialize the page surface. Real captures use a later fixed positive
-compositor baseline:
+The presentation must install exactly one runtime host with
+`installRuntimeHost`. `Load` creates every video and overlay node in the plan.
+Inactive nodes retain their stable binding identity but remain outside layout
+and compositing until their solved interval makes them visible. This prevents
+placements outside a Render Unit from changing its pixels. After `Prepare`,
+native rendering sends one awaited, visual, non-capturing BeginFrame at a fixed
+pre-baseline timestamp to initialize the page surface. Real captures use a later
+fixed positive compositor baseline:
 
 ```text
 Load(plan) -> Prepare(evaluationStart)
@@ -111,12 +111,12 @@ The split handshake is required by Chromium's decoded-media contract.
 it observes, but waiting for that callback before issuing `BeginFrame` would
 deadlock a target controlled by CDP BeginFrameControl. `FrameStaged(frame)`
 therefore means browser state is ready to enter the compositor. Native then
-issues one normal capture-bearing `HeadlessExperimental.beginFrame` command
-for each output frame. At a video or overlay boundary, native first commits the
+issues one normal capture-bearing `HeadlessExperimental.beginFrame` command for
+each output frame. At a video or overlay boundary, native first commits the
 staged placement without a screenshot at a fixed sub-millisecond timestamp
 immediately before the exact authored capture timestamp. This gives a newly
-visible layer one compositor turn without retaining unrelated inactive layers
-or advancing screenplay time. The capture command then commits frame state and
+visible layer one compositor turn without retaining unrelated inactive layers or
+advancing screenplay time. The capture command then commits frame state and
 captures the PNG at the exact timestamp. A no-damage response normally reuses
 the preceding PNG, but a boundary never does so; a missing boundary or first
 screenshot receives one bounded sub-millisecond retry. `Confirm(frame)` waits
@@ -131,13 +131,13 @@ encoder or frame artifact.
 
 The boundary is strict:
 
-| Owner | Owns |
-| --- | --- |
-| Screenplay | element structure, text, media references, cues, local delays |
-| Rust compiler | parsing, binding, reference resolution, exact timing, Timeline IR |
-| Runtime | protocol state, frame clock, decoded video readiness, visibility intervals |
-| Presentation | DOM shape, CSS, layout, typography, visual styling |
-| Renderer | materialized asset paths, Chromium, capture, encoding |
+| Owner         | Owns                                                                       |
+| ------------- | -------------------------------------------------------------------------- |
+| Screenplay    | element structure, text, media references, cues, local delays              |
+| Rust compiler | parsing, binding, reference resolution, exact timing, Timeline IR          |
+| Runtime       | protocol state, frame clock, decoded video readiness, visibility intervals |
+| Presentation  | DOM shape, CSS, layout, typography, visual styling                         |
+| Renderer      | materialized asset paths, Chromium, capture, encoding                      |
 
 The presentation receives placements that already contain absolute frame
 intervals. It may decide how a title looks, where a CTA sits, or how a video is
@@ -152,8 +152,8 @@ or derive a new media duration from the DOM.
   bindings for videos and overlays.
 - Video placements become hidden `<video>` elements with the stable
   `onmark-video` class.
-- Title and CTA placements become hidden `<div>` elements with
-  `onmark-overlay` plus `onmark-title` or `onmark-call-to-action`.
+- Title and CTA placements become hidden `<div>` elements with `onmark-overlay`
+  plus `onmark-title` or `onmark-call-to-action`.
 - The runtime toggles visibility from solved intervals; CSS owns layout.
 
 The default facade is deliberately small. A presentation can implement
@@ -162,8 +162,8 @@ rules apply: bindings create browser resources, `setVisible` applies visibility,
 and `dispose` releases resources terminally.
 
 More precisely, the production adapter calls `bindVideo(placement, index)` and
-`bindOverlay(placement, index)` once during `load`. A video binding supplies
-the browser element, its materialized source, visibility effect, and terminal
+`bindOverlay(placement, index)` once during `load`. A video binding supplies the
+browser element, its materialized source, visibility effect, and terminal
 cleanup. An overlay binding supplies visibility and terminal cleanup. The
 `index` is the placement's stable position in the frozen plan; it is useful for
 DOM identity and is not a timing coordinate. On every `seek`, the runtime first
@@ -175,11 +175,11 @@ own those effects, not interval arithmetic.
 
 The current language does **not** have `presents`, `definePresentation`, or a
 screenplay-to-presentation props channel. `onmark render` selects one
-`presentation.ts` through `--presentation` or same-directory discovery. The
-only dynamic facts delivered to that entry are the Rust-owned `BrowserPlan`
-facts sent by `Load(plan)`: frame rate, evaluation and output intervals, video
-placements, and overlay placements. Static values imported by
-`presentation.ts` are bundled program code, not screenplay props.
+`presentation.ts` through `--presentation` or same-directory discovery. The only
+dynamic facts delivered to that entry are the Rust-owned `BrowserPlan` facts
+sent by `Load(plan)`: frame rate, evaluation and output intervals, video
+placements, and overlay placements. Static values imported by `presentation.ts`
+are bundled program code, not screenplay props.
 
 This absence is intentional rather than an undocumented convention. A future
 presentation-selection or props feature must define, together, its screenplay
@@ -192,8 +192,8 @@ parameters, a mutable side channel, or an invented `presents` attribute.
 ## Temporal capabilities
 
 `stateless`, `warmup`, and `sequential` are architectural categories, not a
-public adapter API or screenplay annotation today. The production adapter is
-the only adapter whose frame behavior is exercised by Gate-one and Gate-two
+public adapter API or screenplay annotation today. The production adapter is the
+only adapter whose frame behavior is exercised by Gate-one and Gate-two
 conformance. A custom adapter therefore gains no implied random-seek or
 partitioning guarantee merely by implementing `PresentationBindings`.
 
@@ -243,10 +243,10 @@ deterministic Gate-one output contract.
 
 ## Failures and cleanup
 
-Expected browser failures are reported through runtime protocol failures.
-Custom adapters should throw `RuntimeAdapterError` when they can identify an
-operation or readiness failure and should include bounded pending-resource names
-for readiness timeouts.
+Expected browser failures are reported through runtime protocol failures. Custom
+adapters should throw `RuntimeAdapterError` when they can identify an operation
+or readiness failure and should include bounded pending-resource names for
+readiness timeouts.
 
 Disposal is terminal. A presentation may report cleanup failure, but it must not
 return a partially disposed session to service. Resource cleanup should be
@@ -254,8 +254,8 @@ idempotent where the browser API allows it.
 
 ## Non-goals
 
-Gate one does not provide a presentation development server, watch mode,
-plugin API, component registry, screenplay-selected components or props,
-cross-scene persistence, free `begin/end/until` timing, or browser-side render
-planning. Those capabilities require explicit language, runtime, and evaluation
-evidence before they become public contract.
+Gate one does not provide a presentation development server, watch mode, plugin
+API, component registry, screenplay-selected components or props, cross-scene
+persistence, free `begin/end/until` timing, or browser-side render planning.
+Those capabilities require explicit language, runtime, and evaluation evidence
+before they become public contract.

@@ -26,13 +26,7 @@ impl RenderGraph {
     /// Derives the Gate-two dependency graph from solved Timeline IR.
     #[must_use]
     pub fn from_timeline(timeline: &TimelineIr) -> Self {
-        let mut regions = Vec::new();
-
-        for scene in timeline.scenes() {
-            for shot in scene.shots() {
-                regions.push(RenderRegion::from_shot(shot));
-            }
-        }
+        let regions = timeline.shots().map(RenderRegion::from_shot).collect();
 
         Self {
             interval: timeline.interval(),

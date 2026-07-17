@@ -1,3 +1,5 @@
+//! Dependency-driven partition facts for the Gate-two graph boundary.
+
 mod conformance;
 
 use std::collections::BTreeMap;

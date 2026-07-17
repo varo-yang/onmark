@@ -1,3 +1,5 @@
+//! ffprobe process and normalization conformance over bounded fixtures.
+
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::path::{Path, PathBuf};
@@ -12,6 +14,7 @@ use onmark_core::model::{
 use onmark_media::{Ffprobe, InvalidFfprobe, ProbeError};
 
 static FIXTURE_PROCESS_LOCK: Mutex<()> = Mutex::new(());
+const RESPONSIVE_FIXTURE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// One serialized owner of the fixture executable and its process deadline.
 ///
@@ -31,7 +34,7 @@ impl FixtureProbe {
 
 #[test]
 fn normalizes_exact_duration_from_ffprobe() {
-    let ffprobe = fixture_probe(Duration::from_secs(1), 4_096);
+    let ffprobe = responsive_fixture_probe(4_096);
     let metadata = ffprobe
         .probe(Path::new("valid.mp4"))
         .expect("the fixture response is valid");
@@ -55,7 +58,7 @@ fn normalizes_exact_duration_from_ffprobe() {
 
 #[test]
 fn records_audio_presence_independently_of_visual_metadata() {
-    let ffprobe = fixture_probe(Duration::from_secs(1), 4_096);
+    let ffprobe = responsive_fixture_probe(4_096);
     let audio = ffprobe
         .probe(Path::new("audio.mp3"))
         .expect("the fixture contains no video stream");
@@ -90,7 +93,7 @@ fn records_audio_presence_independently_of_visual_metadata() {
 
 #[test]
 fn derives_artifact_duration_from_streams_when_format_duration_is_absent() {
-    let ffprobe = fixture_probe(Duration::from_secs(1), 4_096);
+    let ffprobe = responsive_fixture_probe(4_096);
     let metadata = ffprobe
         .probe(Path::new("stream-duration-only.mp4"))
         .expect("stream durations are sufficient when format duration is absent");
@@ -116,8 +119,24 @@ fn derives_artifact_duration_from_streams_when_format_duration_is_absent() {
 }
 
 #[test]
+fn derives_video_duration_from_the_container_when_the_stream_omits_it() {
+    let ffprobe = responsive_fixture_probe(4_096);
+    let metadata = ffprobe
+        .probe(Path::new("format-duration-only.mp4"))
+        .expect("the container duration can bound a video stream");
+
+    assert_eq!(
+        metadata
+            .video_metadata()
+            .expect("the fixture has a video stream")
+            .duration(),
+        MediaDuration::from_nanos(2_500_000_000),
+    );
+}
+
+#[test]
 fn distinguishes_variable_and_still_video_timing() {
-    let ffprobe = fixture_probe(Duration::from_secs(1), 4_096);
+    let ffprobe = responsive_fixture_probe(4_096);
     let variable = ffprobe
         .probe(Path::new("variable.mp4"))
         .expect("the fixture reports conflicting stream frame rates");
@@ -143,7 +162,7 @@ fn distinguishes_variable_and_still_video_timing() {
 
 #[test]
 fn frozen_identity_and_probed_metadata_drive_timeline_solving() {
-    let ffprobe = fixture_probe(Duration::from_secs(1), 4_096);
+    let ffprobe = responsive_fixture_probe(4_096);
     let metadata = ffprobe
         .probe(Path::new("valid.mp4"))
         .expect("the fixture response is valid");
@@ -218,7 +237,7 @@ fn rejects_probe_limits_outside_the_safety_ceiling() {
 
 #[test]
 fn translates_process_and_response_failures() {
-    let ffprobe = fixture_probe(Duration::from_secs(1), 4_096);
+    let ffprobe = responsive_fixture_probe(4_096);
 
     assert!(matches!(
         probe_error(&ffprobe, "failed.mp4"),
@@ -248,7 +267,7 @@ fn translates_process_and_response_failures() {
 
 #[test]
 fn failed_probes_retain_the_artifact_and_stderr_tail() {
-    let ffprobe = fixture_probe(Duration::from_secs(1), 64);
+    let ffprobe = responsive_fixture_probe(64);
     let path = Path::new("failed-tail.mp4");
     let error = ffprobe
         .probe(path)
@@ -285,7 +304,7 @@ fn terminates_a_probe_that_exceeds_its_deadline() {
 
 #[test]
 fn drains_but_does_not_retain_output_past_the_limit() {
-    let ffprobe = fixture_probe(Duration::from_secs(1), 64);
+    let ffprobe = responsive_fixture_probe(64);
     for path in ["large.mp4", "large-stderr.mp4"] {
         let error = ffprobe
             .probe(Path::new(path))
@@ -304,6 +323,10 @@ fn fixture_probe(timeout: Duration, output_limit: usize) -> FixtureProbe {
         ffprobe,
         _process_lock: process_lock,
     }
+}
+
+fn responsive_fixture_probe(output_limit: usize) -> FixtureProbe {
+    fixture_probe(RESPONSIVE_FIXTURE_TIMEOUT, output_limit)
 }
 
 fn fixture_process_lock() -> MutexGuard<'static, ()> {

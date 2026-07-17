@@ -66,16 +66,19 @@ pub async fn run() -> Result<(), lambda_runtime::Error> {
     let handler = Arc::new(handler::CaptureHandler::from_environment().await?);
     let service = lambda_runtime::service_fn(
         move |event: lambda_runtime::LambdaEvent<CaptureInvocation>| {
-            let handler = Arc::clone(&handler);
-            async move {
-                Box::pin(handler.handle(event.payload))
-                    .await
-                    .map_err(|source| {
-                        Box::new(ReportedDeploymentError::new(source)) as lambda_runtime::Error
-                    })
-            }
+            handle_invocation(Arc::clone(&handler), event)
         },
     );
 
     Box::pin(lambda_runtime::run(service)).await
+}
+
+#[cfg(feature = "runtime")]
+async fn handle_invocation(
+    handler: Arc<handler::CaptureHandler>,
+    event: lambda_runtime::LambdaEvent<CaptureInvocation>,
+) -> Result<CaptureResult, lambda_runtime::Error> {
+    Box::pin(handler.handle(event.payload))
+        .await
+        .map_err(|source| Box::new(ReportedDeploymentError::new(source)) as lambda_runtime::Error)
 }

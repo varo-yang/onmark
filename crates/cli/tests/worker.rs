@@ -1,3 +1,5 @@
+//! Portable worker and local assembly conformance through the public CLI.
+
 use std::collections::BTreeMap;
 use std::env;
 use std::fs;

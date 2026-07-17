@@ -29,8 +29,9 @@ const MAX_FRAME_BYTES: usize = 64 * 1024 * 1024;
 const MAX_INPUT_FILES: usize = 10_000;
 // A publish collision temporarily retains worker input, the renderer's copied
 // unit root, the newly captured artifact, and the artifact being verified for
-// reuse. These limits cap that four-file envelope at six GiB, leaving measured
-// headroom inside Lambda's configured ten-GB `/tmp` volume for Chromium.
+// reuse. These limits cap those four retained groups at six GiB, leaving
+// measured headroom inside Lambda's configured ten-GB `/tmp` volume for
+// Chromium.
 const MAX_INPUT_BYTES: u64 = 1024 * 1024 * 1024;
 
 const S3_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);

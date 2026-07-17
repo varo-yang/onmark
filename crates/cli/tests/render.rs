@@ -1,3 +1,5 @@
+//! Opt-in release-CLI conformance across compilation, Chromium, and FFmpeg.
+
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};

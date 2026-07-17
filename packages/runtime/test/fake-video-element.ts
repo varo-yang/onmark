@@ -20,7 +20,10 @@ export class FakeVideoElement implements BrowserVideoElement {
   frameCallbackError: Error | undefined;
   loadCount = 0;
   loadError: Error | undefined;
+  loadErrorAfterReadiness: Error | undefined;
+  releaseError: Error | undefined;
   seekCount = 0;
+  seekError: Error | undefined;
 
   constructor(loadAutomatically = false) {
     this.#loadAutomatically = loadAutomatically;
@@ -31,6 +34,9 @@ export class FakeVideoElement implements BrowserVideoElement {
   }
 
   set currentTime(value: number) {
+    if (this.seekError !== undefined) {
+      throw this.seekError;
+    }
     this.#currentTime = value;
     this.seekCount += 1;
   }
@@ -75,6 +81,10 @@ export class FakeVideoElement implements BrowserVideoElement {
     if (this.loadError !== undefined) {
       throw this.loadError;
     }
+    if (this.loadErrorAfterReadiness !== undefined) {
+      this.emit("loadeddata");
+      throw this.loadErrorAfterReadiness;
+    }
     if (this.#loadAutomatically && this.#hasSource) {
       queueMicrotask(() => this.emit("loadeddata"));
     }
@@ -82,6 +92,9 @@ export class FakeVideoElement implements BrowserVideoElement {
 
   removeAttribute(name: "src"): void {
     assert.equal(name, "src");
+    if (this.releaseError !== undefined) {
+      throw this.releaseError;
+    }
     this.#src = "";
     this.#hasSource = false;
   }

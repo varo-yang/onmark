@@ -4,35 +4,28 @@
 //! the browser only applies the already-solved plan. Request IDs are allocated
 //! once here so protocol sequencing cannot drift across execution paths.
 
+mod capture;
 mod error;
 mod output;
 
-use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use onmark_core::model::FrameIndex;
-use onmark_core::protocol::{
-    BrowserCommand, BrowserEvent, BrowserPlan, BrowserRequest, BrowserResponse, RequestId,
-    WireFrame, WireFrameRate, WireInterval,
-};
+use onmark_core::protocol::{WireFrameRate, WireInterval};
 use onmark_core::render_graph::PartitionPlan;
 
+use self::capture::{FrameSink, RequestSequence, render_session, validate_plan};
 use self::output::StagedOutput;
 use crate::encoder::AudioInput;
-use crate::frame_artifact::FrameArtifactWriter;
 use crate::unit::MAX_AUDIO_TRACKS;
 use crate::{
-    BrowserError, BrowserLaunchPolicy, BrowserLimits, BrowserSession, CaptureEnvironmentId,
-    EncodedPng, EncodedVideo, ExecutableUnit, Ffmpeg, FfmpegSession, FrameArtifact,
-    FrameArtifactErrorKind, FrameArtifactLimits,
+    BrowserLaunchPolicy, BrowserLimits, BrowserSession, CaptureEnvironmentId, EncodedVideo,
+    ExecutableUnit, Ffmpeg, FfmpegSession, FrameArtifact, FrameArtifactErrorKind,
+    FrameArtifactLimits,
 };
 
 pub use error::{RenderError, RenderErrorKind};
-
-const LOAD_REQUEST: RequestId = RequestId::new(1);
-const PREPARE_REQUEST: RequestId = RequestId::new(2);
-const FIRST_FRAME_REQUEST: u32 = 3;
 
 /// Aggregate wall-time attribution for one browser capture session.
 ///
@@ -257,7 +250,7 @@ impl FrameCaptureExecutor {
     ) -> Result<FrameCaptureMetrics, RenderError> {
         let plan = unit.browser_plan();
         let launch_started = Instant::now();
-        let browser = BrowserSession::launch(
+        let mut browser = BrowserSession::launch(
             &self.browser_executable,
             self.launch_policy,
             unit.profile(),
@@ -271,7 +264,7 @@ impl FrameCaptureExecutor {
         };
 
         let render_result = render_session(
-            &browser,
+            &mut browser,
             plan,
             requests,
             unit.entry_url().as_str(),
@@ -545,32 +538,13 @@ impl RenderExecutor {
             return Err(invalid_plan(output, "render sequence contains no units"));
         };
         let frame_rate = first.browser_plan().frame_rate();
-        let profile = first.profile();
-        let bundle_id = first.bundle_id();
         let mut expected_start = expected_output.start().get();
         let mut total_frames = 0_u64;
         let mut requests = Vec::with_capacity(units.len());
 
         for unit in units {
             let plan = unit.browser_plan();
-            if unit.bundle_id() != bundle_id {
-                return Err(invalid_plan(
-                    output,
-                    "render units do not share one presentation bundle",
-                ));
-            }
-            if unit.profile() != profile {
-                return Err(invalid_plan(
-                    output,
-                    "render units do not share one render profile",
-                ));
-            }
-            if plan.frame_rate() != frame_rate {
-                return Err(invalid_plan(
-                    output,
-                    "render units do not share one frame rate",
-                ));
-            }
+            validate_unit_identity(first, unit, output)?;
             if plan.output().start().get() != expected_start {
                 return Err(invalid_plan(
                     output,
@@ -579,22 +553,12 @@ impl RenderExecutor {
             }
 
             let unit_requests = validate_plan(plan, self.ffmpeg.max_frames(), output)?;
-            total_frames = total_frames
-                .checked_add(unit_requests.frame_count())
-                .ok_or_else(|| {
-                    RenderError::new(
-                        RenderErrorKind::PlanTooLarge,
-                        output,
-                        "render sequence exceeds the configured frame limit",
-                    )
-                })?;
-            if total_frames > self.ffmpeg.max_frames() {
-                return Err(RenderError::new(
-                    RenderErrorKind::PlanTooLarge,
-                    output,
-                    "render sequence exceeds the configured frame limit",
-                ));
-            }
+            total_frames = extend_frame_budget(
+                total_frames,
+                unit_requests.frame_count(),
+                self.ffmpeg.max_frames(),
+                output,
+            )?;
             expected_start = plan.output().end().get();
             requests.push(unit_requests);
         }
@@ -627,95 +591,53 @@ struct ValidatedSequence {
     requests: Vec<RequestSequence>,
 }
 
-/// Sole authority for frame and disposal request identities in one session.
-#[derive(Clone, Copy)]
-struct RequestSequence {
-    frames: u32,
-}
-
-#[derive(Clone, Copy)]
-struct FrameRequests {
-    seek: RequestId,
-    confirm: RequestId,
-}
-
-impl RequestSequence {
-    fn new(frame_count: u64, output: &Path) -> Result<Self, RenderError> {
-        let frames = u32::try_from(frame_count).map_err(|_| request_identity_overflow(output))?;
-        let frame_requests = frames
-            .checked_mul(2)
-            .ok_or_else(|| request_identity_overflow(output))?;
-        FIRST_FRAME_REQUEST
-            .checked_add(frame_requests)
-            .ok_or_else(|| request_identity_overflow(output))?;
-
-        Ok(Self { frames })
-    }
-
-    fn frame_count(self) -> u64 {
-        u64::from(self.frames)
-    }
-
-    fn frame_requests(self) -> impl Iterator<Item = FrameRequests> {
-        (0..self.frames).map(|offset| {
-            let seek = FIRST_FRAME_REQUEST + offset * 2;
-            FrameRequests {
-                seek: RequestId::new(seek),
-                confirm: RequestId::new(seek + 1),
-            }
-        })
-    }
-
-    const fn disposal(self) -> RequestId {
-        RequestId::new(FIRST_FRAME_REQUEST + self.frames * 2)
-    }
-}
-
-fn validate_plan(
-    plan: &BrowserPlan,
-    configured_max_frames: u64,
-    output: &Path,
-) -> Result<RequestSequence, RenderError> {
-    let Some(frame_count) = output_frame_count(plan) else {
-        return Err(invalid_plan(output, "browser output interval is reversed"));
-    };
-    if frame_count == 0 {
-        return Err(invalid_plan(output, "browser output interval is empty"));
-    }
-    if frame_count > configured_max_frames {
-        return Err(RenderError::new(
-            RenderErrorKind::PlanTooLarge,
-            output,
-            "browser output interval exceeds the configured frame limit",
-        ));
-    }
-    RequestSequence::new(frame_count, output)
-}
-
-async fn render_session(
-    browser: &BrowserSession,
-    plan: &BrowserPlan,
-    requests: RequestSequence,
-    entry_url: &str,
-    frames: &mut FrameSink<'_>,
-    metrics: &mut FrameCaptureMetrics,
+fn validate_unit_identity(
+    expected: &ExecutableUnit,
+    actual: &ExecutableUnit,
     output: &Path,
 ) -> Result<(), RenderError> {
-    let setup_started = Instant::now();
-    browser
-        .navigate(entry_url)
-        .await
-        .map_err(|source| RenderError::browser(output, source))?;
-    load_runtime(browser, plan, output).await?;
-    prepare_runtime(browser, plan, output).await?;
-    browser
-        .initialize_capture_surface(plan.frame_rate())
-        .await
-        .map_err(|source| RenderError::browser(output, source))?;
-    metrics.runtime_setup = setup_started.elapsed();
+    if actual.bundle_id() != expected.bundle_id() {
+        return Err(invalid_plan(
+            output,
+            "render units do not share one presentation bundle",
+        ));
+    }
+    if actual.profile() != expected.profile() {
+        return Err(invalid_plan(
+            output,
+            "render units do not share one render profile",
+        ));
+    }
+    if actual.browser_plan().frame_rate() != expected.browser_plan().frame_rate() {
+        return Err(invalid_plan(
+            output,
+            "render units do not share one frame rate",
+        ));
+    }
+    Ok(())
+}
 
-    render_frames(browser, frames, plan, requests, metrics, output).await?;
-    dispose_runtime(browser, requests.disposal(), output).await
+fn extend_frame_budget(
+    current: u64,
+    additional: u64,
+    limit: u64,
+    output: &Path,
+) -> Result<u64, RenderError> {
+    let total = current
+        .checked_add(additional)
+        .ok_or_else(|| sequence_too_large(output))?;
+    if total > limit {
+        return Err(sequence_too_large(output));
+    }
+    Ok(total)
+}
+
+fn sequence_too_large(output: &Path) -> RenderError {
+    RenderError::new(
+        RenderErrorKind::PlanTooLarge,
+        output,
+        "render sequence exceeds the configured frame limit",
+    )
 }
 
 fn wire_interval(
@@ -728,83 +650,6 @@ fn wire_interval(
             "partition interval exceeds the browser frame domain",
         )
     })
-}
-
-async fn load_runtime(
-    browser: &BrowserSession,
-    plan: &BrowserPlan,
-    output: &Path,
-) -> Result<(), RenderError> {
-    let request = BrowserRequest::new(LOAD_REQUEST, BrowserCommand::Load { plan: plan.clone() });
-    dispatch_expected(browser, request, BrowserEvent::Loaded, output).await
-}
-
-async fn prepare_runtime(
-    browser: &BrowserSession,
-    plan: &BrowserPlan,
-    output: &Path,
-) -> Result<(), RenderError> {
-    let evaluation_start = plan.evaluation().start();
-    let request = BrowserRequest::new(
-        PREPARE_REQUEST,
-        BrowserCommand::Prepare { evaluation_start },
-    );
-    let expected = BrowserEvent::Prepared { evaluation_start };
-
-    dispatch_expected(browser, request, expected, output).await
-}
-
-async fn dispose_runtime(
-    browser: &BrowserSession,
-    request_id: RequestId,
-    output: &Path,
-) -> Result<(), RenderError> {
-    let request = BrowserRequest::new(request_id, BrowserCommand::Dispose);
-    dispatch_expected(browser, request, BrowserEvent::Disposed, output).await
-}
-
-async fn render_frames(
-    browser: &BrowserSession,
-    frames: &mut FrameSink<'_>,
-    plan: &BrowserPlan,
-    requests: RequestSequence,
-    metrics: &mut FrameCaptureMetrics,
-    output: &Path,
-) -> Result<(), RenderError> {
-    let start = plan.output().start().get();
-    let end = plan.output().end().get();
-    let frame_rate = plan.frame_rate();
-    let placement_boundaries = plan.placement_boundaries().collect();
-
-    for (index, request_ids) in (start..end).zip(requests.frame_requests()) {
-        let frame = WireFrame::new(index)
-            .map_err(|_| invalid_plan(output, "browser output frame exceeds the wire domain"))?;
-        let seek_started = Instant::now();
-        stage_frame(browser, request_ids.seek, frame, output).await?;
-        metrics.seek += seek_started.elapsed();
-
-        let readback_started = Instant::now();
-        let png = capture_staged_png(browser, frame_rate, &placement_boundaries, frame)
-            .await
-            .map_err(|source| RenderError::browser(output, source))?;
-        metrics.readback += readback_started.elapsed();
-
-        frames
-            .confirm_and_write(browser, request_ids.confirm, frame, png, metrics, output)
-            .await?;
-    }
-    Ok(())
-}
-
-/// The two bounded destinations for a captured browser frame.
-///
-/// Direct local rendering streams one PNG into `FFmpeg`; Gate three worker
-/// capture also records its canonical raw-pixel fingerprint. The enum keeps
-/// this closed policy at the capture boundary instead of introducing an
-/// unbounded callback or channel abstraction.
-enum FrameSink<'a> {
-    Encoder(&'a mut FfmpegSession),
-    Artifact(&'a mut FrameArtifactWriter),
 }
 
 async fn stream_artifact(
@@ -829,135 +674,6 @@ async fn stream_artifact(
     Ok(())
 }
 
-impl FrameSink<'_> {
-    async fn confirm_and_write(
-        &mut self,
-        browser: &BrowserSession,
-        confirm_request: RequestId,
-        frame: WireFrame,
-        png: EncodedPng,
-        metrics: &mut FrameCaptureMetrics,
-        output: &Path,
-    ) -> Result<(), RenderError> {
-        let confirm_started = Instant::now();
-        confirm_frame(browser, confirm_request, frame, output).await?;
-        metrics.confirm += confirm_started.elapsed();
-
-        match self {
-            Self::Encoder(encoder) => {
-                let write_started = Instant::now();
-                encoder
-                    .write_frame(&png)
-                    .await
-                    .map_err(|source| RenderError::encoder(output, source))?;
-                metrics.write += write_started.elapsed();
-            }
-            Self::Artifact(writer) => {
-                let fingerprint_started = Instant::now();
-                let captured = crate::CapturedFrame::from_png(png, browser.render_profile())
-                    .map_err(|source| RenderError::browser(output, source))?;
-                metrics.fingerprint += fingerprint_started.elapsed();
-                let write_started = Instant::now();
-                writer
-                    .write_frame(&captured)
-                    .await
-                    .map_err(|source| RenderError::artifact(output, source))?;
-                metrics.write += write_started.elapsed();
-            }
-        }
-        metrics.frames += 1;
-        Ok(())
-    }
-}
-
-async fn capture_staged_png(
-    browser: &BrowserSession,
-    frame_rate: WireFrameRate,
-    placement_boundaries: &BTreeSet<WireFrame>,
-    frame: WireFrame,
-) -> Result<EncodedPng, BrowserError> {
-    if placement_boundaries.contains(&frame) {
-        browser
-            .capture_png_after_placement_boundary(frame, frame_rate)
-            .await
-    } else {
-        browser.capture_png(frame, frame_rate).await
-    }
-}
-
-async fn stage_frame(
-    browser: &BrowserSession,
-    request_id: RequestId,
-    frame: WireFrame,
-    output: &Path,
-) -> Result<(), RenderError> {
-    let request = BrowserRequest::new(request_id, BrowserCommand::Seek { frame });
-    let expected = BrowserEvent::FrameStaged { frame };
-
-    dispatch_expected(browser, request, expected, output).await
-}
-
-async fn confirm_frame(
-    browser: &BrowserSession,
-    request_id: RequestId,
-    frame: WireFrame,
-    output: &Path,
-) -> Result<(), RenderError> {
-    let request = BrowserRequest::new(request_id, BrowserCommand::Confirm { frame });
-    let expected = BrowserEvent::FrameReady { frame };
-
-    dispatch_expected(browser, request, expected, output).await
-}
-
-async fn dispatch_expected(
-    browser: &BrowserSession,
-    request: BrowserRequest,
-    expected: BrowserEvent,
-    output: &Path,
-) -> Result<(), RenderError> {
-    let request_id = request.request_id();
-    let response = browser
-        .dispatch(&request)
-        .await
-        .map_err(|source| RenderError::browser(output, source))?;
-
-    if response.request_id() != request_id {
-        return Err(RenderError::protocol(
-            output,
-            "browser response has the wrong request identity",
-        ));
-    }
-    if response.event() != &expected {
-        return Err(unexpected_event(output, &response));
-    }
-    Ok(())
-}
-
-fn unexpected_event(output: &Path, response: &BrowserResponse) -> RenderError {
-    match response.event() {
-        BrowserEvent::Failed(failure) => RenderError::runtime_failure(output, failure),
-        _ => RenderError::protocol(
-            output,
-            "browser response does not match the requested phase",
-        ),
-    }
-}
-
-fn output_frame_count(plan: &BrowserPlan) -> Option<u64> {
-    plan.output()
-        .end()
-        .get()
-        .checked_sub(plan.output().start().get())
-}
-
 fn invalid_plan(output: &Path, message: &'static str) -> RenderError {
     RenderError::new(RenderErrorKind::InvalidPlan, output, message)
-}
-
-fn request_identity_overflow(output: &Path) -> RenderError {
-    RenderError::new(
-        RenderErrorKind::PlanTooLarge,
-        output,
-        "frame request identity exceeds the protocol domain",
-    )
 }

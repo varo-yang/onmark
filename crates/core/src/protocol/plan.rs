@@ -83,39 +83,14 @@ impl BrowserPlan {
             return Err(InvalidBrowserPlan::OutputOutsideEvaluation);
         }
 
-        let rate = timeline.timebase().frame_rate();
         let evaluation_wire = WireInterval::try_from(evaluation)?;
         let output_wire = WireInterval::try_from(output)?;
-        let mut videos = Vec::new();
-        for video in timeline.videos() {
-            if !video.timing().interval().intersects(evaluation) {
-                continue;
-            }
-            if !evaluation.contains_interval(video.timing().interval()) {
-                return Err(InvalidBrowserPlan::VideoCrossesEvaluation);
-            }
-            if videos.len() == MAX_BROWSER_VIDEOS {
-                return Err(InvalidBrowserPlan::TooManyVideos);
-            }
-            videos.push(browser_video(video, source_frame_rates)?);
-        }
-        let mut overlays = Vec::new();
-        for overlay in timeline.overlays() {
-            if !overlay.timing().interval().intersects(evaluation) {
-                continue;
-            }
-            if !evaluation.contains_interval(overlay.timing().interval()) {
-                return Err(InvalidBrowserPlan::OverlayCrossesEvaluation);
-            }
-            if overlays.len() == MAX_BROWSER_OVERLAYS {
-                return Err(InvalidBrowserPlan::TooManyOverlays);
-            }
-            overlays.push(browser_overlay(overlay)?);
-        }
+        let videos = project_videos(timeline, source_frame_rates, evaluation)?;
+        let overlays = project_overlays(timeline, evaluation)?;
 
         Self::checked(BrowserPlanWire {
             timeline_version: timeline.version().get(),
-            frame_rate: rate.into(),
+            frame_rate: timeline.timebase().frame_rate().into(),
             evaluation: evaluation_wire,
             output: output_wire,
             videos,
@@ -225,6 +200,53 @@ impl BrowserPlan {
             overlays: wire.overlays,
         })
     }
+}
+
+fn project_videos(
+    timeline: &TimelineIr,
+    source_frame_rates: &BTreeMap<FrozenAssetId, FrameRate>,
+    evaluation: FrameInterval,
+) -> Result<Vec<BrowserVideo>, InvalidBrowserPlan> {
+    let mut videos = Vec::new();
+
+    for video in timeline.videos() {
+        let interval = video.timing().interval();
+        if !interval.intersects(evaluation) {
+            continue;
+        }
+        if !evaluation.contains_interval(interval) {
+            return Err(InvalidBrowserPlan::VideoCrossesEvaluation);
+        }
+        if videos.len() == MAX_BROWSER_VIDEOS {
+            return Err(InvalidBrowserPlan::TooManyVideos);
+        }
+        videos.push(browser_video(video, source_frame_rates)?);
+    }
+
+    Ok(videos)
+}
+
+fn project_overlays(
+    timeline: &TimelineIr,
+    evaluation: FrameInterval,
+) -> Result<Vec<BrowserOverlay>, InvalidBrowserPlan> {
+    let mut overlays = Vec::new();
+
+    for overlay in timeline.overlays() {
+        let interval = overlay.timing().interval();
+        if !interval.intersects(evaluation) {
+            continue;
+        }
+        if !evaluation.contains_interval(interval) {
+            return Err(InvalidBrowserPlan::OverlayCrossesEvaluation);
+        }
+        if overlays.len() == MAX_BROWSER_OVERLAYS {
+            return Err(InvalidBrowserPlan::TooManyOverlays);
+        }
+        overlays.push(browser_overlay(overlay)?);
+    }
+
+    Ok(overlays)
 }
 
 fn interval_boundaries(interval: WireInterval) -> [WireFrame; 2] {

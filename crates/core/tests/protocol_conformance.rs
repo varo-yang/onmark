@@ -1,3 +1,5 @@
+//! Versioned browser protocol fixtures projected from solved core facts.
+
 mod conformance;
 
 use std::collections::BTreeMap;

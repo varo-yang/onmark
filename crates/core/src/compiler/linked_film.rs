@@ -287,6 +287,18 @@ pub enum LinkedShotContent {
     Overlay(LinkedOverlay),
 }
 
+impl LinkedShotContent {
+    /// Returns the structurally bound element behind this shot-content role.
+    #[must_use]
+    pub const fn element(&self) -> &LinkedElement {
+        match self {
+            Self::Video(video) => video.element(),
+            Self::VoiceOver(voice_over) => voice_over.element(),
+            Self::Overlay(overlay) => overlay.element(),
+        }
+    }
+}
+
 /// Gate one's sole media element.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LinkedVideo {

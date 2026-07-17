@@ -142,16 +142,17 @@ fn materialize_units(
         // Partition roots are isolated. Shared frozen bytes may therefore be
         // selected by multiple partitions, but only graph-proven inputs enter
         // each composition.
+        let required_assets = materialized
+            .assets()
+            .iter()
+            .filter(|asset| partition.requires_media_asset(asset.id()))
+            .cloned();
         let unit = RenderUnit::from_partition(
             timeline,
             partition,
             bundle.manifest().clone(),
             profile,
-            materialized
-                .assets()
-                .iter()
-                .filter(|asset| partition.requires_media_asset(asset.id()))
-                .cloned(),
+            required_assets,
         )?;
         units.push(ExecutableUnit::materialize(
             unit,

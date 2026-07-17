@@ -37,6 +37,8 @@ pub enum DiagnosticCode {
     TimingOutsideShot,
     /// Exact time cannot fit in the selected frame domain.
     FrameConversionOverflow,
+    /// A film has no shot with a positive solved duration.
+    EmptyFilm,
     /// Renderable media omits its frozen artifact reference.
     MissingMediaSource,
     /// A media element references an artifact without its required track.
@@ -87,6 +89,7 @@ impl DiagnosticCode {
             Self::ConflictingDurationSources => "ONM-TIME-003",
             Self::TimingOutsideShot => "ONM-TIME-004",
             Self::FrameConversionOverflow => "ONM-TIME-005",
+            Self::EmptyFilm => "ONM-TIME-006",
             Self::MissingMediaSource => "ONM-ASSET-001",
             Self::IncompatibleMediaSource => "ONM-ASSET-002",
             Self::UnknownCueReference => "ONM-REF-001",
@@ -122,6 +125,7 @@ impl DiagnosticCode {
             | Self::ConflictingDurationSources
             | Self::TimingOutsideShot
             | Self::FrameConversionOverflow
+            | Self::EmptyFilm
             | Self::MissingMediaSource
             | Self::IncompatibleMediaSource
             | Self::UnknownCueReference
@@ -187,6 +191,7 @@ mod tests {
             (DiagnosticCode::ConflictingDurationSources, "ONM-TIME-003"),
             (DiagnosticCode::TimingOutsideShot, "ONM-TIME-004"),
             (DiagnosticCode::FrameConversionOverflow, "ONM-TIME-005"),
+            (DiagnosticCode::EmptyFilm, "ONM-TIME-006"),
             (DiagnosticCode::MissingMediaSource, "ONM-ASSET-001"),
             (DiagnosticCode::IncompatibleMediaSource, "ONM-ASSET-002"),
             (DiagnosticCode::UnknownCueReference, "ONM-REF-001"),

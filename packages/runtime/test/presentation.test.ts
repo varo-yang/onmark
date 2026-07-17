@@ -84,6 +84,38 @@ test("releases earlier effects when a later binding fails", async () => {
   assert.equal(recorder.allDisposed(), true);
 });
 
+test("reports incomplete cleanup after presentation loading fails", async () => {
+  const recorder = new PresentationRecorder();
+  const adapter = new PresentationRuntimeAdapter(recorder.bindings, 100);
+  recorder.rejectVideoCleanupAt(0);
+  recorder.rejectOverlayBindingAt(1);
+
+  await assert.rejects(
+    adapter.load(presentationPlan()),
+    (error: unknown) =>
+      error instanceof RuntimeAdapterError &&
+      error.message === "presentation load failed and cleanup was incomplete",
+  );
+  assert.equal(recorder.allDisposed(), true);
+  await assert.rejects(
+    adapter.load(presentationPlan()),
+    (error: unknown) =>
+      error instanceof RuntimeAdapterError &&
+      error.message === "presentation load requires the empty state",
+  );
+});
+
+test("rejects an invalid readiness policy before binding browser effects", () => {
+  const recorder = new PresentationRecorder();
+
+  assert.throws(
+    () => new PresentationRuntimeAdapter(recorder.bindings, 0),
+    TypeError,
+  );
+  assert.deepEqual(recorder.videos, []);
+  assert.deepEqual(recorder.overlays, []);
+});
+
 // ── Test presentation boundary ──
 
 interface RecordedVideo {
@@ -106,11 +138,14 @@ class PresentationRecorder {
   readonly overlays: RecordedOverlay[] = [];
   readonly videos: RecordedVideo[] = [];
   #rejectedOverlayIndex: number | undefined;
+  #rejectedVideoCleanupIndex: number | undefined;
 
   readonly bindings: PresentationBindings = {
     bindVideo: (placement, index) => {
       const element = new FakeVideoElement(true);
+      const rejectCleanup = index === this.#rejectedVideoCleanupIndex;
       let visibilityError: Error | undefined;
+      let visibilityCalls = 0;
       const recorded: RecordedVideo = {
         element,
         index,
@@ -125,6 +160,10 @@ class PresentationRecorder {
         element,
         source: `./assets/${placement.assetId.slice("sha256:".length)}`,
         setVisible(visible): void {
+          visibilityCalls += 1;
+          if (rejectCleanup && visibilityCalls > 1) {
+            throw new Error("video cleanup failed");
+          }
           if (visibilityError !== undefined) {
             throw visibilityError;
           }
@@ -160,6 +199,10 @@ class PresentationRecorder {
 
   rejectOverlayBindingAt(index: number): void {
     this.#rejectedOverlayIndex = index;
+  }
+
+  rejectVideoCleanupAt(index: number): void {
+    this.#rejectedVideoCleanupIndex = index;
   }
 
   visibility(): { videos: boolean[]; overlays: boolean[] } {

@@ -51,7 +51,7 @@ impl<'a> AdmittedVideo<'a> {
         self.metadata
     }
 
-    /// Returns the exact source frame rate proved by the complete PTS scan.
+    /// Returns the exact source frame rate admitted from normalized stream facts.
     #[must_use]
     pub const fn frame_rate(self) -> FrameRate {
         self.frame_rate

@@ -9,10 +9,32 @@ const FRAME_TOLERANCE_SECONDS = 0.000_001;
 const MAX_READINESS_TIMEOUT_MILLISECONDS = 24 * 60 * 60 * 1_000;
 
 type VideoEvent = "error" | "loadeddata" | "seeked";
+type ReadinessEvent = Exclude<VideoEvent, "error">;
 type FrameCallback = (
   now: number,
   metadata: { readonly mediaTime: number },
 ) => void;
+
+interface ReadinessContract {
+  readonly event: ReadinessEvent;
+  readonly failureMessage: string;
+  readonly pendingResource: string;
+  readonly timeoutMessage: string;
+}
+
+const LOAD_READINESS: ReadinessContract = {
+  event: "loadeddata",
+  failureMessage: "video data failed to load",
+  pendingResource: "video:loadeddata",
+  timeoutMessage: "video data did not load before its readiness deadline",
+};
+
+const SEEK_READINESS: ReadinessContract = {
+  event: "seeked",
+  failureMessage: "video seek failed",
+  pendingResource: "video:seeked",
+  timeoutMessage: "video seek did not finish before its readiness deadline",
+};
 
 /** Minimal browser-media capability required from a presentation. */
 export interface BrowserVideoElement {
@@ -37,7 +59,7 @@ export class DecodedVideo {
   #state: VideoState = "empty";
 
   constructor(element: BrowserVideoElement, timeoutMilliseconds: number) {
-    requireReadinessTimeout(timeoutMilliseconds);
+    requireVideoReadinessTimeout(timeoutMilliseconds);
     this.#element = element;
     this.#timeoutMilliseconds = timeoutMilliseconds;
   }
@@ -49,19 +71,25 @@ export class DecodedVideo {
       throw new RuntimeAdapterError("operation", "video source is empty");
     }
 
-    const readiness = new LoadedDataReadiness(
+    const readiness = new MediaEventReadiness(
       this.#element,
       this.#timeoutMilliseconds,
+      LOAD_READINESS,
     );
     try {
-      this.#element.src = source;
-      this.#element.load();
-      await readiness.wait();
+      await readiness.waitAfter(() => {
+        this.#element.src = source;
+        this.#element.load();
+      });
       this.#state = "loaded";
     } catch (error) {
       readiness.cancel();
-      releaseElement(this.#element);
-      throw RuntimeAdapterError.fromUnknown(error, "video data failed to load");
+      const cleanupFailure = releaseElement(this.#element);
+      if (cleanupFailure !== undefined) {
+        // A source that could not be fully released must never be reused.
+        this.#state = "disposed";
+      }
+      throw videoLoadFailure(error, cleanupFailure);
     }
   }
 
@@ -81,13 +109,16 @@ export class DecodedVideo {
     }
 
     const pending = StagedFrame.observe(this.#element, selection);
-    const readiness = new SeekReadiness(
+    const readiness = new MediaEventReadiness(
       this.#element,
       this.#timeoutMilliseconds,
+      SEEK_READINESS,
     );
     this.#pendingFrame = pending;
     try {
-      await readiness.seek(selection.seekTimeSeconds);
+      await readiness.waitAfter(() => {
+        this.#element.currentTime = selection.seekTimeSeconds;
+      });
     } catch (error) {
       readiness.cancel();
       pending.cancel();
@@ -180,28 +211,57 @@ function releaseElement(element: BrowserVideoElement): unknown | undefined {
   return failure;
 }
 
+function videoLoadFailure(
+  error: unknown,
+  cleanupFailure: unknown | undefined,
+): RuntimeAdapterError {
+  if (cleanupFailure !== undefined) {
+    return new RuntimeAdapterError(
+      "operation",
+      "video load failed and cleanup was incomplete",
+    );
+  }
+  return RuntimeAdapterError.fromUnknown(error, "video data failed to load");
+}
+
 // ── Readiness waits ──
 
-class LoadedDataReadiness {
+/** One listener-first media event barrier with a bounded terminal state. */
+class MediaEventReadiness {
   readonly #deadline: ReturnType<typeof setTimeout>;
+  readonly #contract: ReadinessContract;
   readonly #element: BrowserVideoElement;
   readonly #promise: Promise<void>;
   readonly #reject: (error: RuntimeAdapterError) => void;
   readonly #resolve: () => void;
   #settled = false;
 
-  constructor(element: BrowserVideoElement, timeoutMilliseconds: number) {
+  constructor(
+    element: BrowserVideoElement,
+    timeoutMilliseconds: number,
+    contract: ReadinessContract,
+  ) {
     this.#element = element;
+    this.#contract = contract;
     const pending = Promise.withResolvers<void>();
     this.#promise = pending.promise;
     this.#reject = pending.reject;
     this.#resolve = pending.resolve;
     this.#deadline = setTimeout(this.#timeout, timeoutMilliseconds);
-    element.addEventListener("loadeddata", this.#complete);
+    element.addEventListener(contract.event, this.#complete);
     element.addEventListener("error", this.#fail);
   }
 
-  wait(): Promise<void> {
+  waitAfter(action: () => void): Promise<void> {
+    try {
+      action();
+    } catch (error) {
+      this.#settle();
+      throw RuntimeAdapterError.fromUnknown(
+        error,
+        this.#contract.failureMessage,
+      );
+    }
     return this.#promise;
   }
 
@@ -218,11 +278,12 @@ class LoadedDataReadiness {
   };
 
   readonly #fail = (): void => {
-    if (this.#settle()) {
-      this.#reject(
-        new RuntimeAdapterError("operation", "video data failed to load"),
-      );
+    if (!this.#settle()) {
+      return;
     }
+    this.#reject(
+      new RuntimeAdapterError("operation", this.#contract.failureMessage),
+    );
   };
 
   readonly #timeout = (): void => {
@@ -230,8 +291,8 @@ class LoadedDataReadiness {
       this.#reject(
         new RuntimeAdapterError(
           "readinessTimeout",
-          "video data did not load before its readiness deadline",
-          ["video:loadeddata"],
+          this.#contract.timeoutMessage,
+          [this.#contract.pendingResource],
         ),
       );
     }
@@ -243,84 +304,8 @@ class LoadedDataReadiness {
     }
     this.#settled = true;
     clearTimeout(this.#deadline);
-    this.#element.removeEventListener("loadeddata", this.#complete);
+    this.#element.removeEventListener(this.#contract.event, this.#complete);
     this.#element.removeEventListener("error", this.#fail);
-    return true;
-  }
-}
-
-class SeekReadiness {
-  readonly #deadline: ReturnType<typeof setTimeout>;
-  readonly #element: BrowserVideoElement;
-  readonly #promise: Promise<void>;
-  readonly #reject: (error: RuntimeAdapterError) => void;
-  readonly #resolve: () => void;
-  #settled = false;
-
-  constructor(element: BrowserVideoElement, timeoutMilliseconds: number) {
-    this.#element = element;
-    const pending = Promise.withResolvers<void>();
-    this.#promise = pending.promise;
-    this.#reject = pending.reject;
-    this.#resolve = pending.resolve;
-    this.#deadline = setTimeout(this.#timeout, timeoutMilliseconds);
-    element.addEventListener("seeked", this.#complete);
-    element.addEventListener("error", this.#failed);
-  }
-
-  seek(timeSeconds: number): Promise<void> {
-    try {
-      this.#element.currentTime = timeSeconds;
-    } catch (error) {
-      this.#fail(error);
-    }
-    return this.#promise;
-  }
-
-  cancel(): void {
-    if (this.#settle()) {
-      this.#resolve();
-    }
-  }
-
-  readonly #complete = (): void => {
-    if (this.#settle()) {
-      this.#resolve();
-    }
-  };
-
-  readonly #failed = (): void => {
-    if (this.#settle()) {
-      this.#reject(new RuntimeAdapterError("operation", "video seek failed"));
-    }
-  };
-
-  readonly #timeout = (): void => {
-    if (this.#settle()) {
-      this.#reject(
-        new RuntimeAdapterError(
-          "readinessTimeout",
-          "video seek did not finish before its readiness deadline",
-          ["video:seeked"],
-        ),
-      );
-    }
-  };
-
-  #fail(error: unknown): void {
-    if (this.#settle()) {
-      this.#reject(RuntimeAdapterError.fromUnknown(error, "video seek failed"));
-    }
-  }
-
-  #settle(): boolean {
-    if (this.#settled) {
-      return false;
-    }
-    this.#settled = true;
-    clearTimeout(this.#deadline);
-    this.#element.removeEventListener("seeked", this.#complete);
-    this.#element.removeEventListener("error", this.#failed);
     return true;
   }
 }
@@ -476,7 +461,10 @@ async function observedBeforeDeadline(
   }
 }
 
-function requireReadinessTimeout(timeoutMilliseconds: number): void {
+/** Validates the bounded timer policy before browser effects are allocated. */
+export function requireVideoReadinessTimeout(
+  timeoutMilliseconds: number,
+): void {
   if (
     !Number.isSafeInteger(timeoutMilliseconds) ||
     timeoutMilliseconds <= 0 ||

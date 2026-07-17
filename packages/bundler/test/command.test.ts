@@ -23,6 +23,7 @@ test("publishes a bundle through the executable boundary", async () => {
           async load() {},
           async prepare() {},
           async seek() {},
+          async confirm() {},
           async dispose() {},
         });
       `,

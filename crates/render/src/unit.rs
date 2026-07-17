@@ -297,7 +297,7 @@ impl RenderUnit {
         for audio in self.audio.tracks() {
             assets.insert(audio.asset().id(), audio.asset());
         }
-        assets.into_values().collect::<Vec<_>>().into_iter()
+        assets.into_values()
     }
 
     pub(crate) fn into_execution_plans(self) -> (BrowserPlan, AudioPlan) {
@@ -392,6 +392,9 @@ fn render_videos(
         }
 
         let id = timeline_video.asset_id();
+        if videos.contains_key(&id) {
+            continue;
+        }
         let asset = available
             .get(&id)
             .cloned()

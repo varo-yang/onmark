@@ -59,9 +59,11 @@ cargo test -p onmark-render --test render \
 `cli/gate-one.onmark` drives the outermost Gate-one contract. The CLI smoke
 copies that screenplay and the production presentation into a private
 workspace, generates its referenced video, and invokes the real `onmark`
-binary twice. It requires identical decoded raw-frame hashes from the two
-independent Chromium and `FFmpeg` sessions, verifies motion and stream facts,
-and proves that a third invocation cannot replace an existing output:
+binary twice. It verifies each independent Chromium and `FFmpeg` session's
+decoded frame count, motion, stream facts, and audio placement, then proves
+that a third invocation cannot replace an existing output. Canonical raw-RGBA
+equality is asserted before lossy MP4 encoding, not inferred from independently
+encoded output:
 
 ```bash
 ONMARK_CHROME=/path/to/chrome \

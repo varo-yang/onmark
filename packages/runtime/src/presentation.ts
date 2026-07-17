@@ -12,7 +12,11 @@ import {
   type RuntimeAdapter,
   type RuntimePlan,
 } from "./session.js";
-import { DecodedVideo, type BrowserVideoElement } from "./video.js";
+import {
+  DecodedVideo,
+  requireVideoReadinessTimeout,
+  type BrowserVideoElement,
+} from "./video.js";
 
 // ── Presentation boundary ──
 
@@ -83,6 +87,7 @@ export class PresentationRuntimeAdapter implements RuntimeAdapter {
     bindings: PresentationBindings,
     videoTimeoutMilliseconds: number,
   ) {
+    requireVideoReadinessTimeout(videoTimeoutMilliseconds);
     this.#bindings = bindings;
     this.#videoTimeoutMilliseconds = videoTimeoutMilliseconds;
   }
@@ -101,11 +106,13 @@ export class PresentationRuntimeAdapter implements RuntimeAdapter {
       await this.#loadVideos(plan, videos);
       this.#bindOverlays(plan, overlays);
     } catch (error) {
-      releasePresentation(videos, overlays);
-      throw RuntimeAdapterError.fromUnknown(
-        error,
-        "presentation failed to load",
-      );
+      const cleanupFailure = releasePresentation(videos, overlays);
+      if (cleanupFailure !== undefined) {
+        // Incomplete release makes the adapter terminal; retrying would bind
+        // new effects beside browser state that no longer has one owner.
+        this.#state = { kind: "disposed" };
+      }
+      throw presentationLoadFailure(error, cleanupFailure);
     }
 
     this.#state = {
@@ -266,6 +273,19 @@ function hideVideos(videos: readonly BoundVideo[]): void {
 }
 
 // ── Terminal cleanup ──
+
+function presentationLoadFailure(
+  error: unknown,
+  cleanupFailure: unknown | undefined,
+): RuntimeAdapterError {
+  if (cleanupFailure !== undefined) {
+    return new RuntimeAdapterError(
+      "operation",
+      "presentation load failed and cleanup was incomplete",
+    );
+  }
+  return RuntimeAdapterError.fromUnknown(error, "presentation failed to load");
+}
 
 function releasePresentation(
   videos: readonly BoundVideo[],

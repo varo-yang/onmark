@@ -385,7 +385,7 @@ async fn capture_frame_sequence(
     indices: &[u64],
     retention: FrameRetention,
 ) -> MeasuredFrames<EncodedPng> {
-    let session = BrowserSession::launch(
+    let mut session = BrowserSession::launch(
         headless_shell(),
         browser_launch_policy(),
         render_profile(),
@@ -393,7 +393,8 @@ async fn capture_frame_sequence(
     )
     .await
     .expect("headless shell must launch");
-    let capture_result = capture_video_frames(&session, fixture, plan, indices, retention).await;
+    let capture_result =
+        capture_video_frames(&mut session, fixture, plan, indices, retention).await;
     let shutdown_result = session.shutdown().await;
 
     let frames = capture_result.expect("the browser must seek every decoded frame");
@@ -407,7 +408,7 @@ async fn capture_transparent_frame_sequence(
     indices: &[u64],
     retention: FrameRetention,
 ) -> MeasuredFrames<EncodedPng> {
-    let session = BrowserSession::launch(
+    let mut session = BrowserSession::launch(
         headless_shell(),
         browser_launch_policy(),
         render_profile(),
@@ -419,7 +420,8 @@ async fn capture_transparent_frame_sequence(
         .use_transparent_capture_surface()
         .await
         .expect("Chromium must expose a transparent capture surface");
-    let capture_result = capture_video_frames(&session, fixture, plan, indices, retention).await;
+    let capture_result =
+        capture_video_frames(&mut session, fixture, plan, indices, retention).await;
     let shutdown_result = session.shutdown().await;
 
     let frames = capture_result.expect("the browser must capture every presentation frame");
@@ -428,7 +430,7 @@ async fn capture_transparent_frame_sequence(
 }
 
 async fn capture_video_frames(
-    session: &BrowserSession,
+    session: &mut BrowserSession,
     fixture: &Url,
     plan: &BrowserPlan,
     indices: &[u64],

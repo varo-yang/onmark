@@ -1,32 +1,34 @@
 # Onmark
 
-Onmark is a screenplay-first video compiler and rendering engine for people and agents.
+Onmark is a screenplay-first video compiler and rendering engine for people and
+agents.
 
 ```text
 screenplay → deterministic Timeline IR → browser frames + audio plan → MP4
 ```
 
-Delivery gates one through three are complete. Gate one renders and independently
-verifies one real screenplay through the compiler, browser protocol, Chromium,
-and FFmpeg. Gate two partitions one media-bearing two-shot film into two local
-Render Units and proves that their assembled decoded video and audio match the
-whole-film baseline. Gate three sends those same portable units to two
-concurrent arm64 Lambda workers, verifies their immutable S3 frame artifacts
-against a remote whole-film capture by canonical raw-RGBA pixels, and assembles
-the partitions through the shared H.264/AAC path.
+Delivery gates one through three are complete. Gate one renders and
+independently verifies one real screenplay through the compiler, browser
+protocol, Chromium, and FFmpeg. Gate two partitions one media-bearing two-shot
+film into two local Render Units and proves that their assembled decoded video
+and audio match the whole-film baseline. Gate three sends those same portable
+units to two concurrent arm64 Lambda workers, verifies their immutable S3 frame
+artifacts against a remote whole-film capture by canonical raw-RGBA pixels, and
+assembles the partitions through the shared H.264/AAC path.
 
 The completed foundation includes the pure compiler and versioned wire types in
 `onmark-core`; bounded ffprobe normalization in `onmark-media`; deterministic
 video and overlay presentation in `@onmark/runtime`; semantic DOM bindings in
 `@onmark/authoring`; immutable presentation artifacts in `@onmark/bundler`; the
 typed Chromium-to-FFmpeg executor in `onmark-render`; and the `onmark-cli`
-composition root. A production deployment workflow and infrastructure
-definition remain deliberately absent; there is still no queue, lease system,
-scheduler, or coordinator.
+composition root. A production deployment workflow and infrastructure definition
+remain deliberately absent; there is still no queue, lease system, scheduler, or
+coordinator.
 
 ## Render
 
-The native command discovers `presentation.ts` beside the screenplay and writes a no-clobber `renders/<name>.mp4` by default:
+The native command discovers `presentation.ts` beside the screenplay and writes
+a no-clobber `renders/<name>.mp4` by default:
 
 ```bash
 onmark render film.onmark
@@ -34,7 +36,13 @@ onmark render film.onmark --presentation browser.ts --output review.mp4
 onmark render film.onmark --fps 30000/1001 --width 1920 --height 1080
 ```
 
-Rendering requires `onmark-bundle` and its Node.js runtime, Chrome for Testing's `chrome-headless-shell`, `ffmpeg`, and `ffprobe` to be installed. The renderer requires headless shell's CDP BeginFrameControl and does not fall back to ordinary Chrome. CDP does not currently support BeginFrameControl on macOS, so native macOS rendering requires a Linux worker or container. Use the execution override flags shown by `onmark render --help` when tools are not on the default paths.
+Rendering requires `onmark-bundle` and its Node.js runtime, Chrome for Testing's
+`chrome-headless-shell`, `ffmpeg`, and `ffprobe` to be installed. The renderer
+requires headless shell's CDP BeginFrameControl and does not fall back to
+ordinary Chrome. CDP does not currently support BeginFrameControl on macOS, so
+native macOS rendering requires a Linux worker or container. Use the execution
+override flags shown by `onmark render --help` when tools are not on the default
+paths.
 
 ## Worker capture
 
@@ -45,7 +53,14 @@ visual work:
 onmark worker capture --input worker-input --output opening.onmark-frames --browser /path/to/chrome-headless-shell
 ```
 
-`worker-input` contains a versioned `request.json`, including the locked capture-environment identity, the `bundle/` payload files named by that request's manifest, and any frozen `assets/sha256/` bytes. The worker accepts no screenplay and does not compile source. It publishes one checksum-verified, no-clobber frame artifact; retry reuse requires both the planned unit and the declared capture environment to match. This command proves the future worker interchange locally—it is not a cloud coordinator or a replacement for `onmark render`.
+`worker-input` contains a versioned `request.json`, including the locked
+capture-environment identity, the `bundle/` payload files named by that
+request's manifest, and any frozen `assets/sha256/` bytes. The worker accepts no
+screenplay and does not compile source. It publishes one checksum-verified,
+no-clobber frame artifact; retry reuse requires both the planned unit and the
+declared capture environment to match. This command proves the future worker
+interchange locally—it is not a cloud coordinator or a replacement for
+`onmark render`.
 
 ## Lambda capture adapter
 
@@ -53,10 +68,9 @@ onmark worker capture --input worker-input --output opening.onmark-frames --brow
 and conditional artifact publication. Its V1 invocation and result schemas are
 checked in under `schemas/`; its required environment, IAM scope, limits, and
 intentional non-goals are documented in
-[its deployment README](deploy/aws-lambda/README.md). The real arm64 Lambda
-ZIP experiment and deterministic package command are recorded there.
-Infrastructure provisioning and a published release workflow remain outside
-this gate.
+[its deployment README](deploy/aws-lambda/README.md). The real arm64 Lambda ZIP
+experiment and deterministic package command are recorded there. Infrastructure
+provisioning and a published release workflow remain outside this gate.
 
 ## Repository map
 
@@ -68,7 +82,8 @@ this gate.
 
 ## Development
 
-Rust 1.97.0, Node.js 26.4.0, and pnpm 11.9.0 are pinned for reproducible development.
+Rust 1.97.0, Node.js 26.4.0, and pnpm 11.9.0 are pinned for reproducible
+development.
 
 ```bash
 cargo test --workspace
@@ -91,4 +106,6 @@ cargo xtask schema --check
 - [TypeScript style guide](docs/en/typescript-style-guide.md)
 - [中文文档](docs/zh-CN/)
 
-The design documents remain the project contract. Code and documentation disagreements must be resolved explicitly rather than silently choosing one side.
+The design documents remain the project contract. Code and documentation
+disagreements must be resolved explicitly rather than silently choosing one
+side.

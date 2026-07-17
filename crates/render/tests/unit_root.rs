@@ -1,3 +1,5 @@
+//! Private unit-root materialization and hostile-input boundary tests.
+
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};

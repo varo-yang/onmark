@@ -127,10 +127,7 @@ impl Binder {
             match self.recognize_or_report(&child) {
                 Some(ElementKind::Cues) => self.bind_cues_container(child, &mut cues),
                 Some(ElementKind::Scene) => scenes.push(self.bind_scene(child)),
-                Some(kind) => {
-                    self.diagnostics
-                        .push(misplaced_element(&child, kind, Some(ElementKind::Film)));
-                }
+                Some(kind) => self.reject_misplaced(&child, kind, ElementKind::Film),
                 None => {}
             }
         }
@@ -163,10 +160,7 @@ impl Binder {
 
             match self.recognize_or_report(&child) {
                 Some(ElementKind::Cue) => cues.push(self.bind_cue(child)),
-                Some(kind) => {
-                    self.diagnostics
-                        .push(misplaced_element(&child, kind, Some(ElementKind::Cues)));
-                }
+                Some(kind) => self.reject_misplaced(&child, kind, ElementKind::Cues),
                 None => {}
             }
         }
@@ -193,13 +187,7 @@ impl Binder {
 
             match self.recognize_or_report(&child) {
                 Some(ElementKind::Shot) => shots.push(self.bind_shot(child)),
-                Some(kind) => {
-                    self.diagnostics.push(misplaced_element(
-                        &child,
-                        kind,
-                        Some(ElementKind::Scene),
-                    ));
-                }
+                Some(kind) => self.reject_misplaced(&child, kind, ElementKind::Scene),
                 None => {}
             }
         }
@@ -227,10 +215,7 @@ impl Binder {
                 Some(kind @ (ElementKind::Title | ElementKind::CallToAction)) => {
                     content.push(LinkedShotContent::Overlay(self.bind_overlay(child, kind)));
                 }
-                Some(kind) => {
-                    self.diagnostics
-                        .push(misplaced_element(&child, kind, Some(ElementKind::Shot)));
-                }
+                Some(kind) => self.reject_misplaced(&child, kind, ElementKind::Shot),
                 None => {}
             }
         }
@@ -306,6 +291,11 @@ impl Binder {
             self.diagnostics.push(unknown_element(element));
         }
         kind
+    }
+
+    fn reject_misplaced(&mut self, element: &Element, kind: ElementKind, parent: ElementKind) {
+        self.diagnostics
+            .push(misplaced_element(element, kind, Some(parent)));
     }
 
     fn bind_element(
@@ -623,14 +613,7 @@ mod tests {
             elements.push(scene.element());
             for shot in scene.shots() {
                 elements.push(shot.element());
-                for content in shot.content() {
-                    let element = match content {
-                        LinkedShotContent::Video(video) => video.element(),
-                        LinkedShotContent::VoiceOver(voice_over) => voice_over.element(),
-                        LinkedShotContent::Overlay(overlay) => overlay.element(),
-                    };
-                    elements.push(element);
-                }
+                elements.extend(shot.content().iter().map(LinkedShotContent::element));
             }
         }
 

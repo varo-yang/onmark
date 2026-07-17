@@ -180,10 +180,10 @@ fn frame_delay_expression(start: FrameIndex, frame_rate: WireFrameRate) -> Strin
 
 async fn wait_for_mix(
     child: &mut Child,
-    deadline: Duration,
+    completion_timeout: Duration,
     output: &Path,
 ) -> Result<std::process::ExitStatus, EncodeError> {
-    match timeout(deadline, child.wait()).await {
+    match timeout(completion_timeout, child.wait()).await {
         Ok(Ok(status)) => Ok(status),
         Ok(Err(source)) => {
             stop_child(child).await;
@@ -199,7 +199,7 @@ async fn wait_for_mix(
             Err(EncodeError::new(
                 EncodeErrorKind::Timeout,
                 output,
-                "FFmpeg audio mixing made no progress before its inactivity timeout",
+                "FFmpeg audio mixing missed its completion deadline",
             ))
         }
     }

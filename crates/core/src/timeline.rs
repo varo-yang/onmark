@@ -90,6 +90,11 @@ impl TimelineIr {
         &self.scenes
     }
 
+    /// Returns shots in screenplay order without exposing the scene walk.
+    pub fn shots(&self) -> impl Iterator<Item = &TimelineShot> {
+        self.scenes.iter().flat_map(|scene| &scene.shots)
+    }
+
     /// Returns primary videos in screenplay order without exposing tree walks.
     pub fn videos(&self) -> impl Iterator<Item = &TimelineVideo> {
         self.contents().filter_map(TimelineContent::as_video)
@@ -106,10 +111,7 @@ impl TimelineIr {
     }
 
     fn contents(&self) -> impl Iterator<Item = &TimelineContent> {
-        self.scenes
-            .iter()
-            .flat_map(|scene| &scene.shots)
-            .flat_map(|shot| &shot.content)
+        self.shots().flat_map(|shot| &shot.content)
     }
 }
 

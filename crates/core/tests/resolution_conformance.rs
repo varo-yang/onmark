@@ -1,3 +1,5 @@
+//! Stable typed-attribute and reference-resolution facts.
+
 mod conformance;
 
 use std::fmt::Write as _;

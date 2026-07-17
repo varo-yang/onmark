@@ -4,6 +4,7 @@
 //! across independently captured or compressed artifacts.
 
 use std::io::Cursor;
+use std::sync::Arc;
 
 use png::{BitDepth, ColorType, Decoder, Limits, Transformations};
 use sha2::{Digest as _, Sha256};
@@ -13,25 +14,29 @@ use crate::RenderProfile;
 
 const RGBA_CHANNELS: usize = 4;
 
-/// One PNG screenshot retained for the encoder boundary.
+/// One immutable PNG screenshot retained across capture and encoder boundaries.
+///
+/// Chromium may omit pixels when the compositor reports no damage. Clones
+/// therefore share the encoded payload so reusing the preceding frame never
+/// copies a viewport-sized allocation.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct EncodedPng(Vec<u8>);
+pub struct EncodedPng(Arc<Vec<u8>>);
 
 impl EncodedPng {
     pub(crate) fn new(bytes: Vec<u8>) -> Self {
-        Self(bytes)
+        Self(Arc::new(bytes))
     }
 
     /// Returns the encoded PNG bytes.
     #[must_use]
     pub fn as_bytes(&self) -> &[u8] {
-        &self.0
+        self.0.as_slice()
     }
 
     /// Transfers ownership of the encoded PNG bytes.
     #[must_use]
     pub fn into_bytes(self) -> Vec<u8> {
-        self.0
+        Arc::try_unwrap(self.0).unwrap_or_else(|bytes| bytes.as_ref().clone())
     }
 }
 
@@ -138,9 +143,12 @@ fn raw_rgba_hash(png: &EncodedPng, profile: RenderProfile) -> Result<RawRgbaHash
 }
 
 fn expected_rgba_bytes(profile: RenderProfile) -> Result<usize, BrowserError> {
-    let pixels = usize::try_from(profile.width())
-        .ok()
-        .and_then(|width| width.checked_mul(usize::try_from(profile.height()).ok()?))
+    let width = usize::try_from(profile.width())
+        .map_err(|_| BrowserError::capture_pixels("render profile exceeds pixel accounting"))?;
+    let height = usize::try_from(profile.height())
+        .map_err(|_| BrowserError::capture_pixels("render profile exceeds pixel accounting"))?;
+    let pixels = width
+        .checked_mul(height)
         .ok_or_else(|| BrowserError::capture_pixels("render profile exceeds pixel accounting"))?;
     pixels
         .checked_mul(RGBA_CHANNELS)
@@ -175,6 +183,7 @@ fn hash_rgb_as_rgba(pixels: &[u8], expected: usize) -> Result<[u8; 32], BrowserE
 #[cfg(test)]
 mod tests {
     use std::error::Error as _;
+    use std::sync::Arc;
 
     use super::{CapturedFrame, EncodedPng};
     use crate::RenderProfile;
@@ -257,6 +266,14 @@ mod tests {
 
         assert_eq!(error.kind(), super::super::BrowserErrorKind::Capture);
         assert!(error.source().is_some());
+    }
+
+    #[test]
+    fn cloning_a_png_does_not_copy_its_frame_payload() {
+        let original = EncodedPng::new(vec![1, 2, 3, 4]);
+        let cloned = original.clone();
+
+        assert!(Arc::ptr_eq(&original.0, &cloned.0));
     }
 
     fn encoded_png(color: png::ColorType, width: u32, height: u32, pixels: &[u8]) -> EncodedPng {

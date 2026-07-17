@@ -106,6 +106,37 @@ test("cleans media observers after synchronous browser failures", async () => {
   assert.equal(loadingElement.listenerCount, 0);
   assert.equal(loadingElement.hasSource, false);
 
+  const eventThenErrorElement = new FakeVideoElement();
+  eventThenErrorElement.loadErrorAfterReadiness = new Error("load rejected");
+  const eventThenErrorVideo = new DecodedVideo(eventThenErrorElement, 100);
+
+  await assert.rejects(
+    eventThenErrorVideo.load("./assets/sha256/source"),
+    RuntimeAdapterError,
+  );
+  assert.equal(eventThenErrorElement.listenerCount, 0);
+  assert.equal(eventThenErrorElement.hasSource, false);
+
+  const cleanupErrorElement = new FakeVideoElement();
+  cleanupErrorElement.loadError = new Error("load rejected");
+  cleanupErrorElement.releaseError = new Error("release rejected");
+  const cleanupErrorVideo = new DecodedVideo(cleanupErrorElement, 100);
+
+  await assert.rejects(
+    cleanupErrorVideo.load("./assets/sha256/source"),
+    (error: unknown) =>
+      error instanceof RuntimeAdapterError &&
+      error.message === "video load failed and cleanup was incomplete",
+  );
+  assert.equal(cleanupErrorElement.listenerCount, 0);
+  cleanupErrorElement.releaseError = undefined;
+  await assert.rejects(
+    cleanupErrorVideo.load("./assets/sha256/source"),
+    (error: unknown) =>
+      error instanceof RuntimeAdapterError &&
+      error.message === "video load requires the empty state",
+  );
+
   const seekingElement = new FakeVideoElement();
   const seekingVideo = await loadedVideo(seekingElement);
   seekingElement.frameCallbackError = new Error("callback unavailable");
@@ -113,6 +144,14 @@ test("cleans media observers after synchronous browser failures", async () => {
   await assert.rejects(seekingVideo.stage(selection), RuntimeAdapterError);
   assert.equal(seekingElement.listenerCount, 0);
   assert.equal(seekingElement.pendingFrameCallbacks, 0);
+
+  const rejectedSeekElement = new FakeVideoElement();
+  const rejectedSeekVideo = await loadedVideo(rejectedSeekElement);
+  rejectedSeekElement.seekError = new Error("seek rejected");
+
+  await assert.rejects(rejectedSeekVideo.stage(selection), RuntimeAdapterError);
+  assert.equal(rejectedSeekElement.listenerCount, 0);
+  assert.equal(rejectedSeekElement.pendingFrameCallbacks, 0);
 });
 
 test("releases media bytes and makes disposal terminal", async () => {

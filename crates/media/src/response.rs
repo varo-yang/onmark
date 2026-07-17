@@ -58,7 +58,7 @@ pub(crate) fn parse_metadata(path: &Path, bytes: &[u8]) -> Result<AssetMetadata,
     }
 
     let video = video_stream
-        .map(|stream| parse_video(path, stream))
+        .map(|stream| parse_video(path, stream, format_duration))
         .transpose()?;
     let audio_duration = match audio_stream
         .as_ref()
@@ -96,16 +96,31 @@ impl ProbeStream {
     }
 }
 
-fn parse_video(path: &Path, stream: ProbeStream) -> Result<VideoMetadata, ProbeError> {
-    let duration = required_field(path, "duration", stream.duration.as_deref())?;
-    let duration = Duration::parse(&format!("{duration}s"))
-        .map_err(|source| ProbeError::invalid_video_duration(path, duration, source))?;
+fn parse_video(
+    path: &Path,
+    stream: ProbeStream,
+    format_duration: Option<Duration>,
+) -> Result<VideoMetadata, ProbeError> {
+    let duration = video_duration(path, stream.duration.as_deref(), format_duration)?;
     let timing = parse_timing(path, &stream)?;
     let codec = required_field(path, "codec name", stream.codec_name)?;
     let pixel_format = required_field(path, "pixel format", stream.pix_fmt)?;
 
     VideoMetadata::new(duration, codec, pixel_format, timing)
         .map_err(|source| ProbeError::invalid_video(path, source.to_string()))
+}
+
+fn video_duration(
+    path: &Path,
+    stream_duration: Option<&str>,
+    format_duration: Option<Duration>,
+) -> Result<Duration, ProbeError> {
+    match stream_duration {
+        None | Some("N/A") => format_duration
+            .ok_or_else(|| ProbeError::invalid_video(path, "video stream has no duration")),
+        Some(duration) => Duration::parse(&format!("{duration}s"))
+            .map_err(|source| ProbeError::invalid_video_duration(path, duration, source)),
+    }
 }
 
 fn parse_format_duration(path: &Path, duration: &str) -> Result<Duration, ProbeError> {

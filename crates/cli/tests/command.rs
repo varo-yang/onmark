@@ -1,3 +1,5 @@
+//! Fast command-boundary checks that must run without browser or media tools.
+
 use std::path::Path;
 use std::process::Command;
 

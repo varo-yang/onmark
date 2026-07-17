@@ -92,6 +92,7 @@ struct Solver<'a> {
     events: BTreeMap<CueId, TimelineEvent>,
     diagnostics: Diagnostics,
     cursor: PlacementCursor,
+    rejected_shot_timing: bool,
 }
 
 impl<'a> Solver<'a> {
@@ -102,16 +103,24 @@ impl<'a> Solver<'a> {
             events: BTreeMap::new(),
             diagnostics: Diagnostics::new(),
             cursor: PlacementCursor::FilmStart,
+            rejected_shot_timing: false,
         }
     }
 
     fn solve(mut self, film: ResolvedFilm) -> Result<SolveReport, SolveError> {
         let (element, cues, scenes, _ids) = film.into_parts();
+        let film_span = element.span();
         self.solve_events(cues);
 
         let mut timeline_scenes = Vec::with_capacity(scenes.len());
         for scene in scenes {
             timeline_scenes.push(self.solve_scene(scene)?);
+        }
+
+        // A rejected shot already owns a more actionable timing diagnostic.
+        // Unrelated cue failures must not conceal an independently empty film.
+        if self.cursor.position() == FrameIndex::ZERO && !self.rejected_shot_timing {
+            self.diagnostics.push(empty_film(film_span));
         }
 
         let interval = interval(FrameIndex::ZERO, self.cursor.position());
@@ -233,10 +242,12 @@ impl<'a> Solver<'a> {
         let (start, start_reason) = self.cursor.next_shot()?;
 
         let Some(duration) = duration else {
+            self.rejected_shot_timing = true;
             self.cursor = PlacementCursor::Lost(start);
             return None;
         };
         let Some(end) = advance(start, duration.frames, source, &mut self.diagnostics) else {
+            self.rejected_shot_timing = true;
             self.cursor = PlacementCursor::Lost(start);
             return None;
         };
@@ -448,6 +459,7 @@ impl<'a> Solver<'a> {
                 TimingReason::LongestContent(primary.source),
             ));
         }
+
         if let ExplicitDuration::Available {
             frames,
             authored_at,
@@ -458,8 +470,9 @@ impl<'a> Solver<'a> {
                 TimingReason::ExplicitDuration(authored_at),
             ));
         }
-        if matches!(explicit, ExplicitDuration::Absent)
-            && matches!(primary, PrimaryDuration::Absent)
+
+        if matches!(primary, PrimaryDuration::Absent)
+            && matches!(explicit, ExplicitDuration::Absent)
         {
             self.diagnostics.push(missing_duration_source(source));
         }
@@ -824,4 +837,15 @@ fn frame_overflow(primary: SourceSpan) -> Diagnostic {
     .expect("the static frame-domain message is non-blank")
     .with_help("use a shorter duration or a lower compile frame rate")
     .expect("the static frame-domain help is non-blank")
+}
+
+fn empty_film(primary: SourceSpan) -> Diagnostic {
+    Diagnostic::new(
+        DiagnosticCode::EmptyFilm,
+        primary,
+        "film has no positive-duration shot",
+    )
+    .expect("the static empty-film message is non-blank")
+    .with_help("add a shot with timed media or an explicit positive duration")
+    .expect("the static empty-film help is non-blank")
 }

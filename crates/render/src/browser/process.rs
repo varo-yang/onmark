@@ -260,18 +260,19 @@ impl BrowserDiagnostics {
 
     fn retain(&self, bytes: &[u8]) {
         let mut retained = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        if bytes.len() >= STDERR_LIMIT {
+            retained.clear();
+            retained.extend(&bytes[bytes.len() - STDERR_LIMIT..]);
+            return;
+        }
+
         let overflow = retained
             .len()
             .saturating_add(bytes.len())
             .saturating_sub(STDERR_LIMIT);
         let retained_len = retained.len();
         retained.drain(..overflow.min(retained_len));
-        if bytes.len() >= STDERR_LIMIT {
-            retained.clear();
-            retained.extend(&bytes[bytes.len() - STDERR_LIMIT..]);
-        } else {
-            retained.extend(bytes);
-        }
+        retained.extend(bytes);
     }
 
     fn devtools_endpoint(&self) -> Option<String> {

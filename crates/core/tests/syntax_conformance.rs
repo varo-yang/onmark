@@ -1,3 +1,5 @@
+//! Stable recovered syntax trees and markup diagnostics.
+
 mod conformance;
 
 use std::fmt::Write as _;

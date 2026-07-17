@@ -1,5 +1,5 @@
 // Behavioral contract for the sequential browser runtime session.
-// A recording adapter replaces only the not-yet-implemented browser boundary.
+// A recording adapter isolates protocol behavior from browser effects.
 
 import assert from "node:assert/strict";
 import test from "node:test";
