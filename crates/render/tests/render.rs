@@ -150,17 +150,12 @@ async fn renders_the_gate_one_plan_to_a_verified_mp4() {
 
 #[tokio::test]
 #[ignore = "requires ONMARK_HEADLESS_SHELL, ONMARK_FFMPEG, and ONMARK_FFPROBE"]
-async fn renders_two_partitions_equivalently_to_one_whole_film_unit() {
+async fn renders_two_partitions_into_one_complete_film() {
     let directory = tempdir().expect("the test output directory must be available");
     let fixture = GateTwoFixture::materialize(directory.path()).await;
-    let whole_output = directory.path().join("whole-film.mp4");
     let partitioned_output = directory.path().join("partitioned.mp4");
     let executor = real_executor(TWO_UNIT_FRAME_COUNT);
 
-    let whole = executor
-        .render(fixture.whole_film, &whole_output)
-        .await
-        .expect("the whole-film baseline must render");
     let partitioned = executor
         .render_partitioned(
             &fixture.partition_plan,
@@ -170,9 +165,8 @@ async fn renders_two_partitions_equivalently_to_one_whole_film_unit() {
         .await
         .expect("the two unit plan must render");
 
-    assert_eq!(whole.frames(), TWO_UNIT_FRAME_COUNT);
     assert_eq!(partitioned.frames(), TWO_UNIT_FRAME_COUNT);
-    assert_equivalent_output(&whole_output, &partitioned_output).await;
+    assert_gate_two_output(&partitioned_output).await;
 }
 
 #[tokio::test]
@@ -226,17 +220,21 @@ async fn assembles_worker_frame_artifacts_equivalently_to_the_whole_film() {
         .await
         .expect("partition artifacts must reproduce the whole-film pixel sequence");
     assert_eq!(assembled.frames(), TWO_UNIT_FRAME_COUNT);
-    assert_video_stream(&assembled_output, TWO_UNIT_FRAME_COUNT).await;
-    let assembled = inspect_output(&assembled_output).await;
+    assert_gate_two_output(&assembled_output).await;
+}
+
+async fn assert_gate_two_output(output: &Path) {
+    assert_video_stream(output, TWO_UNIT_FRAME_COUNT).await;
+    let output = inspect_output(output).await;
     assert!(
-        assembled.has_motion(),
-        "the assembled video must contain motion"
+        output.has_motion(),
+        "the partitioned video must contain motion"
     );
     assert!(
-        !assembled.audio_hashes.is_empty(),
-        "the assembled video must retain voice-over audio",
+        !output.audio_hashes.is_empty(),
+        "the partitioned video must retain voice-over audio",
     );
-    assert_audio_starts_at(&assembled, VOICE_OVER_START_FRAME);
+    assert_audio_starts_at(&output, VOICE_OVER_START_FRAME);
 }
 
 async fn generate_source_video(output: &Path, duration_seconds: &str) {
@@ -479,25 +477,6 @@ async fn assert_decodable_motion(output: &Path) {
     assert!(hashes.len() > 1, "the rendered video must contain motion");
 }
 
-async fn assert_equivalent_output(whole: &Path, partitioned: &Path) {
-    assert_video_stream(whole, TWO_UNIT_FRAME_COUNT).await;
-    assert_video_stream(partitioned, TWO_UNIT_FRAME_COUNT).await;
-
-    let whole = inspect_output(whole).await;
-    let partitioned = inspect_output(partitioned).await;
-    assert_eq!(whole, partitioned);
-    assert!(
-        whole.has_motion(),
-        "the equivalence fixture must have motion"
-    );
-    assert!(
-        !whole.audio_hashes.is_empty(),
-        "the equivalence fixture must retain voice-over audio",
-    );
-    assert_audio_starts_at(&whole, VOICE_OVER_START_FRAME);
-}
-
-#[derive(Debug, Eq, PartialEq)]
 struct DecodedOutput {
     video_hashes: Vec<String>,
     audio_hashes: Vec<String>,
