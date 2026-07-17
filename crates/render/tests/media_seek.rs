@@ -1,8 +1,8 @@
 //! Disposable media-strategy experiment across real Chromium and `FFmpeg`.
 //!
-//! The test stays opt-in until CI owns pinned browser and codec binaries. It
-//! measures selection and repeatability without turning an experimental media
-//! path into a product API.
+//! The test stays opt-in because it compares experimental media paths rather
+//! than enforcing the renderer's release contract. It measures selection and
+//! repeatability without turning a research path into a product API.
 
 #[path = "media_seek/decoder.rs"]
 mod decoder;
