@@ -14,8 +14,9 @@ use onmark_core::render_graph::{PartitionPlan, RenderGraph};
 use onmark_media::Ffprobe;
 use onmark_render::{
     BrowserErrorKind, BrowserLaunchPolicy, BrowserLimits, BrowserSession, CaptureEnvironmentId,
-    EncodeLimits, EncodedPng, ExecutableUnit, Ffmpeg, FrameArtifactLimits, MaterializedAsset,
-    RawRgbaHash, RenderErrorKind, RenderExecutor, RenderProfile, RenderUnit, UnitRootLimits,
+    EncodeLimits, EncodedPng, ExecutableUnit, Ffmpeg, FrameArtifact, FrameArtifactLimits,
+    MaterializedAsset, RawRgbaHash, RenderErrorKind, RenderExecutor, RenderProfile, RenderUnit,
+    UnitRootLimits,
 };
 use serde::Deserialize;
 use sha2::{Digest as _, Sha256};
@@ -179,14 +180,19 @@ async fn renders_two_partitions_equivalently_to_one_whole_film_unit() {
 async fn assembles_worker_frame_artifacts_equivalently_to_the_whole_film() {
     let directory = tempdir().expect("the test output directory must be available");
     let fixture = GateTwoFixture::materialize(directory.path()).await;
-    let whole_output = directory.path().join("whole-film.mp4");
+    let whole_artifact_path = directory.path().join("whole-film.onmark-frames");
     let assembled_output = directory.path().join("assembled-from-artifacts.mp4");
     let executor = real_executor(TWO_UNIT_FRAME_COUNT);
 
     let whole = executor
-        .render(fixture.whole_film, &whole_output)
+        .capture_frame_artifact(
+            &fixture.whole_film,
+            capture_environment(),
+            &whole_artifact_path,
+            frame_artifact_limits(),
+        )
         .await
-        .expect("the whole-film baseline must render");
+        .expect("the whole-film baseline must capture canonical pixels");
 
     let mut artifacts = Vec::new();
     for (index, unit) in fixture.partitioned_units.iter().enumerate() {
@@ -216,9 +222,21 @@ async fn assembles_worker_frame_artifacts_equivalently_to_the_whole_film() {
         .await
         .expect("the assembler must reuse worker artifacts through one encoder");
 
-    assert_eq!(whole.frames(), TWO_UNIT_FRAME_COUNT);
+    FrameArtifact::verify_raw_rgba_equivalence(std::slice::from_ref(&whole), &artifacts)
+        .await
+        .expect("partition artifacts must reproduce the whole-film pixel sequence");
     assert_eq!(assembled.frames(), TWO_UNIT_FRAME_COUNT);
-    assert_equivalent_output(&whole_output, &assembled_output).await;
+    assert_video_stream(&assembled_output, TWO_UNIT_FRAME_COUNT).await;
+    let assembled = inspect_output(&assembled_output).await;
+    assert!(
+        assembled.has_motion(),
+        "the assembled video must contain motion"
+    );
+    assert!(
+        !assembled.audio_hashes.is_empty(),
+        "the assembled video must retain voice-over audio",
+    );
+    assert_audio_starts_at(&assembled, VOICE_OVER_START_FRAME);
 }
 
 async fn generate_source_video(output: &Path, duration_seconds: &str) {
