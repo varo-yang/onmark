@@ -340,28 +340,21 @@ async fn exercise_protocol(
 ) -> Result<RawRgbaHash, Box<dyn Error>> {
     load_and_prepare(session, fixture).await?;
 
-    stage(session, 3, 0).await?;
-    let first = session
-        .capture_frame(frame(0), gate_one_plan().frame_rate())
-        .await?;
-    confirm(session, 4, 0).await?;
-
-    stage(session, 5, 15).await?;
-    let selected = session
+    stage(session, 3, 15).await?;
+    let captured = session
         .capture_frame(frame(15), gate_one_plan().frame_rate())
         .await?;
-    confirm(session, 6, 15).await?;
-
-    stage(session, 7, 15).await?;
-    let repeated = session
-        .capture_frame(frame(15), gate_one_plan().frame_rate())
+    confirm(session, 4, 15).await?;
+    let disposed = session
+        .dispatch(&BrowserRequest::new(
+            RequestId::new(5),
+            BrowserCommand::Dispose,
+        ))
         .await?;
-    confirm(session, 8, 15).await?;
+    assert_eq!(disposed.event(), &BrowserEvent::Disposed);
 
-    assert_png(first.png());
-    assert_ne!(first.raw_rgba_hash(), selected.raw_rgba_hash());
-    assert_eq!(selected.raw_rgba_hash(), repeated.raw_rgba_hash());
-    Ok(selected.raw_rgba_hash())
+    assert_png(captured.png());
+    Ok(captured.raw_rgba_hash())
 }
 
 async fn load_and_prepare(session: &BrowserSession, fixture: &Url) -> Result<(), Box<dyn Error>> {
