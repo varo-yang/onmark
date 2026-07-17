@@ -52,15 +52,18 @@ const STANDARD_ARGUMENTS: &[&str] = &[
     "--use-mock-keychain",
 ];
 const DISABLED_SANDBOX_ARGUMENTS: &[&str] = &["--no-sandbox", "--disable-setuid-sandbox"];
+const CAPTURE_BACKEND_ARGUMENTS: &[&str] = &[
+    "--disable-accelerated-video-decode",
+    "--ignore-gpu-blocklist",
+    "--use-gl=angle",
+    "--use-angle=swiftshader",
+    "--enable-unsafe-swiftshader",
+];
 const SINGLE_PROCESS_ARGUMENTS: &[&str] = &[
     "--disable-dev-shm-usage",
     "--single-process",
     "--no-zygote",
     "--in-process-gpu",
-    "--ignore-gpu-blocklist",
-    "--use-gl=angle",
-    "--use-angle=swiftshader",
-    "--enable-unsafe-swiftshader",
 ];
 
 /// Environment-owned Chromium launch policy.
@@ -323,6 +326,7 @@ fn browser_arguments(
     render_profile: RenderProfile,
 ) -> Vec<OsString> {
     let mut arguments: Vec<OsString> = STANDARD_ARGUMENTS.iter().map(OsString::from).collect();
+    arguments.extend(CAPTURE_BACKEND_ARGUMENTS.iter().map(OsString::from));
     if launch_policy.disables_chromium_sandbox() {
         arguments.extend(DISABLED_SANDBOX_ARGUMENTS.iter().map(OsString::from));
     }
@@ -449,11 +453,17 @@ mod tests {
     }
 
     #[test]
-    fn local_arguments_retain_chromiums_sandbox_and_process_model() {
+    fn local_arguments_lock_software_rendering_without_changing_process_model() {
         let profile = RenderProfile::new(320, 180).expect("the fixture profile is valid");
         let arguments =
             browser_arguments(BrowserLaunchPolicy::local(), Path::new("/tmp/p"), profile);
 
+        assert!(has_argument(&arguments, "--use-angle=swiftshader"));
+        assert!(has_argument(&arguments, "--enable-unsafe-swiftshader"));
+        assert!(has_argument(
+            &arguments,
+            "--disable-accelerated-video-decode"
+        ));
         assert!(!has_argument(&arguments, "--no-sandbox"));
         assert!(!has_argument(&arguments, "--single-process"));
         assert!(!has_argument(&arguments, "--in-process-gpu"));

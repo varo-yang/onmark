@@ -350,7 +350,10 @@ GitHub-hosted Ubuntu does not expose a usable Chromium sandbox to the installed
 Chrome for Testing headless-shell binary. The real-process job therefore
 supplies a runner-local launcher that adds `--no-sandbox`; this exception
 belongs only to the disposable CI worker. Product and local browser launches
-keep Chromium's sandbox enabled by default. An adapter may select
+keep Chromium's sandbox enabled by default. Every capture policy explicitly
+uses ANGLE's SwiftShader backend: host GPU and decoder availability must not
+change pixels or make whole-film and partition captures disagree. Local
+capture retains Chromium's normal multiprocess topology; an adapter may select
 `BrowserLaunchPolicy::isolated_worker()` only when an independently audited
 outer container or microVM owns equivalent process isolation. That policy also
 keeps the renderer and SwiftShader GPU in one process and disables the
