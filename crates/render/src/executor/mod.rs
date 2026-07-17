@@ -7,6 +7,7 @@
 mod error;
 mod output;
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -22,9 +23,9 @@ use crate::encoder::AudioInput;
 use crate::frame_artifact::FrameArtifactWriter;
 use crate::unit::MAX_AUDIO_TRACKS;
 use crate::{
-    BrowserLaunchPolicy, BrowserLimits, BrowserSession, CaptureEnvironmentId, EncodedVideo,
-    ExecutableUnit, Ffmpeg, FfmpegSession, FrameArtifact, FrameArtifactErrorKind,
-    FrameArtifactLimits,
+    BrowserError, BrowserLaunchPolicy, BrowserLimits, BrowserSession, CaptureEnvironmentId,
+    EncodedPng, EncodedVideo, ExecutableUnit, Ffmpeg, FfmpegSession, FrameArtifact,
+    FrameArtifactErrorKind, FrameArtifactLimits,
 };
 
 pub use error::{RenderError, RenderErrorKind};
@@ -705,12 +706,12 @@ async fn render_session(
         .navigate(entry_url)
         .await
         .map_err(|source| RenderError::browser(output, source))?;
-    browser
-        .prime_compositor()
-        .await
-        .map_err(|source| RenderError::browser(output, source))?;
     load_runtime(browser, plan, output).await?;
     prepare_runtime(browser, plan, output).await?;
+    browser
+        .initialize_capture_surface(plan.frame_rate())
+        .await
+        .map_err(|source| RenderError::browser(output, source))?;
     metrics.runtime_setup = setup_started.elapsed();
 
     render_frames(browser, frames, plan, requests, metrics, output).await?;
@@ -772,6 +773,8 @@ async fn render_frames(
 ) -> Result<(), RenderError> {
     let start = plan.output().start().get();
     let end = plan.output().end().get();
+    let frame_rate = plan.frame_rate();
+    let placement_boundaries = plan.placement_boundaries().collect();
 
     for (index, request_ids) in (start..end).zip(requests.frame_requests()) {
         let frame = WireFrame::new(index)
@@ -779,15 +782,15 @@ async fn render_frames(
         let seek_started = Instant::now();
         stage_frame(browser, request_ids.seek, frame, output).await?;
         metrics.seek += seek_started.elapsed();
+
+        let readback_started = Instant::now();
+        let png = capture_staged_png(browser, frame_rate, &placement_boundaries, frame)
+            .await
+            .map_err(|source| RenderError::browser(output, source))?;
+        metrics.readback += readback_started.elapsed();
+
         frames
-            .capture_confirm_and_write(
-                browser,
-                request_ids.confirm,
-                frame,
-                plan.frame_rate(),
-                metrics,
-                output,
-            )
+            .confirm_and_write(browser, request_ids.confirm, frame, png, metrics, output)
             .await?;
     }
     Ok(())
@@ -827,22 +830,15 @@ async fn stream_artifact(
 }
 
 impl FrameSink<'_> {
-    async fn capture_confirm_and_write(
+    async fn confirm_and_write(
         &mut self,
         browser: &BrowserSession,
         confirm_request: RequestId,
         frame: WireFrame,
-        frame_rate: WireFrameRate,
+        png: EncodedPng,
         metrics: &mut FrameCaptureMetrics,
         output: &Path,
     ) -> Result<(), RenderError> {
-        let readback_started = Instant::now();
-        let png = browser
-            .capture_png(frame, frame_rate)
-            .await
-            .map_err(|source| RenderError::browser(output, source))?;
-        metrics.readback += readback_started.elapsed();
-
         let confirm_started = Instant::now();
         confirm_frame(browser, confirm_request, frame, output).await?;
         metrics.confirm += confirm_started.elapsed();
@@ -871,6 +867,21 @@ impl FrameSink<'_> {
         }
         metrics.frames += 1;
         Ok(())
+    }
+}
+
+async fn capture_staged_png(
+    browser: &BrowserSession,
+    frame_rate: WireFrameRate,
+    placement_boundaries: &BTreeSet<WireFrame>,
+    frame: WireFrame,
+) -> Result<EncodedPng, BrowserError> {
+    if placement_boundaries.contains(&frame) {
+        browser
+            .capture_png_after_placement_boundary(frame, frame_rate)
+            .await
+    } else {
+        browser.capture_png(frame, frame_rate).await
     }
 }
 

@@ -1886,6 +1886,7 @@ dependencies = [
  "aws-sdk-s3",
  "lambda_runtime",
  "onmark-core",
+ "onmark-media",
  "onmark-render",
  "schemars",
  "serde",

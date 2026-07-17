@@ -62,11 +62,11 @@
         },
         {
           "additionalProperties": false,
-          "description": "Confirm that the compositor presented the staged media frame.",
+          "description": "Confirm staged media reached the compositor before accepting capture.",
           "properties": {
             "frame": {
               "$ref": "#/$defs/WireFrame",
-              "description": "Frame whose captured presentation is being confirmed."
+              "description": "Frame whose staged media must be compositor-confirmed."
             },
             "type": {
               "const": "confirm",

@@ -35,8 +35,9 @@ use super::process::{BrowserDiagnostics, BrowserLaunchPolicy, ChromiumProcess};
 use crate::RenderProfile;
 
 const READINESS_POLL_INTERVAL: Duration = Duration::from_millis(10);
+const SURFACE_INITIALIZATION_TIME_MILLIS: f64 = 1.0;
 const COMPOSITOR_BASE_TIME_MILLIS: f64 = 1_000.0;
-const FIRST_CAPTURE_RETRY_OFFSET_MILLIS: f64 = 0.001;
+const MAX_COMPOSITOR_OFFSET_MILLIS: f64 = 0.001;
 
 /// One owned headless-shell process and its single render page.
 #[derive(Debug)]
@@ -173,18 +174,20 @@ impl BrowserSession {
             .map_err(|source| BrowserError::json(BrowserErrorKind::Protocol, source))
     }
 
-    /// Initializes the target surface before any authored browser state is loaded.
+    /// Initializes the target surface before the first captured frame.
     ///
-    /// Headless shell requests screenshot readback before it issues the
-    /// associated external `BeginFrame`. A newly navigated target therefore
-    /// needs one non-capturing frame before its surface can be copied.
+    /// The fixed pre-baseline timestamp lets Chromium allocate and paint the
+    /// page surface without consuming an authored frame.
     ///
     /// # Errors
     ///
     /// Returns [`BrowserError`] when the compositor frame cannot complete.
-    pub(crate) async fn prime_compositor(&self) -> Result<(), BrowserError> {
+    pub async fn initialize_capture_surface(
+        &self,
+        frame_rate: WireFrameRate,
+    ) -> Result<(), BrowserError> {
         self.page
-            .execute(compositor_prime_parameters())
+            .execute(surface_initialization_parameters(frame_rate))
             .await
             .map(|_| ())
             .map_err(|source| self.cdp_error(BrowserErrorKind::Capture, source))
@@ -228,21 +231,51 @@ impl BrowserSession {
         frame: WireFrame,
         frame_rate: WireFrameRate,
     ) -> Result<EncodedPng, BrowserError> {
+        self.capture_png_with_fallback(frame, frame_rate, MissingScreenshot::ReusePrevious)
+            .await
+    }
+
+    pub(crate) async fn capture_png_after_placement_boundary(
+        &self,
+        frame: WireFrame,
+        frame_rate: WireFrameRate,
+    ) -> Result<EncodedPng, BrowserError> {
+        // Runtime staging may introduce a layer that was absent from the
+        // compositor. Commit it just before the authored timestamp so capture
+        // observes the new placement without advancing screenplay time.
+        self.page
+            .execute(staged_placement_parameters(frame, frame_rate))
+            .await
+            .map_err(|source| self.cdp_error(BrowserErrorKind::Capture, source))?;
+        self.capture_png_with_fallback(frame, frame_rate, MissingScreenshot::RetryOnce)
+            .await
+    }
+
+    async fn capture_png_with_fallback(
+        &self,
+        frame: WireFrame,
+        frame_rate: WireFrameRate,
+        missing: MissingScreenshot,
+    ) -> Result<EncodedPng, BrowserError> {
         let response = self
             .capture(begin_frame_parameters(frame, frame_rate))
             .await?;
         if let Some(screenshot) = response.screenshot_data {
             return self.decode_and_remember(screenshot);
         }
-        if let Some(previous) = self.previous_capture()? {
+        let previous = match missing {
+            MissingScreenshot::ReusePrevious => self.previous_capture()?,
+            MissingScreenshot::RetryOnce => None,
+        };
+        if let Some(previous) = previous {
             return Ok(previous);
         }
 
         let retry = self
-            .capture(first_capture_retry_parameters(frame, frame_rate))
+            .capture(screenshot_retry_parameters(frame, frame_rate))
             .await?;
         let screenshot = retry.screenshot_data.ok_or_else(|| {
-            BrowserError::capture_pixels("headless shell did not return the first screenshot")
+            BrowserError::capture_pixels("headless shell did not return the required screenshot")
         })?;
         self.decode_and_remember(screenshot)
     }
@@ -361,6 +394,12 @@ impl BrowserSession {
     }
 }
 
+#[derive(Clone, Copy)]
+enum MissingScreenshot {
+    ReusePrevious,
+    RetryOnce,
+}
+
 async fn drive_handler(mut handler: Handler) -> Result<(), CdpError> {
     while let Some(event) = handler.next().await {
         event?;
@@ -424,8 +463,8 @@ fn begin_frame_parameters(frame: WireFrame, frame_rate: WireFrameRate) -> BeginF
     capture_parameters(frame, frame_rate, 0.0)
 }
 
-fn first_capture_retry_parameters(frame: WireFrame, frame_rate: WireFrameRate) -> BeginFrameParams {
-    capture_parameters(frame, frame_rate, FIRST_CAPTURE_RETRY_OFFSET_MILLIS)
+fn screenshot_retry_parameters(frame: WireFrame, frame_rate: WireFrameRate) -> BeginFrameParams {
+    capture_parameters(frame, frame_rate, compositor_offset_millis(frame_rate))
 }
 
 fn capture_parameters(
@@ -433,24 +472,34 @@ fn capture_parameters(
     frame_rate: WireFrameRate,
     time_offset_millis: f64,
 ) -> BeginFrameParams {
+    let frame_time_ticks = compositor_time_millis(frame, frame_rate) + time_offset_millis;
     let screenshot = ScreenshotParams::builder()
         .format(ScreenshotParamsFormat::Png)
         .optimize_for_speed(true)
         .build();
 
     BeginFrameParams::builder()
-        .frame_time_ticks(
-            COMPOSITOR_BASE_TIME_MILLIS + frame_time_millis(frame, frame_rate) + time_offset_millis,
-        )
+        .frame_time_ticks(frame_time_ticks)
         .interval(frame_interval_millis(frame_rate))
         .screenshot(screenshot)
         .build()
 }
 
-fn compositor_prime_parameters() -> BeginFrameParams {
+fn surface_initialization_parameters(frame_rate: WireFrameRate) -> BeginFrameParams {
     BeginFrameParams::builder()
-        .frame_time_ticks(0.0)
-        .no_display_updates(true)
+        .frame_time_ticks(SURFACE_INITIALIZATION_TIME_MILLIS)
+        .interval(frame_interval_millis(frame_rate))
+        .no_display_updates(false)
+        .build()
+}
+
+fn staged_placement_parameters(frame: WireFrame, frame_rate: WireFrameRate) -> BeginFrameParams {
+    let frame_time_ticks =
+        compositor_time_millis(frame, frame_rate) - compositor_offset_millis(frame_rate);
+    BeginFrameParams::builder()
+        .frame_time_ticks(frame_time_ticks)
+        .interval(frame_interval_millis(frame_rate))
+        .no_display_updates(false)
         .build()
 }
 
@@ -462,6 +511,14 @@ fn frame_time_millis(frame: WireFrame, frame_rate: WireFrameRate) -> f64 {
 
 fn frame_interval_millis(frame_rate: WireFrameRate) -> f64 {
     f64::from(frame_rate.denominator()) * 1_000.0 / f64::from(frame_rate.numerator())
+}
+
+fn compositor_time_millis(frame: WireFrame, frame_rate: WireFrameRate) -> f64 {
+    COMPOSITOR_BASE_TIME_MILLIS + frame_time_millis(frame, frame_rate)
+}
+
+fn compositor_offset_millis(frame_rate: WireFrameRate) -> f64 {
+    (frame_interval_millis(frame_rate) / 4.0).min(MAX_COMPOSITOR_OFFSET_MILLIS)
 }
 
 fn maximum_base64_length(decoded_bytes: usize) -> usize {
@@ -536,8 +593,9 @@ mod tests {
     use onmark_core::protocol::{WireFrame, WireFrameRate};
 
     use super::{
-        begin_frame_parameters, compositor_prime_parameters, first_capture_retry_parameters,
-        handler_exit_error, maximum_base64_length, render_target,
+        begin_frame_parameters, handler_exit_error, maximum_base64_length, render_target,
+        screenshot_retry_parameters, staged_placement_parameters,
+        surface_initialization_parameters,
     };
     use crate::BrowserErrorKind;
 
@@ -566,28 +624,72 @@ mod tests {
     }
 
     #[test]
-    fn compositor_prime_advances_only_the_hidden_initialization_clock() {
-        let parameters = compositor_prime_parameters();
+    fn surface_initialization_is_visual_and_precedes_the_capture_baseline() {
+        let rate = WireFrameRate::from(
+            FrameRate::new(30, 1).expect("the fixture rate is canonical and nonzero"),
+        );
+        let parameters = surface_initialization_parameters(rate);
 
-        assert_eq!(parameters.frame_time_ticks, Some(0.0));
-        assert_eq!(parameters.no_display_updates, Some(true));
-        assert_eq!(parameters.interval, None);
+        assert_eq!(parameters.frame_time_ticks, Some(1.0));
+        assert_eq!(parameters.no_display_updates, Some(false));
+        assert_eq!(parameters.interval, Some(1_000.0 / 30.0));
         assert_eq!(parameters.screenshot, None);
     }
 
     #[test]
-    fn first_capture_retry_advances_the_compositor_by_a_bounded_epsilon() {
+    fn staged_placement_commit_precedes_its_exact_capture_timestamp() {
+        let frame = WireFrame::new(15).expect("the fixture frame is browser-safe");
+        let rate = WireFrameRate::from(
+            FrameRate::new(30, 1).expect("the fixture rate is canonical and nonzero"),
+        );
+        let commit = staged_placement_parameters(frame, rate);
+        let capture = begin_frame_parameters(frame, rate);
+
+        assert_eq!(commit.frame_time_ticks, Some(1_499.999));
+        assert_eq!(commit.no_display_updates, Some(false));
+        assert_eq!(commit.screenshot, None);
+        assert_eq!(capture.frame_time_ticks, Some(1_500.0));
+    }
+
+    #[test]
+    fn screenshot_retry_advances_the_compositor_by_a_bounded_epsilon() {
         let frame = WireFrame::new(15).expect("the fixture frame is browser-safe");
         let rate = WireFrameRate::from(
             FrameRate::new(30, 1).expect("the fixture rate is canonical and nonzero"),
         );
         let initial = begin_frame_parameters(frame, rate);
-        let retry = first_capture_retry_parameters(frame, rate);
+        let retry = screenshot_retry_parameters(frame, rate);
 
         assert_eq!(initial.frame_time_ticks, Some(1_500.0));
         assert_eq!(retry.frame_time_ticks, Some(1_500.001));
         assert_eq!(retry.interval, initial.interval);
         assert_eq!(retry.screenshot, initial.screenshot);
+    }
+
+    #[test]
+    fn compositor_offsets_remain_between_adjacent_high_rate_frames() {
+        let previous = WireFrame::new(14).expect("the fixture frame is browser-safe");
+        let frame = WireFrame::new(15).expect("the fixture frame is browser-safe");
+        let next = WireFrame::new(16).expect("the fixture frame is browser-safe");
+        let rate = WireFrameRate::from(
+            FrameRate::new(u32::MAX, 1).expect("the fixture rate is canonical and nonzero"),
+        );
+        let previous_capture = compositor_time(&begin_frame_parameters(previous, rate));
+        let commit = compositor_time(&staged_placement_parameters(frame, rate));
+        let capture = compositor_time(&begin_frame_parameters(frame, rate));
+        let retry = compositor_time(&screenshot_retry_parameters(frame, rate));
+        let next_capture = compositor_time(&begin_frame_parameters(next, rate));
+
+        assert!(previous_capture < commit);
+        assert!(commit < capture);
+        assert!(capture < retry);
+        assert!(retry < next_capture);
+    }
+
+    fn compositor_time(parameters: &super::BeginFrameParams) -> f64 {
+        parameters
+            .frame_time_ticks
+            .expect("frame parameters carry compositor time")
     }
 
     #[test]

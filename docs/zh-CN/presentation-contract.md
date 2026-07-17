@@ -1,6 +1,6 @@
 # Onmark Presentation Contract
 
-> 状态：Gate 一浏览器 authoring 合约；Gate 二原样复用。
+> 状态：Gate 一浏览器 authoring 合约；Gate 二与 Gate 三复用。
 
 Gate 一使用两个作者文件：
 
@@ -61,8 +61,8 @@ interface RuntimeAdapter {
 author-owned plan。`prepare` 恰好在 `plan.evaluation.start` 运行一次，且只能在该帧所需资源
 稳定后 resolve。`seek` 只会在 prepare 成功后运行；它应用请求的 DOM 状态、预先注册
 decoded-media observer，并在媒体完成 seek 后 resolve，但不能等待 compositor presentation。
-`confirm` 在 native capture 后运行，只有 browser media 证明该 capture 呈现了 staged source
-frame 才能 resolve。即使 cleanup 报错，`dispose` 也是终止相位。
+`confirm` 在 native capture 后运行，只有 browser media 证明 staged source frame 已在 native
+接受 captured payload 前进入 compositor 才能 resolve。即使 cleanup 报错，`dispose` 也是终止相位。
 
 `seek` 不接受自由时间 `t`，而是接收 `RuntimeFrame`：
 
@@ -78,15 +78,17 @@ interface RuntimeFrame {
 
 ## Runtime 握手
 
-presentation 必须用 `installRuntimeHost` 安装一个 runtime host。navigation 与 host discovery
-完成后，native renderer 会先在 compositor time zero 发送一次关闭 display updates 的 hidden
-BeginFrame，以初始化 Chromium 可复制的 surface；它发生在 `Load` 之前，因此不会 evaluate
-authored plan state。真实 capture 使用另一个固定的正 compositor baseline。随后才发送版本化
-browser protocol：
+presentation 必须用 `installRuntimeHost` 安装一个 runtime host。`Load` 会创建 plan 中的每个
+video 与 overlay node。inactive node 保留稳定的 binding identity，但在其 solved interval 使其
+可见之前不进入 layout 与 compositor；这样 Render Unit 之外的 placement 不会改变当前像素。
+`Prepare` 之后，native renderer 会在固定的 pre-baseline timestamp 发送并等待一次 visual、
+non-capture BeginFrame，以初始化 page surface。真实 capture 使用更晚的固定正 compositor baseline：
 
 ```text
 Load(plan) -> Prepare(evaluationStart)
+  -> native surface initialization without capture
   -> (Seek(frame) -> FrameStaged(frame)
+      -> [native placement-boundary commit]
       -> native BeginFrame capture
       -> Confirm(frame) -> FrameReady(frame))*
   -> Dispose
@@ -95,11 +97,16 @@ Load(plan) -> Prepare(evaluationStart)
 这个拆分来自 Chromium decoded-media 的真实约束：`requestVideoFrameCallback` 必须在它要
 观察的 compositor frame 之前注册；但在 CDP BeginFrameControl target 上，如果先等 callback
 再发送 `BeginFrame`，两边会形成死锁。因此 `FrameStaged(frame)` 只表示 browser state 已能
-进入 compositor。native 随后为每个 output frame 只发送一次同时 commit 与 capture PNG 的
-`HeadlessExperimental.beginFrame`。no-damage response 复用上一张 PNG；只有空的首帧 capture
-会获得一次有界的亚毫秒重试。`Confirm(frame)` 让预先注册的 callback 完成；
-`FrameReady(frame)` 表示刚才 capture 的帧已经通过精确 decoded-media confirmation。确认失败
-时，captured payload 在进入 encoder 或 frame artifact 前就会被丢弃。
+进入 compositor。native 随后为每个 output frame 发送一次正常的、同时 commit frame state 与
+capture PNG 的 `HeadlessExperimental.beginFrame`。在 video 或 overlay boundary，native 会先在
+精确 authored capture timestamp 之前的固定亚毫秒时刻发送一次无 screenshot commit，让新可见
+layer 获得一次 compositor turn，同时不保留无关 inactive layer，也不推进剧本时间。no-damage
+response 通常复用上一张 PNG；boundary 绝不复用上一 placement，该情况与空的首帧 capture 都会
+获得一次有界的亚毫秒重试。`Confirm(frame)` 等待预先注册的 callback；在 placement boundary，
+observer 可能在 pre-capture commit 上完成，而 runtime media state 在该 commit 与精确 capture 之间
+不能改变。因此 `FrameReady(frame)` 表示 captured payload 的 staged media 已在 native 接受它之前
+通过 decoded-media confirmation。确认失败时，captured payload 在进入 encoder 或 frame artifact
+前就会被丢弃。
 
 ## 所有权
 

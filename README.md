@@ -6,7 +6,23 @@ Onmark is a screenplay-first video compiler and rendering engine for people and 
 screenplay → deterministic Timeline IR → browser frames + audio plan → MP4
 ```
 
-Delivery gates one and two are complete. Gate one renders and independently verifies one real screenplay through the final-direction compiler, browser protocol, Chromium, and FFmpeg. Gate two partitions one media-bearing two-shot film into two independently materialized local Render Units, executes both through the same renderer, and proves their assembled decoded video and audio match the whole-film baseline. Gate three now has local worker-artifact equivalence plus a real arm64 Lambda/S3 conformance run that materializes the same portable worker request, captures a 30-frame title-only fixture through `chrome-headless-shell`, publishes one verified artifact, and independently recaptures it before immutable reuse. The measured ZIP deployment started three independent cold environments in 2.28–3.07 seconds end to end, with browser preparation charged to the first bounded invocation and reused thereafter. A production deployment artifact and infrastructure definition remain deliberately absent; there is still no queue, lease system, scheduler, or coordinator. The completed foundation includes the pure compiler and versioned wire types in `onmark-core`; bounded ffprobe normalization in `onmark-media`; deterministic video and overlay presentation in `@onmark/runtime`; reusable semantic DOM bindings in `@onmark/authoring`; immutable presentation artifacts in `@onmark/bundler`; the typed Chromium-to-FFmpeg executor in `onmark-render`; and the whole-film `onmark-cli` composition root. The checked-in production presentation renders video, title, and call-to-action facts without re-solving Rust-owned time; the native executor mixes solved voice-over after browser capture and muxes it into the final MP4.
+Delivery gates one through three are complete. Gate one renders and independently
+verifies one real screenplay through the compiler, browser protocol, Chromium,
+and FFmpeg. Gate two partitions one media-bearing two-shot film into two local
+Render Units and proves that their assembled decoded video and audio match the
+whole-film baseline. Gate three sends those same portable units to two
+concurrent arm64 Lambda workers, verifies their immutable S3 frame artifacts
+against a remote whole-film capture by canonical raw-RGBA pixels, and assembles
+the partitions through the shared H.264/AAC path.
+
+The completed foundation includes the pure compiler and versioned wire types in
+`onmark-core`; bounded ffprobe normalization in `onmark-media`; deterministic
+video and overlay presentation in `@onmark/runtime`; semantic DOM bindings in
+`@onmark/authoring`; immutable presentation artifacts in `@onmark/bundler`; the
+typed Chromium-to-FFmpeg executor in `onmark-render`; and the `onmark-cli`
+composition root. A production deployment workflow and infrastructure
+definition remain deliberately absent; there is still no queue, lease system,
+scheduler, or coordinator.
 
 ## Render
 
@@ -22,7 +38,8 @@ Rendering requires `onmark-bundle` and its Node.js runtime, Chrome for Testing's
 
 ## Worker capture
 
-Gate three exposes a narrow local worker entry point for already-composed visual work:
+Gate three introduced a narrow local worker entry point for already-composed
+visual work:
 
 ```bash
 onmark worker capture --input worker-input --output opening.onmark-frames --browser /path/to/chrome-headless-shell

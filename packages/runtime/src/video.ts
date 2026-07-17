@@ -96,7 +96,7 @@ export class DecodedVideo {
     }
   }
 
-  /** Confirms that the compositor presented the previously staged frame. */
+  /** Confirms staged media reached the compositor before capture is accepted. */
   async confirm(selection: VideoFrameSelection): Promise<void> {
     this.#requireState("loaded", "confirm");
     requireSelection(selection);

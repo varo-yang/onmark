@@ -488,6 +488,9 @@ async fn load_and_prepare(
         prepared.event(),
         &BrowserEvent::Prepared { evaluation_start },
     );
+    session
+        .initialize_capture_surface(plan.frame_rate())
+        .await?;
     Ok(())
 }
 

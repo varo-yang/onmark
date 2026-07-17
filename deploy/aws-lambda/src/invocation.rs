@@ -191,6 +191,39 @@ pub struct ArtifactLocation {
     frames: u64,
 }
 
+impl<'de> Deserialize<'de> for ArtifactLocation {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = ArtifactLocationWire::deserialize(deserializer)?;
+        if wire.bucket.trim().is_empty() {
+            return Err(D::Error::custom("artifact bucket cannot be blank"));
+        }
+        if wire.key.trim().is_empty() {
+            return Err(D::Error::custom("artifact key cannot be blank"));
+        }
+        if wire.frames == 0 {
+            return Err(D::Error::custom("artifact frame count must be positive"));
+        }
+        Ok(Self {
+            bucket: wire.bucket,
+            key: wire.key,
+            artifact_id: wire.artifact_id,
+            frames: wire.frames,
+        })
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct ArtifactLocationWire {
+    bucket: Box<str>,
+    key: Box<str>,
+    artifact_id: FrameArtifactId,
+    frames: u64,
+}
+
 impl ArtifactLocation {
     #[cfg(feature = "runtime")]
     pub(crate) fn new(
@@ -234,7 +267,7 @@ impl ArtifactLocation {
 
 /// Whether this invocation committed a new object or reused a verified one.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Publication {
     /// This invocation conditionally committed a new immutable artifact.
@@ -245,7 +278,7 @@ pub enum Publication {
 
 /// Structured result of one frame-capture invocation.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct CaptureResult {
     version: CaptureInvocationVersion,
@@ -320,7 +353,10 @@ fn is_canonical_prefix(prefix: &str) -> bool {
 mod tests {
     use onmark_render::FrameArtifactId;
 
-    use super::{CaptureInvocation, CaptureInvocationVersion, ObjectPrefix, artifact_key};
+    use super::{
+        ArtifactLocation, CaptureInvocation, CaptureInvocationVersion, CaptureResult, ObjectPrefix,
+        Publication, artifact_key,
+    };
 
     #[test]
     fn keeps_input_and_artifact_object_namespaces_disjoint() {
@@ -355,6 +391,53 @@ mod tests {
             encoded,
             r#"{"version":1,"input":{"bucket":"onmark-inputs","prefix":"captures/film-a"}}"#
         );
+    }
+
+    #[test]
+    fn decodes_one_versioned_capture_result_for_remote_assembly() {
+        let artifact_id = FrameArtifactId::parse(
+            "sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+        )
+        .expect("the fixture artifact identity is canonical");
+        let result = CaptureResult::new(
+            ArtifactLocation::new(
+                "onmark-artifacts",
+                "captures/unit.onmark-frames",
+                artifact_id,
+                30,
+            ),
+            Publication::Published,
+        );
+        let encoded = serde_json::to_vec(&result).expect("the capture result serializes");
+
+        let decoded: CaptureResult =
+            serde_json::from_slice(&encoded).expect("the capture result decodes");
+
+        assert_eq!(decoded, result);
+    }
+
+    #[test]
+    fn rejects_invalid_remote_artifact_locations() {
+        let canonical = r#"{
+            "version":1,
+            "artifact":{
+                "bucket":"onmark-artifacts",
+                "key":"captures/unit.onmark-frames",
+                "artifactId":"sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+                "frames":30
+            },
+            "publication":"published"
+        }"#;
+
+        for invalid in [
+            canonical.replace("onmark-artifacts", ""),
+            canonical.replace("onmark-artifacts", "   "),
+            canonical.replace("captures/unit.onmark-frames", ""),
+            canonical.replace("captures/unit.onmark-frames", "   "),
+            canonical.replace("\"frames\":30", "\"frames\":0"),
+        ] {
+            assert!(serde_json::from_str::<CaptureResult>(&invalid).is_err());
+        }
     }
 
     #[test]

@@ -277,7 +277,7 @@ FrameReady(frame_index)
 Dispose
 ```
 
-native rendering 统一使用单独发行的 `chrome-headless-shell`，每个 render target 都启用 CDP BeginFrameControl。navigation 后、`Load` 暴露 authored plan state 前，executor 会先在 compositor time zero 发送一次关闭 display updates 的 hidden initialization BeginFrame；Chromium 会先请求 screenshot readback、再执行关联的 external frame，因此这个只推进时钟的 warm-up 能建立可复制 surface，又不会 evaluate authored state。真实 capture 从一个固定的正 compositor baseline 开始；精确绝对帧与有理帧率只贡献相对该 baseline 的确定性偏移。`Seek(frame)` 随后应用 browser state、预先注册 decoded-media observer，并在媒体 seek 完成后返回 `FrameStaged(frame)`，但不等待 compositor presentation。executor 为每个 output frame 只发送一次 `HeadlessExperimental.beginFrame`，在同一显式帧边界内提交 compositor 并捕获无损 PNG。compositor 没有 visual damage 时，headless shell 可能省略 `screenshotData`，此时 native 复用上一张有效 PNG；若第一帧尚无缓存，则只允许一次有界的亚毫秒 compositor offset 重试，仍为空就失败而不循环。capture 后的 `Confirm(frame)` 让预先注册的 observer 证明该 compositor frame 呈现了选中的 source frame；runtime 此时才返回 `FrameReady(frame)`，native 也只有此时才能写入 captured payload。该顺序避免在 BeginFrame-controlled compositor 前等待 `requestVideoFrameCallback` 形成死锁。initialization clock 与 capture baseline 都永远不成为调度或协议真值。每个 output frame 仍只有一个正常 capture command，它取代 animation-frame polling 与独立 `Page.captureScreenshot` round trip。direct rendering 把 PNG 留作 encoder payload；worker capture 额外把它 decode 成配置 profile 的精确 8-bit RGBA viewport，并对 canonical pixel bytes 做 hash。worker artifact 会把这个 raw-pixel hash 和每条有序 PNG record 一起记录，因此可比较独立 capture，而不把 PNG compression bytes 当作 visual truth。runtime 不发布另一份自行定义的 state hash。runtime 内部的 `RuntimeFrame` 保留精确整数帧身份，只在调用浏览器 API 时从 Rust 给出的有理帧率推导浮点秒数。超时要指出未稳定资源，不能只报 `page timeout`。
+native rendering 统一使用单独发行的 `chrome-headless-shell`，每个 render target 都启用 CDP BeginFrameControl。`Load` 会为 plan 中的每个 video 与 overlay 创建 binding。inactive node 保留稳定的 binding identity，但在其 solved interval 使其可见之前不进入 layout 与 compositor；一个 Render Unit 未包含的 placement 因而不能扰动它的像素。`Prepare` 之后，executor 会在固定的 pre-baseline timestamp 发送并等待一次不带 screenshot 的 visual `HeadlessExperimental.beginFrame`，用于初始化 page surface。这不是关闭 display updates 的 warm-up tick：`noDisplayUpdates` 为 false，且命令会在 capture 前完成。真实 capture 从更晚的固定正 compositor baseline 开始；精确绝对帧与有理帧率只贡献相对该 baseline 的确定性偏移。`Seek(frame)` 随后应用 browser state、预先注册 decoded-media observer，并在媒体 seek 完成后返回 `FrameStaged(frame)`，但不等待 compositor presentation。在 plan 已知的 video 或 overlay boundary，executor 会先在精确 authored capture timestamp 之前的固定亚毫秒时刻发送一次无 screenshot visual BeginFrame，让新可见 layer 获得一次 compositor turn，同时不推进剧本时间。随后正常的 `HeadlessExperimental.beginFrame` 会在精确时刻提交 frame state 并捕获无损 PNG。compositor 没有 visual damage 时，headless shell 可能省略 `screenshotData`。native 通常复用上一张有效 PNG，但在 placement boundary 绝不复用；缺失的 boundary 或首帧 screenshot 会获得一次有界的正亚毫秒 offset 重试，重试仍为空就失败而不循环。capture 后的 `Confirm(frame)` 会在 native 接受 captured payload 前等待预先注册的 media observer；在 placement boundary，observer 可能在 pre-capture commit 上完成，而 runtime media state 在该 commit 与精确 capture 之间不能改变。确认完成后 runtime 才返回 `FrameReady(frame)`，native 也只有此时才能写入 payload。该顺序同时避免三种边界错误：在 BeginFrame-controlled compositor 前等待 `requestVideoFrameCallback` 会死锁；让一个 layer 到 capture command 才首次进入 compositor 会产生 stale/blank frame；保留无关的未来 layer 则会使 whole-film 与 partition capture 不同。surface initialization、placement commit 与 capture baseline timestamp 都永远不成为调度或协议真值。每个 output frame 都有一次正常 capture command；placement boundary 只增加一次 non-capture commit，只有缺失的首帧或 boundary screenshot 可以增加一次有界重试。它取代 animation-frame polling 与独立 `Page.captureScreenshot` round trip。direct rendering 把 PNG 留作 encoder payload；worker capture 额外把它 decode 成配置 profile 的精确 8-bit RGBA viewport，并对 canonical pixel bytes 做 hash。worker artifact 会把这个 raw-pixel hash 和每条有序 PNG record 一起记录，因此可比较独立 capture，而不把 PNG compression bytes 当作 visual truth。runtime 不发布另一份自行定义的 state hash。runtime 内部的 `RuntimeFrame` 保留精确整数帧身份，只在调用浏览器 API 时从 Rust 给出的有理帧率推导浮点秒数。超时要指出未稳定资源，不能只报 `page timeout`。
 
 组件声明时间能力：
 
@@ -406,7 +406,7 @@ Gate 一的 native 命令刻意保持很窄：`onmark render <screenplay>`。若
 
 `onmark-media` 必须独立而不能藏在 render feature 中，因为“无 Chromium 的素材探测服务”是明确消费者，同时满足依赖预算和独立消费两条判据。Feature 只表达同一包内正交能力，不能用来遮住真实存在的架构边界。
 
-Render Graph 和 planner 在第二关先作为 `onmark-core` 模块加入。只有出现独立消费者、编译成本或清晰发布边界后才考虑拆 crate。worker 状态机先属于 `onmark-render`；coordinator 是第三关的部署系统，不提前进入核心 workspace。
+Render Graph 和 planner 在第二关先作为 `onmark-core` 模块加入。只有出现独立消费者、编译成本或清晰发布边界后才考虑拆 crate。worker 状态机先属于 `onmark-render`；coordinator 属于后续 control-plane gate，不提前进入核心 workspace。
 
 ### Core 内部依赖也必须执法
 
@@ -606,9 +606,11 @@ Screenplay → Timeline IR → Browser Runtime → Chromium → FFmpeg → MP4
 
 已完成的切片把同一影片编译成两个独立的本地 Render Unit，经既有 executor 捕获并总装。退出一致性测试会让同一条含媒体的两镜头影片分别作为 whole-film unit 与两个独立 materialize 的 unit 渲染，再比较解码后的视频与音频 hash，以及首个音频 packet 的落点。它实现 Render Graph 与 `evaluation/output` 区间。转场预卷、持久 unit cache 和依赖闭包失效要等真实依赖或缓存消费者出现后再实现；不提前搭它们的空架子。
 
-### 第三关：离开本机仍然成立
+### 第三关（已完成）：离开本机仍然成立
 
-先证明独立 worker process 会发布并 assemble 有界、可校验的 frame artifact，仍复用既有 encoder 与 audio path；再在这个已证明的 interchange 外加入 object storage、lease、retry、幂等发布与 capability scheduling。验收 IR/plan byte-identical、锁定环境下 raw frame hash 一致，以及解码后音视频等价；不预设 MP4 容器字节必然一致。
+已完成的数据面切片把本地使用的同一份 deterministic、versioned worker request 投影到有界的 Lambda/S3 adapter。退出一致性测试先把一条含媒体的双镜头影片作为远端 whole-film reference 捕获，再让两个 graph partition 并发进入独立 worker，比较 canonical raw-RGBA frame sequence，并通过共享 H.264/AAC path 总装已校验的 artifact。S3 transport retry 与 conditional compare-and-verify publication 是有界 adapter 语义，不是 distributed retry policy。canonical Timeline IR 与 Execution Plan wire encoding 要等真实 external consumer 出现后再实现；不预设 MP4 容器字节必然一致。
+
+后续 control-plane gate 才可以加入 durable job state、queue、lease、global retry、capability scheduling、final-output publication 与 infrastructure automation。该 gate 必须先写清自己的验收契约，才能创建代码骨架。
 
 每一关都使用最终方向的 IR 和协议，但只实现本关真实消费的部分。上一关没有稳定通过，不创建下一关的空架子。
 

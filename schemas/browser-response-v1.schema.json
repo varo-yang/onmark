@@ -57,7 +57,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "The captured compositor frame passed runtime media confirmation.",
+          "description": "The captured payload's staged media passed compositor confirmation.",
           "properties": {
             "frame": {
               "$ref": "#/$defs/WireFrame",

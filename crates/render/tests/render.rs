@@ -343,6 +343,7 @@ async fn exercise_protocol(
 async fn load_and_prepare(session: &BrowserSession, fixture: &Url) -> Result<(), Box<dyn Error>> {
     session.navigate(fixture.as_str()).await?;
     let plan = gate_one_plan();
+    let frame_rate = plan.frame_rate();
     let loaded = session
         .dispatch(&BrowserRequest::new(
             RequestId::new(1),
@@ -362,6 +363,7 @@ async fn load_and_prepare(session: &BrowserSession, fixture: &Url) -> Result<(),
         prepared.event(),
         &BrowserEvent::Prepared { evaluation_start },
     );
+    session.initialize_capture_surface(frame_rate).await?;
     Ok(())
 }
 

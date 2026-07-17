@@ -159,6 +159,22 @@ impl BrowserPlan {
         &self.overlays
     }
 
+    /// Returns the start and end frame of every browser placement.
+    ///
+    /// Placement visibility is constant between these boundaries. Native
+    /// execution may index them once without reconstructing timeline facts or
+    /// scanning every placement for every output frame.
+    pub fn placement_boundaries(&self) -> impl Iterator<Item = WireFrame> + '_ {
+        self.videos
+            .iter()
+            .flat_map(|video| interval_boundaries(video.interval()))
+            .chain(
+                self.overlays
+                    .iter()
+                    .flat_map(|overlay| interval_boundaries(overlay.interval())),
+            )
+    }
+
     fn checked(wire: BrowserPlanWire) -> Result<Self, InvalidBrowserPlan> {
         if wire.timeline_version != TimelineVersion::V1.get() {
             return Err(InvalidBrowserPlan::UnsupportedTimelineVersion);
@@ -209,6 +225,10 @@ impl BrowserPlan {
             overlays: wire.overlays,
         })
     }
+}
+
+fn interval_boundaries(interval: WireInterval) -> [WireFrame; 2] {
+    [interval.start(), interval.end()]
 }
 
 impl<'de> Deserialize<'de> for BrowserPlan {
@@ -716,7 +736,7 @@ impl Error for InvalidWireFrame {}
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, BTreeSet};
 
     use crate::model::{
         ByteOffset, ElementKind, FrameIndex, FrameInterval, FrameRate, FrozenAssetId, SourceId,
@@ -772,6 +792,31 @@ mod tests {
             "\"output\":{\"start\":0,\"end\":0}",
         );
         assert!(serde_json::from_str::<BrowserPlan>(&empty_output).is_err());
+    }
+
+    #[test]
+    fn enumerates_video_and_overlay_placement_boundaries() {
+        let asset_id = FrozenAssetId::from_sha256([1; 32]);
+        let timeline = timeline_with_content_in(
+            vec![
+                video(asset_id, interval(0, 2)),
+                overlay(ElementKind::Title, interval(2, 4), "Opening"),
+            ],
+            interval(0, 4),
+        );
+        let source_rates = BTreeMap::from([(
+            asset_id,
+            FrameRate::new(30, 1).expect("the fixture frame rate is valid"),
+        )]);
+        let plan = BrowserPlan::from_timeline(&timeline, &source_rates)
+            .expect("the fixture forms a valid browser plan");
+
+        let boundaries = plan.placement_boundaries().collect::<BTreeSet<_>>();
+
+        assert_eq!(
+            boundaries,
+            BTreeSet::from([wire_frame(0), wire_frame(2), wire_frame(4)]),
+        );
     }
 
     #[test]
@@ -874,17 +919,19 @@ mod tests {
     }
 
     fn timeline_with_overlays(count: usize, text: &str) -> TimelineIr {
+        let overlay = overlay(ElementKind::Title, interval(0, 1), text);
+        timeline_with_content(vec![overlay; count])
+    }
+
+    fn overlay(kind: ElementKind, interval: FrameInterval, text: &str) -> TimelineContent {
         let span = SourceSpan::new(SourceId::new(0), ByteOffset::ZERO, ByteOffset::ZERO)
             .expect("equal source bounds form a valid span");
-        let interval = FrameInterval::new(FrameIndex::ZERO, FrameIndex::new(1))
-            .expect("the fixture interval is ordered");
         let timing = TimelineTiming::new(interval, TimingReason::ShotStart, TimingReason::ShotEnd);
-        let overlay = TimelineContent::Overlay(TimelineOverlay::new(
-            TimelineElement::new(ElementKind::Title, None, span),
+        TimelineContent::Overlay(TimelineOverlay::new(
+            TimelineElement::new(kind, None, span),
             timing,
             vec![TimelineText::new(text.to_owned().into_boxed_str(), span)],
-        ));
-        timeline_with_content(vec![overlay; count])
+        ))
     }
 
     fn timeline_with_content(content: Vec<TimelineContent>) -> TimelineIr {
@@ -934,5 +981,9 @@ mod tests {
     fn interval(start: u64, end: u64) -> FrameInterval {
         FrameInterval::new(FrameIndex::new(start), FrameIndex::new(end))
             .expect("the fixture interval is ordered")
+    }
+
+    fn wire_frame(value: u64) -> WireFrame {
+        WireFrame::new(value).expect("the fixture frame is browser-safe")
     }
 }

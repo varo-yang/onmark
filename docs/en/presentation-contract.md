@@ -1,6 +1,6 @@
 # Onmark Presentation Contract
 
-> Status: Gate-one browser authoring contract, reused unchanged by Gate two.
+> Status: Gate-one browser authoring contract, reused by Gates two and three.
 
 Onmark uses two authored files at Gate one:
 
@@ -67,9 +67,9 @@ when resources needed at that frame are stable. `seek` runs only after a
 successful prepare. It applies the requested DOM state, registers decoded-media
 observers, and resolves once browser media has finished seeking; it must not
 wait for compositor presentation. `confirm` runs after native capture and
-resolves only when browser media reports that the staged source frame was the
-one presented by that capture. `dispose` is terminal even if cleanup reports a
-failure.
+resolves only when browser media reports that the staged source frame reached
+the compositor before native accepts the captured payload. `dispose` is
+terminal even if cleanup reports a failure.
 
 `seek` does not accept a free time `t`. It receives a `RuntimeFrame`:
 
@@ -88,15 +88,19 @@ an alternate scheduling clock or a source of timing decisions.
 ## Runtime handshake
 
 The presentation must install exactly one runtime host with `installRuntimeHost`.
-After navigation and host discovery, native rendering first issues one hidden
-BeginFrame at compositor time zero with display updates disabled. This
-initializes Chromium's copyable surface before `Load`, so no authored plan
-state is evaluated. Real captures use a separate fixed positive compositor
-baseline. Native then sends the versioned browser protocol:
+`Load` creates every video and overlay node in the plan. Inactive nodes retain
+their stable binding identity but remain outside layout and compositing until
+their solved interval makes them visible. This prevents placements outside a
+Render Unit from changing its pixels. After `Prepare`, native rendering sends
+one awaited, visual, non-capturing BeginFrame at a fixed pre-baseline timestamp
+to initialize the page surface. Real captures use a later fixed positive
+compositor baseline:
 
 ```text
 Load(plan) -> Prepare(evaluationStart)
+  -> native surface initialization without capture
   -> (Seek(frame) -> FrameStaged(frame)
+      -> [native placement-boundary commit]
       -> native BeginFrame capture
       -> Confirm(frame) -> FrameReady(frame))*
   -> Dispose
@@ -107,14 +111,21 @@ The split handshake is required by Chromium's decoded-media contract.
 it observes, but waiting for that callback before issuing `BeginFrame` would
 deadlock a target controlled by CDP BeginFrameControl. `FrameStaged(frame)`
 therefore means browser state is ready to enter the compositor. Native then
-issues exactly one capture-bearing `HeadlessExperimental.beginFrame` command
-for each output frame. It commits and captures the PNG. A no-damage response
-reuses the preceding PNG; only an empty first capture receives one bounded
-sub-millisecond retry. `Confirm(frame)` lets
-the already-registered callback run;
-`FrameReady(frame)` means the captured frame has passed exact decoded-media
-confirmation. A confirmation failure discards the captured payload before it
-can enter an encoder or frame artifact.
+issues one normal capture-bearing `HeadlessExperimental.beginFrame` command
+for each output frame. At a video or overlay boundary, native first commits the
+staged placement without a screenshot at a fixed sub-millisecond timestamp
+immediately before the exact authored capture timestamp. This gives a newly
+visible layer one compositor turn without retaining unrelated inactive layers
+or advancing screenplay time. The capture command then commits frame state and
+captures the PNG at the exact timestamp. A no-damage response normally reuses
+the preceding PNG, but a boundary never does so; a missing boundary or first
+screenshot receives one bounded sub-millisecond retry. `Confirm(frame)` waits
+for the already-registered callback. At a placement boundary that observer may
+complete on the pre-capture commit; runtime media state cannot change between
+that commit and exact capture. `FrameReady(frame)` therefore means the captured
+payload's staged media passed decoded-media confirmation before native accepts
+it. A confirmation failure discards the captured payload before it can enter an
+encoder or frame artifact.
 
 ## Ownership
 

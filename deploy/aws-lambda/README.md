@@ -212,6 +212,47 @@ generalize across resolutions, media-heavy presentations, or AWS regions. The
 reviewed packager now replaces the experiment's hand-built ZIP procedure; a
 published release workflow is still intentionally absent.
 
+## Remote partition exit conformance
+
+The ignored `remote_partition` integration test is the Gate-three exit check
+for the AWS adapter. It compiles one media-bearing two-shot film, captures the
+whole film through the deployed Lambda, then invokes both graph partitions
+concurrently. The final run's logs show those calls overlapping in a warm
+environment and a second cold environment. The harness verifies all three
+immutable frame artifacts, compares the whole-film raw-RGBA sequence with the
+two adjacent partition sequences, and assembles the remote partitions through
+the shared local encoder and audio path. The final MP4 must contain 60 H.264
+frames, AAC audio, decoded motion, and the expected audio start.
+
+Run it only against a disposable function and an unused input prefix:
+
+```sh
+ONMARK_REMOTE_FUNCTION=onmark-capture-conformance \
+ONMARK_REMOTE_INPUT_BUCKET=onmark-conformance \
+ONMARK_REMOTE_INPUT_PREFIX=runs/remote-partition-001 \
+ONMARK_REMOTE_CAPTURE_ENVIRONMENT="$CAPTURE_ENVIRONMENT" \
+cargo test --package onmark-aws-lambda \
+  --test remote_partition \
+  assembles_two_concurrent_remote_partitions_equivalently_to_one_remote_film \
+  -- --ignored --exact
+```
+
+`ONMARK_FFMPEG`, `ONMARK_FFPROBE`, and `ONMARK_AWS` may override their command
+paths. The harness disables AWS CLI retries, gives synchronous invocation a
+15-minute read deadline, and publishes every input with `If-None-Match: *`;
+reusing an input prefix is therefore an intentional failure rather than an
+implicit mutation.
+
+The final 2,048 MiB arm64 run on 2026-07-17 completed the cold 60-frame
+whole-film reference in 4.605 seconds, including 150 ms of Lambda init. The two
+30-frame partition calls then overlapped: one reused the warm environment and
+completed in 1.933 seconds, while Lambda started a second environment whose
+invocation completed in 3.877 seconds including 150 ms of init. Peak memory was
+458 MB. The complete 38.34-second harness included immutable input upload,
+three synchronous invocations, artifact download, raw-pixel comparison, local
+audio/video assembly, and output probing. These are conformance observations
+from one locked 320×180 fixture, not production throughput claims.
+
 ## Publication and limits
 
 The handler follows one linear path:

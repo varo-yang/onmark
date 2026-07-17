@@ -139,9 +139,9 @@ pub enum BrowserCommand {
         /// Frame selected by the native executor.
         frame: WireFrame,
     },
-    /// Confirm that the compositor presented the staged media frame.
+    /// Confirm staged media reached the compositor before accepting capture.
     Confirm {
-        /// Frame whose captured presentation is being confirmed.
+        /// Frame whose staged media must be compositor-confirmed.
         frame: WireFrame,
     },
     /// Release page-owned resources for this session.
@@ -220,7 +220,7 @@ pub enum BrowserEvent {
         /// Exact frame represented by staged browser state.
         frame: WireFrame,
     },
-    /// The captured compositor frame passed runtime media confirmation.
+    /// The captured payload's staged media passed compositor confirmation.
     FrameReady {
         /// Exact frame confirmed by browser media state.
         frame: WireFrame,
