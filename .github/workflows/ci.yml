@@ -132,9 +132,12 @@ jobs:
         id: chrome
         run: |
           root="$RUNNER_TEMP/onmark-browser"
-          pnpm exec browsers install chrome-headless-shell@149.0.7827.55 --path "$root" --install-deps
+          pnpm exec browsers install chrome-headless-shell@149.0.7827.55 --path "$root"
           mapfile -t binaries < <(find "$root" -type f -name chrome-headless-shell -perm /111)
           test "${#binaries[@]}" -eq 1
+          dependencies="$(dirname "${binaries[0]}")/deb.deps"
+          test -f "$dependencies"
+          sudo apt-get satisfy -y "$(tr '\n' ',' < "$dependencies")" --no-install-recommends
           printf 'shell-path=%s\n' "${binaries[0]}" >> "$GITHUB_OUTPUT"
 
       - name: Build browser products
