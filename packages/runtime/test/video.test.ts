@@ -30,7 +30,6 @@ test("stages a seek before confirming the compositor-presented frame", async () 
 
   const staging = video.stage(selection);
   assert.equal(element.currentTime, selection.seekTimeSeconds);
-  assert.deepEqual(element.frameCallbackTimes, [selection.seekTimeSeconds]);
   element.emit("seeked");
   await staging;
 

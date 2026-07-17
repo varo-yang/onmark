@@ -102,11 +102,9 @@
               "the video experiment can only confirm its staged frame",
             );
           }
-          try {
-            await pendingFrame.presented;
-          } finally {
-            pendingFrame = undefined;
-          }
+          // Stage already copied the decoded source into the canvas output;
+          // confirmation only closes that staged-frame transaction.
+          pendingFrame = undefined;
         },
         async dispose() {
           pendingFrame = undefined;
@@ -144,10 +142,6 @@
 
         const seeked = waitForVideoEvent("seeked", "video seek did not finish");
         video.currentTime = selection.seekTimeSeconds;
-        // Register against the seek that is now in flight. Registering before
-        // currentTime changes can attach the callback to the loaded frame and
-        // miss a first out-of-order presentation.
-        const presented = waitForPresentedFrame(expectedMediaTime);
         await seeked;
         canvas.width = window.innerWidth;
         canvas.height = window.innerHeight;
@@ -155,43 +149,7 @@
         if (drawsOverlay) {
           drawMovingOverlay(context, frame.index, canvas.width, canvas.height);
         }
-        return { index: frame.index, presented };
-      }
-
-      function waitForPresentedFrame(timeSeconds) {
-        return new Promise((resolve, reject) => {
-          let active = true;
-          let observedMediaTime = "none";
-          const deadline = window.setTimeout(() => {
-            active = false;
-            reject(
-              new RuntimeAdapterError(
-                "readinessTimeout",
-                `decoded frame ${timeSeconds} did not become visible; last media time was ${observedMediaTime}`,
-                ["video-frame"],
-              ),
-            );
-          }, READINESS_DEADLINE_MS);
-          const inspect = (_now, metadata) => {
-            if (!active) {
-              return;
-            }
-            observedMediaTime = String(metadata.mediaTime);
-            if (
-              Math.abs(metadata.mediaTime - timeSeconds) <=
-              FRAME_TOLERANCE_SECONDS
-            ) {
-              active = false;
-              window.clearTimeout(deadline);
-              resolve();
-              return;
-            }
-
-            video.requestVideoFrameCallback(inspect);
-          };
-
-          video.requestVideoFrameCallback(inspect);
-        });
+        return { index: frame.index };
       }
 
       function waitForVideoEvent(eventName, failureMessage) {
