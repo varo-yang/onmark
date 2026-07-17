@@ -443,7 +443,15 @@ async fn capture_video_frames(
         let started = Instant::now();
         stage(session, RequestId::new(3 + request_offset), index).await?;
         let frame = WireFrame::new(index).expect("the seek fixture is browser-safe");
-        let captured = session.capture_png(frame, plan.frame_rate()).await?;
+        // This experiment begins out of order, so its first random seek also
+        // introduces the video to the compositor.
+        let captured = if offset == 0 {
+            session
+                .capture_png_after_placement_boundary(frame, plan.frame_rate())
+                .await?
+        } else {
+            session.capture_png(frame, plan.frame_rate()).await?
+        };
         if matches!(retention, FrameRetention::Retain) {
             frames.push(captured);
         }

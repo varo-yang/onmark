@@ -235,7 +235,17 @@ impl BrowserSession {
             .await
     }
 
-    pub(crate) async fn capture_png_after_placement_boundary(
+    /// Commits a newly presented placement before capturing its first frame.
+    ///
+    /// A caller that owns the capture loop must use this operation when a
+    /// staged video or overlay was absent from the preceding compositor frame.
+    /// The production executor derives those boundaries from the browser plan.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`BrowserError`] when either the placement commit or capture
+    /// fails.
+    pub async fn capture_png_after_placement_boundary(
         &self,
         frame: WireFrame,
         frame_rate: WireFrameRate,
