@@ -113,9 +113,11 @@ response 通常复用上一张 PNG；boundary 绝不复用上一 placement，该
 等待预先注册的 callback；在 placement boundary，observer 可能在 pre-capture
 commit 上完成，而 runtime media
 state 在该 commit 与精确 capture 之间不能改变。因此 `FrameReady(frame)`
-表示 captured payload 的 staged media 已在 native 接受它之前通过 decoded-media
-confirmation。确认失败时，captured payload 在进入 encoder 或 frame
-artifact 前就会被丢弃。
+表示精确 capture 的 staged media 已在 native 接受它之前通过 decoded-media
+confirmation。placement boundary 随后会在既有正 epsilon 上执行一次有界的 reconciliation
+capture；若 confirmation 没有产生新的 compositor damage，Chromium 可以省略 pixels，native
+便复用精确 capture，否则以新 pixels 替换。确认失败时，captured payload 在进入 encoder 或
+frame artifact 前就会被丢弃。
 
 ## 所有权
 

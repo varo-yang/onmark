@@ -252,6 +252,27 @@ impl BrowserSession {
             .await
     }
 
+    /// Reconciles a placement boundary after decoded-media confirmation.
+    ///
+    /// The exact capture is retained when Chromium reports no further damage.
+    /// If confirmation allowed a pending layer to settle, the bounded epsilon
+    /// capture replaces it with the now-confirmed compositor output.
+    pub(crate) async fn recapture_png_after_confirmation(
+        &mut self,
+        frame: WireFrame,
+        frame_rate: WireFrameRate,
+    ) -> Result<EncodedPng, BrowserError> {
+        let response = self
+            .capture(screenshot_retry_parameters(frame, frame_rate))
+            .await?;
+        if let Some(screenshot) = response.screenshot_data {
+            return self.decode_and_remember(screenshot);
+        }
+        self.last_capture.clone().ok_or_else(|| {
+            BrowserError::capture_pixels("headless shell lost the confirmed boundary capture")
+        })
+    }
+
     async fn capture_png_with_fallback(
         &mut self,
         frame: WireFrame,

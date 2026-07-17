@@ -16,6 +16,10 @@ units to two concurrent arm64 Lambda workers, verifies their immutable S3 frame
 artifacts against a remote whole-film capture by canonical raw-RGBA pixels, and
 assembles the partitions through the shared H.264/AAC path.
 
+Deployment work is now frozen. Gate four returns to the authored product surface:
+general audio plus imported SRT, WebVTT, and ASS subtitles, proved first through
+the existing local whole-film and partitioned pipelines.
+
 The completed foundation includes the pure compiler and versioned wire types in
 `onmark-core`; bounded ffprobe normalization in `onmark-media`; deterministic
 video and overlay presentation in `@onmark/runtime`; semantic DOM bindings in

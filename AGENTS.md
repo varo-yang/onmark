@@ -5,9 +5,12 @@ Onmark is a screenplay-first, browser-rendered video compiler and execution engi
 **Current phase:** delivery gates one through three are complete. Gate three
 proved the portable worker artifact locally and across two concurrent arm64
 Lambda workers, then assembled their verified media-bearing partitions through
-the shared encoder and audio path. The next delivery gate is intentionally not
-open yet. Do not build a coordinator, queue, lease database, scheduler, or
-infrastructure product surface until its acceptance contract is documented.
+the shared encoder and audio path. It closes deployment work for now: do not add
+a coordinator, database, queue, lease system, cloud workflow, infrastructure
+definition, or another provider adapter. Gate four is the only implementation
+goal: general authored audio and imported subtitle files through the existing
+local compiler, partitioner, renderer, and assembler. New screenplay spelling
+still requires the language admission evidence defined below.
 
 ## Read before changing code
 

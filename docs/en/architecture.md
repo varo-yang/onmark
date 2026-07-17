@@ -194,9 +194,9 @@ materialize → launch → ready → seek/capture → fingerprint → verify →
 ```
 
 The capture worker never owns a visual encoder: it atomically publishes one
-verified frame artifact. A later coordinator owns claims and leases; the
-assembler owns the one continuous visual encode. Audio follows a separate plan
-and is mixed outside browser frame capture.
+verified frame artifact. The short-lived render owner verifies the finite set
+of artifacts; the assembler owns the one continuous visual encode. Audio
+follows a separate plan and is mixed outside browser frame capture.
 
 ## Deterministic browser protocol
 
@@ -236,9 +236,12 @@ than looping.
 
 `Confirm(frame)` waits for the pre-registered media observer before native
 accepts the captured payload. At a placement boundary the observer may complete
-on the pre-capture commit; runtime media state cannot change between that commit
-and exact capture. Only after confirmation does the runtime return
-`FrameReady(frame)`, and only then may native execution write the payload.
+on the pre-capture commit. After confirmation, native performs one bounded
+reconciliation capture at the existing positive epsilon. A no-damage response
+reuses the exact capture without copying its PNG payload; new pixels replace it.
+Only then may native execution write the payload. This closes the race in which
+the media observer and exact screenshot become ready on opposite sides of the
+same compositor turn.
 
 This ordering avoids three boundary failures: waiting for
 `requestVideoFrameCallback` before advancing a BeginFrame-controlled compositor
@@ -248,9 +251,9 @@ and partition captures differ. Surface-initialization, placement-commit, and
 capture-baseline timestamps never become scheduling or protocol truth.
 
 Each output frame owns one normal capture command. A placement boundary adds one
-non-capturing commit, and a missing first or boundary screenshot adds at most
-one bounded retry. This replaces both animation-frame polling and a separate
-`Page.captureScreenshot` round trip.
+non-capturing commit and one post-confirm reconciliation capture; a missing
+first or exact boundary screenshot adds at most one bounded retry. This replaces
+animation-frame polling and a separate `Page.captureScreenshot` round trip.
 
 Direct rendering retains the PNG as its encoder payload. Worker capture also
 decodes it into the configured exact 8-bit RGBA viewport and hashes those
@@ -279,10 +282,14 @@ experimental property, not a blanket promise.
 
 ## Distributed execution (production target)
 
-The coordinator stores DAG state, leases, retries, and artifact references but
-never proxies frames. Stateless workers exchange immutable bundles, assets, and
-artifacts directly with object storage. Delivery is at least once; deterministic
-contract identity plus compare-and-verify publication makes it effectively once.
+A remote render is one finite DAG owned by one short-lived invocation. A parent
+process or provider-native workflow may retain transient progress while workers
+exchange immutable bundles, assets, and artifacts directly with object storage.
+Restarting the same render identity verifies and reuses completed artifacts. The
+engine therefore needs no database, durable queue, distributed lease, or Redis
+lock for correctness. A future multi-tenant service may wrap this contract with
+its own admission and accounting systems, but those are not Onmark engine
+dependencies.
 
 Gate three starts with a deliberately narrower interchange: a worker captures a
 whole planned output interval into one bounded, checksummed frame artifact. The
@@ -407,8 +414,9 @@ consume `onmark-render`'s portable worker request and `onmark-core`'s canonical
 bundle layout, but neither dependency knows about AWS or Lambda packaging.
 Syntax, diagnostics, model, compiler, timeline, and protocol remain rectangular
 modules inside core. Render graph and planning initially join core at gate two.
-Worker execution belongs to render. A coordinator may appear only after the
-remote artifact adapter has passed conformance.
+Worker execution belongs to render. Remote orchestration remains an external,
+short-lived composition concern unless a later product proves that durable
+coordination is necessary.
 
 Gate one's native command is deliberately narrow: `onmark render <screenplay>`.
 It discovers `presentation.ts` beside the screenplay unless `--presentation` is
@@ -426,8 +434,8 @@ launch configuration, and other pixel-affecting host facts; the renderer
 deliberately does not guess it from one executable path or browser-version
 string. The worker materializes inputs in a private root and publishes one frame
 artifact. Reuse and assembly require that environment identity alongside the
-unit identity. The command accepts no screenplay and never recompiles source; a
-coordinator or object-store adapter owns request publication later.
+unit identity. The command accepts no screenplay and never recompiles source;
+the short-lived invocation owner or object-store adapter publishes requests.
 
 `onmark-cli` resolves every external executable before starting process work,
 then follows one linear path: read and compile, freeze and probe referenced
@@ -709,9 +717,9 @@ worker wait without pretending that it is a scheduler or lease policy.
 
 This JSON contract has checked-in Rust-generated schemas. It intentionally has
 no generated TypeScript SDK because no TypeScript caller exists yet; creating a
-coordinator client merely to satisfy symmetry would prebuild a later control
-plane. AWS SDK and browser-archive types may not enter core or render. One real
-arm64 Lambda experiment used a 92.4 MB function ZIP at 4,096 MiB to prove outer
+remote orchestration client merely to satisfy symmetry would invent a consumer.
+AWS SDK and browser-archive types may not enter core or render. One real arm64
+Lambda experiment used a 92.4 MB function ZIP at 4,096 MiB to prove outer
 isolation, constrained-process BeginFrame capture, and immutable reuse for a
 locked 30-frame 320×180 title-only fixture. Three independent cold environments
 completed in 3.005, 2.277, and 3.069 seconds with 455–457 MB peak memory; one
@@ -784,10 +792,39 @@ bounded adapter semantics, not a distributed retry policy. Canonical Timeline IR
 and Execution Plan wire encodings remain deferred until they have an external
 consumer; byte-identical MP4 containers are not presumed.
 
-A later control-plane gate may add durable job state, queues, leases, global
-retries, capability scheduling, final-output publication, and infrastructure
-automation. That gate requires its own acceptance contract before any skeleton
-is built.
+The exit harness is also the gate's complete orchestration proof: one
+short-lived owner uploads immutable inputs, invokes the finite set of workers,
+downloads and verifies their artifacts, and assembles the result. Gate three
+does not require a database, queue, lease service, or long-running coordinator.
+Deployment work is frozen after this proof. Provider workflows, public remote
+render commands, infrastructure definitions, release publication, and additional
+cloud adapters require a later user need and are not part of gates four or five.
+
+**Gate four (open): authored audio and subtitles.** The only implementation goal
+is to carry general audio and user-supplied subtitle files through the existing
+local compiler and renderer without weakening exact timing or partition
+equivalence. The gate accepts no language spelling until its evaluation assets
+and conformance fixtures satisfy the language admission rule. Its exit contract
+is:
+
+- narrative voice-over remains distinct from general music and sound effects;
+- external TTS audio remains a normal frozen authored asset rather than an
+  online generation side effect;
+- SRT, WebVTT, and ASS inputs are bounded and normalized into Rust-owned caption
+  facts before the browser sees them; unsupported ASS semantics are rejected
+  explicitly rather than silently discarded;
+- audio placement, gain, duration, subtitle timing, and caption text are exact
+  compiler or media facts, never a second browser timeline;
+- malformed external files produce source-located authored diagnostics while
+  unavailable or unreadable files remain typed infrastructure failures;
+- one local media-bearing film with a cross-shot audio bed, a shot-local sound,
+  voice-over, and imported captions renders equivalently as a whole film and as
+  two partitions; canonical raw-RGBA frames and decoded audio timing/content are
+  both checked before the gate closes.
+
+Gate four does not add cloud conformance, deployment commands, a subtitle
+editor, speech generation, or animation adapters. Gate five may open the CSS,
+GSAP, and Three.js temporal-capability work only after Gate four is stable.
 
 Every gate uses the final-direction contracts but implements only fields
 consumed by that gate. A failed gate blocks construction of the next gate's
@@ -795,8 +832,9 @@ skeleton.
 
 ## Open experimental questions
 
-Layered alpha caching, wire encoding, coordinator storage, adapter seekability,
-and environment-locking granularity require prototypes and measurements.
+Layered alpha caching, wire encoding, caption-style normalization, adapter
+seekability, and environment-locking granularity require prototypes and
+measurements.
 Gate-three native capture has selected headless shell's CDP BeginFrameControl;
 revisiting that boundary requires stronger correctness and performance evidence,
 not API novelty alone. The pure compiler boundary, deterministic protocol,

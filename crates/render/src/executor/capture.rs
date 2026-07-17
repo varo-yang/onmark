@@ -156,7 +156,7 @@ async fn render_frames(
     output: &Path,
 ) -> Result<(), RenderError> {
     let frame_rate = plan.frame_rate();
-    let placement_boundaries = plan.placement_boundaries().collect();
+    let placement_boundaries: BTreeSet<_> = plan.placement_boundaries().collect();
     let output_frames = plan.output().start().get()..plan.output().end().get();
 
     for (index, request_ids) in output_frames.zip(requests.frame_requests()) {
@@ -167,8 +167,9 @@ async fn render_frames(
         stage_frame(browser, request_ids.seek, frame, output).await?;
         metrics.seek += started.elapsed();
 
+        let boundary = placement_boundaries.contains(&frame);
         let started = Instant::now();
-        let png = capture_staged_png(browser, frame_rate, &placement_boundaries, frame)
+        let mut png = capture_staged_png(browser, frame_rate, boundary, frame)
             .await
             .map_err(|source| RenderError::browser(output, source))?;
         metrics.readback += started.elapsed();
@@ -176,6 +177,15 @@ async fn render_frames(
         let started = Instant::now();
         confirm_frame(browser, request_ids.confirm, frame, output).await?;
         metrics.confirm += started.elapsed();
+
+        if boundary {
+            let started = Instant::now();
+            png = browser
+                .recapture_png_after_confirmation(frame, frame_rate)
+                .await
+                .map_err(|source| RenderError::browser(output, source))?;
+            metrics.readback += started.elapsed();
+        }
 
         frames
             .write(png, browser.render_profile(), metrics, output)
@@ -242,10 +252,10 @@ async fn write_artifact(
 async fn capture_staged_png(
     browser: &mut BrowserSession,
     frame_rate: WireFrameRate,
-    placement_boundaries: &BTreeSet<WireFrame>,
+    placement_boundary: bool,
     frame: WireFrame,
 ) -> Result<EncodedPng, BrowserError> {
-    if placement_boundaries.contains(&frame) {
+    if placement_boundary {
         return browser
             .capture_png_after_placement_boundary(frame, frame_rate)
             .await;
