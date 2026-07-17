@@ -28,7 +28,9 @@
         opacity: 0.01;
         position: fixed;
         width: 1px;
-        z-index: 0;
+        /* rVFC observes presented frames, so the probe must survive compositor
+           occlusion while the canvas remains the measured presentation. */
+        z-index: 2;
       }
     </style>
   </head>
