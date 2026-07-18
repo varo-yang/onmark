@@ -16,8 +16,10 @@ const WIDTH: u32 = 320;
 const HEIGHT: u32 = 180;
 const FRAMES_PER_SECOND: u64 = 30;
 const MICROS_PER_SECOND: u64 = 1_000_000;
-// One 48 kHz AAC packet spans roughly 21.3 ms; leave room for packet rounding.
-const AAC_PACKET_TIMESTAMP_TOLERANCE_MICROS: u64 = 25_000;
+const AUDIO_SAMPLE_RATE: u64 = 48_000;
+const AUDIBLE_SAMPLE_THRESHOLD: u16 = 256;
+// AAC can spread a transient across one 1024-sample coding frame.
+const AUDIO_START_TOLERANCE_MICROS: u64 = 25_000;
 const GATE_ONE_FRAME_COUNT: usize = 45;
 const GATE_TWO_FRAME_COUNT: usize = 60;
 const PROCESS_DEADLINE: Duration = Duration::from_mins(3);
@@ -309,61 +311,57 @@ async fn decode_audio_hashes(path: &Path) -> Vec<String> {
 
 async fn assert_audio_begins_at_frame(path: &Path, frame: u64) {
     let output = run_process(
-        Command::new(required_path("ONMARK_FFPROBE"))
-            .args(["-v", "error", "-select_streams", "a:0"])
+        Command::new(required_path("ONMARK_FFMPEG"))
+            .args(["-nostdin", "-v", "error", "-i"])
             .arg(path)
             .args([
-                "-show_entries",
-                "packet=pts_time",
-                "-show_packets",
-                "-of",
-                "json",
-            ]),
+                "-map",
+                "0:a:0",
+                "-f",
+                "s16le",
+                "-acodec",
+                "pcm_s16le",
+                "-ar",
+            ])
+            .arg(AUDIO_SAMPLE_RATE.to_string())
+            .args(["-ac", "1", "-"]),
     )
     .await;
-    assert_process_success("audio timestamp probing", &output);
+    assert_process_success("audio sample decoding", &output);
 
-    let response: AudioPacketProbe =
-        serde_json::from_slice(&output.stdout).expect("ffprobe emits valid JSON");
-    let packet = response
-        .packets
-        .first()
-        .expect("the output audio stream has a first packet");
-    let actual = timestamp_micros(&packet.pts_time);
+    let actual = first_audible_sample(&output.stdout)
+        .expect("the fixture output contains audible PCM samples");
+    let actual = u64::try_from(actual).expect("the bounded fixture length fits in u64")
+        * MICROS_PER_SECOND
+        / AUDIO_SAMPLE_RATE;
     let expected = frame * MICROS_PER_SECOND / FRAMES_PER_SECOND;
 
-    // AAC priming can move the first packet by one encoded audio frame, while
-    // raw PCM output drops its timestamp entirely.
     assert!(
-        actual.abs_diff(expected) <= AAC_PACKET_TIMESTAMP_TOLERANCE_MICROS,
+        actual.abs_diff(expected) <= AUDIO_START_TOLERANCE_MICROS,
         "audio starts at {actual}µs instead of frame {frame} ({expected}µs)",
     );
 }
 
-fn timestamp_micros(timestamp: &str) -> u64 {
-    let (seconds, fraction) = timestamp.split_once('.').unwrap_or((timestamp, ""));
-    let seconds = seconds
-        .parse::<u64>()
-        .expect("the fixture packet timestamp is non-negative seconds");
-    let mut micros = 0_u64;
-    let mut digits = 0_u32;
-
-    for digit in fraction.bytes().take(6) {
-        assert!(digit.is_ascii_digit());
-        micros = micros * 10 + u64::from(digit - b'0');
-        digits += 1;
-    }
-    for _ in digits..6 {
-        micros *= 10;
-    }
-
-    seconds * MICROS_PER_SECOND + micros
+fn first_audible_sample(pcm: &[u8]) -> Option<usize> {
+    let mut samples = pcm.chunks_exact(2);
+    let audible = samples.position(|sample| {
+        i16::from_le_bytes([sample[0], sample[1]]).unsigned_abs() >= AUDIBLE_SAMPLE_THRESHOLD
+    });
+    assert!(
+        samples.remainder().is_empty(),
+        "decoded PCM is frame-aligned"
+    );
+    audible
 }
 
 #[test]
-fn parses_ffprobe_packet_timestamps_without_floating_point() {
-    assert_eq!(timestamp_micros("0.978000"), 978_000);
-    assert_eq!(timestamp_micros("1.2"), 1_200_000);
+fn finds_the_first_audible_pcm_sample() {
+    let pcm = [0_i16, 255, -256, 1_024]
+        .into_iter()
+        .flat_map(i16::to_le_bytes)
+        .collect::<Vec<_>>();
+
+    assert_eq!(first_audible_sample(&pcm), Some(2));
 }
 
 fn frame_hash(record: &str) -> String {
@@ -429,16 +427,6 @@ struct VideoProbeResponse {
 #[derive(Debug, Deserialize)]
 struct AudioProbeResponse {
     streams: Vec<AudioStream>,
-}
-
-#[derive(Debug, Deserialize)]
-struct AudioPacketProbe {
-    packets: Vec<AudioPacket>,
-}
-
-#[derive(Debug, Deserialize)]
-struct AudioPacket {
-    pts_time: String,
 }
 
 #[derive(Debug, Deserialize)]
