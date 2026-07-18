@@ -268,7 +268,7 @@ async fn probe_audio_stream(path: &Path) {
         .expect("ffprobe must report exactly one audio stream");
     assert_eq!(stream.codec_name, "aac");
     assert_eq!(stream.sample_rate, "48000");
-    assert_eq!(stream.channels, 1);
+    assert_eq!(stream.channels, 2);
 }
 
 async fn decode_video_hashes(path: &Path) -> Vec<String> {
