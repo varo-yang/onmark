@@ -7,13 +7,17 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use onmark_core::compiler;
-use onmark_core::model::{AssetRef, FrameRate, FrozenAsset, FrozenAssetId, SourceId, Timebase};
+use onmark_core::compiler::{self, GeneralAudioKind, GeneralAudioPlacement};
+use onmark_core::model::{
+    AssetRef, AudioGain, ByteOffset, Duration as MediaDuration, FrameRate, FrozenAsset,
+    FrozenAssetId, SourceId, SourceSpan, Timebase,
+};
 use onmark_core::protocol::{
-    BrowserCommand, BrowserEvent, BrowserPlan, BrowserRequest, BundleManifest, RequestId, WireFrame,
+    BrowserCommand, BrowserEvent, BrowserOverlayKind, BrowserPlan, BrowserRequest, BundleManifest,
+    RequestId, WireFrame,
 };
 use onmark_core::render_graph::{PartitionPlan, RenderGraph};
-use onmark_media::Ffprobe;
+use onmark_media::{Ffprobe, SubtitleLimits, parse_webvtt};
 use onmark_render::{
     BrowserErrorKind, BrowserLaunchPolicy, BrowserLimits, BrowserSession, CaptureEnvironmentId,
     EncodeLimits, EncodedPng, ExecutableUnit, Ffmpeg, FrameArtifact, FrameArtifactLimits,
@@ -31,7 +35,6 @@ const WIDTH: u32 = 320;
 const HEIGHT: u32 = 180;
 const FRAME_COUNT: u64 = 75;
 const TWO_UNIT_FRAME_COUNT: u64 = 60;
-const VOICE_OVER_START_FRAME: u64 = 30;
 const MICROS_PER_SECOND: i64 = 1_000_000;
 const AUDIO_TIMESTAMP_TOLERANCE_MICROS: u64 = 25_000;
 
@@ -152,12 +155,17 @@ async fn renders_the_gate_one_plan_to_a_verified_mp4() {
 
 #[tokio::test]
 #[ignore = "requires ONMARK_HEADLESS_SHELL, ONMARK_FFMPEG, and ONMARK_FFPROBE"]
-async fn renders_two_partitions_into_one_complete_film() {
+async fn renders_gate_four_media_equally_as_one_or_two_units() {
     let directory = tempdir().expect("the test output directory must be available");
-    let fixture = GateTwoFixture::materialize(directory.path()).await;
+    let fixture = GateFourFixture::materialize(directory.path()).await;
+    let whole_output = directory.path().join("whole.mp4");
     let partitioned_output = directory.path().join("partitioned.mp4");
     let executor = real_executor(TWO_UNIT_FRAME_COUNT);
 
+    let whole = executor
+        .render(fixture.whole_film, &whole_output)
+        .await
+        .expect("the whole-film Gate-four plan must render");
     let partitioned = executor
         .render_partitioned(
             &fixture.partition_plan,
@@ -167,15 +175,21 @@ async fn renders_two_partitions_into_one_complete_film() {
         .await
         .expect("the two unit plan must render");
 
+    assert_eq!(whole.frames(), TWO_UNIT_FRAME_COUNT);
     assert_eq!(partitioned.frames(), TWO_UNIT_FRAME_COUNT);
-    assert_gate_two_output(&partitioned_output).await;
+    let whole = inspect_gate_four_output(&whole_output).await;
+    let partitioned = inspect_gate_four_output(&partitioned_output).await;
+    assert_eq!(
+        whole.audio_hashes, partitioned.audio_hashes,
+        "partitioning must not change the decoded final audio",
+    );
 }
 
 #[tokio::test]
 #[ignore = "requires ONMARK_HEADLESS_SHELL, ONMARK_FFMPEG, and ONMARK_FFPROBE"]
 async fn assembles_worker_frame_artifacts_equivalently_to_the_whole_film() {
     let directory = tempdir().expect("the test output directory must be available");
-    let fixture = GateTwoFixture::materialize(directory.path()).await;
+    let fixture = GateFourFixture::materialize(directory.path()).await;
     let whole_artifact_path = directory.path().join("whole-film.onmark-frames");
     let assembled_output = directory.path().join("assembled-from-artifacts.mp4");
     let executor = real_executor(TWO_UNIT_FRAME_COUNT);
@@ -222,21 +236,22 @@ async fn assembles_worker_frame_artifacts_equivalently_to_the_whole_film() {
         .await
         .expect("partition artifacts must reproduce the whole-film pixel sequence");
     assert_eq!(assembled.frames(), TWO_UNIT_FRAME_COUNT);
-    assert_gate_two_output(&assembled_output).await;
+    inspect_gate_four_output(&assembled_output).await;
 }
 
-async fn assert_gate_two_output(output: &Path) {
+async fn inspect_gate_four_output(output: &Path) -> DecodedOutput {
     assert_video_stream(output, TWO_UNIT_FRAME_COUNT).await;
     let output = inspect_output(output).await;
     assert!(
         output.has_motion(),
-        "the partitioned video must contain motion"
+        "the Gate-four video must contain motion"
     );
     assert!(
         !output.audio_hashes.is_empty(),
-        "the partitioned video must retain voice-over audio",
+        "the Gate-four video must retain its final audio mix",
     );
-    assert_audio_starts_at(&output, VOICE_OVER_START_FRAME);
+    assert_audio_starts_at(&output, 0);
+    output
 }
 
 async fn generate_source_video(output: &Path, duration_seconds: &str) {
@@ -292,6 +307,33 @@ async fn generate_voice_over(output: &Path) {
         .await
         .expect("voice-over generation must finish before its deadline")
         .expect("FFmpeg must generate the voice-over");
+    assert!(
+        generated.status.success(),
+        "{}",
+        String::from_utf8_lossy(&generated.stderr),
+    );
+}
+
+async fn generate_audio(
+    output: &Path,
+    frequency: u32,
+    sample_rate: u32,
+    channels: u8,
+    duration_seconds: &str,
+) {
+    let source =
+        format!("sine=frequency={frequency}:sample_rate={sample_rate}:duration={duration_seconds}");
+    let generated = Command::new(required_path("ONMARK_FFMPEG"))
+        .args(["-nostdin", "-v", "error", "-f", "lavfi", "-i", &source])
+        .arg("-ac")
+        .arg(channels.to_string())
+        .args(["-c:a", "pcm_s16le", "-y"])
+        .arg(output)
+        .output();
+    let generated = timeout(Duration::from_secs(20), generated)
+        .await
+        .expect("audio generation must finish before its deadline")
+        .expect("FFmpeg must generate the audio fixture");
     assert!(
         generated.status.success(),
         "{}",
@@ -735,21 +777,29 @@ fn gate_one_video_timeline(frozen: FrozenAsset) -> onmark_core::timeline::Timeli
     )
 }
 
-struct GateTwoFixture {
+struct GateFourFixture {
     partition_plan: PartitionPlan,
     whole_film: ExecutableUnit,
     partitioned_units: Vec<ExecutableUnit>,
 }
 
-impl GateTwoFixture {
+impl GateFourFixture {
     async fn materialize(workspace: &Path) -> Self {
         let video_path = workspace.join("source.mp4");
         let voice_over_path = workspace.join("voice.m4a");
+        let music_path = workspace.join("music.wav");
+        let effect_path = workspace.join("effect.wav");
         generate_source_video(&video_path, "1").await;
         generate_voice_over(&voice_over_path).await;
+        generate_audio(&music_path, 220, 44_100, 1, "2").await;
+        generate_audio(&effect_path, 880, 48_000, 2, "0.25").await;
 
         let video = freeze_asset(&video_path).await;
         let voice_over = freeze_asset(&voice_over_path).await;
+        let music = freeze_asset(&music_path).await;
+        let effect = freeze_asset(&effect_path).await;
+        let music_ref = asset_ref("music.wav");
+        let effect_ref = asset_ref("effect.wav");
         let assets = BTreeMap::from([
             (
                 AssetRef::parse("source.mp4").expect("the fixture video path is valid"),
@@ -759,10 +809,35 @@ impl GateTwoFixture {
                 AssetRef::parse("voice.m4a").expect("the fixture voice-over path is valid"),
                 voice_over.clone(),
             ),
+            (music_ref.clone(), music.clone()),
+            (effect_ref.clone(), effect.clone()),
         ]);
         let source = fs::read_to_string(repository().join("conformance/cli/gate-two.onmark"))
             .expect("the two-unit screenplay fixture is readable");
         let timeline = solve_timeline(&source, &assets);
+        let timeline = compiler::import_general_audio(
+            timeline,
+            [
+                audio_placement(
+                    music_ref,
+                    "0s",
+                    "2s",
+                    AudioGain::new(1, 4).expect("one quarter is a valid gain"),
+                    GeneralAudioKind::Music,
+                ),
+                audio_placement(
+                    effect_ref,
+                    "1250ms",
+                    "1500ms",
+                    AudioGain::UNITY,
+                    GeneralAudioKind::SoundEffect,
+                ),
+            ],
+            &assets,
+        )
+        .expect("typed general audio must enter the fixture timeline");
+        let timeline = compiler::import_captions(timeline, [caption_track()])
+            .expect("fixture captions must enter the frame grid");
         let partition_plan = RenderGraph::from_timeline(&timeline).into_partition();
         assert_eq!(
             partition_plan.units().len(),
@@ -775,6 +850,10 @@ impl GateTwoFixture {
                 .expect("the fixture video source path is present"),
             MaterializedAsset::new(voice_over, voice_over_path)
                 .expect("the fixture voice-over source path is present"),
+            MaterializedAsset::new(music, music_path)
+                .expect("the fixture music source path is present"),
+            MaterializedAsset::new(effect, effect_path)
+                .expect("the fixture sound-effect source path is present"),
         ];
         let bundle = FixtureBundle::load();
         let whole_film = RenderUnit::whole_film(
@@ -785,7 +864,7 @@ impl GateTwoFixture {
         )
         .expect("the complete fixture forms one whole-film unit");
         let whole_film = bundle.materialize(whole_film);
-        let partitioned_units = partition_plan
+        let partitioned_units: Vec<_> = partition_plan
             .units()
             .iter()
             .map(|partition| {
@@ -805,6 +884,12 @@ impl GateTwoFixture {
                 bundle.materialize(unit)
             })
             .collect();
+        assert!(partitioned_units.iter().all(|unit| {
+            unit.browser_plan()
+                .overlays()
+                .iter()
+                .any(|overlay| overlay.kind() == BrowserOverlayKind::Caption)
+        }));
 
         Self {
             partition_plan,
@@ -812,6 +897,39 @@ impl GateTwoFixture {
             partitioned_units,
         }
     }
+}
+
+fn asset_ref(value: &str) -> AssetRef {
+    AssetRef::parse(value).expect("the fixture asset reference is portable")
+}
+
+fn audio_placement(
+    source: AssetRef,
+    start: &str,
+    end: &str,
+    gain: AudioGain,
+    kind: GeneralAudioKind,
+) -> GeneralAudioPlacement {
+    GeneralAudioPlacement::new(
+        source,
+        MediaDuration::parse(start).expect("the fixture audio start is valid"),
+        MediaDuration::parse(end).expect("the fixture audio end is valid"),
+        gain,
+        kind,
+        SourceSpan::new(SourceId::new(2), ByteOffset::ZERO, ByteOffset::ZERO)
+            .expect("the fixture source point is valid"),
+    )
+    .expect("the fixture audio interval is positive")
+}
+
+fn caption_track() -> onmark_core::model::CaptionTrack {
+    let source = b"WEBVTT\n\n00:00:00.750 --> 00:00:01.250\nAcross the partition\n";
+    let limits =
+        SubtitleLimits::new(source.len(), 1, 64).expect("the fixture subtitle limits are bounded");
+    let report = parse_webvtt(SourceId::new(3), source, limits);
+    let (track, errors) = report.into_parts();
+    assert!(errors.is_empty());
+    track.expect("the fixture subtitle is valid")
 }
 
 struct FixtureBundle {

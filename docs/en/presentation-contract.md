@@ -1,6 +1,7 @@
 # Onmark Presentation Contract
 
-> Status: Gate-one browser authoring contract, reused by Gates two and three.
+> Status: Gate-one browser authoring contract, extended and reused through Gate
+> four.
 
 Onmark uses two authored files at Gate one:
 
@@ -89,6 +90,8 @@ an alternate scheduling clock or a source of timing decisions.
 
 The presentation must install exactly one runtime host with
 `installRuntimeHost`. `Load` creates every video and overlay node in the plan.
+Imported captions are caption-role overlays; they use the same solved visibility
+path rather than a second browser timing engine.
 Inactive nodes retain their stable binding identity but remain outside layout
 and compositing until their solved interval makes them visible. This prevents
 placements outside a Render Unit from changing its pixels. After `Prepare`,
@@ -137,8 +140,8 @@ The boundary is strict:
 
 | Owner         | Owns                                                                       |
 | ------------- | -------------------------------------------------------------------------- |
-| Screenplay    | element structure, text, media references, cues, local delays              |
-| Rust compiler | parsing, binding, reference resolution, exact timing, Timeline IR          |
+| Screenplay and imported captions | authored structure, text, media references, cues, local delays |
+| Rust compiler | parsing, normalization, reference resolution, exact timing, Timeline IR    |
 | Runtime       | protocol state, frame clock, decoded video readiness, visibility intervals |
 | Presentation  | DOM shape, CSS, layout, typography, visual styling                         |
 | Renderer      | materialized asset paths, Chromium, capture, encoding                      |
@@ -156,8 +159,9 @@ or derive a new media duration from the DOM.
   bindings for videos and overlays.
 - Video placements become hidden `<video>` elements with the stable
   `onmark-video` class.
-- Title and CTA placements become hidden `<div>` elements with `onmark-overlay`
-  plus `onmark-title` or `onmark-call-to-action`.
+- Title, CTA, and caption placements become hidden `<div>` elements with
+  `onmark-overlay` plus `onmark-title`, `onmark-call-to-action`, or
+  `onmark-caption`.
 - The runtime toggles visibility from solved intervals; CSS owns layout.
 
 The default facade is deliberately small. A presentation can implement
@@ -182,8 +186,9 @@ screenplay-to-presentation props channel. `onmark render` selects one
 `presentation.ts` through `--presentation` or same-directory discovery. The only
 dynamic facts delivered to that entry are the Rust-owned `BrowserPlan` facts
 sent by `Load(plan)`: frame rate, evaluation and output intervals, video
-placements, and overlay placements. Static values imported by `presentation.ts`
-are bundled program code, not screenplay props.
+placements, and title, CTA, or imported-caption overlay placements. Static
+values imported by `presentation.ts` are bundled program code, not screenplay
+props.
 
 This absence is intentional rather than an undocumented convention. A future
 presentation-selection or props feature must define, together, its screenplay

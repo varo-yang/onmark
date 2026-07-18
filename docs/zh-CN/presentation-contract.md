@@ -1,6 +1,6 @@
 # Onmark Presentation Contract
 
-> 状态：Gate 一浏览器 authoring 合约；Gate 二与 Gate 三复用。
+> 状态：Gate 一浏览器 authoring 合约；Gate 二至 Gate 四扩展并复用。
 
 Gate 一使用两个作者文件：
 
@@ -80,7 +80,9 @@ interface RuntimeFrame {
 ## Runtime 握手
 
 presentation 必须用 `installRuntimeHost` 安装一个 runtime host。`Load`
-会创建 plan 中的每个 video 与 overlay node。inactive node 保留稳定的 binding
+会创建 plan 中的每个 video 与 overlay node。导入字幕是 caption role 的
+overlay，与其他 overlay 共用已求解 visibility path，不另造 browser timing
+engine。inactive node 保留稳定的 binding
 identity，但在其 solved
 interval 使其可见之前不进入 layout 与 compositor；这样 Render
 Unit 之外的 placement 不会改变当前像素。 `Prepare` 之后，native
@@ -125,8 +127,8 @@ frame artifact 前就会被丢弃。
 
 | Owner         | Owns                                                                |
 | ------------- | ------------------------------------------------------------------- |
-| Screenplay    | 元素结构、文本、素材引用、cue、局部 delay                           |
-| Rust compiler | parse、bind、reference resolution、精确求时、Timeline IR            |
+| Screenplay 与导入字幕 | authored 结构、文本、素材引用、cue、局部 delay                |
+| Rust compiler | parse、normalize、reference resolution、精确求时、Timeline IR       |
 | Runtime       | protocol 状态、frame clock、视频解码 readiness、visibility interval |
 | Presentation  | DOM 形状、CSS、layout、字体与视觉风格                               |
 | Renderer      | materialized asset path、Chromium、capture、encoding                |
@@ -141,8 +143,9 @@ presentation 收到的 placement 已经包含绝对帧区间。它可以决定 t
 - `createDomPresentationBindings({ document, videoSource })`
   返回 runtime 可消费的 video/overlay bindings；
 - video placement 会变成隐藏的 `<video>`，并带稳定 class `onmark-video`；
-- title/CTA placement 会变成隐藏的 `<div>`，并带 `onmark-overlay` 以及
-  `onmark-title` 或 `onmark-call-to-action`；
+- title、CTA 与 caption placement 会变成隐藏的 `<div>`，并带
+  `onmark-overlay` 以及 `onmark-title`、`onmark-call-to-action` 或
+  `onmark-caption`；
 - runtime 根据已求解 interval 切换 visibility，CSS 拥有 layout。
 
 默认 facade 刻意很小。presentation 可以直接实现 `PresentationBindings`
@@ -167,8 +170,9 @@ arithmetic。
 通过 `--presentation` 或同目录发现选择一个
 `presentation.ts`。该 entry 唯一收到的动态事实，是 `Load(plan)`
 传入的 Rust-owned `BrowserPlan`：帧率、evaluation/output interval、video
-placement 和 overlay placement。 `presentation.ts` 静态 import 的值是 bundled
-program code，不是 screenplay props。
+placement，以及 title、CTA 或导入 caption 的 overlay placement。
+`presentation.ts` 静态 import 的值是 bundled program code，不是 screenplay
+props。
 
 这项缺失是有意边界，不是未写下来的约定。未来的 presentation selection 或 props
 feature 必须一起定义：screenplay spelling、带类型的 schema/default、canonical

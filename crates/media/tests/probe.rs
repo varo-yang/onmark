@@ -8,8 +8,8 @@ use std::time::Duration;
 
 use onmark_core::compiler;
 use onmark_core::model::{
-    AssetMetadata, AssetRef, Duration as MediaDuration, FrameRate, FrozenAsset, FrozenAssetId,
-    SourceId, Timebase, VideoTiming,
+    AssetMetadata, AssetRef, AudioChannelLayout, AudioSampleRate, Duration as MediaDuration,
+    FrameRate, FrozenAsset, FrozenAssetId, SourceId, Timebase, VideoTiming,
 };
 use onmark_media::{Ffprobe, InvalidFfprobe, ProbeError};
 
@@ -78,6 +78,20 @@ fn records_audio_presence_independently_of_visual_metadata() {
             .duration(),
         MediaDuration::from_nanos(2_500_000_000),
     );
+    assert_eq!(
+        audio
+            .audio_metadata()
+            .expect("the audio fixture has an audio stream")
+            .sample_rate(),
+        AudioSampleRate::new(48_000).expect("48 kHz is valid"),
+    );
+    assert_eq!(
+        audio
+            .audio_metadata()
+            .expect("the audio fixture has an audio stream")
+            .channel_layout(),
+        AudioChannelLayout::Mono,
+    );
     assert!(audiovisual.has_audio_stream());
     assert!(audiovisual.video_metadata().is_some());
     assert_eq!(
@@ -86,6 +100,20 @@ fn records_audio_presence_independently_of_visual_metadata() {
             .expect("the audiovisual fixture has an audio stream")
             .duration(),
         MediaDuration::from_nanos(1_500_000_000),
+    );
+    assert_eq!(
+        audiovisual
+            .audio_metadata()
+            .expect("the audiovisual fixture has an audio stream")
+            .sample_rate(),
+        AudioSampleRate::new(44_100).expect("44.1 kHz is valid"),
+    );
+    assert_eq!(
+        audiovisual
+            .audio_metadata()
+            .expect("the audiovisual fixture has an audio stream")
+            .channel_layout(),
+        AudioChannelLayout::Stereo,
     );
     assert!(!metadata_only.has_audio_stream());
     assert!(metadata_only.video_metadata().is_none());
@@ -262,6 +290,26 @@ fn translates_process_and_response_failures() {
     assert!(matches!(
         probe_error(&ffprobe, "invalid-video-duration.mp4"),
         ProbeError::InvalidVideo(_)
+    ));
+    assert!(matches!(
+        probe_error(&ffprobe, "missing-audio-sample-rate.mp3"),
+        ProbeError::InvalidAudio(_)
+    ));
+    assert!(matches!(
+        probe_error(&ffprobe, "missing-audio-channels.mp3"),
+        ProbeError::InvalidAudio(_)
+    ));
+    assert!(matches!(
+        probe_error(&ffprobe, "surround.mp3"),
+        ProbeError::InvalidAudio(_)
+    ));
+    assert!(matches!(
+        probe_error(&ffprobe, "excessive-channels.mp3"),
+        ProbeError::InvalidAudio(_)
+    ));
+    assert!(matches!(
+        probe_error(&ffprobe, "invalid-audio-duration.mp3"),
+        ProbeError::InvalidAudio(_)
     ));
 }
 

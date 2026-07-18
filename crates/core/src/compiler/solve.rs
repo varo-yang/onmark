@@ -130,6 +130,8 @@ impl<'a> Solver<'a> {
             interval,
             self.events,
             timeline_scenes,
+            Vec::new(),
+            Vec::new(),
         );
         let timeline = (!self.diagnostics.has_errors()).then_some(candidate);
 

@@ -1,0 +1,4 @@
+invalid-subrip-index 0..5
+non-positive-interval 6..35
+invalid-subrip-timing 44..54
+missing-timing 68..68

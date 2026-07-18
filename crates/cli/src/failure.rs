@@ -9,13 +9,14 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use onmark_core::compiler::SolveError;
+use onmark_core::compiler::{CaptionProjectionError, SolveError};
 use onmark_render::{InvalidRenderProfile, InvalidRenderUnit, RenderError, UnitRootError};
 use tokio::task::JoinError;
 
 use crate::assets::AssetError;
 use crate::bundler::BundleError;
 use crate::environment::EnvironmentError;
+use crate::subtitle::SubtitleLoadError;
 
 #[derive(Debug)]
 pub(super) enum CliError {
@@ -46,6 +47,8 @@ pub(super) enum CliError {
     InvalidProfile(InvalidRenderProfile),
     Assets(AssetError),
     Solve(SolveError),
+    Subtitle(SubtitleLoadError),
+    CaptionProjection(CaptionProjectionError),
     Bundle(BundleError),
     RenderUnit(InvalidRenderUnit),
     UnitRoot(UnitRootError),
@@ -134,6 +137,8 @@ impl fmt::Display for CliError {
             Self::InvalidProfile(source) => source.fmt(formatter),
             Self::Assets(source) => source.fmt(formatter),
             Self::Solve(source) => source.fmt(formatter),
+            Self::Subtitle(source) => source.fmt(formatter),
+            Self::CaptionProjection(source) => source.fmt(formatter),
             Self::Bundle(source) => source.fmt(formatter),
             Self::RenderUnit(source) => source.fmt(formatter),
             Self::UnitRoot(source) => source.fmt(formatter),
@@ -156,6 +161,8 @@ impl Error for CliError {
             Self::InvalidProfile(source) => Some(source),
             Self::Assets(source) => Some(source),
             Self::Solve(source) => Some(source),
+            Self::Subtitle(source) => Some(source),
+            Self::CaptionProjection(source) => Some(source),
             Self::Bundle(source) => Some(source),
             Self::RenderUnit(source) => Some(source),
             Self::UnitRoot(source) => Some(source),
@@ -185,6 +192,18 @@ impl From<AssetError> for CliError {
 impl From<SolveError> for CliError {
     fn from(source: SolveError) -> Self {
         Self::Solve(source)
+    }
+}
+
+impl From<SubtitleLoadError> for CliError {
+    fn from(source: SubtitleLoadError) -> Self {
+        Self::Subtitle(source)
+    }
+}
+
+impl From<CaptionProjectionError> for CliError {
+    fn from(source: CaptionProjectionError) -> Self {
+        Self::CaptionProjection(source)
     }
 }
 

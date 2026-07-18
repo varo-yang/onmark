@@ -8,8 +8,8 @@ use std::fs;
 
 use onmark_core::compiler;
 use onmark_core::model::{
-    AssetMetadata, AssetRef, Duration, FrameInterval, FrameRate, FrozenAsset, FrozenAssetId,
-    SourceId, Timebase, VideoMetadata, VideoTiming,
+    AssetMetadata, AssetRef, AudioChannelLayout, AudioSampleRate, Duration, FrameInterval,
+    FrameRate, FrozenAsset, FrozenAssetId, SourceId, Timebase, VideoMetadata, VideoTiming,
 };
 use onmark_core::render_graph::{PartitionPlan, RenderGraph};
 use onmark_core::timeline::TimelineIr;
@@ -74,7 +74,11 @@ fn frozen_assets<const N: usize>(entries: [(&str, &str); N]) -> BTreeMap<AssetRe
                 [u8::try_from(index + 1).expect("the fixture catalog is small"); 32],
             );
             let metadata = if name.ends_with(".mp3") {
-                AssetMetadata::audio(duration)
+                AssetMetadata::audio(
+                    duration,
+                    AudioSampleRate::new(48_000).expect("48 kHz is valid"),
+                    AudioChannelLayout::Stereo,
+                )
             } else {
                 let video = VideoMetadata::new(
                     duration,

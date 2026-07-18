@@ -9,8 +9,9 @@ use std::fs;
 use onmark_core::compiler;
 use onmark_core::diagnostics::DiagnosticCode;
 use onmark_core::model::{
-    AssetMetadata, AssetRef, Duration, EventRef, FrameInterval, FrameRate, FrozenAsset,
-    FrozenAssetId, SourceId, Timebase, VideoMetadata, VideoTiming,
+    AssetMetadata, AssetRef, AudioChannelLayout, AudioSampleRate, Duration, EventRef,
+    FrameInterval, FrameRate, FrozenAsset, FrozenAssetId, SourceId, Timebase, VideoMetadata,
+    VideoTiming,
 };
 use onmark_core::timeline::{
     TimelineContent, TimelineElement, TimelineIr, TimelineScene, TimelineShot, TimelineTiming,
@@ -105,7 +106,11 @@ fn incompatible_video_source_matches_stable_diagnostics() {
         "invalid/incompatible-video-source.diagnostics.txt",
     );
     let asset = AssetRef::parse("voice.mp3").expect("the fixture asset reference is valid");
-    let metadata = AssetMetadata::audio(Duration::parse("2s").expect("the duration is valid"));
+    let metadata = AssetMetadata::audio(
+        Duration::parse("2s").expect("the duration is valid"),
+        audio_sample_rate(),
+        AudioChannelLayout::Stereo,
+    );
     let frozen = FrozenAsset::new(FrozenAssetId::from_sha256([1; 32]), metadata);
     let assets = BTreeMap::from([(asset, frozen)]);
     let report = solve_fixture(&source_path, &assets).expect("the referenced asset was probed");
@@ -193,7 +198,7 @@ fn frozen_assets<const N: usize>(entries: [(&str, &str); N]) -> BTreeMap<AssetRe
             let digest_byte = u8::try_from(index + 1).expect("the fixture catalog is small");
             let id = FrozenAssetId::from_sha256([digest_byte; 32]);
             let metadata = if asset.as_str().ends_with(".mp3") {
-                AssetMetadata::audio(duration)
+                AssetMetadata::audio(duration, audio_sample_rate(), AudioChannelLayout::Stereo)
             } else {
                 fixture_video_metadata(duration)
             };
@@ -207,6 +212,10 @@ fn fixture_video_metadata(duration: Duration) -> AssetMetadata {
     let video = VideoMetadata::new(duration, "h264", "yuv420p", VideoTiming::Constant(rate))
         .expect("the fixture video metadata is normalized");
     AssetMetadata::video(duration, video)
+}
+
+fn audio_sample_rate() -> AudioSampleRate {
+    AudioSampleRate::new(48_000).expect("48 kHz is valid")
 }
 
 struct TimelineRenderer {

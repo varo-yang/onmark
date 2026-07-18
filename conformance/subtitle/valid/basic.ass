@@ -1,0 +1,7 @@
+[Script Info]
+ScriptType: v4.00+
+
+[Events]
+Format: Start, End, Text
+Dialogue: 0:00:00.50,0:00:02.00,First\Nline
+Dialogue: 0:00:01.75,0:00:03.00,Second, cue

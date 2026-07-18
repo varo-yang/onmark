@@ -1,0 +1,7 @@
+invalid-ass-header 0..13
+unsupported-ass-section 14..28
+unsupported-ass-section 30..42
+unsupported-ass-event-fields 97..135
+invalid-ass-timing 229..243
+non-positive-interval 264..285
+unsupported-ass-text 323..334

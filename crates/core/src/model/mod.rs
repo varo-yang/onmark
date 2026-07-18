@@ -3,6 +3,8 @@
 //! This module depends on no other `onmark-core` module.
 
 mod asset;
+mod audio;
+mod caption;
 mod duration;
 mod element;
 mod id;
@@ -13,6 +15,14 @@ mod time;
 pub use asset::{
     AssetMetadata, AudioMetadata, FrozenAsset, FrozenAssetId, InvalidFrozenAssetId,
     InvalidVideoMetadata, VideoMetadata, VideoTiming,
+};
+pub use audio::{
+    AudioChannelLayout, AudioGain, AudioSampleConversionOverflow, AudioSampleCount,
+    AudioSampleRate, InvalidAudioGain, InvalidAudioSampleRate,
+};
+pub use caption::{
+    CaptionCue, CaptionInterval, CaptionTrack, InvalidCaptionCue, InvalidCaptionInterval,
+    InvalidCaptionTrack,
 };
 pub use duration::{Duration, InvalidDuration};
 pub use element::ElementKind;

@@ -69,6 +69,12 @@ pub enum DiagnosticCode {
     UnexpectedClosingTag,
     /// XML machinery outside the screenplay surface is authored.
     UnsupportedMarkupDirective,
+    /// A standalone subtitle file violates its selected format grammar.
+    InvalidSubtitleFile,
+    /// A standalone subtitle file uses presentation semantics not represented by caption facts.
+    UnsupportedSubtitleFeature,
+    /// A standalone subtitle file exceeds a bounded ingestion limit.
+    SubtitleResourceLimit,
 }
 
 impl DiagnosticCode {
@@ -105,6 +111,9 @@ impl DiagnosticCode {
             Self::UnclosedElement => "ONM-SYNTAX-005",
             Self::UnexpectedClosingTag => "ONM-SYNTAX-006",
             Self::UnsupportedMarkupDirective => "ONM-SYNTAX-007",
+            Self::InvalidSubtitleFile => "ONM-CAPTION-001",
+            Self::UnsupportedSubtitleFeature => "ONM-CAPTION-002",
+            Self::SubtitleResourceLimit => "ONM-CAPTION-003",
         }
     }
 
@@ -139,7 +148,10 @@ impl DiagnosticCode {
             | Self::InvalidCharacterReference
             | Self::UnclosedElement
             | Self::UnexpectedClosingTag
-            | Self::UnsupportedMarkupDirective => Severity::Error,
+            | Self::UnsupportedMarkupDirective
+            | Self::InvalidSubtitleFile
+            | Self::UnsupportedSubtitleFeature
+            | Self::SubtitleResourceLimit => Severity::Error,
             Self::UnusedCue => Severity::Warning,
         }
     }
@@ -206,6 +218,12 @@ mod tests {
             (DiagnosticCode::UnclosedElement, "ONM-SYNTAX-005"),
             (DiagnosticCode::UnexpectedClosingTag, "ONM-SYNTAX-006"),
             (DiagnosticCode::UnsupportedMarkupDirective, "ONM-SYNTAX-007"),
+            (DiagnosticCode::InvalidSubtitleFile, "ONM-CAPTION-001"),
+            (
+                DiagnosticCode::UnsupportedSubtitleFeature,
+                "ONM-CAPTION-002",
+            ),
+            (DiagnosticCode::SubtitleResourceLimit, "ONM-CAPTION-003"),
         ];
 
         for (code, stable) in errors {

@@ -94,6 +94,10 @@ pub(super) struct RenderArgs {
     /// ffprobe executable.
     #[arg(long, default_value = "ffprobe", help_heading = "Execution overrides")]
     pub(super) ffprobe: PathBuf,
+
+    /// Standalone SRT, `WebVTT`, or ASS file.
+    #[arg(long = "subtitle", value_name = "FILE")]
+    pub(super) subtitle: Option<PathBuf>,
 }
 
 impl RenderArgs {
@@ -172,6 +176,37 @@ mod tests {
 
         assert!(
             Cli::try_parse_from(["onmark", "render", "film.onmark", "--fps", "29.97",]).is_err()
+        );
+    }
+
+    #[test]
+    fn accepts_one_standalone_subtitle_file() {
+        let cli = Cli::try_parse_from([
+            "onmark",
+            "render",
+            "film.onmark",
+            "--subtitle",
+            "captions.srt",
+        ])
+        .expect("one subtitle input is valid");
+        let Command::Render(args) = cli.command else {
+            panic!("the fixture must parse as a render command");
+        };
+
+        assert_eq!(args.subtitle.as_deref(), Some(Path::new("captions.srt")));
+
+        assert!(
+            Cli::try_parse_from([
+                "onmark",
+                "render",
+                "film.onmark",
+                "--subtitle",
+                "captions.srt",
+                "--subtitle",
+                "translation.vtt",
+            ])
+            .is_err(),
+            "multiple caption tracks require explicit selection semantics",
         );
     }
 

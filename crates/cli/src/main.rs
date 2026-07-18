@@ -13,6 +13,7 @@ mod environment;
 mod execution;
 mod failure;
 mod render;
+mod subtitle;
 mod worker;
 
 use std::io;

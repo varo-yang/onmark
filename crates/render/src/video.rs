@@ -89,7 +89,10 @@ impl Error for UnsupportedVideo {}
 
 #[cfg(test)]
 mod tests {
-    use onmark_core::model::{AssetMetadata, Duration, FrameRate, VideoMetadata, VideoTiming};
+    use onmark_core::model::{
+        AssetMetadata, AudioChannelLayout, AudioSampleRate, Duration, FrameRate, VideoMetadata,
+        VideoTiming,
+    };
 
     use super::{AdmittedVideo, UnsupportedVideo};
 
@@ -102,7 +105,11 @@ mod tests {
         assert_eq!(admitted.frame_rate(), rate);
         assert_eq!(admitted.metadata().pixel_format(), "yuv420p");
         assert_eq!(
-            AdmittedVideo::admit(&AssetMetadata::audio(Duration::from_nanos(1))),
+            AdmittedVideo::admit(&AssetMetadata::audio(
+                Duration::from_nanos(1),
+                AudioSampleRate::new(48_000).expect("48 kHz is valid"),
+                AudioChannelLayout::Stereo,
+            )),
             Err(UnsupportedVideo::MissingVideoStream),
         );
         assert_eq!(

@@ -329,7 +329,7 @@ impl RenderExecutor {
     ) -> Result<EncodedVideo, RenderError> {
         let expected_output = unit.browser_plan().output();
         let output_origin = FrameIndex::new(expected_output.start().get());
-        let audio = unit.audio_inputs_rebased_to(output_origin).collect();
+        let audio = collect_audio_inputs(std::slice::from_ref(&unit), output_origin, output)?;
         self.render_sequence(vec![unit], expected_output, audio, output)
             .await
     }
@@ -354,10 +354,7 @@ impl RenderExecutor {
         Self::validate_partition_units(partitions, &units, output)?;
         let expected_output = wire_interval(partitions.interval(), output)?;
         let output_origin = partitions.interval().start();
-        let audio: Vec<AudioInput> = units
-            .iter()
-            .flat_map(|unit| unit.audio_inputs_rebased_to(output_origin))
-            .collect();
+        let audio = collect_audio_inputs(&units, output_origin, output)?;
         self.render_sequence(units, expected_output, audio, output)
             .await
     }
@@ -407,11 +404,8 @@ impl RenderExecutor {
         Self::validate_frame_artifacts(units, artifacts, capture_environment, output)?;
         let expected_output = wire_interval(partitions.interval(), output)?;
         let output_origin = partitions.interval().start();
-        let audio: Vec<AudioInput> = units
-            .iter()
-            .flat_map(|unit| unit.audio_inputs_rebased_to(output_origin))
-            .collect();
-        let sequence = self.validate_sequence(units, expected_output, &audio, output)?;
+        let audio = collect_audio_inputs(units, output_origin, output)?;
+        let sequence = self.validate_sequence(units, expected_output, output)?;
         let frame_rate = sequence.frame_rate;
 
         let staging = StagedOutput::new(output)?;
@@ -437,7 +431,7 @@ impl RenderExecutor {
         let ValidatedSequence {
             frame_rate,
             requests,
-        } = self.validate_sequence(&units, expected_output, &audio, output)?;
+        } = self.validate_sequence(&units, expected_output, output)?;
         let staging = StagedOutput::new(output)?;
         let mut encoder = self
             .ffmpeg
@@ -531,7 +525,6 @@ impl RenderExecutor {
         &self,
         units: &[ExecutableUnit],
         expected_output: WireInterval,
-        audio: &[AudioInput],
         output: &Path,
     ) -> Result<ValidatedSequence, RenderError> {
         let Some(first) = units.first() else {
@@ -570,19 +563,42 @@ impl RenderExecutor {
             ));
         }
 
-        if audio.len() > MAX_AUDIO_TRACKS {
-            return Err(RenderError::new(
-                RenderErrorKind::PlanTooLarge,
-                output,
-                "render sequence exceeds the configured audio-track limit",
-            ));
-        }
-
         Ok(ValidatedSequence {
             frame_rate,
             requests,
         })
     }
+}
+
+fn collect_audio_inputs(
+    units: &[ExecutableUnit],
+    origin: FrameIndex,
+    output: &Path,
+) -> Result<Vec<AudioInput>, RenderError> {
+    let mut audio = Vec::new();
+    for unit in units {
+        for input in unit.audio_inputs_rebased_to(origin) {
+            if audio.len() == MAX_AUDIO_TRACKS {
+                return Err(RenderError::new(
+                    RenderErrorKind::PlanTooLarge,
+                    output,
+                    "render sequence exceeds the configured audio-track limit",
+                ));
+            }
+            audio.push(input);
+        }
+    }
+    audio.sort_by_key(AudioInput::mix_order);
+    if audio
+        .windows(2)
+        .any(|pair| pair[0].mix_order() == pair[1].mix_order())
+    {
+        return Err(invalid_plan(
+            output,
+            "render sequence contains duplicate canonical audio positions",
+        ));
+    }
+    Ok(audio)
 }
 
 /// Execution facts whose frame count is already representable by request IDs.

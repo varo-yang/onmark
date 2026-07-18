@@ -29,14 +29,21 @@
 //! assert_eq!(solved.timeline().expect("the film solves").interval().end().get(), 30);
 //! ```
 
+mod audio;
 mod bind;
+mod captions;
 mod linked_film;
 mod parse;
 mod resolve;
 mod resolved_film;
 mod solve;
 
+pub use audio::{
+    GeneralAudioImportError, GeneralAudioKind, GeneralAudioPlacement, InvalidGeneralAudioPlacement,
+    import_general_audio,
+};
 pub use bind::{BindReport, bind};
+pub use captions::{CaptionProjectionError, import_captions};
 pub use linked_film::{
     LinkedCue, LinkedCues, LinkedElement, LinkedFilm, LinkedNode, LinkedOverlay, LinkedScene,
     LinkedShot, LinkedShotContent, LinkedVideo, LinkedVoiceOver,

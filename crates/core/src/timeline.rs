@@ -6,8 +6,8 @@
 use std::collections::BTreeMap;
 
 use crate::model::{
-    CueId, ElementKind, EventRef, FrameIndex, FrameInterval, FrozenAssetId, NodeId, SourceSpan,
-    Timebase,
+    AudioGain, CueId, ElementKind, EventRef, FrameIndex, FrameInterval, FrozenAssetId, NodeId,
+    SourceSpan, Timebase,
 };
 
 /// Version of the Timeline IR contract.
@@ -34,6 +34,8 @@ pub struct TimelineIr {
     interval: FrameInterval,
     events: BTreeMap<CueId, TimelineEvent>,
     scenes: Vec<TimelineScene>,
+    general_audio: Vec<TimelineAudio>,
+    captions: Vec<TimelineCaption>,
 }
 
 impl TimelineIr {
@@ -43,6 +45,8 @@ impl TimelineIr {
         interval: FrameInterval,
         events: BTreeMap<CueId, TimelineEvent>,
         scenes: Vec<TimelineScene>,
+        general_audio: Vec<TimelineAudio>,
+        captions: Vec<TimelineCaption>,
     ) -> Self {
         Self {
             version: TimelineVersion::V1,
@@ -51,6 +55,8 @@ impl TimelineIr {
             interval,
             events,
             scenes,
+            general_audio,
+            captions,
         }
     }
 
@@ -105,13 +111,90 @@ impl TimelineIr {
         self.contents().filter_map(TimelineContent::as_voice_over)
     }
 
+    /// Returns every executable audio placement in canonical mix order.
+    ///
+    /// Narrative tracks retain screenplay order. General tracks follow in
+    /// their authored order; this fixed grouping keeps floating-point mixing
+    /// order deterministic without erasing their distinct semantics. Empty
+    /// placements remain available through their narrative nodes but require
+    /// neither a render dependency nor an `FFmpeg` input.
+    pub fn audio(&self) -> impl Iterator<Item = &TimelineAudio> {
+        self.voice_overs()
+            .map(TimelineVoiceOver::audio)
+            .chain(&self.general_audio)
+            .filter(|audio| !audio.timing().interval().is_empty())
+    }
+
     /// Returns title and call-to-action overlays in screenplay order.
     pub fn overlays(&self) -> impl Iterator<Item = &TimelineOverlay> {
         self.contents().filter_map(TimelineContent::as_overlay)
     }
 
+    /// Returns imported captions in track and authored cue order.
+    #[must_use]
+    pub fn captions(&self) -> &[TimelineCaption] {
+        &self.captions
+    }
+
+    pub(crate) fn replace_captions(&mut self, captions: Vec<TimelineCaption>) {
+        self.captions = captions;
+    }
+
+    pub(crate) fn replace_general_audio(&mut self, audio: Vec<TimelineAudio>) {
+        self.general_audio = audio;
+    }
+
     fn contents(&self) -> impl Iterator<Item = &TimelineContent> {
         self.shots().flat_map(|shot| &shot.content)
+    }
+}
+
+/// One imported caption projected onto the solved frame grid.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TimelineCaption {
+    interval: FrameInterval,
+    text: Box<str>,
+    timing_span: SourceSpan,
+    text_span: SourceSpan,
+}
+
+impl TimelineCaption {
+    pub(crate) fn new(
+        interval: FrameInterval,
+        text: impl Into<Box<str>>,
+        timing_span: SourceSpan,
+        text_span: SourceSpan,
+    ) -> Self {
+        Self {
+            interval,
+            text: text.into(),
+            timing_span,
+            text_span,
+        }
+    }
+
+    /// Returns the executable half-open frame interval.
+    #[must_use]
+    pub const fn interval(&self) -> FrameInterval {
+        self.interval
+    }
+
+    /// Returns normalized authored caption text.
+    #[must_use]
+    pub const fn text(&self) -> &str {
+        &self.text
+    }
+
+    /// Returns the external-source range containing the timing expression.
+    #[must_use]
+    pub const fn timing_span(&self) -> SourceSpan {
+        self.timing_span
+    }
+
+    /// Returns the external-source range containing the caption payload.
+    #[must_use]
+    pub const fn text_span(&self) -> SourceSpan {
+        self.text_span
     }
 }
 
@@ -330,8 +413,7 @@ impl TimelineVideo {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TimelineVoiceOver {
     element: TimelineElement,
-    timing: TimelineTiming,
-    asset_id: FrozenAssetId,
+    audio: TimelineAudio,
     text: Vec<TimelineText>,
 }
 
@@ -342,10 +424,16 @@ impl TimelineVoiceOver {
         asset_id: FrozenAssetId,
         text: Vec<TimelineText>,
     ) -> Self {
+        let authored_at = element.span();
         Self {
             element,
-            timing,
-            asset_id,
+            audio: TimelineAudio::new(
+                authored_at,
+                timing,
+                asset_id,
+                AudioGain::UNITY,
+                TimelineAudioKind::VoiceOver,
+            ),
             text,
         }
     }
@@ -359,19 +447,94 @@ impl TimelineVoiceOver {
     /// Returns the solved voice-over timing.
     #[must_use]
     pub const fn timing(&self) -> &TimelineTiming {
-        &self.timing
+        self.audio.timing()
     }
 
     /// Returns the frozen voice-over artifact identity.
     #[must_use]
     pub const fn asset_id(&self) -> FrozenAssetId {
-        self.asset_id
+        self.audio.asset_id()
+    }
+
+    /// Returns the shared executable audio placement.
+    #[must_use]
+    pub const fn audio(&self) -> &TimelineAudio {
+        &self.audio
     }
 
     /// Returns authored inscription runs in source order.
     #[must_use]
     pub fn text(&self) -> &[TimelineText] {
         &self.text
+    }
+}
+
+/// Semantic role retained by one solved audio placement.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum TimelineAudioKind {
+    /// Spoken narrative that remains attached to authored voice-over text.
+    VoiceOver,
+    /// General musical content.
+    Music,
+    /// General authored sound effect.
+    SoundEffect,
+}
+
+/// Exact executable facts shared by narrative and general audio.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TimelineAudio {
+    authored_at: SourceSpan,
+    timing: TimelineTiming,
+    asset_id: FrozenAssetId,
+    gain: AudioGain,
+    kind: TimelineAudioKind,
+}
+
+impl TimelineAudio {
+    pub(crate) const fn new(
+        authored_at: SourceSpan,
+        timing: TimelineTiming,
+        asset_id: FrozenAssetId,
+        gain: AudioGain,
+        kind: TimelineAudioKind,
+    ) -> Self {
+        Self {
+            authored_at,
+            timing,
+            asset_id,
+            gain,
+            kind,
+        }
+    }
+
+    /// Returns the source span that authored this placement.
+    #[must_use]
+    pub const fn authored_at(&self) -> SourceSpan {
+        self.authored_at
+    }
+
+    /// Returns the exact Timeline placement.
+    #[must_use]
+    pub const fn timing(&self) -> &TimelineTiming {
+        &self.timing
+    }
+
+    /// Returns the frozen source artifact identity.
+    #[must_use]
+    pub const fn asset_id(&self) -> FrozenAssetId {
+        self.asset_id
+    }
+
+    /// Returns the exact linear amplitude.
+    #[must_use]
+    pub const fn gain(&self) -> AudioGain {
+        self.gain
+    }
+
+    /// Returns the retained narrative or general-audio role.
+    #[must_use]
+    pub const fn kind(&self) -> TimelineAudioKind {
+        self.kind
     }
 }
 

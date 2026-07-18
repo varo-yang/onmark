@@ -37,3 +37,13 @@ body {
   font-size: 18px;
   font-weight: 600;
 }
+
+.onmark-caption {
+  bottom: 16px;
+  font-size: 18px;
+  left: 50%;
+  max-width: calc(100% - 32px);
+  text-align: center;
+  transform: translateX(-50%);
+  white-space: pre-line;
+}

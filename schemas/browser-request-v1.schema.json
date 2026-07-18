@@ -129,6 +129,11 @@
           "const": "callToAction",
           "description": "Authored call-to-action content.",
           "type": "string"
+        },
+        {
+          "const": "caption",
+          "description": "Imported caption text.",
+          "type": "string"
         }
       ]
     },

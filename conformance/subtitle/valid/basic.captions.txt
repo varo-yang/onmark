@@ -1,0 +1,7 @@
+caption-track
+  cue 500000000..2000000000
+    timing 2..31
+    text 32..45 "Hello,\nworld."
+  cue 1750000000..64250000000
+    timing 49..78
+    text 79..89 "Second cue"

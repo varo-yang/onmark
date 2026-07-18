@@ -186,14 +186,27 @@ bundle 负责把这些事实画成 DOM、CSS、Canvas 或 WebGL；Render
 Unit 则定义一次 executor 调用消费哪些不可变输入。第一关只有一个覆盖整部影片的 unit。第二关加入 Render
 Graph 后，可以产生多个同类型 unit，但不更换执行器合约。
 
-Gate 一的 `AudioPlan`
-只包含已求解的旁白 placement。materialization 会把其冻结字节与浏览器素材一起复制，却不把它们变成浏览器输入。Chromium 编出视觉流后，executor 将每个音频输入归零、施加精确有理的帧延迟、混合轨道，并将 AAC
-mux 进最终 MP4。gain、fade、重采样策略和通用音频效果仍然延期，不能从这份首个混音合约中推断出来。一条 Gate 一 unit 最多保留 512 条音轨，使
-`FFmpeg` 参数和 filter graph 边界始终有界。
+Gate 一最初的 `AudioPlan`
+用已求解的旁白 placement 建立了原生混音边界。materialization 会把冻结音频字节与浏览器素材一起复制，却不把它们变成浏览器输入。Chromium 编出视觉流后，executor 混合轨道并将 AAC
+mux 进最终 MP4。每条 unit 和完整装配序列最多保留 32 条音轨，使 `FFmpeg` 进程、输入描述符
+与 filter graph 边界始终有界。Gate 四只扩展同一边界上的 fact 与 sample policy，不另造第二套
+audio engine。
 
 Gate 二的首条本地组装路径会在各自独立 materialize 的 unit 依次把连续 output 帧送入同一个视觉 encoder 期间保留这些 unit
-root。旁白先保留绝对 Timeline 起点，最终总装时只按成片 output 原点重基一次，并在所有 unit 的画面都捕获完后混合。这样既不假定已 mux
+root。音频 placement 先保留绝对 Timeline 起点，最终总装时只按成片 output 原点重基一次，并在所有 unit 的画面都捕获完后混合。这样既不假定已 mux
 AAC 的分段可以安全拼接，也不再做一次有损的视频重编码。这是一条正确性优先的路径，不是持久分段缓存格式；缓存编码分段必须先有独立的等价性证明，才能成为执行产物。
+
+Gate 四保留 voice-over 的 narrative Timeline 节点，同时把其可执行的 asset、interval、gain 与 role
+收敛到未来 music 和 sound effect 共用的 `TimelineAudio` fact。通用音频是 film-level collection，因为一条 music
+bed 可以跨越 shot 与 partition。Render Graph 把每条 placement 交给其起点所在的唯一 region；该 owner
+只 materialize 一次冻结字节，但 placement 可以越过 owner 的 visual output，并且只在最终总装时混合。
+
+音频探测现在保留 selected stream 的正整数 sample rate 与归一化的 mono/stereo channel layout；其他声道数会在 FFmpeg 隐式 downmix 之前被拒绝。mono 会被显式复制到双声道，stereo 保留左右声道身份，AAC 编码前的固定 mix profile 是 48 kHz stereo floating-point audio。unit composition 将精确帧长度用具名的向上取整策略只投影一次到该 sample
+grid：时间戳仍早于 Timeline exclusive end 的 sample 会被保留。每条输入先在 source grid 上 trim，再重采样到固定 48
+kHz mix grid。Rust 用向上取整把 frame start 投影到该 grid，因此 `FFmpeg` 收到整数 `adelay` sample count，而不是自行计算 decimal 或 floating timing expression。canonical rational linear
+gain 通过 `volume` 应用；`amix` normalization 被明确关闭，避免多轨重叠时静默改写 authored gain。最终 AAC path 按 visual frame count 在同一 output sample grid 上的投影 trim 或 pad 混音，再由 visual stream 通过
+`-shortest` 封口容器。因此跨 partition 的 owner track 不能让单独渲染的 unit 长于其 visual output。screenplay
+拼写及更窄的 gain policy 仍受语言准入规则约束；这些底层 fact 本身不等于接纳了 `<audio>` 元素。
 
 ## 5. 从源码到 MP4
 
@@ -604,8 +617,8 @@ root：
   `syntax`、`diagnostics`、`model`、`compiler`、`timeline`、`protocol`
   模块保持结构；
 - `onmark-media`
-  只负责素材探测和规范化 metadata，使服务端 compile/lint 修正循环能够使用
-  `core + media` 而不链接 Chromium；
+  负责素材探测、规范化 metadata 与 standalone subtitle format parsing，使服务端
+  compile/lint 修正循环能够使用 `core + media` 而不链接 Chromium；
 - `@onmark/runtime`
   因为运行在浏览器中、并被 authoring 与 bundler 消费而保持独立 package；
 - `@onmark/authoring` 因为用户 presentation 会独立消费它的公开 DOM
@@ -735,12 +748,28 @@ failure，`Drop` 只作 best-effort termination fallback。私有 ffprobe respon
 type 只在此边界翻译一次并产出 core-owned `AssetMetadata`；JSON
 value 与第三方 error type 不定义稳定 API，但底层 error 会通过标准 source
 chain 保留，供调试使用。Gate 一对每条 stream 请求有界的 stream-level
-facts：`codec_type` 记录音轨存在性并选择第一条视觉流，`nb_frames`
+facts：`codec_type` 记录音轨存在性并选择第一条视觉流，`sample_rate` 与
+`channels` 固定 selected audio stream 的 sample grid 与归一化 channel layout，`nb_frames`
 识别 still。视觉流优先使用自己的 duration；ffprobe 省略该字段时才回退到容器
 duration，显式但格式错误的 stream duration 仍会被拒绝，不能被 fallback
 掩盖。仅当 ffprobe 中可解析的 `avg_frame_rate` 和 `r_frame_rate`
 约分为同一个精确有理帧率时，才把视觉流归为 constant；二者不一致或不可用时保守归为 variable。因此一 MiB
 stdout ceiling 与媒体时长无关。
+
+Gate 四同时把 standalone-subtitle syntax boundary 放进 `onmark-media`。parser 在显式
+input bytes、cue count、单 cue text 与固定 retained-error 上限内消费 caller-owned bytes，并返回
+带 source location 的 format error，或带精确纳秒 interval 的 core-owned `CaptionTrack` fact。该边界
+不访问文件系统、不猜编码、不解释样式、不翻译 diagnostic code，也不决定 browser layout。首批格式是
+strict UTF-8 SubRip、无损的 plain-text WebVTT 子集和无损的 plain-event ASS 子集，三者都支持可选
+UTF-8 BOM 以及 LF/CRLF 换行。WebVTT comment 与 cue identifier 不携带 rendered fact，可以丢弃；
+region、style block、cue setting、markup 与 escape 则必须报告 unsupported。Plain ASS 接纳
+`ScriptType: v4.00+`、安全 script metadata 与 `Format: Start, End, Text`，精确换算 centisecond
+时间并处理 `\N` 和 `\h`；resolution、style、layout field、effect、override tag、drawing 与其他呈现
+语义都必须明确报告 unsupported。三种格式共用同一个 fact boundary，且不给 crate 增加 production
+dependency。
+CLI 根据 authored file extension 选择唯一 parser，并在 presentation validation、media probe
+或 browser launch 之前，把 format-local error 恰好一次翻译成 `ONM-CAPTION-*`
+diagnostic；文件打开与读取失败仍是 typed infrastructure error。
 
 `onmark-render` 拥有 Chromium 与 `FFmpeg` 的重型依赖预算。它只把 `chromiumoxide`
 用作 CDP transport。Onmark 自己启动并回收 headless shell，使 stderr 在
@@ -944,7 +973,7 @@ types，不再从 schema 反向生成第二套 Rust 类型。
 
 `BrowserPlan` 现在携带 production presentation adapter 已真实消费的 output frame
 rate、evaluation/output interval、primary-video
-placement，以及 title/call-to-action overlay。video placement 记录 immutable
+placement，以及 title、call-to-action 或导入 caption overlay。video placement 记录 immutable
 asset identity、绝对可见区间和验证 decoded-frame selection 所需的 admitted CFR
 source rate；overlay placement 只记录语义角色、decoded
 text 与 compiler 已求解的绝对区间。materialized URL 仍是 render-owned
@@ -957,7 +986,9 @@ adapter 真正消费时再加入，不提前把后续 gate 塞进协议。
 
 Protocol V1 最多携带 10,000 个 video placement 与 10,000 个 overlay
 placement；每条 overlay
-inscription 最多包含 65,536 个 Unicode 字符。一条 failure 最多包含 4,096 个 message 字符与 256 条 pending-resource
+inscription 最多包含 65,536 个 Unicode 字符。native projection 与 Rust wire decode
+还会在 CDP serialization 前，把每份 browser plan 的合计 UTF-8 text 限制为一 MiB；该 aggregate
+process budget 不会被伪装成 JSON Schema 能表达的结构约束。一条 failure 最多包含 4,096 个 message 字符与 256 条 pending-resource
 description，每条 description 最多 1,024 个字符；它们的确定性顺序由 producer 拥有。runtime-host
 property name 与这些 resource limit 都从 Rust-owned schema metadata 生成，native
 executor、browser runtime 与 validator 不得各自保存手写副本。

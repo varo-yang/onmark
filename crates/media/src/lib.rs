@@ -1,4 +1,4 @@
-//! Media probing without browser or compiler responsibilities.
+//! Media probing and subtitle normalization without browser responsibilities.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
@@ -9,6 +9,11 @@ mod error;
 mod probe;
 mod process;
 mod response;
+mod subtitle;
 
 pub use error::{InvalidFfprobe, ProbeError, ProbeFailure};
 pub use probe::Ffprobe;
+pub use subtitle::{
+    InvalidSubtitleLimits, SubtitleError, SubtitleErrorKind, SubtitleLimits, SubtitleReport,
+    parse_ass, parse_subrip, parse_webvtt,
+};

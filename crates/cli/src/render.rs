@@ -4,10 +4,11 @@
 //! graph rule is recreated at this I/O boundary.
 
 use std::fs;
-use std::io::{self, Write as _};
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use onmark_core::compiler;
 use onmark_core::diagnostics::Diagnostic;
 use onmark_core::model::Timebase;
 use onmark_core::render_graph::{PartitionPlan, RenderGraph};
@@ -25,18 +26,21 @@ use crate::diagnostic;
 use crate::environment::Executables;
 use crate::execution;
 use crate::failure::CliError;
+use crate::subtitle::SubtitleImport;
+
+pub(super) struct AuthoredReport {
+    path: PathBuf,
+    source: String,
+    diagnostics: Vec<Diagnostic>,
+}
 
 /// Authored rejection or a completed local render, both retaining diagnostics.
 pub(super) enum RenderOutcome {
     Rejected {
-        source_path: PathBuf,
-        source: String,
-        diagnostics: Vec<Diagnostic>,
+        report: AuthoredReport,
     },
     Completed {
-        source_path: PathBuf,
-        source: String,
-        diagnostics: Vec<Diagnostic>,
+        screenplay: AuthoredReport,
         video: EncodedVideo,
     },
 }
@@ -44,29 +48,32 @@ pub(super) enum RenderOutcome {
 impl RenderOutcome {
     fn rejected(source_path: PathBuf, source: String, diagnostics: Vec<Diagnostic>) -> Self {
         Self::Rejected {
-            source_path,
-            source,
-            diagnostics,
+            report: AuthoredReport {
+                path: source_path,
+                source,
+                diagnostics,
+            },
+        }
+    }
+
+    fn rejected_subtitle(rejected: crate::subtitle::RejectedSubtitle) -> Self {
+        let (path, source, diagnostics) = rejected.into_parts();
+        Self::Rejected {
+            report: AuthoredReport {
+                path,
+                source,
+                diagnostics,
+            },
         }
     }
 
     pub(super) fn write(self) -> ExitCode {
         let result = match self {
-            Self::Rejected {
-                source_path,
-                source,
-                diagnostics,
-            } => {
+            Self::Rejected { report } => {
                 let mut stderr = io::stderr().lock();
-                diagnostic::write_all(&mut stderr, &source_path, &source, &diagnostics)
-                    .map(|()| ExitCode::FAILURE)
+                write_report(&mut stderr, &report).map(|()| ExitCode::FAILURE)
             }
-            Self::Completed {
-                source_path,
-                source,
-                diagnostics,
-                video,
-            } => write_completed(&source_path, &source, &diagnostics, &video),
+            Self::Completed { screenplay, video } => write_completed(&screenplay, &video),
         };
         result.unwrap_or(ExitCode::FAILURE)
     }
@@ -87,6 +94,18 @@ pub(super) async fn run(args: RenderArgs) -> Result<RenderOutcome, CliError> {
             source,
             diagnostics,
         ));
+    };
+    let caption_track = match args
+        .subtitle
+        .as_deref()
+        .map(SubtitleImport::load)
+        .transpose()?
+    {
+        Some(SubtitleImport::Track(track)) => Some(track),
+        Some(SubtitleImport::Rejected(rejected)) => {
+            return Ok(RenderOutcome::rejected_subtitle(rejected));
+        }
+        None => None,
     };
 
     validate_presentation(&presentation)?;
@@ -109,6 +128,7 @@ pub(super) async fn run(args: RenderArgs) -> Result<RenderOutcome, CliError> {
             diagnostics,
         ));
     };
+    let timeline = compiler::import_captions(timeline, caption_track)?;
 
     let bundle = PresentationBundler::new(executables.bundler)
         .bundle(&presentation)
@@ -120,9 +140,11 @@ pub(super) async fn run(args: RenderArgs) -> Result<RenderOutcome, CliError> {
         .render_partitioned(&partitions, units, &output)
         .await?;
     Ok(RenderOutcome::Completed {
-        source_path: args.screenplay,
-        source,
-        diagnostics,
+        screenplay: AuthoredReport {
+            path: args.screenplay,
+            source,
+            diagnostics,
+        },
         video,
     })
 }
@@ -204,14 +226,13 @@ fn render_executor(browser: PathBuf, ffmpeg: PathBuf) -> RenderExecutor {
     RenderExecutor::new(browser, execution::browser_limits(), ffmpeg)
 }
 
-fn write_completed(
-    source_path: &Path,
-    source: &str,
-    diagnostics: &[Diagnostic],
-    video: &EncodedVideo,
-) -> io::Result<ExitCode> {
+fn write_report(writer: &mut impl Write, report: &AuthoredReport) -> io::Result<()> {
+    diagnostic::write_all(writer, &report.path, &report.source, &report.diagnostics)
+}
+
+fn write_completed(report: &AuthoredReport, video: &EncodedVideo) -> io::Result<ExitCode> {
     let mut stderr = io::stderr().lock();
-    diagnostic::write_all(&mut stderr, source_path, source, diagnostics)?;
+    write_report(&mut stderr, report)?;
     drop(stderr);
 
     let mut stdout = io::stdout().lock();

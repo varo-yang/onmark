@@ -1,6 +1,6 @@
 [package]
 name = "onmark-media"
-description = "Bounded media probing and normalized metadata for Onmark"
+description = "Bounded media probing and subtitle normalization for Onmark"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

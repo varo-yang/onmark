@@ -21,13 +21,13 @@ general audio plus imported SRT, WebVTT, and ASS subtitles, proved first through
 the existing local whole-film and partitioned pipelines.
 
 The completed foundation includes the pure compiler and versioned wire types in
-`onmark-core`; bounded ffprobe normalization in `onmark-media`; deterministic
-video and overlay presentation in `@onmark/runtime`; semantic DOM bindings in
-`@onmark/authoring`; immutable presentation artifacts in `@onmark/bundler`; the
-typed Chromium-to-FFmpeg executor in `onmark-render`; and the `onmark-cli`
-composition root. A production deployment workflow and infrastructure definition
-remain deliberately absent; there is still no queue, lease system, scheduler, or
-coordinator.
+`onmark-core`; bounded ffprobe and initial SubRip/WebVTT/ASS normalization in
+`onmark-media`; deterministic video and overlay presentation in
+`@onmark/runtime`; semantic DOM bindings in `@onmark/authoring`; immutable
+presentation artifacts in `@onmark/bundler`; the typed Chromium-to-FFmpeg
+executor in `onmark-render`; and the `onmark-cli` composition root. A production
+deployment workflow and infrastructure definition remain deliberately absent;
+there is still no queue, lease system, scheduler, or coordinator.
 
 ## Render
 
@@ -38,7 +38,12 @@ a no-clobber `renders/<name>.mp4` by default:
 onmark render film.onmark
 onmark render film.onmark --presentation browser.ts --output review.mp4
 onmark render film.onmark --fps 30000/1001 --width 1920 --height 1080
+onmark render film.onmark --subtitle captions.vtt
 ```
+
+`--subtitle` imports strict UTF-8 `.srt`, `.vtt`, or `.ass` files without adding
+external-format syntax to the screenplay. Invalid files produce diagnostics
+against their own path and byte spans before browser or media processes start.
 
 Rendering requires `onmark-bundle` and its Node.js runtime, Chrome for Testing's
 `chrome-headless-shell`, `ffmpeg`, and `ffprobe` to be installed. The renderer

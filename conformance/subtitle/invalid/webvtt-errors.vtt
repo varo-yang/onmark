@@ -1,0 +1,16 @@
+WEBVTT
+
+STYLE
+::cue { color: red; }
+
+00:00.000 --> 00:01.000 line:0
+Positioned
+
+00:00.500 --> 00:00.500
+Zero
+
+00:xx.000 --> 00:02.000
+Bad clock
+
+00:02.000 --> 00:03.000
+<c.red>Styled</c>

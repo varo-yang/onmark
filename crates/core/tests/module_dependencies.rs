@@ -8,7 +8,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use syn::visit::{self, Visit};
-use syn::{ItemUse, UseTree};
+use syn::{ItemMod, ItemUse, UseTree};
 
 #[test]
 fn core_module_dependencies_follow_the_architecture_dag() {
@@ -27,6 +27,7 @@ fn core_module_dependencies_follow_the_architecture_dag() {
             owner,
             file: &file,
             violations: &mut violations,
+            inline_depth: 0,
         };
 
         visitor.visit_file(&syntax);
@@ -53,19 +54,23 @@ fn dependency_resolution_distinguishes_allowed_and_forbidden_siblings() {
         String::from("timeline"),
     ];
 
-    let syntax_to_diagnostics =
-        resolve_owner(&syntax_module, &diagnostics).expect("the explicit crate path has an owner");
-    let syntax_to_model =
-        resolve_owner(&syntax_module, &model).expect("the explicit crate path has an owner");
-    let compiler_to_timeline = resolve_owner(&compiler_module, &timeline)
-        .expect("the explicit ancestor path has an owner");
-    let graph_to_timeline = resolve_owner(&render_graph_module, &graph_timeline)
+    let syntax_to_diagnostics = resolve_owner(&syntax_module, &diagnostics, 0)
         .expect("the explicit crate path has an owner");
+    let syntax_to_model =
+        resolve_owner(&syntax_module, &model, 0).expect("the explicit crate path has an owner");
+    let compiler_to_timeline = resolve_owner(&compiler_module, &timeline, 0)
+        .expect("the explicit ancestor path has an owner");
+    let graph_to_timeline = resolve_owner(&render_graph_module, &graph_timeline, 0)
+        .expect("the explicit crate path has an owner");
+    let graph_inline_test = vec![String::from("super"), String::from("RenderGraph")];
+    let graph_to_itself = resolve_owner(&render_graph_module, &graph_inline_test, 1)
+        .expect("the inline test path retains its file owner");
 
     assert!(!dependency_allowed("syntax", syntax_to_diagnostics));
     assert!(dependency_allowed("syntax", syntax_to_model));
     assert!(dependency_allowed("compiler", compiler_to_timeline));
     assert!(dependency_allowed("render_graph", graph_to_timeline));
+    assert_eq!(graph_to_itself, "render_graph");
 }
 
 struct DependencyVisitor<'a> {
@@ -73,6 +78,7 @@ struct DependencyVisitor<'a> {
     owner: &'a str,
     file: &'a Path,
     violations: &'a mut BTreeSet<String>,
+    inline_depth: usize,
 }
 
 impl<'ast> Visit<'ast> for DependencyVisitor<'_> {
@@ -93,11 +99,18 @@ impl<'ast> Visit<'ast> for DependencyVisitor<'_> {
 
         visit::visit_item_use(self, item);
     }
+
+    fn visit_item_mod(&mut self, item: &'ast ItemMod) {
+        let is_inline = item.content.is_some();
+        self.inline_depth += usize::from(is_inline);
+        visit::visit_item_mod(self, item);
+        self.inline_depth -= usize::from(is_inline);
+    }
 }
 
 impl DependencyVisitor<'_> {
     fn check_path(&mut self, path: &[String]) {
-        let Some(target) = resolve_owner(self.module, path) else {
+        let Some(target) = resolve_owner(self.module, path, self.inline_depth) else {
             return;
         };
 
@@ -190,7 +203,11 @@ fn use_paths(prefix: Vec<String>, tree: &UseTree) -> Vec<Vec<String>> {
     }
 }
 
-fn resolve_owner<'a>(module: &'a [String], path: &'a [String]) -> Option<&'a str> {
+fn resolve_owner<'a>(
+    module: &'a [String],
+    path: &'a [String],
+    inline_depth: usize,
+) -> Option<&'a str> {
     let first = path.first()?.as_str();
 
     if first == "crate" {
@@ -209,7 +226,10 @@ fn resolve_owner<'a>(module: &'a [String], path: &'a [String]) -> Option<&'a str
         .iter()
         .take_while(|segment| segment.as_str() == "super")
         .count();
-    let retained = module.len().saturating_sub(parent_count);
+    let retained = module
+        .len()
+        .saturating_add(inline_depth)
+        .saturating_sub(parent_count);
 
     if retained > 0 {
         module.first().map(String::as_str)

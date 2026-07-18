@@ -61,12 +61,14 @@ test("maps every overlay role to its stable semantic class", () => {
 
   bindings.bindOverlay({ ...OVERLAY, kind: "title" }, 0);
   bindings.bindOverlay({ ...OVERLAY, kind: "callToAction" }, 1);
+  bindings.bindOverlay({ ...OVERLAY, kind: "caption" }, 2);
 
   assert.deepEqual(
     browser.nodes.map(({ className }) => className),
     [
       `${PRESENTATION_CLASSES.overlay} ${PRESENTATION_CLASSES.title}`,
       `${PRESENTATION_CLASSES.overlay} ${PRESENTATION_CLASSES.callToAction}`,
+      `${PRESENTATION_CLASSES.overlay} ${PRESENTATION_CLASSES.caption}`,
     ],
   );
 });

@@ -133,7 +133,7 @@ impl Ffprobe {
                 OsStr::new("-show_entries"),
                 OsStr::new(
                     "format=duration:stream=codec_type,codec_name,pix_fmt,duration,\
-                     avg_frame_rate,r_frame_rate,nb_frames",
+                     avg_frame_rate,r_frame_rate,nb_frames,sample_rate,channels",
                 ),
                 OsStr::new("-of"),
                 OsStr::new("json"),

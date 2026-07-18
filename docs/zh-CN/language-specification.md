@@ -273,6 +273,9 @@ ONM-TIME-004 标题“立即购买”从第 13 秒开始，但所属 shot 在第
 | `ONM-ATTR-002`   | 元素缺少必需属性                              |
 | `ONM-ATTR-003`   | 属性值非法，包括格式错误的 cue ID             |
 | `ONM-ATTR-004`   | 两个属性定义了互相冲突的规则                  |
+| `ONM-CAPTION-001` | 导入的字幕文件违反所选格式的语法             |
+| `ONM-CAPTION-002` | 导入的字幕文件使用了尚未支持的呈现语义       |
+| `ONM-CAPTION-003` | 导入的字幕文件超过了有界摄取限制             |
 
 `ONM-REF-002`
 的 severity 是 warning；其余首批 bind、resolve 与 timing 诊断均为 error。

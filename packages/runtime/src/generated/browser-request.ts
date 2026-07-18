@@ -39,7 +39,7 @@ export type WireFrame = number;
 /**
  * Closed overlay roles understood by the Gate-one presentation.
  */
-export type BrowserOverlayKind = "title" | "callToAction";
+export type BrowserOverlayKind = "title" | "callToAction" | "caption";
 /**
  * Correlation identity shared by one request and its response events.
  */

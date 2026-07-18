@@ -1,14 +1,19 @@
 //! Final audio mix over an already continuous visual encode.
 //!
-//! Timeline IR supplies exact frame starts. `FFmpeg` receives rational delay
-//! expressions so this I/O boundary never rounds authored timing through `f64`.
+//! Timeline IR supplies exact frame starts. Rust projects them once onto the
+//! fixed output sample grid, so `FFmpeg` receives integer lengths and delays.
 
 use std::fmt::Write as _;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use onmark_core::model::FrameIndex;
+use onmark_core::model::{
+    AudioChannelLayout, AudioGain, AudioSampleConversionOverflow, AudioSampleCount,
+    AudioSampleRate, FrameCount, FrameIndex, FrameRate, Rounding,
+};
 use onmark_core::protocol::WireFrameRate;
+use tempfile::NamedTempFile;
 use tokio::process::{Child, Command};
 use tokio::runtime::Handle;
 use tokio::time::timeout;
@@ -19,18 +24,94 @@ use super::process::{CapturedStderr, capture_stderr};
 use super::session::{EncodedVideo, with_stderr};
 
 const CLEANUP_TIMEOUT: Duration = Duration::from_secs(5);
+const OUTPUT_SAMPLE_RATE_HZ: u32 = 48_000;
 
-/// One materialized voice-over input for an `FFmpeg` mix operation.
+/// One materialized Timeline audio placement for an `FFmpeg` mix operation.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct AudioInput {
+    mix_order: usize,
     source: PathBuf,
     start: FrameIndex,
+    duration: FrameCount,
+    samples: AudioSampleCount,
+    channel_layout: AudioChannelLayout,
+    gain: AudioGain,
 }
 
 impl AudioInput {
-    pub(crate) fn new(source: PathBuf, start: FrameIndex) -> Self {
-        Self { source, start }
+    pub(crate) fn new(
+        mix_order: usize,
+        source: PathBuf,
+        start: FrameIndex,
+        duration: FrameCount,
+        samples: AudioSampleCount,
+        channel_layout: AudioChannelLayout,
+        gain: AudioGain,
+    ) -> Self {
+        Self {
+            mix_order,
+            source,
+            start,
+            duration,
+            samples,
+            channel_layout,
+            gain,
+        }
     }
+
+    pub(crate) const fn mix_order(&self) -> usize {
+        self.mix_order
+    }
+
+    fn write_filter(&self, output: &mut String, index: usize, placement: AudioPlacement) {
+        let stream = index + 1;
+        write!(
+            output,
+            "[{stream}:a]atrim=end_sample={},asetpts=N/SR/TB,",
+            self.samples.get(),
+        )
+        .expect("writing into a String cannot fail");
+        write!(
+            output,
+            "aresample={OUTPUT_SAMPLE_RATE_HZ},{},",
+            channel_filter(self.channel_layout),
+        )
+        .expect("writing into a String cannot fail");
+        write!(
+            output,
+            "aformat=sample_fmts=fltp:sample_rates={OUTPUT_SAMPLE_RATE_HZ}:channel_layouts=stereo,\
+             atrim=end_sample={},asetpts=N/SR/TB,",
+            placement.samples.get(),
+        )
+        .expect("writing into a String cannot fail");
+        write!(
+            output,
+            "adelay=delays={}S:all=1,volume={}/{}[audio{index}];",
+            placement.delay.get(),
+            self.gain.numerator(),
+            self.gain.denominator(),
+        )
+        .expect("writing into a String cannot fail");
+    }
+}
+
+fn channel_filter(layout: AudioChannelLayout) -> &'static str {
+    match layout {
+        AudioChannelLayout::Mono => "pan=stereo|c0=c0|c1=c0",
+        AudioChannelLayout::Stereo => "anull",
+    }
+}
+
+#[derive(Clone, Copy)]
+struct AudioPlacement {
+    delay: AudioSampleCount,
+    samples: AudioSampleCount,
+}
+
+/// `FFmpeg` must retain access to its private filter script until process exit.
+struct RunningAudioMix {
+    child: Child,
+    _filter_script: NamedTempFile,
 }
 
 pub(super) async fn mix_audio(
@@ -49,6 +130,9 @@ pub(super) async fn mix_audio(
         ));
     }
 
+    let frame_rate = model_frame_rate(frame_rate);
+    let output_samples = output_samples(visual.frames(), frame_rate, &output)?;
+
     let runtime = Handle::try_current().map_err(|_| {
         EncodeError::new(
             EncodeErrorKind::Spawn,
@@ -56,8 +140,15 @@ pub(super) async fn mix_audio(
             "FFmpeg audio mixing requires a Tokio runtime",
         )
     })?;
-    let mut child = spawn_audio_mix(executable, visual.path(), &inputs, frame_rate, &output)?;
-    let Some(stderr) = child.stderr.take() else {
+    let mut process = spawn_audio_mix(
+        executable,
+        visual.path(),
+        &inputs,
+        frame_rate,
+        output_samples,
+        &output,
+    )?;
+    let Some(stderr) = process.child.stderr.take() else {
         discard_partial_output(&output);
         return Err(EncodeError::new(
             EncodeErrorKind::Spawn,
@@ -66,7 +157,8 @@ pub(super) async fn mix_audio(
         ));
     };
     let stderr = runtime.spawn(capture_stderr(stderr, limits.max_stderr_bytes()));
-    let status = match wait_for_mix(&mut child, limits.inactivity_timeout(), &output).await {
+    let status = match wait_for_mix(&mut process.child, limits.inactivity_timeout(), &output).await
+    {
         Ok(status) => status,
         Err(error) => {
             let _ = finish_stderr(stderr, &output).await;
@@ -98,10 +190,18 @@ fn spawn_audio_mix(
     executable: &Path,
     visual: &Path,
     inputs: &[AudioInput],
-    frame_rate: WireFrameRate,
+    frame_rate: FrameRate,
+    output_samples: AudioSampleCount,
     output: &Path,
-) -> Result<Child, EncodeError> {
-    let filter = audio_filter(inputs, frame_rate);
+) -> Result<RunningAudioMix, EncodeError> {
+    let filter = audio_filter(inputs, frame_rate, output_samples).map_err(|source| {
+        EncodeError::new(
+            EncodeErrorKind::InputLimit,
+            output,
+            format!("audio placement exceeds its sample domain: {source}"),
+        )
+    })?;
+    let filter = write_filter_script(&filter, output)?;
     let mut command = Command::new(executable);
     command.args(["-nostdin", "-loglevel", "error", "-i"]);
     command.arg(visual);
@@ -109,24 +209,16 @@ fn spawn_audio_mix(
         command.args(["-i"]);
         command.arg(&input.source);
     }
-    command
+    let child = command
+        .args(["-filter_complex_script"])
+        .arg(filter.path())
         .args([
-            "-filter_complex",
-            &filter,
-            "-map",
-            "0:v:0",
-            "-map",
-            "[audio]",
-            "-c:v",
-            "copy",
-            "-c:a",
-            "aac",
-            "-movflags",
-            "+faststart",
-            "-f",
-            "mp4",
-            "-n",
+            "-map", "0:v:0", "-map", "[audio]", "-c:v", "copy", "-c:a", "aac",
         ])
+        .arg("-ar")
+        .arg(OUTPUT_SAMPLE_RATE_HZ.to_string())
+        .args(["-ac", "2"])
+        .args(["-shortest", "-movflags", "+faststart", "-f", "mp4", "-n"])
         .arg(output)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
@@ -140,42 +232,107 @@ fn spawn_audio_mix(
                 "failed to start FFmpeg audio mixing",
                 source,
             )
-        })
+        })?;
+
+    Ok(RunningAudioMix {
+        child,
+        _filter_script: filter,
+    })
 }
 
-fn audio_filter(inputs: &[AudioInput], frame_rate: WireFrameRate) -> String {
+fn write_filter_script(filter: &str, output: &Path) -> Result<NamedTempFile, EncodeError> {
+    let directory = output.parent().unwrap_or_else(|| Path::new("."));
+    let mut script = tempfile::Builder::new()
+        .prefix(".onmark-audio-")
+        .suffix(".ffscript")
+        .tempfile_in(directory)
+        .map_err(|source| {
+            EncodeError::io(
+                EncodeErrorKind::InputWrite,
+                output,
+                "failed to create the private FFmpeg audio filter script",
+                source,
+            )
+        })?;
+    script.write_all(filter.as_bytes()).map_err(|source| {
+        EncodeError::io(
+            EncodeErrorKind::InputWrite,
+            output,
+            "failed to write the private FFmpeg audio filter script",
+            source,
+        )
+    })?;
+    script.flush().map_err(|source| {
+        EncodeError::io(
+            EncodeErrorKind::InputWrite,
+            output,
+            "failed to flush the private FFmpeg audio filter script",
+            source,
+        )
+    })?;
+    Ok(script)
+}
+
+fn audio_filter(
+    inputs: &[AudioInput],
+    frame_rate: FrameRate,
+    output_samples: AudioSampleCount,
+) -> Result<String, AudioSampleConversionOverflow> {
     let mut filter = String::new();
     for (index, input) in inputs.iter().enumerate() {
-        let stream = index + 1;
-        let delay = frame_delay_expression(input.start, frame_rate);
-        write!(
-            filter,
-            "[{stream}:a]asetpts=PTS-STARTPTS+{delay}/TB[audio{index}];"
-        )
-        .expect("writing into a String cannot fail");
+        let delay = output_sample_rate().samples_for(
+            FrameCount::new(input.start.get()),
+            frame_rate,
+            Rounding::Ceil,
+        )?;
+        let samples =
+            output_sample_rate().samples_for(input.duration, frame_rate, Rounding::Ceil)?;
+        input.write_filter(&mut filter, index, AudioPlacement { delay, samples });
     }
     for index in 0..inputs.len() {
         write!(filter, "[audio{index}]").expect("writing into a String cannot fail");
     }
     write!(
         filter,
-        "amix=inputs={}:duration=longest:dropout_transition=0[audio]",
-        inputs.len()
+        "amix=inputs={}:duration=longest:dropout_transition=0:normalize=0[mixed];",
+        inputs.len(),
     )
     .expect("writing into a String cannot fail");
-    filter
+    write!(
+        filter,
+        "[mixed]aresample={OUTPUT_SAMPLE_RATE_HZ},atrim=end_sample={},\
+         apad=whole_len={}[audio]",
+        output_samples.get(),
+        output_samples.get(),
+    )
+    .expect("writing into a String cannot fail");
+    Ok(filter)
 }
 
-fn frame_delay_expression(start: FrameIndex, frame_rate: WireFrameRate) -> String {
-    // The filter expression stays rational until FFmpeg maps it into the
-    // selected audio stream time base. A decimal seconds projection would
-    // discard the exact frame boundary owned by Timeline IR.
-    format!(
-        "({}*{})/{}",
-        start.get(),
-        frame_rate.denominator(),
-        frame_rate.numerator()
-    )
+fn output_samples(
+    frames: u64,
+    frame_rate: FrameRate,
+    output: &Path,
+) -> Result<AudioSampleCount, EncodeError> {
+    output_sample_rate()
+        .samples_for(FrameCount::new(frames), frame_rate, Rounding::Ceil)
+        .map_err(|source| {
+            EncodeError::new(
+                EncodeErrorKind::InputLimit,
+                output,
+                format!("audio output length exceeds its sample domain: {source}"),
+            )
+        })
+}
+
+fn output_sample_rate() -> AudioSampleRate {
+    AudioSampleRate::new(OUTPUT_SAMPLE_RATE_HZ)
+        .expect("the fixed output audio sample rate is positive")
+}
+
+fn model_frame_rate(frame_rate: WireFrameRate) -> FrameRate {
+    FrameRate::new(frame_rate.numerator(), frame_rate.denominator())
+        .expect("WireFrameRate retains one validated positive frame rate")
 }
 
 async fn wait_for_mix(
@@ -240,32 +397,91 @@ fn discard_partial_output(output: &Path) {
 
 #[cfg(test)]
 mod tests {
-    use onmark_core::model::FrameRate;
-    use onmark_core::protocol::WireFrameRate;
-
-    use super::{AudioInput, audio_filter, frame_delay_expression};
+    use super::{AudioInput, audio_filter, output_samples};
+    use onmark_core::model::{
+        AudioChannelLayout, AudioGain, AudioSampleCount, FrameCount, FrameIndex, FrameRate,
+    };
 
     #[test]
-    fn projects_frame_delays_as_rational_filter_expressions() {
-        let rate = WireFrameRate::from(FrameRate::new(30_000, 1_001).expect("rate is valid"));
+    fn mixes_tracks_in_authored_order_with_integer_sample_delays() {
+        let rate = FrameRate::new(30, 1).expect("rate is valid");
+        let output_samples = AudioSampleCount::new(96_000);
+        let inputs = [
+            AudioInput::new(
+                0,
+                "first.m4a".into(),
+                FrameIndex::new(0),
+                FrameCount::new(30),
+                AudioSampleCount::new(48_000),
+                AudioChannelLayout::Stereo,
+                AudioGain::UNITY,
+            ),
+            AudioInput::new(
+                1,
+                "second.m4a".into(),
+                FrameIndex::new(15),
+                FrameCount::new(15),
+                AudioSampleCount::new(24_000),
+                AudioChannelLayout::Mono,
+                AudioGain::new(1, 2).expect("one half is a valid gain"),
+            ),
+        ];
 
         assert_eq!(
-            frame_delay_expression(onmark_core::model::FrameIndex::new(15), rate),
-            "(15*1001)/30000"
+            audio_filter(&inputs, rate, output_samples)
+                .expect("the fixture placements fit the sample grid"),
+            concat!(
+                "[1:a]atrim=end_sample=48000,asetpts=N/SR/TB,",
+                "aresample=48000,anull,",
+                "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,",
+                "atrim=end_sample=48000,asetpts=N/SR/TB,",
+                "adelay=delays=0S:all=1,volume=1/1[audio0];",
+                "[2:a]atrim=end_sample=24000,asetpts=N/SR/TB,",
+                "aresample=48000,pan=stereo|c0=c0|c1=c0,",
+                "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,",
+                "atrim=end_sample=24000,asetpts=N/SR/TB,",
+                "adelay=delays=24000S:all=1,volume=1/2[audio1];",
+                "[audio0][audio1]",
+                "amix=inputs=2:duration=longest:dropout_transition=0:normalize=0[mixed];",
+                "[mixed]aresample=48000,atrim=end_sample=96000,",
+                "apad=whole_len=96000[audio]",
+            ),
         );
     }
 
     #[test]
-    fn mixes_tracks_in_authored_order() {
-        let rate = WireFrameRate::from(FrameRate::new(30, 1).expect("rate is valid"));
-        let inputs = [
-            AudioInput::new("first.m4a".into(), onmark_core::model::FrameIndex::new(0)),
-            AudioInput::new("second.m4a".into(), onmark_core::model::FrameIndex::new(15)),
-        ];
+    fn trims_again_on_the_output_grid_after_resampling() {
+        let rate = FrameRate::new(30_000, 1_001).expect("rate is valid");
+        let input = AudioInput::new(
+            0,
+            "voice-44k.m4a".into(),
+            FrameIndex::ZERO,
+            FrameCount::new(1),
+            AudioSampleCount::new(1_472),
+            AudioChannelLayout::Stereo,
+            AudioGain::UNITY,
+        );
+
+        let filter = audio_filter(&[input], rate, AudioSampleCount::new(1_602))
+            .expect("one frame fits both sample grids");
+
+        assert!(filter.contains(
+            "atrim=end_sample=1472,asetpts=N/SR/TB,aresample=48000,anull,\
+             aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,\
+             atrim=end_sample=1602,asetpts=N/SR/TB"
+        ));
+    }
+
+    #[test]
+    fn bounds_the_mix_to_the_visual_frame_count() {
+        let rate = FrameRate::new(30_000, 1_001).expect("rate is valid");
+        let output = std::path::Path::new("output.mp4");
 
         assert_eq!(
-            audio_filter(&inputs, rate),
-            "[1:a]asetpts=PTS-STARTPTS+(0*1)/30/TB[audio0];[2:a]asetpts=PTS-STARTPTS+(15*1)/30/TB[audio1];[audio0][audio1]amix=inputs=2:duration=longest:dropout_transition=0[audio]"
+            output_samples(1, rate, output)
+                .expect("one frame fits the output sample domain")
+                .get(),
+            1_602,
         );
     }
 }

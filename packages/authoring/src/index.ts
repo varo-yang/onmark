@@ -1,4 +1,4 @@
-// Browser DOM bindings for screenplay-authored video and overlay facts.
+// Browser DOM bindings for solved video, overlay, and imported-caption facts.
 // Layout remains presentation-owned; runtime remains the sole timing owner.
 
 import type {
@@ -9,12 +9,13 @@ import type {
   VideoPresentation,
 } from "@onmark/runtime/types";
 
-/** Stable semantic classes emitted by the Gate-one DOM authoring surface. */
+/** Stable semantic classes emitted by the DOM authoring surface. */
 export const PRESENTATION_CLASSES = Object.freeze({
   video: "onmark-video",
   overlay: "onmark-overlay",
   title: "onmark-title",
   callToAction: "onmark-call-to-action",
+  caption: "onmark-caption",
 });
 
 /** Resolves one immutable video placement to its materialized browser source. */
@@ -97,5 +98,7 @@ function overlayClass(kind: RuntimeOverlay["kind"]): string {
       return PRESENTATION_CLASSES.title;
     case "callToAction":
       return PRESENTATION_CLASSES.callToAction;
+    case "caption":
+      return PRESENTATION_CLASSES.caption;
   }
 }

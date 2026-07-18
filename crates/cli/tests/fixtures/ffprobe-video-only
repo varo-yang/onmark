@@ -1,6 +1,6 @@
 #!/bin/sh
 
-entries='format=duration:stream=codec_type,codec_name,pix_fmt,duration,avg_frame_rate,r_frame_rate,nb_frames'
+entries='format=duration:stream=codec_type,codec_name,pix_fmt,duration,avg_frame_rate,r_frame_rate,nb_frames,sample_rate,channels'
 
 if [ "$#" -ne 8 ] || \
    [ "$1" != "-v" ] || [ "$2" != "error" ] || \

@@ -128,7 +128,7 @@ interface RecordedVideo {
 
 interface RecordedOverlay {
   readonly index: number;
-  readonly kind: "callToAction" | "title";
+  readonly kind: "callToAction" | "caption" | "title";
   readonly text: string;
   disposed: boolean;
   visible: boolean;

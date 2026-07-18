@@ -11,13 +11,16 @@ use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::model::{ElementKind, FrameIndex, FrameInterval, FrameRate, FrozenAssetId};
-use crate::timeline::{TimelineIr, TimelineOverlay, TimelineText, TimelineVersion, TimelineVideo};
+use crate::timeline::{
+    TimelineCaption, TimelineIr, TimelineOverlay, TimelineText, TimelineVersion, TimelineVideo,
+};
 
 /// Largest integer represented exactly by every JavaScript implementation.
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 const MAX_BROWSER_VIDEOS: usize = 10_000;
 const MAX_BROWSER_OVERLAYS: usize = 10_000;
 const MAX_BROWSER_OVERLAY_TEXT_CHARACTERS: usize = 65_536;
+const MAX_BROWSER_OVERLAY_TEXT_BYTES: usize = 1 << 20;
 
 /// Timeline facts consumed by the Gate-one browser clock and presentation.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -160,6 +163,9 @@ impl BrowserPlan {
         if wire.overlays.len() > MAX_BROWSER_OVERLAYS {
             return Err(InvalidBrowserPlan::TooManyOverlays);
         }
+        if overlay_text_bytes(&wire.overlays) > MAX_BROWSER_OVERLAY_TEXT_BYTES {
+            return Err(InvalidBrowserPlan::OverlayTextBudget);
+        }
         if !wire.evaluation.contains_interval(wire.output) {
             return Err(InvalidBrowserPlan::OutputOutsideEvaluation);
         }
@@ -231,6 +237,7 @@ fn project_overlays(
     evaluation: FrameInterval,
 ) -> Result<Vec<BrowserOverlay>, InvalidBrowserPlan> {
     let mut overlays = Vec::new();
+    let mut text_bytes = 0_usize;
 
     for overlay in timeline.overlays() {
         let interval = overlay.timing().interval();
@@ -240,13 +247,45 @@ fn project_overlays(
         if !evaluation.contains_interval(interval) {
             return Err(InvalidBrowserPlan::OverlayCrossesEvaluation);
         }
-        if overlays.len() == MAX_BROWSER_OVERLAYS {
-            return Err(InvalidBrowserPlan::TooManyOverlays);
-        }
-        overlays.push(browser_overlay(overlay)?);
+        push_browser_overlay(&mut overlays, &mut text_bytes, browser_overlay(overlay)?)?;
+    }
+    for caption in timeline.captions() {
+        let Some(interval) = intersection(caption.interval(), evaluation) else {
+            continue;
+        };
+        push_browser_overlay(
+            &mut overlays,
+            &mut text_bytes,
+            browser_caption(caption, interval)?,
+        )?;
     }
 
     Ok(overlays)
+}
+
+fn push_browser_overlay(
+    overlays: &mut Vec<BrowserOverlay>,
+    text_bytes: &mut usize,
+    overlay: BrowserOverlay,
+) -> Result<(), InvalidBrowserPlan> {
+    if overlays.len() == MAX_BROWSER_OVERLAYS {
+        return Err(InvalidBrowserPlan::TooManyOverlays);
+    }
+
+    *text_bytes = text_bytes
+        .checked_add(overlay.text.len())
+        .filter(|bytes| *bytes <= MAX_BROWSER_OVERLAY_TEXT_BYTES)
+        .ok_or(InvalidBrowserPlan::OverlayTextBudget)?;
+    overlays.push(overlay);
+    Ok(())
+}
+
+fn intersection(left: FrameInterval, right: FrameInterval) -> Option<FrameInterval> {
+    let start = left.start().max(right.start());
+    let end = left.end().min(right.end());
+    (start < end).then(|| {
+        FrameInterval::new(start, end).expect("intersecting ordered intervals remain ordered")
+    })
 }
 
 fn interval_boundaries(interval: WireInterval) -> [WireFrame; 2] {
@@ -350,6 +389,8 @@ pub enum BrowserOverlayKind {
     Title,
     /// Authored call-to-action content.
     CallToAction,
+    /// Imported caption text.
+    Caption,
 }
 
 /// One solved overlay placement consumed by the browser presentation.
@@ -455,6 +496,29 @@ fn browser_overlay(overlay: &TimelineOverlay) -> Result<BrowserOverlay, InvalidB
     })
 }
 
+fn browser_caption(
+    caption: &TimelineCaption,
+    interval: FrameInterval,
+) -> Result<BrowserOverlay, InvalidBrowserPlan> {
+    if text_exceeds_limit(caption.text()) {
+        return Err(InvalidBrowserPlan::CaptionTextTooLong);
+    }
+
+    Ok(BrowserOverlay {
+        kind: BrowserOverlayKind::Caption,
+        text: caption.text().into(),
+        interval: WireInterval::try_from(interval)?,
+    })
+}
+
+fn overlay_text_bytes(overlays: &[BrowserOverlay]) -> usize {
+    overlays
+        .iter()
+        .map(|overlay| overlay.text.len())
+        .try_fold(0_usize, usize::checked_add)
+        .unwrap_or(usize::MAX)
+}
+
 fn text_exceeds_limit(text: &str) -> bool {
     text.chars()
         .take(MAX_BROWSER_OVERLAY_TEXT_CHARACTERS + 1)
@@ -490,6 +554,10 @@ pub enum InvalidBrowserPlan {
     InvalidOverlayKind(ElementKind),
     /// One overlay inscription exceeds the V1 character budget.
     OverlayTextTooLong(ElementKind),
+    /// One imported caption exceeds the per-placement text budget.
+    CaptionTextTooLong,
+    /// Combined browser text would exceed the bounded CDP request budget.
+    OverlayTextBudget,
     /// One video lacks the source rate proved during render admission.
     MissingSourceFrameRate(FrozenAssetId),
     /// A frame lies outside JavaScript's exact integer range.
@@ -535,6 +603,12 @@ impl fmt::Display for InvalidBrowserPlan {
                     "browser {kind} text exceeds the V1 character limit"
                 )
             }
+            Self::CaptionTextTooLong => {
+                formatter.write_str("browser caption text exceeds the V1 character limit")
+            }
+            Self::OverlayTextBudget => {
+                formatter.write_str("browser overlay text exceeds the request byte budget")
+            }
             Self::MissingSourceFrameRate(id) => {
                 write!(formatter, "source frame rate is missing for video {id}")
             }
@@ -559,6 +633,8 @@ impl Error for InvalidBrowserPlan {
             | Self::TooManyOverlays
             | Self::InvalidOverlayKind(_)
             | Self::OverlayTextTooLong(_)
+            | Self::CaptionTextTooLong
+            | Self::OverlayTextBudget
             | Self::MissingSourceFrameRate(_) => None,
         }
     }
@@ -765,13 +841,14 @@ mod tests {
         SourceSpan, Timebase,
     };
     use crate::timeline::{
-        TimelineContent, TimelineElement, TimelineIr, TimelineOverlay, TimelineScene, TimelineShot,
-        TimelineText, TimelineTiming, TimelineVideo, TimingReason,
+        TimelineCaption, TimelineContent, TimelineElement, TimelineIr, TimelineOverlay,
+        TimelineScene, TimelineShot, TimelineText, TimelineTiming, TimelineVideo, TimingReason,
     };
 
     use super::{
-        BrowserPlan, InvalidBrowserPlan, InvalidWireFrame, MAX_BROWSER_OVERLAY_TEXT_CHARACTERS,
-        MAX_BROWSER_OVERLAYS, MAX_BROWSER_VIDEOS, MAX_SAFE_INTEGER, WireFrame,
+        BrowserOverlayKind, BrowserPlan, InvalidBrowserPlan, InvalidWireFrame,
+        MAX_BROWSER_OVERLAY_TEXT_BYTES, MAX_BROWSER_OVERLAY_TEXT_CHARACTERS, MAX_BROWSER_OVERLAYS,
+        MAX_BROWSER_VIDEOS, MAX_SAFE_INTEGER, WireFrame,
     };
 
     #[test]
@@ -878,6 +955,37 @@ mod tests {
     }
 
     #[test]
+    fn clips_caption_overlays_to_each_unit_evaluation() {
+        let mut timeline = timeline_with_content_in(Vec::new(), interval(0, 4));
+        timeline.replace_captions(vec![caption(interval(1, 3), "Caption")]);
+
+        let plan = BrowserPlan::from_timeline_for_unit(
+            &timeline,
+            &BTreeMap::new(),
+            interval(0, 2),
+            interval(0, 2),
+        )
+        .expect("a crossing caption is clipped without widening evaluation");
+
+        assert_eq!(plan.overlays().len(), 1);
+        assert_eq!(plan.overlays()[0].kind(), BrowserOverlayKind::Caption);
+        assert_eq!(plan.overlays()[0].interval().start().get(), 1);
+        assert_eq!(plan.overlays()[0].interval().end().get(), 2);
+    }
+
+    #[test]
+    fn rejects_combined_overlay_text_outside_the_cdp_budget() {
+        let text = "a".repeat(MAX_BROWSER_OVERLAY_TEXT_BYTES / 17 + 1);
+        let mut timeline = timeline_with_content_in(Vec::new(), interval(0, 1));
+        timeline.replace_captions((0..17).map(|_| caption(interval(0, 1), &text)).collect());
+
+        assert_eq!(
+            BrowserPlan::from_timeline(&timeline, &BTreeMap::new()),
+            Err(InvalidBrowserPlan::OverlayTextBudget),
+        );
+    }
+
+    #[test]
     fn omits_placements_outside_the_unit_evaluation() {
         let asset_id = FrozenAssetId::from_sha256([1; 32]);
         let timeline =
@@ -956,6 +1064,12 @@ mod tests {
         ))
     }
 
+    fn caption(interval: FrameInterval, text: &str) -> TimelineCaption {
+        let span = SourceSpan::new(SourceId::new(1), ByteOffset::ZERO, ByteOffset::ZERO)
+            .expect("equal source bounds form a valid span");
+        TimelineCaption::new(interval, text, span, span)
+    }
+
     fn timeline_with_content(content: Vec<TimelineContent>) -> TimelineIr {
         timeline_with_content_in(content, interval(0, 1))
     }
@@ -985,6 +1099,8 @@ mod tests {
             interval,
             BTreeMap::new(),
             vec![scene],
+            Vec::new(),
+            Vec::new(),
         )
     }
 

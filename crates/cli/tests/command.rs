@@ -40,6 +40,36 @@ fn reports_authored_errors_before_environment_preflight() {
 }
 
 #[test]
+fn reports_subtitle_errors_against_their_own_source_before_preflight() {
+    let directory = tempdir().expect("the fixture directory is available");
+    let screenplay = directory.path().join("film.onmark");
+    let subtitles = directory.path().join("captions.vtt");
+    std::fs::write(
+        &screenplay,
+        "<film><scene><shot duration=\"1s\" /></scene></film>",
+    )
+    .expect("the fixture screenplay is writable");
+    std::fs::write(&subtitles, "WEBVTT\n\n00:01.000 --> 00:00.000\nBad\n")
+        .expect("the fixture subtitle is writable");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_onmark"))
+        .arg("render")
+        .arg(screenplay)
+        .arg("--subtitle")
+        .arg(&subtitles)
+        .env("PATH", "")
+        .output()
+        .expect("the CLI can be started");
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8(output.stderr).expect("diagnostics are UTF-8");
+    assert!(stderr.contains("ONM-CAPTION-001"));
+    assert!(stderr.contains(&subtitles.display().to_string()));
+    assert!(!stderr.contains("executable"));
+}
+
+#[test]
 fn rejects_a_voice_over_source_without_an_audio_track_before_rendering() {
     let directory = tempdir().expect("the fixture directory is available");
     let screenplay = directory.path().join("invalid.onmark");

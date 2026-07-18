@@ -6,7 +6,8 @@
 use std::path::Path;
 
 use onmark_core::model::{
-    AssetMetadata, AudioMetadata, Duration, FrameRate, VideoMetadata, VideoTiming,
+    AssetMetadata, AudioChannelLayout, AudioMetadata, AudioSampleRate, Duration, FrameRate,
+    VideoMetadata, VideoTiming,
 };
 use serde::Deserialize;
 
@@ -29,6 +30,8 @@ struct ProbeStream {
     avg_frame_rate: Option<Box<str>>,
     r_frame_rate: Option<Box<str>>,
     nb_frames: Option<Box<str>>,
+    sample_rate: Option<Box<str>>,
+    channels: Option<u32>,
 }
 
 #[derive(Deserialize)]
@@ -60,29 +63,63 @@ pub(crate) fn parse_metadata(path: &Path, bytes: &[u8]) -> Result<AssetMetadata,
     let video = video_stream
         .map(|stream| parse_video(path, stream, format_duration))
         .transpose()?;
-    let audio_duration = match audio_stream
-        .as_ref()
-        .and_then(|stream| stream.duration.as_deref())
-    {
-        None | Some("N/A") => None,
-        Some(duration) => Some(parse_stream_duration(path, duration)?),
-    };
+    let audio = audio_stream
+        .map(|stream| parse_audio(path, stream, format_duration))
+        .transpose()?;
     let duration = format_duration
-        .or_else(|| longest_duration(video.as_ref().map(VideoMetadata::duration), audio_duration))
+        .or_else(|| {
+            longest_duration(
+                video.as_ref().map(VideoMetadata::duration),
+                audio.as_ref().map(AudioMetadata::duration),
+            )
+        })
         .ok_or_else(|| ProbeError::missing_duration(path))?;
 
-    match (audio_stream, video, audio_duration) {
-        (Some(_), Some(video), audio_duration) => Ok(AssetMetadata::audio_video(
-            duration,
-            AudioMetadata::new(audio_duration.unwrap_or(duration)),
-            video,
+    match (audio, video) {
+        (Some(audio), Some(video)) => Ok(AssetMetadata::audio_video(duration, audio, video)),
+        (Some(audio), None) => Ok(AssetMetadata::audio_only(duration, audio)),
+        (None, Some(video)) => Ok(AssetMetadata::video(duration, video)),
+        (None, None) => Ok(AssetMetadata::without_media_tracks(duration)),
+    }
+}
+
+fn parse_audio(
+    path: &Path,
+    stream: ProbeStream,
+    format_duration: Option<Duration>,
+) -> Result<AudioMetadata, ProbeError> {
+    let duration = match stream.duration.as_deref() {
+        None | Some("N/A") => {
+            format_duration.ok_or_else(|| ProbeError::invalid_audio(path, "missing duration"))?
+        }
+        Some(duration) => parse_audio_duration(path, duration)?,
+    };
+    let sample_rate = required_audio_field(path, "sample rate", stream.sample_rate)?;
+    let sample_rate = sample_rate.parse::<u32>().map_err(|_| {
+        ProbeError::invalid_audio(
+            path,
+            format!("sample rate {sample_rate:?} is not an integer"),
+        )
+    })?;
+    let sample_rate = AudioSampleRate::new(sample_rate)
+        .map_err(|source| ProbeError::invalid_audio(path, source))?;
+    let channel_layout = parse_audio_channels(path, stream.channels)?;
+
+    Ok(AudioMetadata::new(duration, sample_rate, channel_layout))
+}
+
+fn parse_audio_channels(
+    path: &Path,
+    channels: Option<u32>,
+) -> Result<AudioChannelLayout, ProbeError> {
+    match channels {
+        Some(1) => Ok(AudioChannelLayout::Mono),
+        Some(2) => Ok(AudioChannelLayout::Stereo),
+        Some(channels) => Err(ProbeError::invalid_audio(
+            path,
+            format!("{channels}-channel audio is not supported"),
         )),
-        (Some(_), None, audio_duration) => Ok(AssetMetadata::audio_with_stream_duration(
-            duration,
-            audio_duration.unwrap_or(duration),
-        )),
-        (None, Some(video), _) => Ok(AssetMetadata::video(duration, video)),
-        (None, None, _) => Ok(AssetMetadata::without_media_tracks(duration)),
+        None => Err(ProbeError::invalid_audio(path, "missing channel count")),
     }
 }
 
@@ -128,8 +165,9 @@ fn parse_format_duration(path: &Path, duration: &str) -> Result<Duration, ProbeE
         .map_err(|source| ProbeError::invalid_duration(path, duration, source))
 }
 
-fn parse_stream_duration(path: &Path, duration: &str) -> Result<Duration, ProbeError> {
-    parse_format_duration(path, duration)
+fn parse_audio_duration(path: &Path, duration: &str) -> Result<Duration, ProbeError> {
+    Duration::parse(&format!("{duration}s"))
+        .map_err(|source| ProbeError::invalid_audio_duration(path, duration, source))
 }
 
 fn longest_duration(first: Option<Duration>, second: Option<Duration>) -> Option<Duration> {
@@ -214,4 +252,8 @@ fn parse_frame_rate(
 
 fn required_field<T>(path: &Path, name: &str, value: Option<T>) -> Result<T, ProbeError> {
     value.ok_or_else(|| ProbeError::invalid_video(path, format!("video stream has no {name}")))
+}
+
+fn required_audio_field<T>(path: &Path, name: &str, value: Option<T>) -> Result<T, ProbeError> {
+    value.ok_or_else(|| ProbeError::invalid_audio(path, format!("audio stream has no {name}")))
 }

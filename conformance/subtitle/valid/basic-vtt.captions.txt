@@ -1,0 +1,7 @@
+caption-track
+  cue 500000000..2000000000
+    timing 80..103
+    text 104..114 "First\nline"
+  cue 3723250000000..3724500000000
+    timing 116..145
+    text 146..156 "Second cue"

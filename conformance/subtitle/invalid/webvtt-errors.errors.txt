@@ -1,0 +1,5 @@
+unsupported-webvtt-block 8..13
+unsupported-webvtt-cue-settings 37..67
+non-positive-interval 80..103
+invalid-webvtt-timing 110..133
+unsupported-webvtt-cue-markup 169..186

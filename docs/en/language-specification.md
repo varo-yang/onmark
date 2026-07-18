@@ -193,6 +193,9 @@ Initial binding, resolution, and timing diagnostics are:
 | `ONM-ATTR-002`   | an element is missing a required attribute                            |
 | `ONM-ATTR-003`   | an authored attribute value, including a malformed cue ID, is invalid |
 | `ONM-ATTR-004`   | two authored attributes define conflicting rules                      |
+| `ONM-CAPTION-001` | an imported subtitle file violates its selected format grammar       |
+| `ONM-CAPTION-002` | an imported subtitle file uses unsupported presentation semantics    |
+| `ONM-CAPTION-003` | an imported subtitle file exceeds a bounded ingestion limit          |
 
 `ONM-REF-002` is a warning; the other initial binding, resolution, and timing
 diagnostics are errors.

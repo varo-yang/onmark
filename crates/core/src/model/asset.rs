@@ -6,7 +6,7 @@
 use std::error::Error;
 use std::fmt;
 
-use super::{Duration, FrameRate};
+use super::{AudioChannelLayout, AudioSampleRate, Duration, FrameRate};
 
 /// Byte width of the Gate-one SHA-256 asset digest.
 const SHA256_BYTES: usize = 32;
@@ -109,17 +109,23 @@ pub struct AssetMetadata {
 impl AssetMetadata {
     /// Creates metadata for an artifact with an audio stream and no visual stream.
     #[must_use]
-    pub const fn audio(duration: Duration) -> Self {
-        Self::audio_with_stream_duration(duration, duration)
+    pub const fn audio(
+        duration: Duration,
+        sample_rate: AudioSampleRate,
+        channel_layout: AudioChannelLayout,
+    ) -> Self {
+        Self::audio_only(
+            duration,
+            AudioMetadata::new(duration, sample_rate, channel_layout),
+        )
     }
 
-    /// Creates metadata for an audio artifact whose stream has its own exact
-    /// duration.
+    /// Creates metadata for an artifact with one normalized audio stream.
     #[must_use]
-    pub const fn audio_with_stream_duration(duration: Duration, audio_duration: Duration) -> Self {
+    pub const fn audio_only(duration: Duration, audio: AudioMetadata) -> Self {
         Self {
             duration,
-            tracks: MediaTracks::Audio(AudioMetadata::new(audio_duration)),
+            tracks: MediaTracks::Audio(audio),
         }
     }
 
@@ -207,19 +213,41 @@ enum MediaTracks {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct AudioMetadata {
     duration: Duration,
+    sample_rate: AudioSampleRate,
+    channel_layout: AudioChannelLayout,
 }
 
 impl AudioMetadata {
     /// Creates audio metadata from an exact stream duration.
     #[must_use]
-    pub const fn new(duration: Duration) -> Self {
-        Self { duration }
+    pub const fn new(
+        duration: Duration,
+        sample_rate: AudioSampleRate,
+        channel_layout: AudioChannelLayout,
+    ) -> Self {
+        Self {
+            duration,
+            sample_rate,
+            channel_layout,
+        }
     }
 
     /// Returns the exact selected-stream duration.
     #[must_use]
     pub const fn duration(&self) -> Duration {
         self.duration
+    }
+
+    /// Returns the exact selected-stream sample rate.
+    #[must_use]
+    pub const fn sample_rate(&self) -> AudioSampleRate {
+        self.sample_rate
+    }
+
+    /// Returns the normalized source channel layout.
+    #[must_use]
+    pub const fn channel_layout(&self) -> AudioChannelLayout {
+        self.channel_layout
     }
 }
 
@@ -364,7 +392,7 @@ mod tests {
         AssetMetadata, AudioMetadata, FrozenAssetId, InvalidFrozenAssetId, InvalidVideoMetadata,
         VideoMetadata, VideoTiming,
     };
-    use crate::model::{Duration, FrameRate};
+    use crate::model::{AudioChannelLayout, AudioSampleRate, Duration, FrameRate};
 
     #[test]
     fn frozen_identity_has_an_algorithm_named_canonical_spelling() {
@@ -431,11 +459,16 @@ mod tests {
     fn asset_metadata_preserves_closed_track_combinations() {
         let duration = Duration::from_nanos(1);
         let rate = FrameRate::new(30, 1).expect("30 fps is valid");
+        let sample_rate = AudioSampleRate::new(48_000).expect("48 kHz is valid");
         let video = VideoMetadata::new(duration, "h264", "yuv420p", VideoTiming::Constant(rate))
             .expect("the video metadata is valid");
-        let audio = AssetMetadata::audio(duration);
+        let audio = AssetMetadata::audio(duration, sample_rate, AudioChannelLayout::Stereo);
         let video_only = AssetMetadata::video(duration, video.clone());
-        let audio_video = AssetMetadata::audio_video(duration, AudioMetadata::new(duration), video);
+        let audio_video = AssetMetadata::audio_video(
+            duration,
+            AudioMetadata::new(duration, sample_rate, AudioChannelLayout::Stereo),
+            video,
+        );
         let without_tracks = AssetMetadata::without_media_tracks(duration);
 
         assert!(audio.has_audio_stream());
@@ -452,7 +485,11 @@ mod tests {
     fn audio_metadata_preserves_a_stream_duration_distinct_from_the_artifact() {
         let artifact = Duration::from_nanos(2);
         let stream = Duration::from_nanos(1);
-        let metadata = AssetMetadata::audio_with_stream_duration(artifact, stream);
+        let sample_rate = AudioSampleRate::new(48_000).expect("48 kHz is valid");
+        let metadata = AssetMetadata::audio_only(
+            artifact,
+            AudioMetadata::new(stream, sample_rate, AudioChannelLayout::Mono),
+        );
 
         assert_eq!(metadata.duration(), artifact);
         assert_eq!(
@@ -461,6 +498,13 @@ mod tests {
                 .expect("the metadata has an audio stream")
                 .duration(),
             stream,
+        );
+        assert_eq!(
+            metadata
+                .audio_metadata()
+                .expect("the metadata has an audio stream")
+                .sample_rate(),
+            sample_rate,
         );
     }
 }

@@ -85,24 +85,53 @@ Gate one has exactly one whole-film unit. Gate two introduces the Render Graph
 and may derive several units of the same type; it does not replace the executor
 contract.
 
-Gate-one `AudioPlan` contains only solved voice-over placements. Materialization
-copies their frozen bytes beside browser assets without making them browser
-inputs. After Chromium has encoded the visual stream, the executor resets each
-audio input to its origin, applies its exact rational frame delay, mixes the
-tracks, and muxes AAC into the final MP4. Gain, fades, resampling policy, and
-general audio effects remain deferred rather than being implied by this first
-mixing contract. One Gate-one unit retains at most 512 audio tracks, keeping the
-`FFmpeg` argument and filter-graph boundary explicitly bounded.
+The original Gate-one `AudioPlan` established the native mixing boundary with
+solved voice-over placements. Materialization copies frozen audio bytes beside
+browser assets without making them browser inputs. After Chromium has encoded
+the visual stream, the executor mixes the tracks and muxes AAC into the final
+MP4. Every unit and complete assembled sequence retains at most 32 audio tracks,
+keeping the `FFmpeg` process, input-descriptor, and filter-graph boundaries
+explicitly bounded. Gate four extends the facts and sample policy at this same
+boundary rather than creating a second audio engine.
 
 The first Gate-two local assembly keeps its independently materialized units
 alive while their contiguous output frames enter one continuous visual encoder
-in screenplay order. Voice-over placements retain absolute Timeline starts until
+in screenplay order. Audio placements retain absolute Timeline starts until
 final assembly rebases them once to the assembled artifact's output origin and
 mixes them after every unit has captured its output. This avoids treating
 separately AAC-muxed segments as safely concatenable, and also avoids a second
 lossy visual encode. It is deliberately a correctness path, not yet a persistent
 segment-cache format: cached encoded segments require a separate equivalence
 proof before they become an execution artifact.
+
+Gate four retains voice-over as a narrative Timeline node while moving its
+executable asset, interval, gain, and role into the same `TimelineAudio` fact
+used by future music and sound effects. General audio remains a film-level
+collection because a music bed may cross shot and partition boundaries. The
+Render Graph assigns each placement to the one region containing its start;
+that owner materializes the frozen bytes once, while the placement may extend
+beyond the owner's visual output and is mixed only during final assembly.
+
+Audio probing now retains the selected stream's positive integer sample rate
+and normalized mono or stereo channel layout. Other channel counts are rejected
+before FFmpeg can apply an implicit downmix. Mono is duplicated explicitly and
+stereo preserves left/right identity; the fixed mix profile is 48 kHz stereo
+floating-point audio before AAC encoding.
+At unit composition, the exact frame length is projected once onto that sample
+grid with named ceiling semantics: a sample whose timestamp precedes the
+exclusive Timeline end is retained. Each input is trimmed on its source grid,
+then resampled to the fixed 48 kHz mix grid. Rust projects its frame start onto
+that grid with ceiling semantics, so `FFmpeg` receives an integer `adelay`
+sample count rather than evaluating a decimal or floating timing expression.
+The canonical rational linear gain is applied through `volume`, and `amix`
+normalization is disabled so overlapping tracks do not silently rescale it.
+The final AAC path trims or pads the mix to the visual frame count projected
+onto the same grid and lets the visual stream close the container through
+`-shortest`. A partition-owning track therefore cannot lengthen an independently
+rendered unit beyond its visual output.
+The screenplay spelling and its narrower gain policy remain subject to the
+language-admission rule; these facts do not admit an `<audio>` element by
+themselves.
 
 ## End-to-end pipeline
 
@@ -389,14 +418,15 @@ The completed Gate-one milestone contains `onmark-core`, `onmark-media`,
 `onmark-render`, `@onmark/runtime`'s browser session, `@onmark/authoring`'s
 semantic DOM bindings, `@onmark/bundler`'s presentation artifact boundary, and
 the first `onmark-cli` whole-film composition root. Media is a separate crate
-because server-side compile/lint loops need probing without Chromium; this is
-both a distinct dependency budget and a real consumer. Runtime is a separate
-package because it executes inside the browser and is consumed by authoring and
-bundling. Authoring is a separate browser package because user presentations
-consume its public DOM contract independently while runtime must not depend
-upward on author-facing effects; its only product dependency is runtime's
-types-only public surface. Bundler is a separate package because it executes
-under Node, owns the esbuild and filesystem dependency budget, and produces a
+because server-side compile/lint loops need probing and standalone-subtitle
+normalization without Chromium; this is both a distinct dependency budget and a
+real consumer. Runtime is a separate package because it executes inside the
+browser and is consumed by authoring and bundling. Authoring is a separate
+browser package because user presentations consume its public DOM contract
+independently while runtime must not depend upward on author-facing effects;
+its only product dependency is runtime's types-only public surface. Bundler is
+a separate package because it executes under Node, owns the esbuild and
+filesystem dependency budget, and produces a
 presentation directory consumed independently by native rendering. The CLI is a
 distinct release artifact that combines core compilation, media probing, the
 bundler process, and native rendering without moving their implementation
@@ -511,7 +541,9 @@ core-owned `AssetMetadata`; JSON values and third-party error types do not
 define the stable API, while underlying errors remain available through the
 standard error source chain for debugging. Gate-one probing requests bounded
 stream-level facts for every stream: `codec_type` records audio presence and
-selects the first visual stream, while `nb_frames` identifies stills. It
+selects the first visual stream; `sample_rate` and `channels` fix the selected
+audio stream's sample grid and normalized channel layout; and `nb_frames`
+identifies stills. It
 prefers a visual stream's duration and falls back to the container duration
 when ffprobe omits that stream field; a malformed explicit stream duration is
 still rejected rather than hidden by the fallback. It
@@ -519,6 +551,26 @@ classifies a visual stream as constant only when ffprobe's parseable
 `avg_frame_rate` and `r_frame_rate` normalize to the same exact rational rate;
 disagreement or unavailable values are conservatively variable. The one-MiB
 stdout ceiling therefore remains independent of media duration.
+
+Gate four also gives `onmark-media` the standalone-subtitle syntax boundary.
+Its parsers consume caller-owned bytes under explicit input, cue-count, per-cue
+text, and fixed retained-error limits, then return source-located format errors
+or core-owned `CaptionTrack` facts with exact nanosecond intervals. They perform
+no filesystem access, encoding guess, styling interpretation, diagnostic-code
+translation, or browser layout. The initial formats are strict UTF-8 SubRip,
+a lossless plain-text WebVTT subset, and a lossless plain-event ASS subset; all
+accept an optional UTF-8 BOM and LF or CRLF line endings. WebVTT comments and
+cue identifiers carry no rendered facts and may be discarded, while regions,
+style blocks, cue settings, markup, and escapes remain explicit unsupported
+errors. Plain ASS accepts `ScriptType: v4.00+`, safe script metadata, and
+`Format: Start, End, Text`; it converts exact centisecond timing plus `\N` and
+`\h`, while resolution, styles, layout fields, effects, override tags, drawings,
+and other presentation semantics remain explicit unsupported errors. The three
+formats share the same fact boundary and add no production dependency.
+The CLI selects one parser from the authored file extension and translates its
+format-local errors exactly once into `ONM-CAPTION-*` diagnostics before
+presentation validation, media probing, or browser launch. File open and read
+failures remain typed infrastructure errors.
 
 `onmark-render` owns the heavy Chromium and `FFmpeg` dependency budget. It uses
 `chromiumoxide` only as a CDP transport. Onmark launches and reaps headless
@@ -650,8 +702,9 @@ own schema. Before the first external Gate-one release, v1 is refined in place
 so the initial public contract does not preserve experimental fields; after
 publication, an incompatible wire change requires a new protocol version and
 migration fixture. The `BrowserPlan` carries the output frame rate,
-evaluation/output intervals, primary-video placements, and title/call-to-action
-overlays consumed by the production presentation adapter. Video placements
+evaluation/output intervals, primary-video placements, and title,
+call-to-action, or imported-caption overlays consumed by the production
+presentation adapter. Video placements
 identify immutable bytes, an absolute visible interval, and the admitted CFR
 source rate needed to verify decoded-frame selection; overlay placements carry
 only their semantic role, decoded text, and compiler-solved absolute interval.
@@ -665,6 +718,9 @@ them.
 
 Protocol V1 carries at most 10,000 video placements and 10,000 overlay
 placements; one overlay inscription carries at most 65,536 Unicode characters.
+Native projection and Rust wire decoding additionally cap their combined UTF-8
+text at one MiB before CDP serialization. That aggregate process budget is not
+misrepresented as a JSON Schema structural constraint.
 One failure carries at most 4,096 message characters and 256 pending-resource
 descriptions of at most 1,024 characters each; the producer owns their
 deterministic order. The runtime-host property name and these resource limits

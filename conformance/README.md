@@ -4,6 +4,10 @@ Authored `.onmark` inputs are maintained by hand. Expected `.ast.txt`,
 `.linked.txt`, `.resolved.txt`, `.timeline.txt`, and `.diagnostics.txt` files
 are generated golden artifacts and are not wire formats or protocol schemas.
 
+`subtitle/` fixtures exercise standalone subtitle normalization independently
+of screenplay syntax. Their `.captions.txt` and `.errors.txt` files are test
+renderings, not Timeline IR or a public caption wire format.
+
 Files under `protocol/` are different: they are checked-in wire examples and
 therefore part of versioned cross-process contracts. Browser request/response
 examples are maintained through the protocol conformance test. Bundle fixture

@@ -9,16 +9,19 @@ use std::error::Error;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-use onmark_core::model::{FrameIndex, FrameInterval, FrameRate, FrozenAsset, FrozenAssetId};
+use onmark_core::model::{
+    AudioChannelLayout, AudioGain, AudioSampleConversionOverflow, AudioSampleCount, FrameInterval,
+    FrameRate, FrozenAsset, FrozenAssetId, Rounding,
+};
 use onmark_core::protocol::{BrowserPlan, BundleManifest, InvalidBrowserPlan};
 use onmark_core::render_graph::RenderPartition;
-use onmark_core::timeline::{TimelineIr, TimelineVoiceOver};
+use onmark_core::timeline::{TimelineAudio, TimelineIr};
 
 use crate::{
     AdmittedVideo, CaptureEnvironmentId, RenderProfile, UnsupportedVideo, WorkerCaptureRequest,
 };
 
-pub(crate) const MAX_AUDIO_TRACKS: usize = 512;
+pub(crate) const MAX_AUDIO_TRACKS: usize = 32;
 
 /// One frozen artifact at its browser-visible execution location.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -132,31 +135,57 @@ impl AudioPlan {
         Self { tracks: Vec::new() }
     }
 
-    /// Returns tracks in screenplay order.
+    /// Returns tracks in canonical mix order.
     #[must_use]
     pub fn tracks(&self) -> impl ExactSizeIterator<Item = &RenderAudio> {
         self.tracks.iter()
     }
 }
 
-/// One frozen voice-over artifact placed at an absolute Timeline frame.
+/// One frozen audio artifact placed on the absolute Timeline.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RenderAudio {
+    mix_order: usize,
     asset: MaterializedAsset,
-    start: FrameIndex,
+    interval: FrameInterval,
+    gain: AudioGain,
+    samples: AudioSampleCount,
+    channel_layout: AudioChannelLayout,
 }
 
 impl RenderAudio {
-    /// Returns the verified bytes mixed for this voice-over.
+    pub(crate) const fn mix_order(&self) -> usize {
+        self.mix_order
+    }
+
+    /// Returns the verified bytes mixed for this placement.
     #[must_use]
     pub const fn asset(&self) -> &MaterializedAsset {
         &self.asset
     }
 
-    /// Returns the Timeline frame at which the voice-over starts.
+    /// Returns the exact half-open Timeline placement.
     #[must_use]
-    pub const fn start(&self) -> FrameIndex {
-        self.start
+    pub const fn interval(&self) -> FrameInterval {
+        self.interval
+    }
+
+    /// Returns the exact linear amplitude applied at the media boundary.
+    #[must_use]
+    pub const fn gain(&self) -> AudioGain {
+        self.gain
+    }
+
+    /// Returns how many decoded source samples belong to this placement.
+    #[must_use]
+    pub const fn samples(&self) -> AudioSampleCount {
+        self.samples
+    }
+
+    /// Returns the normalized source channel layout.
+    #[must_use]
+    pub const fn channel_layout(&self) -> AudioChannelLayout {
+        self.channel_layout
     }
 }
 
@@ -164,8 +193,8 @@ impl RenderUnit {
     /// Composes the single whole-film unit from solved facts and local inputs.
     ///
     /// Extra materialized assets are not retained. Every referenced video and
-    /// voice-over must be present; video also passes the browser profile while
-    /// voice-over becomes a separate executor-owned audio plan.
+    /// audio placement must be present; video also passes the browser profile
+    /// while audio becomes a separate executor-owned plan.
     ///
     /// # Errors
     ///
@@ -259,7 +288,7 @@ impl RenderUnit {
     /// The caller supplies the deployment-owned identity that makes captured
     /// pixels reusable. Audio intentionally remains outside this request:
     /// worker capture writes only browser frames, while final assembly mixes
-    /// every voice-over once.
+    /// every owned audio placement once.
     #[must_use]
     pub fn worker_capture_request(
         &self,
@@ -279,7 +308,7 @@ impl RenderUnit {
         self.videos.values()
     }
 
-    /// Returns voice-over tracks in screenplay order.
+    /// Returns audio placements in canonical mix order.
     #[must_use]
     pub fn audio_tracks(&self) -> impl ExactSizeIterator<Item = &RenderAudio> {
         self.audio.tracks()
@@ -305,7 +334,7 @@ impl RenderUnit {
     }
 }
 
-/// Reason solved and materialized facts cannot form one Gate-one unit.
+/// Reason solved and materialized facts cannot form one render unit.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum InvalidRenderUnit {
@@ -320,10 +349,19 @@ pub enum InvalidRenderUnit {
         /// Exact profile rule that rejected it.
         source: UnsupportedVideo,
     },
-    /// The audio plan would exceed the bounded Gate-one process envelope.
+    /// The audio plan would exceed the bounded process envelope.
     AudioTrackLimit,
-    /// A voice-over crosses a unit output boundary and cannot be mixed safely.
-    AudioCrossesOutput(FrozenAssetId),
+    /// An audio placement escapes the solved film interval.
+    AudioOutsideTimeline(FrozenAssetId),
+    /// Materialized bytes do not contain the audio stream solved by core.
+    MissingAudioStream(FrozenAssetId),
+    /// A solved placement cannot be projected onto the source sample grid.
+    AudioSampleConversion {
+        /// Identity of the rejected audio artifact.
+        id: FrozenAssetId,
+        /// Exact conversion failure.
+        source: AudioSampleConversionOverflow,
+    },
     /// A timeline frame cannot cross the JavaScript wire boundary exactly.
     BrowserPlan(InvalidBrowserPlan),
 }
@@ -345,10 +383,19 @@ impl fmt::Display for InvalidRenderUnit {
                     "audio plan exceeds the {MAX_AUDIO_TRACKS}-track limit"
                 )
             }
-            Self::AudioCrossesOutput(id) => {
+            Self::AudioOutsideTimeline(id) => {
                 write!(
                     formatter,
-                    "voice-over {id} crosses the unit output boundary"
+                    "audio placement {id} falls outside the solved Timeline"
+                )
+            }
+            Self::MissingAudioStream(id) => {
+                write!(formatter, "materialized audio {id} has no audio stream")
+            }
+            Self::AudioSampleConversion { id, source } => {
+                write!(
+                    formatter,
+                    "materialized audio {id} exceeds the sample domain: {source}"
                 )
             }
             Self::BrowserPlan(source) => source.fmt(formatter),
@@ -360,6 +407,7 @@ impl Error for InvalidRenderUnit {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::UnsupportedVideo { source, .. } => Some(source),
+            Self::AudioSampleConversion { source, .. } => Some(source),
             Self::BrowserPlan(source) => Some(source),
             _ => None,
         }
@@ -421,36 +469,64 @@ fn audio_plan(
 ) -> Result<AudioPlan, InvalidRenderUnit> {
     let mut tracks = Vec::new();
 
-    for voice_over in timeline.voice_overs() {
-        if !voice_over.timing().interval().intersects(output) {
+    for (mix_order, audio) in timeline.audio().enumerate() {
+        if !owns_audio_start(output, audio) {
             continue;
         }
         if tracks.len() == MAX_AUDIO_TRACKS {
             return Err(InvalidRenderUnit::AudioTrackLimit);
         }
-        tracks.push(render_audio(voice_over, output, available)?);
+        tracks.push(render_audio(
+            mix_order,
+            audio,
+            timeline.interval(),
+            timeline.timebase().frame_rate(),
+            available,
+        )?);
     }
     Ok(AudioPlan { tracks })
 }
 
 fn render_audio(
-    voice_over: &TimelineVoiceOver,
-    output: FrameInterval,
+    mix_order: usize,
+    audio: &TimelineAudio,
+    timeline: FrameInterval,
+    frame_rate: FrameRate,
     available: &BTreeMap<FrozenAssetId, MaterializedAsset>,
 ) -> Result<RenderAudio, InvalidRenderUnit> {
-    let id = voice_over.asset_id();
+    let id = audio.asset_id();
     let asset = available
         .get(&id)
         .cloned()
         .ok_or(InvalidRenderUnit::MissingAsset(id))?;
-    let interval = voice_over.timing().interval();
-    if !output.contains_interval(interval) {
-        return Err(InvalidRenderUnit::AudioCrossesOutput(id));
+    let interval = audio.timing().interval();
+    if !timeline.contains_interval(interval) {
+        return Err(InvalidRenderUnit::AudioOutsideTimeline(id));
     }
+    let metadata = asset
+        .frozen()
+        .metadata()
+        .audio_metadata()
+        .ok_or(InvalidRenderUnit::MissingAudioStream(id))?;
+    let samples = metadata
+        .sample_rate()
+        .samples_for(interval.len(), frame_rate, Rounding::Ceil)
+        .map_err(|source| InvalidRenderUnit::AudioSampleConversion { id, source })?;
+    let channel_layout = metadata.channel_layout();
+
     Ok(RenderAudio {
+        mix_order,
         asset,
-        start: interval.start(),
+        interval,
+        gain: audio.gain(),
+        samples,
+        channel_layout,
     })
+}
+
+fn owns_audio_start(output: FrameInterval, audio: &TimelineAudio) -> bool {
+    let start = audio.timing().interval().start();
+    output.start() <= start && start < output.end()
 }
 
 #[cfg(test)]
@@ -459,8 +535,8 @@ mod tests {
 
     use onmark_core::compiler;
     use onmark_core::model::{
-        AssetMetadata, AssetRef, Duration, FrameRate, FrozenAsset, FrozenAssetId, SourceId,
-        Timebase, VideoMetadata, VideoTiming,
+        AssetMetadata, AssetRef, AudioChannelLayout, AudioGain, AudioSampleRate, Duration,
+        FrameRate, FrozenAsset, FrozenAssetId, SourceId, Timebase, VideoMetadata, VideoTiming,
     };
     use onmark_core::protocol::BundleFile;
     use onmark_core::render_graph::RenderGraph;
@@ -619,7 +695,11 @@ mod tests {
         let id = FrozenAssetId::from_sha256([1; 32]);
         let voice = FrozenAsset::new(
             id,
-            AssetMetadata::audio(Duration::from_nanos(1_000_000_000)),
+            AssetMetadata::audio(
+                Duration::from_nanos(1_000_000_000),
+                audio_sample_rate(),
+                AudioChannelLayout::Mono,
+            ),
         );
         let timeline = solve(
             r#"<film><scene><shot><vo src="voice.mp3" delay="500ms">Read me</vo></shot></scene></film>"#,
@@ -642,7 +722,10 @@ mod tests {
             .next()
             .expect("the unit contains one voice-over track");
         assert_eq!(audio.asset().id(), id);
-        assert_eq!(audio.start().get(), 15);
+        assert_eq!(audio.interval().start().get(), 15);
+        assert_eq!(audio.interval().end().get(), 45);
+        assert_eq!(audio.samples().get(), 48_000);
+        assert_eq!(audio.gain(), AudioGain::UNITY);
         assert_eq!(unit.materialized_assets().len(), 1);
     }
 
@@ -651,7 +734,11 @@ mod tests {
         let id = FrozenAssetId::from_sha256([1; 32]);
         let voice = FrozenAsset::new(
             id,
-            AssetMetadata::audio(Duration::from_nanos(1_000_000_000)),
+            AssetMetadata::audio(
+                Duration::from_nanos(1_000_000_000),
+                audio_sample_rate(),
+                AudioChannelLayout::Mono,
+            ),
         );
         let timeline = solve(
             r#"<film><scene><shot duration="1s" /><shot><vo src="voice.mp3">Read me</vo></shot></scene></film>"#,
@@ -679,14 +766,18 @@ mod tests {
             .next()
             .expect("the unit contains the second-shot voice-over");
         assert_eq!(audio.asset().id(), id);
-        assert_eq!(audio.start().get(), 30);
+        assert_eq!(audio.interval().start().get(), 30);
     }
 
     #[test]
     fn bounds_the_audio_plan_before_process_composition() {
         let voice = FrozenAsset::new(
             FrozenAssetId::from_sha256([1; 32]),
-            AssetMetadata::audio(Duration::from_nanos(1_000_000_000)),
+            AssetMetadata::audio(
+                Duration::from_nanos(1_000_000_000),
+                audio_sample_rate(),
+                AudioChannelLayout::Mono,
+            ),
         );
         let source = format!(
             "<film><scene><shot>{}</shot></scene></film>",
@@ -713,6 +804,10 @@ mod tests {
             "opening.mp4",
             frozen,
         )
+    }
+
+    fn audio_sample_rate() -> AudioSampleRate {
+        AudioSampleRate::new(48_000).expect("48 kHz is valid")
     }
 
     fn video_asset(timing: VideoTiming) -> FrozenAsset {

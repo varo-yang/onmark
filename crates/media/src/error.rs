@@ -63,6 +63,8 @@ pub enum ProbeError {
     InvalidDuration(ProbeFailure),
     /// The selected video stream lacks normalized format or timing facts.
     InvalidVideo(ProbeFailure),
+    /// The selected audio stream lacks normalized duration, rate, or channel facts.
+    InvalidAudio(ProbeFailure),
 }
 
 impl ProbeError {
@@ -168,6 +170,25 @@ impl ProbeError {
         ))
     }
 
+    pub(crate) fn invalid_audio(path: &Path, detail: impl fmt::Display) -> Self {
+        Self::InvalidAudio(ProbeFailure::new(
+            path,
+            format!("ffprobe audio metadata is invalid: {detail}"),
+        ))
+    }
+
+    pub(crate) fn invalid_audio_duration(
+        path: &Path,
+        duration: &str,
+        source: InvalidDuration,
+    ) -> Self {
+        Self::InvalidAudio(ProbeFailure::with_source(
+            path,
+            format!("ffprobe audio stream duration {duration:?} is invalid"),
+            ProbeErrorSource::Duration(source),
+        ))
+    }
+
     pub(crate) fn invalid_video_duration(
         path: &Path,
         duration: &str,
@@ -191,7 +212,8 @@ impl ProbeError {
             | Self::InvalidResponse(failure)
             | Self::MissingDuration(failure)
             | Self::InvalidDuration(failure)
-            | Self::InvalidVideo(failure) => failure,
+            | Self::InvalidVideo(failure)
+            | Self::InvalidAudio(failure) => failure,
         }
     }
 }
