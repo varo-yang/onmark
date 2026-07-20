@@ -1,0 +1,12 @@
+# onmark resolution test rendering; not a wire format
+film id=mix
+  music id=bed src=bed.wav delay=- gain=1/4
+  scene id=-
+    shot id=opening duration=-
+      video id=- src=opening.mp4 delay=-
+      sfx id=hit src=hit.wav delay=0.25s gain=1/2
+index
+  bed -> music @0:29..32
+  hit -> sfx @0:145..148
+  mix -> film @0:10..13
+  opening -> shot @0:86..93

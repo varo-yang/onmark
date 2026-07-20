@@ -1,0 +1,12 @@
+# onmark binding test rendering; not a wire format
+film id=mix
+  music id=bed
+  scene id=-
+    shot id=opening
+      video id=-
+      sfx id=hit
+index
+  bed -> music @0:29..32
+  hit -> sfx @0:145..148
+  mix -> film @0:10..13
+  opening -> shot @0:86..93

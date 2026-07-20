@@ -6,7 +6,8 @@ use std::fmt::Write as _;
 use std::fs;
 
 use onmark_core::compiler::{
-    self, LinkedCues, LinkedElement, LinkedFilm, LinkedScene, LinkedShot, LinkedShotContent,
+    self, LinkedAudio, LinkedCues, LinkedElement, LinkedFilm, LinkedScene, LinkedShot,
+    LinkedShotContent,
 };
 use onmark_core::model::SourceId;
 
@@ -14,19 +15,12 @@ use conformance::{assert_or_update, fixture, render_diagnostics, span};
 
 #[test]
 fn the_gate_one_example_matches_canonical_binding() {
-    let source_path = fixture("binding", "valid/gate-one.onmark");
-    let expected_path = fixture("binding", "valid/gate-one.linked.txt");
-    let source = fs::read_to_string(&source_path).expect("the binding fixture must be readable");
-    let parsed = compiler::parse(SourceId::new(0), &source);
-    let (document, syntax_diagnostics) = parsed.into_parts();
+    assert_valid_fixture("gate-one");
+}
 
-    assert!(syntax_diagnostics.is_empty());
-
-    let report = compiler::bind(document);
-    let film = report.film().expect("the valid fixture must bind one film");
-
-    assert!(report.diagnostics().is_empty());
-    assert_or_update(&expected_path, &LinkedFilmRenderer::render(film));
+#[test]
+fn authored_general_audio_matches_canonical_binding() {
+    assert_valid_fixture("general-audio");
 }
 
 #[test]
@@ -51,6 +45,21 @@ fn assert_invalid_fixture(name: &str) {
     let report = compiler::bind(document);
     assert!(report.film().is_none());
     assert_or_update(&expected_path, &render_diagnostics(report.diagnostics()));
+}
+
+fn assert_valid_fixture(name: &str) {
+    let source_path = fixture("binding", &format!("valid/{name}.onmark"));
+    let expected_path = fixture("binding", &format!("valid/{name}.linked.txt"));
+    let source = fs::read_to_string(&source_path).expect("the binding fixture must be readable");
+    let (document, diagnostics) = compiler::parse(SourceId::new(0), &source).into_parts();
+    assert!(diagnostics.is_empty());
+    let report = compiler::bind(document);
+
+    assert!(report.diagnostics().is_empty());
+    assert_or_update(
+        &expected_path,
+        &LinkedFilmRenderer::render(report.film().expect("the valid fixture must bind")),
+    );
 }
 
 fn id(element: &LinkedElement) -> &str {
@@ -78,6 +87,10 @@ impl LinkedFilmRenderer {
 
         if let Some(cues) = film.cues() {
             self.render_cues(cues)?;
+        }
+
+        for music in film.music() {
+            self.render_audio(music, "  ")?;
         }
 
         for scene in film.scenes() {
@@ -114,6 +127,10 @@ impl LinkedFilmRenderer {
             self.render_content(content)?;
         }
 
+        for effect in shot.sound_effects() {
+            self.render_audio(effect, "      ")?;
+        }
+
         Ok(())
     }
 
@@ -121,6 +138,15 @@ impl LinkedFilmRenderer {
         let element = content.element();
 
         writeln!(self.output, "      {} id={}", element.kind(), id(element))
+    }
+
+    fn render_audio(&mut self, audio: &LinkedAudio, indent: &str) -> std::fmt::Result {
+        writeln!(
+            self.output,
+            "{indent}{} id={}",
+            audio.element().kind(),
+            id(audio.element()),
+        )
     }
 
     fn render_index(&mut self, film: &LinkedFilm) -> std::fmt::Result {

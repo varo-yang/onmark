@@ -1,0 +1,8 @@
+<film>
+  <music gain="125%" delay="1s" />
+  <scene>
+    <shot duration="1s">
+      <sfx src="" gain="1.5%" />
+    </shot>
+  </scene>
+</film>

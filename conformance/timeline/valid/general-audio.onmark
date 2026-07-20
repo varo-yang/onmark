@@ -1,0 +1,13 @@
+<film id="mix">
+  <music id="bed" src="bed.wav" gain="25%" />
+  <scene>
+    <shot id="opening">
+      <video src="opening.mp4" />
+      <vo src="voice.wav">Meet Onmark.</vo>
+      <sfx id="hit" src="hit.wav" delay="250ms" gain="50%" />
+    </shot>
+    <shot id="closing">
+      <video src="closing.mp4" />
+    </shot>
+  </scene>
+</film>

@@ -86,6 +86,7 @@ provisioning and a published release workflow remain outside this gate.
 - `crates/` contains Rust product code.
 - `packages/` contains browser and Node product packages.
 - `conformance/` contains behavior examples shared across implementations.
+- `evals/` contains frozen language-admission experiments and raw model output.
 - `schemas/` contains generated, versioned wire contracts.
 - `scripts/` contains repository-only generation and quality checks.
 
@@ -104,6 +105,7 @@ pnpm lint
 pnpm typecheck
 pnpm test
 cargo xtask schema --check
+cargo xtask eval audio
 ```
 
 ## Design documents

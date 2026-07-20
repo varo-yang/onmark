@@ -11,7 +11,7 @@ use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 
 use onmark_core::compiler::{
-    Authored, ResolvedFilm, ResolvedScene, ResolvedShot, ResolvedShotContent,
+    Authored, ResolvedAudio, ResolvedFilm, ResolvedScene, ResolvedShotContent,
 };
 use onmark_core::model::{AssetRef, FrozenAsset, FrozenAssetId};
 use onmark_media::{Ffprobe, ProbeError};
@@ -194,13 +194,19 @@ impl Error for AssetError {
 }
 
 fn asset_references(film: &ResolvedFilm) -> BTreeSet<AssetRef> {
-    film.scenes()
-        .iter()
-        .flat_map(ResolvedScene::shots)
-        .flat_map(ResolvedShot::content)
-        .filter_map(content_asset)
-        .cloned()
-        .collect()
+    let mut references = BTreeSet::new();
+    references.extend(film.music().iter().map(audio_asset).cloned());
+
+    for shot in film.scenes().iter().flat_map(ResolvedScene::shots) {
+        references.extend(shot.content().iter().filter_map(content_asset).cloned());
+        references.extend(shot.sound_effects().iter().map(audio_asset).cloned());
+    }
+
+    references
+}
+
+fn audio_asset(audio: &ResolvedAudio) -> &AssetRef {
+    audio.src().value()
 }
 
 fn content_asset(content: &ResolvedShotContent) -> Option<&AssetRef> {
@@ -257,11 +263,14 @@ fn freeze_file(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
     use std::fs;
 
+    use onmark_core::compiler;
+    use onmark_core::model::{AssetRef, SourceId};
     use tempfile::tempdir;
 
-    use super::{MAX_FROZEN_BYTES, freeze_file};
+    use super::{MAX_FROZEN_BYTES, asset_references, freeze_file};
 
     #[test]
     fn freezes_the_exact_bytes_it_hashes() {
@@ -281,5 +290,31 @@ mod tests {
             id.to_string(),
             "sha256:96b050b919f3fca2fc8b6923537136a197ad13c583beb1438d1a12ccbc999c42",
         );
+    }
+
+    #[test]
+    fn discovers_narrative_and_general_audio_assets() {
+        let source = r#"
+            <film>
+              <music src="bed.wav" />
+              <scene><shot duration="1s">
+                <vo src="voice.wav">Read me.</vo>
+                <sfx src="hit.wav" />
+              </shot></scene>
+            </film>
+        "#;
+        let (document, diagnostics) = compiler::parse(SourceId::new(0), source).into_parts();
+        assert!(diagnostics.is_empty());
+        let (film, diagnostics) = compiler::bind(document).into_parts();
+        assert!(diagnostics.is_empty());
+        let (film, diagnostics) = compiler::resolve(film.expect("the fixture binds")).into_parts();
+        assert!(diagnostics.is_empty());
+
+        let actual = asset_references(&film.expect("the fixture resolves"));
+        let expected = ["bed.wav", "hit.wav", "voice.wav"]
+            .into_iter()
+            .map(|source| AssetRef::parse(source).expect("fixture paths are portable"))
+            .collect::<BTreeSet<_>>();
+        assert_eq!(actual, expected);
     }
 }

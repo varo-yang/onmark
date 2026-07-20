@@ -14,8 +14,8 @@ use onmark_core::model::{
     VideoTiming,
 };
 use onmark_core::timeline::{
-    TimelineContent, TimelineElement, TimelineIr, TimelineScene, TimelineShot, TimelineTiming,
-    TimingReason,
+    TimelineAudio, TimelineAudioKind, TimelineContent, TimelineElement, TimelineIr, TimelineScene,
+    TimelineShot, TimelineTiming, TimingReason,
 };
 
 use conformance::{assert_or_update, fixture, render_diagnostics};
@@ -33,11 +33,45 @@ fn media_duration_and_longest_content_match_canonical_timeline() {
 }
 
 #[test]
+fn authored_general_audio_matches_canonical_timeline() {
+    let assets = frozen_assets([
+        ("bed.wav", "5s"),
+        ("opening.mp4", "2s"),
+        ("voice.wav", "1s"),
+        ("hit.wav", "500ms"),
+        ("closing.mp4", "2s"),
+    ]);
+
+    assert_valid_fixture("general-audio", assets);
+}
+
+#[test]
+fn music_retains_its_natural_end_before_the_film_ends() {
+    let assets = frozen_assets([("sting.wav", "500ms")]);
+
+    assert_valid_fixture("short-music", assets);
+}
+
+#[test]
 fn timing_errors_match_stable_diagnostics() {
     let source_path = fixture("timeline", "invalid/timing-errors.onmark");
     let expected_path = fixture("timeline", "invalid/timing-errors.diagnostics.txt");
     let assets = frozen_assets([("clip.mp4", "2s")]);
     let report = solve_fixture(&source_path, &assets).expect("all referenced assets were probed");
+
+    assert!(report.timeline().is_none());
+    assert_or_update(&expected_path, &render_diagnostics(report.diagnostics()));
+}
+
+#[test]
+fn a_sound_effect_cannot_escape_its_shot() {
+    let source_path = fixture("timeline", "invalid/sound-effect-outside-shot.onmark");
+    let expected_path = fixture(
+        "timeline",
+        "invalid/sound-effect-outside-shot.diagnostics.txt",
+    );
+    let assets = frozen_assets([("hit.wav", "500ms")]);
+    let report = solve_fixture(&source_path, &assets).expect("the sound effect was probed");
 
     assert!(report.timeline().is_none());
     assert_or_update(&expected_path, &render_diagnostics(report.diagnostics()));
@@ -197,7 +231,7 @@ fn frozen_assets<const N: usize>(entries: [(&str, &str); N]) -> BTreeMap<AssetRe
             let duration = Duration::parse(duration).expect("the fixture duration is valid");
             let digest_byte = u8::try_from(index + 1).expect("the fixture catalog is small");
             let id = FrozenAssetId::from_sha256([digest_byte; 32]);
-            let metadata = if asset.as_str().ends_with(".mp3") {
+            let metadata = if asset.as_str().ends_with(".mp3") || asset.as_str().ends_with(".wav") {
                 AssetMetadata::audio(duration, audio_sample_rate(), AudioChannelLayout::Stereo)
             } else {
                 fixture_video_metadata(duration)
@@ -251,6 +285,10 @@ impl TimelineRenderer {
 
         for scene in timeline.scenes() {
             self.render_scene(scene)?;
+        }
+
+        for audio in timeline.general_audio() {
+            self.render_audio(audio)?;
         }
 
         Ok(())
@@ -312,6 +350,26 @@ impl TimelineRenderer {
             ),
         }
     }
+
+    fn render_audio(&mut self, audio: &TimelineAudio) -> std::fmt::Result {
+        writeln!(
+            self.output,
+            "  audio kind={} {} asset={} gain={}/{}",
+            audio_kind(audio.kind()),
+            timing(audio.timing()),
+            audio.asset_id(),
+            audio.gain().numerator(),
+            audio.gain().denominator(),
+        )
+    }
+}
+
+fn audio_kind(kind: TimelineAudioKind) -> &'static str {
+    match kind {
+        TimelineAudioKind::VoiceOver => "voice-over",
+        TimelineAudioKind::Music => "music",
+        TimelineAudioKind::SoundEffect => "sound-effect",
+    }
 }
 
 fn element(element: &TimelineElement) -> String {
@@ -346,6 +404,7 @@ fn reason(reason: &TimingReason) -> String {
         TimingReason::LongestContent(_) => "longest-content".to_owned(),
         TimingReason::Children => "children".to_owned(),
         TimingReason::ShotEnd => "shot-end".to_owned(),
+        TimingReason::FilmEnd => "film-end".to_owned(),
         _ => panic!("the fixture renderer must cover every emitted timing reason"),
     }
 }

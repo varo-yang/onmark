@@ -7,8 +7,8 @@ use std::fs;
 use std::path::Path;
 
 use onmark_core::compiler::{
-    self, Authored, ResolvedCues, ResolvedElement, ResolvedFilm, ResolvedOverlay, ResolvedScene,
-    ResolvedShot, ResolvedShotContent, ResolvedStart, ResolvedText, ResolvedVideo,
+    self, Authored, ResolvedAudio, ResolvedCues, ResolvedElement, ResolvedFilm, ResolvedOverlay,
+    ResolvedScene, ResolvedShot, ResolvedShotContent, ResolvedStart, ResolvedText, ResolvedVideo,
     ResolvedVoiceOver,
 };
 use onmark_core::model::{AssetRef, Duration, EventRef, SourceId};
@@ -26,9 +26,24 @@ fn authored_values_match_canonical_resolution() {
 }
 
 #[test]
+fn authored_general_audio_matches_canonical_resolution() {
+    assert_valid_fixture("general-audio");
+}
+
+#[test]
 fn attribute_and_reference_errors_match_stable_diagnostics() {
     let source_path = fixture("resolution", "invalid/attribute-errors.onmark");
     let expected_path = fixture("resolution", "invalid/attribute-errors.diagnostics.txt");
+    let report = resolve_fixture(&source_path);
+
+    assert!(report.film().is_none());
+    assert_or_update(&expected_path, &render_diagnostics(report.diagnostics()));
+}
+
+#[test]
+fn authored_audio_errors_match_stable_diagnostics() {
+    let source_path = fixture("resolution", "invalid/audio-errors.onmark");
+    let expected_path = fixture("resolution", "invalid/audio-errors.diagnostics.txt");
     let report = resolve_fixture(&source_path);
 
     assert!(report.film().is_none());
@@ -118,6 +133,10 @@ impl ResolvedFilmRenderer {
             self.render_cues(cues)?;
         }
 
+        for music in film.music() {
+            self.render_audio(music, "  ")?;
+        }
+
         for scene in film.scenes() {
             self.render_scene(scene)?;
         }
@@ -164,6 +183,10 @@ impl ResolvedFilmRenderer {
             self.render_content(content)?;
         }
 
+        for effect in shot.sound_effects() {
+            self.render_audio(effect, "      ")?;
+        }
+
         Ok(())
     }
 
@@ -182,6 +205,19 @@ impl ResolvedFilmRenderer {
             id(video.element()),
             asset(video.src()),
             duration(video.delay()),
+        )
+    }
+
+    fn render_audio(&mut self, audio: &ResolvedAudio, indent: &str) -> std::fmt::Result {
+        writeln!(
+            self.output,
+            "{indent}{} id={} src={} delay={} gain={}/{}",
+            audio.element().kind(),
+            id(audio.element()),
+            audio.src().value(),
+            duration(audio.delay()),
+            audio.gain().numerator(),
+            audio.gain().denominator(),
         )
     }
 

@@ -1,0 +1,15 @@
+<film>
+  <music src="music.wav" gain="25%" />
+  <scene>
+    <shot>
+      <video src="source.mp4" />
+      <title>Opening unit</title>
+    </shot>
+    <shot>
+      <video src="source.mp4" />
+      <vo src="voice.m4a">A partitioned voice-over.</vo>
+      <sfx src="effect.wav" delay="250ms" />
+      <cta>Closing unit</cta>
+    </shot>
+  </scene>
+</film>

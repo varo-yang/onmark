@@ -7,11 +7,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use onmark_core::compiler::{self, GeneralAudioKind, GeneralAudioPlacement};
-use onmark_core::model::{
-    AssetRef, AudioGain, ByteOffset, Duration as MediaDuration, FrameRate, FrozenAsset,
-    FrozenAssetId, SourceId, SourceSpan, Timebase,
-};
+use onmark_core::compiler;
+use onmark_core::model::{AssetRef, FrameRate, FrozenAsset, FrozenAssetId, SourceId, Timebase};
 use onmark_core::protocol::{
     BrowserCommand, BrowserEvent, BrowserOverlayKind, BrowserPlan, BrowserRequest, BundleManifest,
     RequestId, WireFrame,
@@ -798,8 +795,6 @@ impl GateFourFixture {
         let voice_over = freeze_asset(&voice_over_path).await;
         let music = freeze_asset(&music_path).await;
         let effect = freeze_asset(&effect_path).await;
-        let music_ref = asset_ref("music.wav");
-        let effect_ref = asset_ref("effect.wav");
         let assets = BTreeMap::from([
             (
                 AssetRef::parse("source.mp4").expect("the fixture video path is valid"),
@@ -809,33 +804,12 @@ impl GateFourFixture {
                 AssetRef::parse("voice.m4a").expect("the fixture voice-over path is valid"),
                 voice_over.clone(),
             ),
-            (music_ref.clone(), music.clone()),
-            (effect_ref.clone(), effect.clone()),
+            (asset_ref("music.wav"), music.clone()),
+            (asset_ref("effect.wav"), effect.clone()),
         ]);
-        let source = fs::read_to_string(repository().join("conformance/cli/gate-two.onmark"))
-            .expect("the two-unit screenplay fixture is readable");
+        let source = fs::read_to_string(repository().join("conformance/cli/gate-four.onmark"))
+            .expect("the Gate-four screenplay fixture is readable");
         let timeline = solve_timeline(&source, &assets);
-        let timeline = compiler::import_general_audio(
-            timeline,
-            [
-                audio_placement(
-                    music_ref,
-                    "0s",
-                    "2s",
-                    AudioGain::new(1, 4).expect("one quarter is a valid gain"),
-                    GeneralAudioKind::Music,
-                ),
-                audio_placement(
-                    effect_ref,
-                    "1250ms",
-                    "1500ms",
-                    AudioGain::UNITY,
-                    GeneralAudioKind::SoundEffect,
-                ),
-            ],
-            &assets,
-        )
-        .expect("typed general audio must enter the fixture timeline");
         let timeline = compiler::import_captions(timeline, [caption_track()])
             .expect("fixture captions must enter the frame grid");
         let partition_plan = RenderGraph::from_timeline(&timeline).into_partition();
@@ -901,25 +875,6 @@ impl GateFourFixture {
 
 fn asset_ref(value: &str) -> AssetRef {
     AssetRef::parse(value).expect("the fixture asset reference is portable")
-}
-
-fn audio_placement(
-    source: AssetRef,
-    start: &str,
-    end: &str,
-    gain: AudioGain,
-    kind: GeneralAudioKind,
-) -> GeneralAudioPlacement {
-    GeneralAudioPlacement::new(
-        source,
-        MediaDuration::parse(start).expect("the fixture audio start is valid"),
-        MediaDuration::parse(end).expect("the fixture audio end is valid"),
-        gain,
-        kind,
-        SourceSpan::new(SourceId::new(2), ByteOffset::ZERO, ByteOffset::ZERO)
-            .expect("the fixture source point is valid"),
-    )
-    .expect("the fixture audio interval is positive")
 }
 
 fn caption_track() -> onmark_core::model::CaptionTrack {

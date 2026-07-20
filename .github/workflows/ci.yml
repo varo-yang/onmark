@@ -78,6 +78,9 @@ jobs:
       - name: Check generated protocol artifacts
         run: cargo xtask schema --check
 
+      - name: Regrade frozen language evaluations
+        run: cargo xtask eval audio
+
       - name: Check TypeScript
         run: pnpm typecheck
 

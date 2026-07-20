@@ -7,19 +7,20 @@ use std::collections::BTreeMap;
 
 use crate::diagnostics::{Diagnostic, DiagnosticCode, Diagnostics};
 use crate::model::{
-    AssetRef, CueId, Duration, ElementKind, EventRef, InvalidAssetRef, InvalidDuration,
-    InvalidNodeId, NodeId, SourceSpan,
+    AssetRef, AudioGain, CueId, Duration, ElementKind, EventRef, InvalidAssetRef, InvalidAudioGain,
+    InvalidDuration, InvalidNodeId, NodeId, SourceSpan,
 };
 use crate::syntax::{Attribute, TextNode};
 
 use super::linked_film::{
-    LinkedCue, LinkedCues, LinkedElement, LinkedFilm, LinkedId, LinkedNode, LinkedOverlay,
-    LinkedScene, LinkedShot, LinkedShotContent, LinkedVideo, LinkedVoiceOver,
+    LinkedAudio, LinkedCue, LinkedCues, LinkedElement, LinkedFilm, LinkedFilmParts, LinkedId,
+    LinkedNode, LinkedOverlay, LinkedScene, LinkedShot, LinkedShotContent, LinkedVideo,
+    LinkedVoiceOver,
 };
 use super::resolved_film::{
-    Authored, ResolvedCue, ResolvedCues, ResolvedElement, ResolvedFilm, ResolvedNode,
-    ResolvedOverlay, ResolvedScene, ResolvedShot, ResolvedShotContent, ResolvedStart, ResolvedText,
-    ResolvedVideo, ResolvedVoiceOver,
+    Authored, ResolvedAudio, ResolvedCue, ResolvedCues, ResolvedElement, ResolvedFilm,
+    ResolvedNode, ResolvedOverlay, ResolvedScene, ResolvedShot, ResolvedShotContent, ResolvedStart,
+    ResolvedText, ResolvedVideo, ResolvedVoiceOver,
 };
 
 /// Optional typed attribute/reference output and its authored diagnostics.
@@ -74,10 +75,20 @@ impl Resolver {
     }
 
     fn resolve(film: LinkedFilm) -> ResolveReport {
-        let (element, cues, scenes, ids) = film.into_parts();
+        let LinkedFilmParts {
+            element,
+            cues,
+            music,
+            scenes,
+            ids,
+        } = film.into_parts();
         let mut resolver = Self::new(ids);
         let element = resolver.resolve_id_only_element(element);
         let cues = cues.map(|cues| resolver.resolve_cues(cues));
+        let music = music
+            .into_iter()
+            .filter_map(|audio| resolver.resolve_audio(audio))
+            .collect();
         let mut resolved_scenes = Vec::with_capacity(scenes.len());
         for scene in scenes {
             resolved_scenes.push(resolver.resolve_scene(scene));
@@ -92,7 +103,7 @@ impl Resolver {
             .into_iter()
             .map(|(id, node)| (id, resolved_node(node)))
             .collect();
-        let candidate = ResolvedFilm::new(element, cues, resolved_scenes, ids);
+        let candidate = ResolvedFilm::new(element, cues, music, resolved_scenes, ids);
         let film = (!diagnostics.has_errors()).then_some(candidate);
 
         ResolveReport { film, diagnostics }
@@ -177,7 +188,7 @@ impl Resolver {
     }
 
     fn resolve_shot(&mut self, shot: LinkedShot) -> ResolvedShot {
-        let (element, content) = shot.into_parts();
+        let (element, content, sound_effects) = shot.into_parts();
         let input = ElementInput::new(element);
         let (element, mut attributes) = input.into_resolved_parts();
         let duration = self.take_positive_duration(&mut attributes, "duration");
@@ -188,7 +199,12 @@ impl Resolver {
             resolved_content.push(self.resolve_content(content));
         }
 
-        ResolvedShot::new(element, duration, resolved_content)
+        let sound_effects = sound_effects
+            .into_iter()
+            .filter_map(|audio| self.resolve_audio(audio))
+            .collect();
+
+        ResolvedShot::new(element, duration, resolved_content, sound_effects)
     }
 
     fn resolve_content(&mut self, content: LinkedShotContent) -> ResolvedShotContent {
@@ -227,6 +243,58 @@ impl Resolver {
             src,
             delay,
         }
+    }
+
+    fn resolve_audio(&mut self, audio: LinkedAudio) -> Option<ResolvedAudio> {
+        let input = ElementInput::new(audio.into_element());
+        let (element, mut attributes) = input.into_resolved_parts();
+        let source_attribute = attributes.take("src");
+        let delay_attribute = match element.kind() {
+            ElementKind::Music => None,
+            ElementKind::SoundEffect => attributes.take("delay"),
+            kind => unreachable!("a resolved audio element cannot have kind {kind}"),
+        };
+        let gain_attribute = attributes.take("gain");
+        attributes.reject_unknown(element.kind(), &mut self.diagnostics);
+
+        let source = self.resolve_required_asset(source_attribute, &element);
+        let delay = match delay_attribute.as_ref() {
+            Some(attribute) => self.resolve_duration(attribute).map(Some),
+            None => Some(None),
+        };
+        let gain = match gain_attribute {
+            Some(attribute) => self.resolve_audio_gain(&attribute),
+            None => Some(AudioGain::UNITY),
+        };
+        let (Some(source), Some(delay), Some(gain)) = (source, delay, gain) else {
+            return None;
+        };
+
+        Some(ResolvedAudio::new(element, source, delay, gain))
+    }
+
+    fn resolve_audio_gain(&mut self, attribute: &Attribute) -> Option<AudioGain> {
+        match AudioGain::parse_percentage(attribute.value()) {
+            Ok(gain) => Some(gain),
+            Err(reason) => {
+                self.diagnostics.push(invalid_audio_gain(attribute, reason));
+                None
+            }
+        }
+    }
+
+    fn resolve_required_asset(
+        &mut self,
+        attribute: Option<Attribute>,
+        element: &ResolvedElement,
+    ) -> Option<Authored<AssetRef>> {
+        let Some(attribute) = attribute else {
+            self.diagnostics
+                .push(missing_attribute(element.kind(), "src", element.span()));
+            return None;
+        };
+
+        self.resolve_asset(&attribute)
     }
 
     fn resolve_overlay(&mut self, overlay: LinkedOverlay) -> ResolvedOverlay {
@@ -438,6 +506,17 @@ fn invalid_duration(attribute: &Attribute, reason: InvalidDuration) -> Diagnosti
     .expect("a formatted duration message is non-blank")
     .with_help("use an exact duration such as 3s, 500ms, or 1.5s")
     .expect("the static duration help is non-blank")
+}
+
+fn invalid_audio_gain(attribute: &Attribute, reason: InvalidAudioGain) -> Diagnostic {
+    Diagnostic::new(
+        DiagnosticCode::InvalidAttributeValue,
+        attribute.value_span(),
+        format!("audio gain \"{}\" is invalid: {reason}", attribute.value()),
+    )
+    .expect("a formatted audio-gain message is non-blank")
+    .with_help("use an exact linear gain from 0% through 100%")
+    .expect("the static audio-gain help is non-blank")
 }
 
 fn unknown_cue(attribute: &Attribute) -> Diagnostic {

@@ -87,6 +87,7 @@ impl LinkedId {
 pub struct LinkedFilm {
     element: LinkedElement,
     cues: Option<LinkedCues>,
+    music: Vec<LinkedAudio>,
     scenes: Vec<LinkedScene>,
     ids: BTreeMap<NodeId, LinkedNode>,
 }
@@ -95,12 +96,14 @@ impl LinkedFilm {
     pub(super) fn new(
         element: LinkedElement,
         cues: Option<LinkedCues>,
+        music: Vec<LinkedAudio>,
         scenes: Vec<LinkedScene>,
         ids: BTreeMap<NodeId, LinkedNode>,
     ) -> Self {
         Self {
             element,
             cues,
+            music,
             scenes,
             ids,
         }
@@ -118,6 +121,12 @@ impl LinkedFilm {
         self.cues.as_ref()
     }
 
+    /// Returns film-wide music in authored order.
+    #[must_use]
+    pub fn music(&self) -> &[LinkedAudio] {
+        &self.music
+    }
+
     /// Returns sequential scenes in authored order.
     #[must_use]
     pub fn scenes(&self) -> &[LinkedScene] {
@@ -130,16 +139,24 @@ impl LinkedFilm {
         self.ids.iter()
     }
 
-    pub(super) fn into_parts(
-        self,
-    ) -> (
-        LinkedElement,
-        Option<LinkedCues>,
-        Vec<LinkedScene>,
-        BTreeMap<NodeId, LinkedNode>,
-    ) {
-        (self.element, self.cues, self.scenes, self.ids)
+    pub(super) fn into_parts(self) -> LinkedFilmParts {
+        LinkedFilmParts {
+            element: self.element,
+            cues: self.cues,
+            music: self.music,
+            scenes: self.scenes,
+            ids: self.ids,
+        }
     }
+}
+
+/// Consuming handoff from structural binding into attribute resolution.
+pub(super) struct LinkedFilmParts {
+    pub(super) element: LinkedElement,
+    pub(super) cues: Option<LinkedCues>,
+    pub(super) music: Vec<LinkedAudio>,
+    pub(super) scenes: Vec<LinkedScene>,
+    pub(super) ids: BTreeMap<NodeId, LinkedNode>,
 }
 
 /// One declaration in the film-wide ID index.
@@ -252,11 +269,20 @@ impl LinkedScene {
 pub struct LinkedShot {
     element: LinkedElement,
     content: Vec<LinkedShotContent>,
+    sound_effects: Vec<LinkedAudio>,
 }
 
 impl LinkedShot {
-    pub(super) const fn new(element: LinkedElement, content: Vec<LinkedShotContent>) -> Self {
-        Self { element, content }
+    pub(super) const fn new(
+        element: LinkedElement,
+        content: Vec<LinkedShotContent>,
+        sound_effects: Vec<LinkedAudio>,
+    ) -> Self {
+        Self {
+            element,
+            content,
+            sound_effects,
+        }
     }
 
     /// Returns the structurally bound shot element.
@@ -271,12 +297,18 @@ impl LinkedShot {
         &self.content
     }
 
-    pub(super) fn into_parts(self) -> (LinkedElement, Vec<LinkedShotContent>) {
-        (self.element, self.content)
+    /// Returns shot-local sound effects in authored order.
+    #[must_use]
+    pub fn sound_effects(&self) -> &[LinkedAudio] {
+        &self.sound_effects
+    }
+
+    pub(super) fn into_parts(self) -> (LinkedElement, Vec<LinkedShotContent>, Vec<LinkedAudio>) {
+        (self.element, self.content, self.sound_effects)
     }
 }
 
-/// Closed kinds of content that a shot may own during Gate one.
+/// Closed kinds of narrative and visual content owned by a shot.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum LinkedShotContent {
     /// Primary video content.
@@ -299,10 +331,32 @@ impl LinkedShotContent {
     }
 }
 
-/// Gate one's sole media element.
+/// The current language's sole visual media element.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LinkedVideo {
     element: LinkedElement,
+}
+
+/// General audio before source, gain, and optional delay are resolved.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LinkedAudio {
+    element: LinkedElement,
+}
+
+impl LinkedAudio {
+    pub(super) const fn new(element: LinkedElement) -> Self {
+        Self { element }
+    }
+
+    /// Returns the structurally bound music or sound-effect element.
+    #[must_use]
+    pub const fn element(&self) -> &LinkedElement {
+        &self.element
+    }
+
+    pub(super) fn into_element(self) -> LinkedElement {
+        self.element
+    }
 }
 
 impl LinkedVideo {

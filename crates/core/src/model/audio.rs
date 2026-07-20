@@ -78,6 +78,32 @@ impl AudioGain {
     pub const fn denominator(self) -> u32 {
         self.denominator
     }
+
+    /// Parses the authored linear-gain spelling `integer%`.
+    ///
+    /// The screenplay surface deliberately admits neither decimals nor
+    /// amplification. The returned ratio remains exact after parsing.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InvalidAudioGain`] when the spelling is malformed or falls
+    /// outside the inclusive `0%..=100%` authoring range.
+    pub fn parse_percentage(source: &str) -> Result<Self, InvalidAudioGain> {
+        let digits = source
+            .strip_suffix('%')
+            .ok_or(InvalidAudioGain::MalformedPercentage)?;
+        if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+            return Err(InvalidAudioGain::MalformedPercentage);
+        }
+        let percentage = digits
+            .parse::<u32>()
+            .map_err(|_| InvalidAudioGain::PercentageOutOfRange)?;
+        if percentage > 100 {
+            return Err(InvalidAudioGain::PercentageOutOfRange);
+        }
+
+        Self::new(percentage, 100)
+    }
 }
 
 /// Reason a linear audio amplitude cannot be represented.
@@ -85,11 +111,23 @@ impl AudioGain {
 pub enum InvalidAudioGain {
     /// A rational amplitude cannot have a zero denominator.
     ZeroDenominator,
+    /// An authored percentage omits digits, `%`, or uses other characters.
+    MalformedPercentage,
+    /// An authored percentage exceeds the closed authoring range.
+    PercentageOutOfRange,
 }
 
 impl fmt::Display for InvalidAudioGain {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("audio-gain denominator cannot be zero")
+        match self {
+            Self::ZeroDenominator => formatter.write_str("audio-gain denominator cannot be zero"),
+            Self::MalformedPercentage => {
+                formatter.write_str("audio gain must use the exact spelling integer%")
+            }
+            Self::PercentageOutOfRange => {
+                formatter.write_str("audio gain must be between 0% and 100%")
+            }
+        }
     }
 }
 
@@ -294,6 +332,30 @@ mod tests {
             AudioGain::new(0, 1).expect("the denominator is positive"),
         );
         assert_eq!(AudioGain::new(1, 0), Err(InvalidAudioGain::ZeroDenominator));
+    }
+
+    #[test]
+    fn parses_the_closed_authored_gain_range() {
+        assert_eq!(
+            AudioGain::parse_percentage("25%").expect("25% is valid"),
+            AudioGain::new(1, 4).expect("one quarter is valid"),
+        );
+        assert_eq!(
+            AudioGain::parse_percentage("0%").expect("silence is valid"),
+            AudioGain::new(0, 1).expect("zero gain is valid"),
+        );
+        assert_eq!(
+            AudioGain::parse_percentage("100%").expect("unity is valid"),
+            AudioGain::UNITY,
+        );
+        assert_eq!(
+            AudioGain::parse_percentage("1.5%"),
+            Err(InvalidAudioGain::MalformedPercentage),
+        );
+        assert_eq!(
+            AudioGain::parse_percentage("101%"),
+            Err(InvalidAudioGain::PercentageOutOfRange),
+        );
     }
 
     #[test]

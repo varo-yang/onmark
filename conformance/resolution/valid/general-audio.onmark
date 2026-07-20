@@ -1,0 +1,9 @@
+<film id="mix">
+  <music id="bed" src="bed.wav" gain="25%" />
+  <scene>
+    <shot id="opening">
+      <video src="opening.mp4" />
+      <sfx id="hit" src="hit.wav" delay="250ms" gain="50%" />
+    </shot>
+  </scene>
+</film>

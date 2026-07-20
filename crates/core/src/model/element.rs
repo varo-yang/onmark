@@ -2,7 +2,7 @@
 
 use std::fmt;
 
-/// Closed Gate-one screenplay vocabulary.
+/// Closed current screenplay vocabulary.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum ElementKind {
     /// Root time domain of one screenplay.
@@ -19,6 +19,10 @@ pub enum ElementKind {
     Video,
     /// Authored voice-over inscription and media reference.
     VoiceOver,
+    /// Film-wide musical content.
+    Music,
+    /// Shot-local sound effect.
+    SoundEffect,
     /// Title overlay owned by one shot.
     Title,
     /// Call-to-action overlay owned by one shot.
@@ -37,6 +41,8 @@ impl ElementKind {
             "shot" => Some(Self::Shot),
             "video" => Some(Self::Video),
             "vo" => Some(Self::VoiceOver),
+            "music" => Some(Self::Music),
+            "sfx" => Some(Self::SoundEffect),
             "title" => Some(Self::Title),
             "cta" => Some(Self::CallToAction),
             _ => None,
@@ -54,6 +60,8 @@ impl ElementKind {
             Self::Shot => "shot",
             Self::Video => "video",
             Self::VoiceOver => "vo",
+            Self::Music => "music",
+            Self::SoundEffect => "sfx",
             Self::Title => "title",
             Self::CallToAction => "cta",
         }
@@ -71,14 +79,14 @@ mod tests {
     use super::ElementKind;
 
     #[test]
-    fn recognizes_the_closed_gate_one_vocabulary() {
+    fn recognizes_the_closed_screenplay_vocabulary() {
         let names = [
-            "film", "cues", "cue", "scene", "shot", "video", "vo", "title", "cta",
+            "film", "cues", "cue", "scene", "shot", "video", "vo", "music", "sfx", "title", "cta",
         ];
 
         for name in names {
             let kind = ElementKind::from_local_name(name)
-                .expect("every Gate-one element name must be recognized");
+                .expect("every screenplay element name must be recognized");
             assert_eq!(kind.as_str(), name);
         }
 

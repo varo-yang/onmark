@@ -5,7 +5,9 @@
 
 use std::collections::BTreeMap;
 
-use crate::model::{AssetRef, CueId, Duration, ElementKind, EventRef, NodeId, SourceSpan};
+use crate::model::{
+    AssetRef, AudioGain, CueId, Duration, ElementKind, EventRef, NodeId, SourceSpan,
+};
 
 /// One typed value together with the authored bytes that produced it.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -102,6 +104,7 @@ impl ResolvedNode {
 pub struct ResolvedFilm {
     element: ResolvedElement,
     cues: Option<ResolvedCues>,
+    music: Vec<ResolvedAudio>,
     scenes: Vec<ResolvedScene>,
     ids: BTreeMap<NodeId, ResolvedNode>,
 }
@@ -110,12 +113,14 @@ impl ResolvedFilm {
     pub(super) fn new(
         element: ResolvedElement,
         cues: Option<ResolvedCues>,
+        music: Vec<ResolvedAudio>,
         scenes: Vec<ResolvedScene>,
         ids: BTreeMap<NodeId, ResolvedNode>,
     ) -> Self {
         Self {
             element,
             cues,
+            music,
             scenes,
             ids,
         }
@@ -133,6 +138,12 @@ impl ResolvedFilm {
         self.cues.as_ref()
     }
 
+    /// Returns resolved film-wide music in authored order.
+    #[must_use]
+    pub fn music(&self) -> &[ResolvedAudio] {
+        &self.music
+    }
+
     /// Returns sequential scenes in authored order.
     #[must_use]
     pub fn scenes(&self) -> &[ResolvedScene] {
@@ -145,16 +156,22 @@ impl ResolvedFilm {
         self.ids.iter()
     }
 
-    pub(super) fn into_parts(
-        self,
-    ) -> (
-        ResolvedElement,
-        Option<ResolvedCues>,
-        Vec<ResolvedScene>,
-        BTreeMap<NodeId, ResolvedNode>,
-    ) {
-        (self.element, self.cues, self.scenes, self.ids)
+    pub(super) fn into_parts(self) -> ResolvedFilmParts {
+        ResolvedFilmParts {
+            element: self.element,
+            cues: self.cues,
+            music: self.music,
+            scenes: self.scenes,
+        }
     }
+}
+
+/// Consuming handoff from attribute resolution into timeline solving.
+pub(super) struct ResolvedFilmParts {
+    pub(super) element: ResolvedElement,
+    pub(super) cues: Option<ResolvedCues>,
+    pub(super) music: Vec<ResolvedAudio>,
+    pub(super) scenes: Vec<ResolvedScene>,
 }
 
 /// The optional singleton cue container after cue resolution.
@@ -261,6 +278,7 @@ pub struct ResolvedShot {
     element: ResolvedElement,
     duration: Option<Authored<Duration>>,
     content: Vec<ResolvedShotContent>,
+    sound_effects: Vec<ResolvedAudio>,
 }
 
 impl ResolvedShot {
@@ -268,11 +286,13 @@ impl ResolvedShot {
         element: ResolvedElement,
         duration: Option<Authored<Duration>>,
         content: Vec<ResolvedShotContent>,
+        sound_effects: Vec<ResolvedAudio>,
     ) -> Self {
         Self {
             element,
             duration,
             content,
+            sound_effects,
         }
     }
 
@@ -294,18 +314,90 @@ impl ResolvedShot {
         &self.content
     }
 
+    /// Returns resolved shot-local sound effects in authored order.
+    #[must_use]
+    pub fn sound_effects(&self) -> &[ResolvedAudio] {
+        &self.sound_effects
+    }
+
     pub(super) fn into_parts(
         self,
     ) -> (
         ResolvedElement,
         Option<Authored<Duration>>,
         Vec<ResolvedShotContent>,
+        Vec<ResolvedAudio>,
     ) {
-        (self.element, self.duration, self.content)
+        (
+            self.element,
+            self.duration,
+            self.content,
+            self.sound_effects,
+        )
     }
 }
 
-/// Closed Gate-one content owned by a resolved shot.
+/// Typed music or sound-effect intent before frame placement.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ResolvedAudio {
+    element: ResolvedElement,
+    src: Authored<AssetRef>,
+    delay: Option<Authored<Duration>>,
+    gain: AudioGain,
+}
+
+impl ResolvedAudio {
+    pub(super) const fn new(
+        element: ResolvedElement,
+        src: Authored<AssetRef>,
+        delay: Option<Authored<Duration>>,
+        gain: AudioGain,
+    ) -> Self {
+        Self {
+            element,
+            src,
+            delay,
+            gain,
+        }
+    }
+
+    /// Returns the resolved music or sound-effect element.
+    #[must_use]
+    pub const fn element(&self) -> &ResolvedElement {
+        &self.element
+    }
+
+    /// Returns the required authored audio source.
+    #[must_use]
+    pub const fn src(&self) -> &Authored<AssetRef> {
+        &self.src
+    }
+
+    /// Returns the optional shot-local delay.
+    #[must_use]
+    pub const fn delay(&self) -> Option<&Authored<Duration>> {
+        self.delay.as_ref()
+    }
+
+    /// Returns the exact authored or default linear gain.
+    #[must_use]
+    pub const fn gain(&self) -> AudioGain {
+        self.gain
+    }
+
+    pub(super) fn into_parts(
+        self,
+    ) -> (
+        ResolvedElement,
+        Authored<AssetRef>,
+        Option<Authored<Duration>>,
+        AudioGain,
+    ) {
+        (self.element, self.src, self.delay, self.gain)
+    }
+}
+
+/// Closed narrative and visual content owned by a resolved shot.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ResolvedShotContent {
     /// Primary video content.

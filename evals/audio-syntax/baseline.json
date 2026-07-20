@@ -1,0 +1,12 @@
+{
+  "semantic-elements": {
+    "passed": 20,
+    "total": 20
+  },
+  "generic-audio": {
+    "passed": 20,
+    "total": 20
+  },
+  "admitted": "semantic-elements",
+  "reason": "Equal generation reliability with semantic role and legal containment encoded by element kind."
+}

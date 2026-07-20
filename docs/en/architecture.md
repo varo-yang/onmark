@@ -106,7 +106,7 @@ proof before they become an execution artifact.
 
 Gate four retains voice-over as a narrative Timeline node while moving its
 executable asset, interval, gain, and role into the same `TimelineAudio` fact
-used by future music and sound effects. General audio remains a film-level
+used by music and sound effects. General audio remains a film-level
 collection because a music bed may cross shot and partition boundaries. The
 Render Graph assigns each placement to the one region containing its start;
 that owner materializes the frozen bytes once, while the placement may extend
@@ -129,9 +129,12 @@ The final AAC path trims or pads the mix to the visual frame count projected
 onto the same grid and lets the visual stream close the container through
 `-shortest`. A partition-owning track therefore cannot lengthen an independently
 rendered unit beyond its visual output.
-The screenplay spelling and its narrower gain policy remain subject to the
-language-admission rule; these facts do not admit an `<audio>` element by
-themselves.
+The checked-in audio-syntax evaluation compared semantic `<music>`/`<sfx>`
+elements with a generic `<audio kind="...">` spelling across forty model
+outputs. Both retained 20/20 generation reliability. Gate four therefore
+admits the semantic elements: their kinds encode role and legal containment
+without a second kind/parent validity matrix. Authored gain is the exact closed
+range from `0%` through `100%`.
 
 ## End-to-end pipeline
 
@@ -484,7 +487,9 @@ core.
 live-model CI service. It owns frozen cases, prompts, grader rules, raw outputs,
 model settings, and comparison baselines. Those assets are added only from real
 experiments; the repository does not create an empty framework or invent a
-historical baseline when the source material is unavailable.
+historical baseline when the source material is unavailable. Repository
+automation may parse and rescore frozen outputs without network access; it
+never turns CI into a live-model benchmark.
 
 Core's internal dependency DAG is CI-enforced: `model` depends on nothing;
 `syntax`, `diagnostics`, and `timeline` may depend on model; `render_graph` may
@@ -512,12 +517,13 @@ application layer. Its Cargo manifest exists solely to give the Rust schema
 generator a pinned build-only dependency budget and a stable `cargo xtask` entry
 point. That binary is consumed only by developers and CI and may depend on core
 and `onmark-aws-lambda` with their `schema` features, `schemars`, and
-`serde_json`; it disables the Lambda package's default runtime feature, so
-schema generation does not link AWS. Product crates and packages never depend on
-it. The Lambda dependency exists solely to publish that deployment boundary's
-schemas, not to smuggle AWS into core. The adjacent Node generator may use the
-pinned schema-to-TypeScript and validation toolchain. `cargo xtask schema`
-writes every versioned schema, then invokes that generator.
+`serde`/`serde_json`; it disables the Lambda package's default runtime feature,
+so schema generation does not link AWS. Product crates and packages never
+depend on it. The Lambda dependency exists solely to publish that deployment
+boundary's schemas, not to smuggle AWS into core. The adjacent Node generator
+may use the pinned schema-to-TypeScript and validation toolchain. `cargo xtask
+schema` writes every versioned schema, then invokes that generator. `cargo
+xtask eval audio` independently regrades the frozen audio-language experiment.
 `json-schema-to-typescript` emits reviewable browser types into runtime and the
 manifest type into bundler; Ajv emits standalone browser validation code at
 build time. The Lambda schemas intentionally have no TypeScript codec until a

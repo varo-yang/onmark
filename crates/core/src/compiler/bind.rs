@@ -11,8 +11,8 @@ use crate::model::{ElementKind, InvalidNodeId, NodeId, SourceSpan};
 use crate::syntax::{Attribute, Element, Node, SourceDocument, TextNode};
 
 use super::linked_film::{
-    LinkedCue, LinkedCues, LinkedElement, LinkedFilm, LinkedId, LinkedNode, LinkedOverlay,
-    LinkedScene, LinkedShot, LinkedShotContent, LinkedVideo, LinkedVoiceOver,
+    LinkedAudio, LinkedCue, LinkedCues, LinkedElement, LinkedFilm, LinkedId, LinkedNode,
+    LinkedOverlay, LinkedScene, LinkedShot, LinkedShotContent, LinkedVideo, LinkedVoiceOver,
 };
 
 /// Optional structurally linked output and every recoverable binding diagnostic.
@@ -117,6 +117,7 @@ impl Binder {
         let (_, attributes, children, span) = element.into_parts();
         let linked = self.bind_element(attributes, ElementKind::Film, span);
         let mut cues = None;
+        let mut music = Vec::new();
         let mut scenes = Vec::new();
 
         for node in children {
@@ -126,6 +127,7 @@ impl Binder {
 
             match self.recognize_or_report(&child) {
                 Some(ElementKind::Cues) => self.bind_cues_container(child, &mut cues),
+                Some(ElementKind::Music) => music.push(self.bind_audio(child, ElementKind::Music)),
                 Some(ElementKind::Scene) => scenes.push(self.bind_scene(child)),
                 Some(kind) => self.reject_misplaced(&child, kind, ElementKind::Film),
                 None => {}
@@ -133,7 +135,7 @@ impl Binder {
         }
 
         let cues = cues.map(|(_, cues)| cues);
-        let film = LinkedFilm::new(linked, cues, scenes, self.ids);
+        let film = LinkedFilm::new(linked, cues, music, scenes, self.ids);
         (film, self.diagnostics)
     }
 
@@ -199,6 +201,7 @@ impl Binder {
         let (_, attributes, children, span) = element.into_parts();
         let linked = self.bind_element(attributes, ElementKind::Shot, span);
         let mut content = Vec::new();
+        let mut sound_effects = Vec::new();
 
         for node in children {
             let Some(child) = self.structural_child(node, ElementKind::Shot) else {
@@ -212,6 +215,9 @@ impl Binder {
                 Some(ElementKind::VoiceOver) => {
                     content.push(LinkedShotContent::VoiceOver(self.bind_voice_over(child)));
                 }
+                Some(ElementKind::SoundEffect) => {
+                    sound_effects.push(self.bind_audio(child, ElementKind::SoundEffect));
+                }
                 Some(kind @ (ElementKind::Title | ElementKind::CallToAction)) => {
                     content.push(LinkedShotContent::Overlay(self.bind_overlay(child, kind)));
                 }
@@ -220,7 +226,7 @@ impl Binder {
             }
         }
 
-        LinkedShot::new(linked, content)
+        LinkedShot::new(linked, content, sound_effects)
     }
 
     fn bind_video(&mut self, element: Element) -> LinkedVideo {
@@ -228,6 +234,13 @@ impl Binder {
         let linked = self.bind_element(attributes, ElementKind::Video, span);
         self.reject_child_elements_and_text(children, ElementKind::Video);
         LinkedVideo::new(linked)
+    }
+
+    fn bind_audio(&mut self, element: Element, kind: ElementKind) -> LinkedAudio {
+        let (_, attributes, children, span) = element.into_parts();
+        let linked = self.bind_element(attributes, kind, span);
+        self.reject_child_elements_and_text(children, kind);
+        LinkedAudio::new(linked)
     }
 
     fn bind_voice_over(&mut self, element: Element) -> LinkedVoiceOver {

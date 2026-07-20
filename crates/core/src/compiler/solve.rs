@@ -10,18 +10,20 @@ use std::fmt;
 
 use crate::diagnostics::{Diagnostic, DiagnosticCode, Diagnostics};
 use crate::model::{
-    AssetMetadata, AssetRef, AudioMetadata, CueId, Duration, EventRef, FrameCount, FrameIndex,
-    FrameInterval, FrozenAsset, FrozenAssetId, Rounding, SourceSpan, Timebase, VideoMetadata,
+    AssetMetadata, AssetRef, AudioGain, AudioMetadata, CueId, Duration, ElementKind, EventRef,
+    FrameCount, FrameIndex, FrameInterval, FrozenAsset, FrozenAssetId, Rounding, SourceSpan,
+    Timebase, VideoMetadata,
 };
 use crate::timeline::{
-    TimelineContent, TimelineElement, TimelineEvent, TimelineIr, TimelineOverlay, TimelineScene,
-    TimelineShot, TimelineText, TimelineTiming, TimelineVideo, TimelineVoiceOver, TimingReason,
+    TimelineAudio, TimelineAudioKind, TimelineContent, TimelineElement, TimelineEvent, TimelineIr,
+    TimelineOverlay, TimelineScene, TimelineShot, TimelineText, TimelineTiming, TimelineVideo,
+    TimelineVoiceOver, TimingReason,
 };
 
 use super::resolved_film::{
-    Authored, ResolvedCues, ResolvedElement, ResolvedFilm, ResolvedMedia, ResolvedOverlay,
-    ResolvedScene, ResolvedShot, ResolvedShotContent, ResolvedStart, ResolvedText, ResolvedVideo,
-    ResolvedVoiceOver,
+    Authored, ResolvedAudio, ResolvedCues, ResolvedElement, ResolvedFilm, ResolvedFilmParts,
+    ResolvedMedia, ResolvedOverlay, ResolvedScene, ResolvedShot, ResolvedShotContent,
+    ResolvedStart, ResolvedText, ResolvedVideo, ResolvedVoiceOver,
 };
 
 /// Optional Timeline IR and the authored diagnostics produced while solving it.
@@ -92,6 +94,7 @@ struct Solver<'a> {
     events: BTreeMap<CueId, TimelineEvent>,
     diagnostics: Diagnostics,
     cursor: PlacementCursor,
+    sound_effects: Vec<TimelineAudio>,
     rejected_shot_timing: bool,
 }
 
@@ -103,12 +106,18 @@ impl<'a> Solver<'a> {
             events: BTreeMap::new(),
             diagnostics: Diagnostics::new(),
             cursor: PlacementCursor::FilmStart,
+            sound_effects: Vec::new(),
             rejected_shot_timing: false,
         }
     }
 
     fn solve(mut self, film: ResolvedFilm) -> Result<SolveReport, SolveError> {
-        let (element, cues, scenes, _ids) = film.into_parts();
+        let ResolvedFilmParts {
+            element,
+            cues,
+            music,
+            scenes,
+        } = film.into_parts();
         let film_span = element.span();
         self.solve_events(cues);
 
@@ -124,13 +133,15 @@ impl<'a> Solver<'a> {
         }
 
         let interval = interval(FrameIndex::ZERO, self.cursor.position());
+        let mut general_audio = self.solve_music(music, interval)?;
+        general_audio.append(&mut self.sound_effects);
         let candidate = TimelineIr::new(
             self.timebase,
             timeline_element(element),
             interval,
             self.events,
             timeline_scenes,
-            Vec::new(),
+            general_audio,
             Vec::new(),
         );
         let timeline = (!self.diagnostics.has_errors()).then_some(candidate);
@@ -181,15 +192,17 @@ impl<'a> Solver<'a> {
     }
 
     fn solve_shot(&mut self, shot: ResolvedShot) -> Result<Option<TimelineShot>, SolveError> {
-        let (element, duration, content) = shot.into_parts();
+        let (element, duration, content, sound_effects) = shot.into_parts();
         let source = element.span();
         let prepared = self.prepare_contents(content)?;
+        let sound_effects = self.prepare_audio_tracks(sound_effects)?;
         let explicit = self.explicit_duration(duration);
         let duration = self.shot_duration(explicit, prepared.primary, source);
         let Some(timing) = self.place_shot(duration, source) else {
             return Ok(None);
         };
         let content = self.lower_contents(prepared.content, timing.interval());
+        self.lower_sound_effects(sound_effects, timing.interval());
         let element = timeline_element(element);
         let shot = TimelineShot::new(element, timing, content);
 
@@ -293,6 +306,30 @@ impl<'a> Solver<'a> {
         Ok(Some(PreparedContent::VoiceOver { media, text }))
     }
 
+    fn prepare_audio_tracks(
+        &mut self,
+        audio: Vec<ResolvedAudio>,
+    ) -> Result<Vec<PreparedAudio>, SolveError> {
+        let mut prepared = Vec::with_capacity(audio.len());
+        for audio in audio {
+            if let Some(audio) = self.prepare_audio(audio)? {
+                prepared.push(audio);
+            }
+        }
+        Ok(prepared)
+    }
+
+    fn prepare_audio(&mut self, audio: ResolvedAudio) -> Result<Option<PreparedAudio>, SolveError> {
+        let (element, source, delay, gain) = audio.into_parts();
+        let kind = match element.kind() {
+            ElementKind::Music => TimelineAudioKind::Music,
+            ElementKind::SoundEffect => TimelineAudioKind::SoundEffect,
+            kind => unreachable!("a resolved audio element cannot have kind {kind}"),
+        };
+        let media = self.prepare_resolved_media(element, source, delay, MediaTrack::Audio)?;
+        Ok(media.map(|media| PreparedAudio { media, gain, kind }))
+    }
+
     fn prepare_media(
         &mut self,
         media: ResolvedMedia,
@@ -303,6 +340,17 @@ impl<'a> Solver<'a> {
             self.diagnostics.push(missing_media_source(&element));
             return Ok(None);
         };
+
+        self.prepare_resolved_media(element, source, delay, track)
+    }
+
+    fn prepare_resolved_media(
+        &mut self,
+        element: ResolvedElement,
+        source: Authored<AssetRef>,
+        delay: Option<Authored<Duration>>,
+        track: MediaTrack,
+    ) -> Result<Option<PreparedMedia>, SolveError> {
         let (asset_ref, asset_span) = source.into_parts();
         let frozen = self
             .assets
@@ -333,6 +381,27 @@ impl<'a> Solver<'a> {
             end,
             start_reason,
         }))
+    }
+
+    fn solve_music(
+        &mut self,
+        music: Vec<ResolvedAudio>,
+        film: FrameInterval,
+    ) -> Result<Vec<TimelineAudio>, SolveError> {
+        let prepared = self.prepare_audio_tracks(music)?;
+        let mut timeline = Vec::with_capacity(prepared.len());
+        for audio in prepared {
+            timeline.push(place_music(audio, film));
+        }
+        Ok(timeline)
+    }
+
+    fn lower_sound_effects(&mut self, effects: Vec<PreparedAudio>, shot: FrameInterval) {
+        for effect in effects {
+            if let Some(effect) = place_sound_effect(effect, shot, &mut self.diagnostics) {
+                self.sound_effects.push(effect);
+            }
+        }
     }
 
     fn prepare_delay(
@@ -636,6 +705,13 @@ struct PreparedMedia {
     start_reason: TimingReason,
 }
 
+/// General audio with shot-relative or film-relative bounds before placement.
+struct PreparedAudio {
+    media: PreparedMedia,
+    gain: AudioGain,
+    kind: TimelineAudioKind,
+}
+
 /// Media placed at absolute Timeline IR bounds.
 struct PlacedMedia {
     element: TimelineElement,
@@ -663,6 +739,52 @@ fn place_media(media: PreparedMedia, shot: FrameInterval) -> PlacedMedia {
         timing,
         asset_id: media.asset_id,
     }
+}
+
+fn place_music(audio: PreparedAudio, film: FrameInterval) -> TimelineAudio {
+    let PreparedAudio { media, gain, kind } = audio;
+    let authored_at = media.element.span();
+    let natural_end = FrameIndex::new(media.end.get());
+    let (end, end_reason) = if natural_end > film.end() {
+        (film.end(), TimingReason::FilmEnd)
+    } else {
+        (natural_end, TimingReason::AssetDuration)
+    };
+    let timing = TimelineTiming::new(
+        interval(film.start(), end),
+        TimingReason::FilmStart,
+        end_reason,
+    );
+
+    TimelineAudio::new(authored_at, timing, media.asset_id, gain, kind)
+}
+
+fn place_sound_effect(
+    audio: PreparedAudio,
+    shot: FrameInterval,
+    diagnostics: &mut Diagnostics,
+) -> Option<TimelineAudio> {
+    let PreparedAudio { media, gain, kind } = audio;
+    let authored_at = media.element.span();
+    let start = advance(shot.start(), media.start, authored_at, diagnostics)?;
+    let end = advance(shot.start(), media.end, authored_at, diagnostics)?;
+    if start >= end || start >= shot.end() || end > shot.end() {
+        diagnostics.push(audio_outside_shot(authored_at, start, end, shot));
+        return None;
+    }
+    let timing = TimelineTiming::new(
+        interval(start, end),
+        media.start_reason,
+        TimingReason::AssetDuration,
+    );
+
+    Some(TimelineAudio::new(
+        authored_at,
+        timing,
+        media.asset_id,
+        gain,
+        kind,
+    ))
 }
 
 fn lower_video(media: PreparedMedia, shot: FrameInterval) -> TimelineContent {
@@ -828,6 +950,28 @@ fn timing_outside_shot(primary: SourceSpan, start: FrameIndex, shot: FrameInterv
     .expect("a formatted timing message is non-blank")
     .with_help("use an earlier cue or delay, or extend the owning shot")
     .expect("the static timing help is non-blank")
+}
+
+fn audio_outside_shot(
+    primary: SourceSpan,
+    start: FrameIndex,
+    end: FrameIndex,
+    shot: FrameInterval,
+) -> Diagnostic {
+    Diagnostic::new(
+        DiagnosticCode::TimingOutsideShot,
+        primary,
+        format!(
+            "sound effect interval {}..{} escapes its shot interval {}..{}",
+            start.get(),
+            end.get(),
+            shot.start().get(),
+            shot.end().get(),
+        ),
+    )
+    .expect("a formatted sound-effect timing message is non-blank")
+    .with_help("use an earlier delay, a shorter sound, or extend the owning shot")
+    .expect("the static sound-effect timing help is non-blank")
 }
 
 fn frame_overflow(primary: SourceSpan) -> Diagnostic {

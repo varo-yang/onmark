@@ -1,0 +1,7 @@
+<film>
+  <scene>
+    <shot duration="1s">
+      <sfx src="hit.wav" delay="750ms" />
+    </shot>
+  </scene>
+</film>

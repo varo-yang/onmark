@@ -113,16 +113,23 @@ impl TimelineIr {
 
     /// Returns every executable audio placement in canonical mix order.
     ///
-    /// Narrative tracks retain screenplay order. General tracks follow in
-    /// their authored order; this fixed grouping keeps floating-point mixing
-    /// order deterministic without erasing their distinct semantics. Empty
-    /// placements remain available through their narrative nodes but require
-    /// neither a render dependency nor an `FFmpeg` input.
+    /// Narrative tracks retain screenplay order. Film music follows in authored
+    /// order, then shot effects follow in screenplay order. This fixed grouping
+    /// keeps floating-point mixing order deterministic without erasing their
+    /// distinct semantics. Empty placements remain available through their
+    /// narrative nodes but require neither a render dependency nor an `FFmpeg`
+    /// input.
     pub fn audio(&self) -> impl Iterator<Item = &TimelineAudio> {
         self.voice_overs()
             .map(TimelineVoiceOver::audio)
             .chain(&self.general_audio)
             .filter(|audio| !audio.timing().interval().is_empty())
+    }
+
+    /// Returns film music and shot-local effects in canonical mix order.
+    #[must_use]
+    pub fn general_audio(&self) -> &[TimelineAudio] {
+        &self.general_audio
     }
 
     /// Returns title and call-to-action overlays in screenplay order.
@@ -138,10 +145,6 @@ impl TimelineIr {
 
     pub(crate) fn replace_captions(&mut self, captions: Vec<TimelineCaption>) {
         self.captions = captions;
-    }
-
-    pub(crate) fn replace_general_audio(&mut self, audio: Vec<TimelineAudio>) {
-        self.general_audio = audio;
     }
 
     fn contents(&self) -> impl Iterator<Item = &TimelineContent> {
@@ -335,7 +338,7 @@ impl TimelineShot {
     }
 }
 
-/// Closed Gate-one content after all frame bounds are solved.
+/// Closed narrative and visual content after all frame bounds are solved.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TimelineContent {
     /// Primary video content.
@@ -675,4 +678,6 @@ pub enum TimingReason {
     Children,
     /// The owning shot's exclusive end frame.
     ShotEnd,
+    /// The solved film's exclusive end frame.
+    FilmEnd,
 }

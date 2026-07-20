@@ -1,4 +1,4 @@
-//! Repository-owned schema generation and checked-artifact drift verification.
+//! Repository-owned schema generation and frozen language-evaluation grading.
 //!
 //! Rust wire types are the source of truth. This binary writes deterministic
 //! schemas, delegates TypeScript codec generation, and makes stale output fail.
@@ -14,6 +14,8 @@ use onmark_aws_lambda::{CaptureInvocation, CaptureResult};
 use onmark_core::protocol::{BrowserRequest, BrowserResponse, BundleManifest};
 use schemars::{JsonSchema, schema_for};
 use serde_json::Value;
+
+mod audio_eval;
 
 fn main() -> ExitCode {
     match run() {
@@ -33,6 +35,7 @@ fn run() -> Result<(), Box<dyn Error>> {
 
     match command {
         Command::Schema(mode) => generate_schemas(repository, mode),
+        Command::AudioEvaluation => audio_eval::grade(repository),
     }
 }
 
@@ -88,6 +91,7 @@ fn generate_typescript(repository: &Path, mode: GenerationMode) -> Result<(), Bo
 
 enum Command {
     Schema(GenerationMode),
+    AudioEvaluation,
 }
 
 impl Command {
@@ -97,6 +101,9 @@ impl Command {
             [command] if command == "schema" => Ok(Self::Schema(GenerationMode::Write)),
             [command, flag] if command == "schema" && flag == "--check" => {
                 Ok(Self::Schema(GenerationMode::Check))
+            }
+            [command, subject] if command == "eval" && subject == "audio" => {
+                Ok(Self::AudioEvaluation)
             }
             _ => Err(InvalidCommand),
         }
@@ -114,7 +121,7 @@ struct InvalidCommand;
 
 impl fmt::Display for InvalidCommand {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("expected `cargo xtask schema [--check]`")
+        formatter.write_str("expected `cargo xtask schema [--check]` or `cargo xtask eval audio`")
     }
 }
 

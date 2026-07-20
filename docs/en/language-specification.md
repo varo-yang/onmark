@@ -1,6 +1,6 @@
 # Onmark Language Specification
 
-> Status: Gate-one language contract. Deferred capabilities are listed
+> Status: Gate-four language contract. Deferred capabilities are listed
 > explicitly.
 
 ## Purpose
@@ -25,14 +25,17 @@ contract: Timeline IR.
 
 ## Core model
 
-The Gate-one vocabulary is `film`, `cues`, `cue`, `scene`, `shot`, `video`,
-`vo`, `title`, and `cta`. A film may contain at most one direct `cues` child;
-that container owns only `cue` declarations and does not participate in scene
-sequencing. Scenes own sequential shots. A renderable film must contain at least
-one shot with a positive solved duration. A shot owns its `video`, `vo`,
-`title`, and `cta` content. Titles and CTAs are overlays and do not participate
-in sibling sequencing. `video` is Gate one's only media element and names its
-artifact with `src`; audio, image, and other media elements remain deferred.
+The current vocabulary is `film`, `cues`, `cue`, `scene`, `shot`, `video`,
+`vo`, `music`, `sfx`, `title`, and `cta`. A film may contain at most one direct
+`cues` child; that container owns only `cue` declarations and does not
+participate in scene sequencing. A film may also own `music` that does not
+participate in scene sequencing. Scenes own sequential shots. A renderable film
+must contain at least one shot with a positive solved duration. A shot owns its
+`video`, `vo`, `sfx`, `title`, and `cta` content. Titles and CTAs are overlays
+and do not participate in sibling sequencing. `video` is the only current
+visual media element. General audio uses the semantic `music` and `sfx`
+elements; a generic `audio` element is not part of the vocabulary. Image and
+other media elements remain deferred.
 Structural binding retains `src` and other unparsed authored attributes for the
 attribute/reference resolution phase rather than discarding them.
 
@@ -40,6 +43,7 @@ Illustrative syntax:
 
 ```html
 <film>
+  <music src="score.wav" gain="25%" />
   <cues>
     <cue id="offer" time="3s" />
     <cue id="cta" time="7s" />
@@ -47,6 +51,7 @@ Illustrative syntax:
   <scene id="sale">
     <shot id="hero">
       <video src="product.mp4" />
+      <sfx src="reveal.wav" delay="250ms" />
       <title cue="offer">30% OFF</title>
       <cta cue="cta">Buy now</cta>
     </shot>
@@ -100,9 +105,9 @@ explicit duration when content provides none. Multiple primary content sources
 extend the shot to the longest source. Gate one does not allow a shot to end at
 a cue. Overlay elements do not silently extend their shot.
 
-Gate one has two explicit relationships:
+The current language has two explicit relationships:
 
-- `delay` is relative to the owning shot's start;
+- `delay` on shot content, including `sfx`, is relative to the owning shot's start;
 - a named cue aligns an overlay to an authored absolute film event.
 
 An overlay starts at its resolved relationship, or at the owning shot's start
@@ -130,6 +135,31 @@ stale text/artifact pairs. Gate one materializes each solved voice-over into the
 private render root and mixes it outside browser capture at its solved frame
 interval. The presentation does not play, delay, or mix voice-over audio.
 
+## General audio
+
+`music` and `sfx` are distinct authored roles rather than a generic element
+with a free-form kind. This keeps illegal role/parent combinations out of the
+language and preserves narrative `vo` as a separate concept.
+
+A film may contain any number of direct `music` children. Music begins at the
+film's zero frame, uses the referenced audio stream's measured duration, and
+may cross scene, shot, and Render Unit boundaries. It never extends the film:
+a source longer than the solved film is clipped at the film's exclusive end; a
+shorter source ends naturally. Music has no authored delay.
+
+A shot may contain any number of direct `sfx` children. A sound effect begins
+at the shot start plus its optional local `delay`, and its measured source
+duration determines its exclusive end. It does not determine or extend shot
+duration. An effect whose start or end lies outside its owning shot is an
+authored timing error rather than a silently clipped sound.
+
+Both elements require a screenplay-relative `src` with the same portability
+rules as voice-over. Their optional `gain` uses the exact grammar `integer%`,
+from `0%` through `100%` inclusive, and defaults to `100%`. Gain is a linear
+amplitude ratio, not decibels. The referenced artifact must contain an audio
+stream. Mixing and muxing remain native execution concerns; the browser does
+not play these elements.
+
 ## IDs and references
 
 Explicit IDs, including cue IDs, are non-empty, case-sensitive, and globally
@@ -144,10 +174,13 @@ namespace.
 Structural binding is followed by attribute and reference resolution. `film`,
 `cues`, and `scene` admit no non-ID attributes. `cue` requires `id` and `time`.
 `shot` admits optional `duration`. `video` and `vo` admit optional `src` and
-`delay`; `title` and `cta` admit optional `cue` or `delay`. `cue` and `delay`
-cannot appear together on one overlay because they define competing start rules.
-Missing media `src` remains valid for static analysis; an authored empty `src`
-is invalid. Unknown attributes are errors.
+`delay`; `music` requires `src` and admits optional `gain`; `sfx` requires
+`src` and admits optional `delay` and `gain`; `title` and `cta` admit optional
+`cue` or `delay`. `cue` and `delay` cannot appear together on one overlay
+because they define competing start rules. Missing `src` on `video` or `vo`
+remains valid for static analysis; `music` and `sfx` require it during
+resolution. An authored empty `src` is always invalid. Unknown attributes are
+errors.
 
 ## Diagnostics
 
@@ -173,7 +206,7 @@ Initial binding, resolution, and timing diagnostics are:
 | ---------------- | --------------------------------------------------------------------- |
 | `ONM-ID-001`     | an authored ID is empty or contains ASCII whitespace                  |
 | `ONM-ID-002`     | an authored ID duplicates another ID in the same film                 |
-| `ONM-STRUCT-001` | an element is outside the Gate-one vocabulary                         |
+| `ONM-STRUCT-001` | an element is outside the current screenplay vocabulary               |
 | `ONM-STRUCT-002` | the document has no top-level `film` element                          |
 | `ONM-STRUCT-003` | the document has more than one top-level `film` element               |
 | `ONM-STRUCT-004` | a known element appears outside its legal parent                      |
@@ -182,7 +215,7 @@ Initial binding, resolution, and timing diagnostics are:
 | `ONM-TIME-001`   | an authored duration is invalid or outside the exact range            |
 | `ONM-TIME-002`   | a shot has no media-derived or explicit duration source               |
 | `ONM-TIME-003`   | explicit and media-derived shot durations compete                     |
-| `ONM-TIME-004`   | resolved content starts outside its owning shot                       |
+| `ONM-TIME-004`   | resolved shot content starts or ends outside its owning shot           |
 | `ONM-TIME-005`   | an exact time does not fit in the selected frame domain               |
 | `ONM-TIME-006`   | a film has no shot with a positive solved duration                    |
 | `ONM-ASSET-001`  | renderable media has no frozen artifact reference                     |

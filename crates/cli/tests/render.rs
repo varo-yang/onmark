@@ -40,12 +40,13 @@ async fn renders_one_screenplay_reliably_across_real_processes() {
 }
 
 #[tokio::test]
-#[ignore = "requires ONMARK_CLI, ONMARK_FFMPEG, ONMARK_FFPROBE, and Gate-two tools on PATH"]
+#[ignore = "requires ONMARK_CLI, ONMARK_FFMPEG, ONMARK_FFPROBE, and Gate-four tools on PATH"]
 async fn assembles_two_partitioned_units_across_real_processes() {
     let directory = tempdir().expect("the conformance workspace is available");
-    let fixture = Fixture::materialize(directory.path(), "cli/gate-two.onmark");
+    let fixture = Fixture::materialize(directory.path(), "cli/gate-four.onmark");
+    fixture.generate_general_audio().await;
 
-    render_fixture_twice(&fixture, GATE_TWO_FRAME_COUNT, 30).await;
+    render_fixture_twice(&fixture, GATE_TWO_FRAME_COUNT, 0).await;
 }
 
 async fn render_fixture_twice(
@@ -150,6 +151,23 @@ impl Fixture {
         )
         .await;
         assert_process_success("voice-over generation", &output);
+    }
+
+    async fn generate_general_audio(&self) {
+        self.generate_audio("music.wav", 220, "2").await;
+        self.generate_audio("effect.wav", 880, "0.25").await;
+    }
+
+    async fn generate_audio(&self, filename: &str, frequency: u32, duration: &str) {
+        let source = format!("sine=frequency={frequency}:sample_rate=48000:duration={duration}");
+        let output = run_process(
+            Command::new(required_path("ONMARK_FFMPEG"))
+                .args(["-nostdin", "-v", "error", "-f", "lavfi", "-i", &source])
+                .args(["-ac", "2", "-c:a", "pcm_s16le", "-y"])
+                .arg(self.root.join(filename)),
+        )
+        .await;
+        assert_process_success("general-audio generation", &output);
     }
 
     async fn render(&self, name: &str) -> RenderedOutput {

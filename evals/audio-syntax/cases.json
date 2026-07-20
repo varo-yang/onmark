@@ -1,0 +1,68 @@
+{
+  "cases": [
+    {
+      "id": "music-bed",
+      "scenes": [["media/opening.mp4", "media/product.mp4"]],
+      "music": [{ "src": "audio/bed.wav", "gain": "25%" }],
+      "effects": []
+    },
+    {
+      "id": "delayed-effect",
+      "scenes": [["media/card.mp4"]],
+      "music": [],
+      "effects": [{ "scene": 0, "shot": 0, "src": "audio/pop.wav", "delay": "250ms", "gain": "40%" }]
+    },
+    {
+      "id": "cross-scene-music",
+      "scenes": [["media/a.mp4"], ["media/b.mp4"]],
+      "music": [{ "src": "audio/theme.wav", "gain": "30%" }],
+      "effects": []
+    },
+    {
+      "id": "overlay-and-music",
+      "scenes": [["media/offer.mp4"]],
+      "music": [{ "src": "audio/offer-bed.wav", "gain": "20%" }],
+      "effects": [],
+      "cue": { "id": "offer", "time": "1s", "text": "Buy now" }
+    },
+    {
+      "id": "no-audio-control",
+      "scenes": [["media/plain.mp4"]],
+      "music": [],
+      "effects": []
+    },
+    {
+      "id": "default-gain",
+      "scenes": [["media/logo.mp4"]],
+      "music": [{ "src": "audio/identity.wav" }],
+      "effects": []
+    },
+    {
+      "id": "two-effects",
+      "scenes": [["media/demo.mp4"]],
+      "music": [],
+      "effects": [
+        { "scene": 0, "shot": 0, "src": "audio/click.wav", "delay": "100ms", "gain": "50%" },
+        { "scene": 0, "shot": 0, "src": "audio/chime.wav", "delay": "700ms", "gain": "35%" }
+      ]
+    },
+    {
+      "id": "nested-paths",
+      "scenes": [["assets/video/launch/hero.mp4"]],
+      "music": [{ "src": "assets/audio/music/launch.wav", "gain": "15%" }],
+      "effects": [{ "scene": 0, "shot": 0, "src": "assets/audio/sfx/whoosh.wav", "delay": "300ms", "gain": "60%" }]
+    },
+    {
+      "id": "local-delay-not-timeline",
+      "scenes": [["media/five-second-card.mp4"]],
+      "music": [],
+      "effects": [{ "scene": 0, "shot": 0, "src": "audio/reveal.wav", "delay": "2s" }]
+    },
+    {
+      "id": "music-and-effect",
+      "scenes": [["media/intro.mp4", "media/outro.mp4"]],
+      "music": [{ "src": "audio/score.wav", "gain": "22%" }],
+      "effects": [{ "scene": 0, "shot": 1, "src": "audio/hit.wav", "delay": "150ms", "gain": "70%" }]
+    }
+  ]
+}
