@@ -1163,6 +1163,48 @@ composition、encoded worker segment、新 cloud deployment、transition、playb
 marketplace、Player 或 Studio。这些能力必须等待本资源契约完成后，再进入独立的 measured performance
 或 language gate。
 
+### 第七关（进行中）：经准入的分层原生媒体合成
+
+本关只允许对显式声明封闭 visual-separability capability 的 presentation 改变权威像素路径。扫描源码、
+video 列表为空或透明截图成功，都不能证明该 capability。未声明的 presentation 继续使用现有
+Chromium-media 路径。
+
+候选路径不改变 Rust 独占的 timing 与 placement fact。Chromium 只渲染透明 presentation layer；一条
+persistent native media process 在 backpressure 下连续 decode、compose、fingerprint 并 encode 对应的
+base frame。browser capture 与 native composition 必须形成一条有界 stream。生产实现不得落盘一整套按帧
+编号的 PNG 目录，不得无界缓存 frame sequence，不得每帧启动 decoder，也不得在 native 与 Chromium
+decode/color path 之间静默回退。本地与远程 worker 必须消费同一 Render Unit 与 executor path。
+
+native 帧率转换不得继承 `FFmpeg` 的默认 `fps` rounding。候选路径必须使用 Rust 独占的 source/output
+有理帧率，把每个 source PTS 投影到第一个以帧中心选中该源帧的 output frame；`FFmpeg` 只能根据这些显式
+PTS fact 丢弃或复制 decoded frame。锁定的 24→30 与非零 partition 检查负责防止这条 execution policy
+长成第二套 timing solver。
+
+实现意图不等于准入证据。候选路径进入 production capability 之前，一份 checked、locked Linux 实验必须
+同时证明：
+
+- 两个相互独立的 cold run 在候选路径内得到完全相同的 canonical frame fingerprint；
+- whole-film 与所有被允许的 partitioning 在候选路径内得到完全相同的 canonical frame sequence；
+- 一份具有完整 range、primaries、transfer 与 matrix 声明的受控色彩 fixture，在每个抽样 patch 上都满足
+  固定为 4 个 8-bit level 的逐 channel 误差上限；缺失、不完整或不支持的 color fact 必须拒绝候选路径，
+  不得猜测；
+- admitted CFR profile 的 source-frame selection 仍然精确，包括非零 partition 起点与帧率转换产生的重复源帧；
+- 在同一锁定机器上，以 1,920×1,080、30 fps、60 帧运行至少五次，端到端 wall time 中位数不超过现有
+  Chromium-media baseline 的一半，process-tree incremental peak RSS 中位数不超过 baseline 的 85%；
+- measured interval 必须包含 browser launch、readiness、全部 frame transport、native composition、canonical
+  fingerprint 与 final encoding。不能因为某阶段两条路径共用，就把 startup 或该阶段排除在外。
+
+实验必须记录 tool identity、machine profile、fixture identity、raw sample、median 与 rejection reason。共享
+CI 负责 correctness 与 bound；容易受噪声影响的 performance admission 只在 pinned environment 运行，并将
+reviewed evidence 提交进仓库。全部门槛通过后，才允许增加 versioned、explicit capability 及其 conformance
+fixture。任何一项失败，实验继续保持 opt-in，production path 不变。
+本路径的 capture-environment identity 除 Chromium、font、launch policy 与其他会改变像素的 host fact 外，
+还必须覆盖 pinned `FFmpeg` binary 与 composition policy。
+
+Gate 七不加入 VFR、新 codec、HDR、hardware acceleration、lossy screenshot transport、parallel browser
+capture、transition、playback-rate control、Player、Studio、component marketplace 或新的 screenplay
+拼写；它们仍属于独立的 measured gate 或 language gate。
+
 每一关都使用最终方向的 IR 和协议，但只实现本关真实消费的部分。上一关没有稳定通过，不创建下一关的空架子。
 
 ## 13. 待实验决策

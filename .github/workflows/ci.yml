@@ -186,4 +186,16 @@ jobs:
           ONMARK_FFPROBE: /usr/bin/ffprobe
         run: |
           cargo test --locked -p onmark-render --test render -- --ignored --test-threads=1
+          cargo test --locked \
+            -p onmark-render --test media_seek \
+            admission::correctness::repeats_and_matches_partitions -- \
+            --exact --ignored --test-threads=1
+          cargo test --locked \
+            -p onmark-render --test media_seek \
+            admission::color::keeps_bt709_patches_within_bound -- \
+            --exact --ignored --test-threads=1
+          cargo test --locked \
+            -p onmark-render --test media_seek \
+            admission::correctness::selects_exact_cfr_frames -- \
+            --exact --ignored --test-threads=1
           cargo test --locked -p onmark-cli --test render -- --ignored --test-threads=1

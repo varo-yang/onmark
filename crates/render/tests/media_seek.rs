@@ -4,8 +4,12 @@
 //! than enforcing the renderer's release contract. It measures selection and
 //! repeatability without turning a research path into a product API.
 
+#[path = "media_seek/admission.rs"]
+mod admission;
 #[path = "media_seek/decoder.rs"]
 mod decoder;
+#[path = "media_seek/layered.rs"]
+mod layered;
 #[path = "media_seek/measurement.rs"]
 mod measurement;
 #[path = "media_seek/pixels.rs"]
@@ -21,7 +25,7 @@ use std::time::{Duration, Instant};
 use onmark_core::compiler;
 use onmark_core::model::{
     AssetMetadata, AssetRef, Duration as MediaDuration, FrameRate, FrozenAsset, FrozenAssetId,
-    SourceId, Timebase, VideoMetadata, VideoTiming,
+    SourceId, Timebase, VideoColorProfile, VideoMetadata, VideoTiming,
 };
 use onmark_core::protocol::{
     BrowserCommand, BrowserEvent, BrowserPlan, BrowserRequest, RequestId, WireFrame,
@@ -92,6 +96,8 @@ async fn compares_native_seek_with_alternative_media_paths() {
 struct StrategyFixture {
     directory: TempDir,
     frame_rate: FrameRate,
+    source_frame_rate: FrameRate,
+    color_profile: VideoColorProfile,
     indices: Vec<u64>,
     media: PathBuf,
     expected: BTreeMap<u64, ExpectedFrame>,
@@ -105,12 +111,18 @@ impl StrategyFixture {
         let indices = (0..BENCHMARK_FRAME_COUNT).collect::<Vec<_>>();
         let media = directory.path().join("benchmark.mp4");
         generate_video(&media, frame_rate, FixtureTiming::Constant).await;
+        let admitted = admitted_source_video(&media, FixtureTiming::Constant)
+            .await
+            .expect("the layered fixture must satisfy media admission");
+        assert_eq!(admitted.frame_rate, frame_rate);
 
         let expected = expected_cfr_frames(frame_rate, &indices);
         let plan = browser_plan(frame_rate);
         Self {
             directory,
             frame_rate,
+            source_frame_rate: frame_rate,
+            color_profile: admitted.color_profile,
             indices,
             media,
             expected,
@@ -147,7 +159,6 @@ async fn measure_strategies(fixture: &StrategyFixture) -> StrategyMeasurements {
         FrameRetention::Discard,
     ))
     .await;
-
     let extraction_directory = fixture.root().join("frames");
     let extraction = measure(extract_frame_sequence(
         &fixture.media,
@@ -192,7 +203,6 @@ async fn measure_strategies(fixture: &StrategyFixture) -> StrategyMeasurements {
         &[],
     ))
     .await;
-
     StrategyMeasurements {
         native,
         extraction,
@@ -276,7 +286,6 @@ async fn compare_strategies(
     )
     .await;
     let native_layer_composition = compare_pixels(&composited_pixels, &native_composed_frames);
-
     StrategyEvidence {
         injected,
         continuous,
@@ -316,10 +325,10 @@ async fn run_case(name: &str, frame_rate: FrameRate, timing: FixtureTiming) {
     let directory = tempdir().expect("the experiment directory must be available");
     let media = directory.path().join(format!("{name}.mp4"));
     generate_video(&media, frame_rate, timing).await;
-    let Some(source_frame_rate) = admitted_source_rate(&media, timing).await else {
+    let Some(source_video) = admitted_source_video(&media, timing).await else {
         return;
     };
-    assert_eq!(source_frame_rate, frame_rate);
+    assert_eq!(source_video.frame_rate, frame_rate);
 
     let source_frames = probe_source_frames(&media).await;
     let expected = expected_frames(frame_rate, &source_frames, &SEEK_SEQUENCE);
@@ -385,14 +394,7 @@ async fn capture_frame_sequence(
     indices: &[u64],
     retention: FrameRetention,
 ) -> MeasuredFrames<EncodedPng> {
-    let mut session = BrowserSession::launch(
-        headless_shell(),
-        browser_launch_policy(),
-        render_profile(),
-        browser_limits(),
-    )
-    .await
-    .expect("headless shell must launch");
+    let mut session = launch_browser().await;
     let capture_result =
         capture_video_frames(&mut session, fixture, plan, indices, retention).await;
     let shutdown_result = session.shutdown().await;
@@ -408,18 +410,7 @@ async fn capture_transparent_frame_sequence(
     indices: &[u64],
     retention: FrameRetention,
 ) -> MeasuredFrames<EncodedPng> {
-    let mut session = BrowserSession::launch(
-        headless_shell(),
-        browser_launch_policy(),
-        render_profile(),
-        browser_limits(),
-    )
-    .await
-    .expect("headless shell must launch");
-    session
-        .use_transparent_capture_surface()
-        .await
-        .expect("Chromium must expose a transparent capture surface");
+    let mut session = launch_transparent_browser().await;
     let capture_result =
         capture_video_frames(&mut session, fixture, plan, indices, retention).await;
     let shutdown_result = session.shutdown().await;
@@ -427,6 +418,26 @@ async fn capture_transparent_frame_sequence(
     let frames = capture_result.expect("the browser must capture every presentation frame");
     shutdown_result.expect("headless shell must shut down after transparent capture");
     frames
+}
+
+async fn launch_browser() -> BrowserSession {
+    BrowserSession::launch(
+        headless_shell(),
+        browser_launch_policy(),
+        render_profile(),
+        browser_limits(),
+    )
+    .await
+    .expect("headless shell must launch")
+}
+
+async fn launch_transparent_browser() -> BrowserSession {
+    let session = launch_browser().await;
+    session
+        .use_transparent_capture_surface()
+        .await
+        .expect("Chromium must expose a transparent capture surface");
+    session
 }
 
 async fn capture_video_frames(
@@ -441,19 +452,34 @@ async fn capture_video_frames(
     let mut frames = Vec::with_capacity(indices.len());
     let mut elapsed = Vec::with_capacity(indices.len());
     for (offset, index) in indices.iter().copied().enumerate() {
-        let request_offset = u32::try_from(offset * 2).expect("the seek fixture is small");
-        let started = Instant::now();
-        stage(session, RequestId::new(3 + request_offset), index).await?;
-        let frame = WireFrame::new(index).expect("the seek fixture is browser-safe");
-        let captured = session.capture_png(frame, plan.frame_rate()).await?;
+        let (captured, duration) = capture_requested_frame(session, plan, offset, index).await?;
         if matches!(retention, FrameRetention::Retain) {
             frames.push(captured);
         }
-        confirm(session, RequestId::new(4 + request_offset), index).await?;
-        elapsed.push(started.elapsed());
+        elapsed.push(duration);
     }
 
-    let request_count = u32::try_from(indices.len() * 2).expect("the seek fixture is small");
+    dispose(session, indices.len()).await?;
+    Ok(MeasuredFrames { frames, elapsed })
+}
+
+async fn capture_requested_frame(
+    session: &mut BrowserSession,
+    plan: &BrowserPlan,
+    offset: usize,
+    index: u64,
+) -> Result<(EncodedPng, Duration), Box<dyn Error>> {
+    let request_offset = u32::try_from(offset * 2).expect("the seek fixture is small");
+    let started = Instant::now();
+    stage(session, RequestId::new(3 + request_offset), index).await?;
+    let frame = WireFrame::new(index).expect("the seek fixture is browser-safe");
+    let captured = session.capture_png(frame, plan.frame_rate()).await?;
+    confirm(session, RequestId::new(4 + request_offset), index).await?;
+    Ok((captured, started.elapsed()))
+}
+
+async fn dispose(session: &BrowserSession, frames: usize) -> Result<(), Box<dyn Error>> {
+    let request_count = u32::try_from(frames * 2).expect("the seek fixture is small");
     let disposed = session
         .dispatch(&BrowserRequest::new(
             RequestId::new(3 + request_count),
@@ -461,8 +487,7 @@ async fn capture_video_frames(
         ))
         .await?;
     assert_eq!(disposed.event(), &BrowserEvent::Disposed);
-
-    Ok(MeasuredFrames { frames, elapsed })
+    Ok(())
 }
 
 async fn load_and_prepare(
@@ -572,6 +597,8 @@ async fn generate_video(output: &Path, frame_rate: FrameRate, timing: FixtureTim
             "libx264",
             "-pix_fmt",
             "yuv420p",
+            "-x264-params",
+            "colorprim=bt709:transfer=bt709:colormatrix=bt709:range=limited",
             "-colorspace",
             "bt709",
             "-color_primaries",
@@ -598,7 +625,15 @@ async fn generate_video(output: &Path, frame_rate: FrameRate, timing: FixtureTim
     assert_process_succeeded("video generation", &generated);
 }
 
-async fn admitted_source_rate(media: &Path, timing: FixtureTiming) -> Option<FrameRate> {
+struct AdmittedFixtureVideo {
+    frame_rate: FrameRate,
+    color_profile: VideoColorProfile,
+}
+
+async fn admitted_source_video(
+    media: &Path,
+    timing: FixtureTiming,
+) -> Option<AdmittedFixtureVideo> {
     let probe = Ffprobe::new(
         required_path("ONMARK_FFPROBE"),
         PROCESS_DEADLINE,
@@ -615,7 +650,14 @@ async fn admitted_source_rate(media: &Path, timing: FixtureTiming) -> Option<Fra
         FixtureTiming::Constant => {
             let admitted =
                 AdmittedVideo::admit(&metadata).expect("the CFR H.264 fixture must enter Gate one");
-            Some(admitted.frame_rate())
+            let color_profile = admitted
+                .metadata()
+                .color_profile()
+                .expect("the layered experiment requires complete source-color facts");
+            Some(AdmittedFixtureVideo {
+                frame_rate: admitted.frame_rate(),
+                color_profile,
+            })
         }
         FixtureTiming::AlternatingVfr => {
             assert_eq!(
@@ -988,12 +1030,19 @@ fn assert_transparent_presentation(frames: &[Vec<u8>]) {
 }
 
 fn browser_plan(frame_rate: FrameRate) -> BrowserPlan {
+    browser_plan_with_source_rate(frame_rate, frame_rate)
+}
+
+fn browser_plan_with_source_rate(
+    output_frame_rate: FrameRate,
+    source_frame_rate: FrameRate,
+) -> BrowserPlan {
     let duration = MediaDuration::from_nanos(2_500_000_000);
     let video = VideoMetadata::new(
         duration,
         "h264",
         "yuv420p",
-        VideoTiming::Constant(frame_rate),
+        VideoTiming::Constant(source_frame_rate),
     )
     .expect("the fixture video metadata is normalized");
     let asset = AssetRef::parse("experiment.mp4").expect("the fixture asset is valid");
@@ -1014,12 +1063,12 @@ fn browser_plan(frame_rate: FrameRate) -> BrowserPlan {
     let solved = compiler::solve(
         film.expect("the fixture resolves"),
         &assets,
-        Timebase::new(frame_rate),
+        Timebase::new(output_frame_rate),
     )
     .expect("the fixture metadata is complete");
     assert!(solved.diagnostics().is_empty());
 
-    let source_frame_rates = BTreeMap::from([(fixture_asset_id(), frame_rate)]);
+    let source_frame_rates = BTreeMap::from([(fixture_asset_id(), source_frame_rate)]);
     BrowserPlan::from_timeline(
         solved.timeline().expect("the fixture solves"),
         &source_frame_rates,

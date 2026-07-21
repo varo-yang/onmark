@@ -9,7 +9,7 @@ use std::time::Duration;
 use onmark_core::compiler;
 use onmark_core::model::{
     AssetMetadata, AssetRef, AudioChannelLayout, AudioSampleRate, Duration as MediaDuration,
-    FrameRate, FrozenAsset, FrozenAssetId, SourceId, Timebase, VideoTiming,
+    FrameRate, FrozenAsset, FrozenAssetId, SourceId, Timebase, VideoColorProfile, VideoTiming,
 };
 use onmark_media::{Ffprobe, InvalidFfprobe, ProbeError};
 
@@ -48,12 +48,29 @@ fn normalizes_exact_duration_from_ffprobe() {
         .expect("the fixture contains a video stream");
     assert_eq!(video.codec(), "h264");
     assert_eq!(video.pixel_format(), "yuv420p");
+    assert_eq!(video.color_profile(), Some(VideoColorProfile::Bt709Limited),);
     assert_eq!(video.duration(), MediaDuration::from_nanos(2_000_000_000));
     assert_eq!(
         video.timing(),
         VideoTiming::Constant(FrameRate::new(30, 1).expect("30 fps is valid")),
     );
     assert!(!metadata.has_audio_stream());
+}
+
+#[test]
+fn does_not_admit_a_partial_source_color_profile() {
+    let ffprobe = responsive_fixture_probe(4_096);
+    let metadata = ffprobe
+        .probe(Path::new("partial-color.mp4"))
+        .expect("partial color facts do not invalidate the browser media path");
+
+    assert_eq!(
+        metadata
+            .video_metadata()
+            .expect("the fixture contains a video stream")
+            .color_profile(),
+        None,
+    );
 }
 
 #[test]

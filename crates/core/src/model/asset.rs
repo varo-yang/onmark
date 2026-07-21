@@ -251,6 +251,17 @@ impl AudioMetadata {
     }
 }
 
+/// Closed normalized source-color profile.
+///
+/// A profile names the complete range, matrix, transfer, and primaries tuple.
+/// Keeping the tuple closed prevents a renderer from combining partial probe
+/// facts into a color conversion that no media boundary actually observed.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum VideoColorProfile {
+    /// BT.709 primaries, transfer, and matrix with limited-range samples.
+    Bt709Limited,
+}
+
 /// Normalized facts for the visual stream selected during probing.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct VideoMetadata {
@@ -258,6 +269,7 @@ pub struct VideoMetadata {
     codec: Box<str>,
     pixel_format: Box<str>,
     timing: VideoTiming,
+    color_profile: Option<VideoColorProfile>,
 }
 
 impl VideoMetadata {
@@ -285,7 +297,16 @@ impl VideoMetadata {
             codec,
             pixel_format,
             timing,
+            color_profile: None,
         })
+    }
+
+    /// Records one complete source-color tuple recognized by the media
+    /// boundary.
+    #[must_use]
+    pub const fn with_color_profile(mut self, color_profile: VideoColorProfile) -> Self {
+        self.color_profile = Some(color_profile);
+        self
     }
 
     /// Returns the exact selected-stream duration.
@@ -310,6 +331,13 @@ impl VideoMetadata {
     #[must_use]
     pub const fn timing(&self) -> VideoTiming {
         self.timing
+    }
+
+    /// Returns the complete admitted source-color tuple, when probing reported
+    /// one without missing or unsupported fields.
+    #[must_use]
+    pub const fn color_profile(&self) -> Option<VideoColorProfile> {
+        self.color_profile
     }
 }
 

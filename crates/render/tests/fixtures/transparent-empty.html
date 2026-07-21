@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Onmark empty transparent presentation experiment</title>
+    <style>
+      html,
+      body {
+        background: transparent;
+        height: 100%;
+        margin: 0;
+        width: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <script type="module">
+      // This closed fixture isolates native color conversion from authored
+      // browser pixels while still crossing the real runtime transaction.
+      import { installRuntimeHost } from "../../../../packages/runtime/dist/src/index.js";
+
+      installRuntimeHost({
+        async load() {},
+        async prepare() {},
+        async seek() {},
+        async confirm() {},
+        async dispose() {},
+      });
+    </script>
+  </body>
+</html>

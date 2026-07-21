@@ -995,13 +995,74 @@ new cloud deployment, transitions, playback-rate control, a component
 marketplace, Player, or Studio. Those require separate measured performance or
 language gates after this resource contract is complete.
 
+**Gate seven (active): admitted layered native-media composition.** This gate
+may change the authoritative pixel path only for a presentation that explicitly
+declares a closed visual-separability capability. Source inspection, an empty
+video list, or a successful transparent screenshot is not evidence of that
+capability. Presentations without the declaration continue through the existing
+Chromium-media path.
+
+The candidate path keeps Rust-owned timing and placement facts unchanged.
+Chromium renders only the transparent presentation layer; one persistent native
+media process decodes, composites, fingerprints, and encodes the corresponding
+base frames with backpressure. Browser capture and native composition form one
+bounded stream. Production may not materialize a frame-indexed PNG directory,
+buffer an unbounded frame sequence, start one decoder per frame, or silently
+fall back between native and Chromium decode/color paths. Local and remote
+workers consume the same Render Unit and executor path.
+
+Native frame-rate conversion may not inherit `FFmpeg`'s default `fps` rounding.
+The candidate projects each source PTS from the Rust-owned source/output
+rationals onto the first output frame whose midpoint selects that source frame;
+`FFmpeg` may then realize those explicit PTS facts by dropping or repeating
+decoded frames. The locked 24-to-30 and nonzero-partition checks prevent this
+execution policy from becoming a second timing solver.
+
+Admission is evidence, not implementation intent. One checked, locked Linux
+experiment must establish all of the following before the candidate becomes a
+production capability:
+
+- two independent cold runs produce equal canonical frame fingerprints within
+  the candidate path;
+- whole-film and every permitted partitioning produce equal canonical frame
+  sequences within that path;
+- a controlled color fixture with complete declared range, primaries, transfer,
+  and matrix facts stays within the frozen four-level error bound per eight-bit
+  channel at all sampled patch interiors; missing, partial, or unsupported
+  color facts reject the candidate path rather than guessing;
+- source-frame selection remains exact for the admitted CFR profile, including
+  nonzero partition starts and repeated source frames under rate conversion;
+- at 1,920×1,080, 30 fps, and 60 frames on one locked machine, median end-to-end
+  wall time across at least five measured runs is at most half of the existing
+  Chromium-media baseline, and the median incremental process-tree peak RSS is
+  at most 85% of that baseline;
+- the measured interval includes browser launch, readiness, all frame transport,
+  native composition, canonical fingerprinting, and final encoding. It excludes
+  neither startup nor a stage merely because the stage is shared by both paths.
+
+The experiment records tool identities, machine profile, fixture identity, raw
+samples, medians, and rejection reasons. Shared CI enforces correctness and
+bounds; noisy performance admission runs only in the pinned environment and is
+checked in as reviewed evidence. Passing the thresholds permits a versioned,
+explicit capability and its conformance fixtures. Failing any threshold leaves
+the experiment opt-in and the production path unchanged.
+For this path the capture-environment identity covers the pinned `FFmpeg`
+binary and composition policy in addition to Chromium, fonts, launch policy,
+and other pixel-affecting host facts.
+
+Gate seven does not add VFR, new codecs, HDR, hardware acceleration, lossy
+screenshot transport, parallel browser capture, transitions, playback-rate
+control, a Player, Studio, component marketplace, or new screenplay spelling.
+Those remain separate measured or language gates.
+
 Every gate uses the final-direction contracts but implements only fields
 consumed by that gate. A failed gate blocks construction of the next gate's
 skeleton.
 
 ## Open experimental questions
 
-Layered alpha caching, wire encoding, caption-style normalization, adapter
+Layered alpha caching beyond Gate seven's bounded stream, wire encoding,
+caption-style normalization, adapter
 seekability, and environment-locking granularity require prototypes and
 measurements.
 Gate-three native capture has selected headless shell's CDP BeginFrameControl;

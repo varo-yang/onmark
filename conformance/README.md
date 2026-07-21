@@ -88,3 +88,27 @@ CI runs all real-process conformance on Ubuntu 24.04 with Chrome for Testing
 149.0.7827.55 and Ubuntu's `FFmpeg` 7:6.1.1-3ubuntu5. Exact executable paths
 are supplied to every test; neither the runner's browser nor an ambient media
 tool can silently change the measured environment.
+
+Gate seven's layered-media candidate remains test-only. Shared Linux CI runs
+its cold-repeatability, whole-versus-partition, and frozen BT.709 patch-bound
+checks. The performance gate is deliberately separate because shared-runner
+noise must not admit a production pixel path. On the pinned admission machine,
+build the runtime and run the five alternating 1,920×1,080 baseline/candidate
+samples explicitly:
+
+```bash
+pnpm --filter @onmark/runtime build
+ONMARK_HEADLESS_SHELL=/path/to/pinned/chrome-headless-shell \
+ONMARK_FFMPEG=/path/to/pinned/ffmpeg \
+ONMARK_FFPROBE=/path/to/pinned/ffprobe \
+ONMARK_CAPTURE_ENVIRONMENT=sha256:<locked-environment-digest> \
+ONMARK_MEDIA_EXPERIMENT_WIDTH=1920 \
+ONMARK_MEDIA_EXPERIMENT_HEIGHT=1080 \
+cargo test -p onmark-render --test media_seek \
+  admission::performance::meets_performance_thresholds \
+  -- --exact --ignored --nocapture --test-threads=1
+```
+
+The test prints every raw timing/RSS sample, the two medians, the frozen source
+digest, and the capture-environment identity. A reviewed evidence record is
+required before the candidate can leave the experiment target.

@@ -15,7 +15,7 @@ mod time;
 
 pub use asset::{
     AssetMetadata, AudioMetadata, FrozenAsset, FrozenAssetId, InvalidFrozenAssetId,
-    InvalidVideoMetadata, VideoMetadata, VideoTiming,
+    InvalidVideoMetadata, VideoColorProfile, VideoMetadata, VideoTiming,
 };
 pub use audio::{
     AudioChannelLayout, AudioGain, AudioSampleConversionOverflow, AudioSampleCount,

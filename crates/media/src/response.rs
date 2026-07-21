@@ -7,7 +7,7 @@ use std::path::Path;
 
 use onmark_core::model::{
     AssetMetadata, AudioChannelLayout, AudioMetadata, AudioSampleRate, Duration, FrameRate,
-    VideoMetadata, VideoTiming,
+    VideoColorProfile, VideoMetadata, VideoTiming,
 };
 use serde::Deserialize;
 
@@ -28,6 +28,10 @@ struct ProbeStream {
     duration: Option<Box<str>>,
     codec_name: Option<Box<str>>,
     pix_fmt: Option<Box<str>>,
+    color_range: Option<Box<str>>,
+    color_space: Option<Box<str>>,
+    color_transfer: Option<Box<str>>,
+    color_primaries: Option<Box<str>>,
     avg_frame_rate: Option<Box<str>>,
     r_frame_rate: Option<Box<str>>,
     nb_frames: Option<Box<str>>,
@@ -149,11 +153,31 @@ fn parse_video(
 ) -> Result<VideoMetadata, ProbeError> {
     let duration = video_duration(path, stream.duration.as_deref(), format_duration)?;
     let timing = parse_timing(path, &stream)?;
+    let color_profile = parse_color_profile(&stream);
     let codec = required_field(path, "codec name", stream.codec_name)?;
     let pixel_format = required_field(path, "pixel format", stream.pix_fmt)?;
 
-    VideoMetadata::new(duration, codec, pixel_format, timing)
-        .map_err(|source| ProbeError::invalid_video(path, source.to_string()))
+    let metadata = VideoMetadata::new(duration, codec, pixel_format, timing)
+        .map_err(|source| ProbeError::invalid_video(path, source.to_string()))?;
+    Ok(match color_profile {
+        Some(profile) => metadata.with_color_profile(profile),
+        None => metadata,
+    })
+}
+
+fn parse_color_profile(stream: &ProbeStream) -> Option<VideoColorProfile> {
+    let profile = (
+        stream.color_range.as_deref(),
+        stream.color_space.as_deref(),
+        stream.color_transfer.as_deref(),
+        stream.color_primaries.as_deref(),
+    );
+    match profile {
+        (Some("tv"), Some("bt709"), Some("bt709"), Some("bt709")) => {
+            Some(VideoColorProfile::Bt709Limited)
+        }
+        _ => None,
+    }
 }
 
 fn video_duration(

@@ -7,7 +7,9 @@ agents.
 screenplay → deterministic Timeline IR → browser frames + audio plan → MP4
 ```
 
-Delivery gates one through six are complete. Gate one renders and
+Delivery gates one through six are complete; Gate seven is measuring an
+explicitly admitted layered native-media path before it may alter production
+pixels. Gate one renders and
 independently verifies one real screenplay through the compiler, browser
 protocol, Chromium, and FFmpeg. Gate two partitions one media-bearing two-shot
 film into two local Render Units and proves that their assembled decoded video
@@ -31,6 +33,14 @@ the existing closed overlay facts Rust-owned component identity that remains
 stable across unit projections. Its Linux exit conformance proves equal pixels
 across cold browsers and whole-film versus partitioned execution without adding
 a general props channel, new screenplay spelling, or a second timing system.
+
+Gate seven keeps the existing Chromium-media renderer authoritative while a
+checked experiment evaluates transparent browser presentation over persistent
+native media decode and composition. Admission requires deterministic cold
+runs, exact whole-film/partition equivalence within the candidate path, declared
+color conformance, bounded streaming without a temporary PNG sequence, at least
+a twofold latency improvement, and no more than 85% of the baseline peak RSS.
+It is an execution optimization, not new screenplay syntax or a hidden fallback.
 
 The completed foundation includes the pure compiler and versioned wire types in
 `onmark-core`; bounded ffprobe and strict SubRip/WebVTT/ASS normalization in
