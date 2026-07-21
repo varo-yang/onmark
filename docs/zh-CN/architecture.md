@@ -1138,9 +1138,9 @@ sequential 执行，只有显式 `randomAccess` 才允许 Render Graph 生成 sh
 分别作为 whole-film unit 和两个独立 unit 渲染，在通过 canonical raw-RGBA frame sequence
 等价检查后再用共享路径组装最终输出。
 
-### 第六关（进行中）：确定性视觉资源与组件绑定
+### 第六关（已完成）：确定性视觉资源与组件绑定
 
-本关先补齐 browser resource 地基，再允许后续性能关卡改变 capture path。本地 image、SVG 与 font
+本关补齐 browser resource 地基，再允许后续性能关卡改变 capture path。本地 image、SVG 与 font
 bytes 作为带稳定 identity、明确 resource fact、字节上限且不依赖 ambient network fetch 的 frozen bundle
 resource 进入既有管线。browser runtime 为 video、image decode、font load、texture upload 与显式注册的
 custom resource 提供一条 typed、bounded readiness boundary；超时必须指出仍未就绪的 resource 与 phase，

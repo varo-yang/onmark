@@ -1,6 +1,6 @@
 # Onmark Presentation Contract
 
-> 状态：已覆盖 Gate 一至 Gate 五；Gate 六正在扩展其确定性 resource 合约。
+> 状态：已覆盖 Gate 一至 Gate 六。
 
 Gate 一使用两个作者文件：
 

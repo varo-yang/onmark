@@ -962,8 +962,8 @@ presentation, renders the same media, audio, and caption facts as one whole-film
 unit and two independent units, and compares their canonical raw-RGBA frame
 sequences before assembling the shared final output.
 
-**Gate six (active): deterministic visual resources and component binding.**
-This gate closes the browser-resource gap before performance work changes the
+**Gate six (completed): deterministic visual resources and component binding.**
+This gate closed the browser-resource gap before performance work changes the
 capture path. Local image, SVG, and font bytes become frozen bundle resources
 with stable identities, declared resource facts, byte limits, and no ambient
 network fetch. The browser runtime owns one typed, bounded readiness boundary

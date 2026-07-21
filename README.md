@@ -7,7 +7,7 @@ agents.
 screenplay → deterministic Timeline IR → browser frames + audio plan → MP4
 ```
 
-Delivery gates one through five are complete. Gate one renders and
+Delivery gates one through six are complete. Gate one renders and
 independently verifies one real screenplay through the compiler, browser
 protocol, Chromium, and FFmpeg. Gate two partitions one media-bearing two-shot
 film into two local Render Units and proves that their assembled decoded video
@@ -25,12 +25,12 @@ conformance proves that the effect-bearing presentation produces identical
 canonical pixels as one whole-film unit or two independent units. Unknown
 presentation code remains sequential. Deployment work remains frozen.
 
-Gate six is active. It is adding content-addressed local image, SVG, and font
-resources; bounded browser readiness that names the resource still pending;
-and Rust-owned component identity for the existing closed overlay facts. It
-does not add a general props channel or change the screenplay surface without
-the repository's language-admission evidence, and it does not reopen deployment
-work or introduce a second timing system.
+Gate six carries content-addressed local image, SVG, and font resources through
+bounded browser readiness that names the resource still pending. It also gives
+the existing closed overlay facts Rust-owned component identity that remains
+stable across unit projections. Its Linux exit conformance proves equal pixels
+across cold browsers and whole-film versus partitioned execution without adding
+a general props channel, new screenplay spelling, or a second timing system.
 
 The completed foundation includes the pure compiler and versioned wire types in
 `onmark-core`; bounded ffprobe and strict SubRip/WebVTT/ASS normalization in

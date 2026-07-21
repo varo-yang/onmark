@@ -1,7 +1,6 @@
 # Onmark Presentation Contract
 
-> Status: browser authoring contract through Gate five; its deterministic
-> resource extension is active in Gate six.
+> Status: browser authoring contract through Gate six.
 
 Onmark uses two authored files at Gate one:
 
