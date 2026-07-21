@@ -862,12 +862,11 @@ Deployment work is frozen after this proof. Provider workflows, public remote
 render commands, infrastructure definitions, release publication, and additional
 cloud adapters require a later user need and are not part of gates four or five.
 
-**Gate four (open): authored audio and subtitles.** The only implementation goal
-is to carry general audio and user-supplied subtitle files through the existing
-local compiler and renderer without weakening exact timing or partition
-equivalence. The gate accepts no language spelling until its evaluation assets
-and conformance fixtures satisfy the language admission rule. Its exit contract
-is:
+**Gate four (complete): authored audio and subtitles.** This gate carried
+general audio and user-supplied subtitle files through the existing local
+compiler and renderer without weakening exact timing or partition equivalence.
+It admitted no language spelling until its evaluation assets and conformance
+fixtures satisfied the language admission rule. Its exit contract was:
 
 - narrative voice-over remains distinct from general music and sound effects;
 - external TTS audio remains a normal frozen authored asset rather than an
@@ -882,11 +881,18 @@ is:
 - one local media-bearing film with a cross-shot audio bed, a shot-local sound,
   voice-over, and imported captions renders equivalently as a whole film and as
   two partitions; canonical raw-RGBA frames and decoded audio timing/content are
-  both checked before the gate closes.
+  both checked before the gate closed.
 
-Gate four does not add cloud conformance, deployment commands, a subtitle
-editor, speech generation, or animation adapters. Gate five may open the CSS,
-GSAP, and Three.js temporal-capability work only after Gate four is stable.
+The pinned Linux real-process suite now exercises that complete slice through
+both the native renderer and release CLI. The whole-film and two-unit paths
+produce equivalent canonical raw-RGBA frames and decoded audio while carrying
+film music, a shot-local effect, voice-over, and imported captions. Gate four
+added no cloud conformance, deployment command, subtitle editor, speech
+generation, or animation adapter.
+
+Gate five begins with bounded CSS, GSAP, and Three.js temporal-capability
+experiments. A production API, seekability declaration, or screenplay spelling
+must wait for those measurements and an explicit Gate-five exit contract.
 
 Every gate uses the final-direction contracts but implements only fields
 consumed by that gate. A failed gate blocks construction of the next gate's

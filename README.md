@@ -7,21 +7,24 @@ agents.
 screenplay → deterministic Timeline IR → browser frames + audio plan → MP4
 ```
 
-Delivery gates one through three are complete. Gate one renders and
+Delivery gates one through four are complete. Gate one renders and
 independently verifies one real screenplay through the compiler, browser
 protocol, Chromium, and FFmpeg. Gate two partitions one media-bearing two-shot
 film into two local Render Units and proves that their assembled decoded video
 and audio match the whole-film baseline. Gate three sends those same portable
 units to two concurrent arm64 Lambda workers, verifies their immutable S3 frame
 artifacts against a remote whole-film capture by canonical raw-RGBA pixels, and
-assembles the partitions through the shared H.264/AAC path.
+assembles the partitions through the shared H.264/AAC path. Gate four carries
+authored music, shot-local effects, voice-over, and imported SRT/WebVTT/ASS
+captions through the same local whole-film and partitioned paths, with both
+canonical raw-RGBA frames and decoded audio checked for equivalence.
 
-Deployment work is now frozen. Gate four returns to the authored product surface:
-general audio plus imported SRT, WebVTT, and ASS subtitles, proved first through
-the existing local whole-film and partitioned pipelines.
+Deployment work remains frozen. Gate five has not admitted a production
+animation API; deterministic CSS, GSAP, and Three.js temporal capabilities must
+first earn their contract through bounded experiments.
 
 The completed foundation includes the pure compiler and versioned wire types in
-`onmark-core`; bounded ffprobe and initial SubRip/WebVTT/ASS normalization in
+`onmark-core`; bounded ffprobe and strict SubRip/WebVTT/ASS normalization in
 `onmark-media`; deterministic video and overlay presentation in
 `@onmark/runtime`; semantic DOM bindings in `@onmark/authoring`; immutable
 presentation artifacts in `@onmark/bundler`; the typed Chromium-to-FFmpeg
