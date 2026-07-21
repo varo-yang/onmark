@@ -1,6 +1,8 @@
 //! Frozen source-color evidence for the layered-media candidate.
 
 use std::env;
+use std::fs::File;
+use std::io::{BufWriter, Write as _};
 use std::path::Path;
 
 use onmark_core::model::FrameRate;
@@ -72,24 +74,26 @@ impl StrategyFixture {
 
 async fn generate_color_video(output: &Path, frame_rate: FrameRate) {
     let (width, height) = experiment_dimensions();
-    let half_width = width / 2;
-    let half_height = height / 2;
+    let source = output.with_extension("ppm");
+    write_color_source(&source, width, height);
     let rate = format!("{}/{}", frame_rate.numerator(), frame_rate.denominator());
-    let source = format!(
-        concat!(
-            "color=c=red:size={half_width}x{half_height}:rate={rate}:d=2.5[tl];",
-            "color=c=lime:size={half_width}x{half_height}:rate={rate}:d=2.5[tr];",
-            "color=c=blue:size={half_width}x{half_height}:rate={rate}:d=2.5[bl];",
-            "color=c=white:size={half_width}x{half_height}:rate={rate}:d=2.5[br];",
-            "[tl][tr]hstack[top];[bl][br]hstack[bottom];[top][bottom]vstack",
-        ),
-        half_width = half_width,
-        half_height = half_height,
-        rate = rate,
-    );
     let generated = Command::new(required_path("ONMARK_FFMPEG"))
-        .args(["-nostdin", "-v", "error", "-f", "lavfi", "-i", &source])
         .args([
+            "-nostdin",
+            "-v",
+            "error",
+            "-framerate",
+            &rate,
+            "-loop",
+            "1",
+            "-i",
+        ])
+        .arg(&source)
+        .args([
+            "-t",
+            "2.5",
+            "-vf",
+            "scale=in_range=full:out_range=limited:out_color_matrix=bt709,format=yuv420p",
             "-an",
             "-c:v",
             "libx264",
@@ -114,6 +118,45 @@ async fn generate_color_video(output: &Path, frame_rate: FrameRate) {
         .expect("the color fixture must finish before its deadline")
         .expect("FFmpeg must generate the color fixture");
     crate::assert_process_succeeded("color-fixture generation", &generated);
+}
+
+fn write_color_source(path: &Path, width: u32, height: u32) {
+    assert!(
+        width.is_multiple_of(2),
+        "the color fixture width must be even"
+    );
+    assert!(
+        height.is_multiple_of(2),
+        "the color fixture height must be even"
+    );
+
+    let mut source =
+        BufWriter::new(File::create(path).expect("the color source must be creatable"));
+    write!(source, "P6\n{width} {height}\n255\n").expect("the color header must be writable");
+    let top = color_row(width, [255, 0, 0], [0, 255, 0]);
+    let bottom = color_row(width, [0, 0, 255], [255; 3]);
+    for row in 0..height {
+        let pixels = if row < height / 2 { &top } else { &bottom };
+        source
+            .write_all(pixels)
+            .expect("the color row must be writable");
+    }
+    source.flush().expect("the color source must be readable");
+}
+
+fn color_row(width: u32, left: [u8; 3], right: [u8; 3]) -> Vec<u8> {
+    let capacity = usize::try_from(width)
+        .expect("the color width must fit this process")
+        .checked_mul(3)
+        .expect("the color row must fit this process");
+    let mut row = Vec::with_capacity(capacity);
+    for _ in 0..width / 2 {
+        row.extend_from_slice(&left);
+    }
+    for _ in width / 2..width {
+        row.extend_from_slice(&right);
+    }
+    row
 }
 
 #[derive(Clone, Copy)]
