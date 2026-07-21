@@ -518,6 +518,10 @@ as repository development dependencies. They are bundled only into the checked
 conformance presentation. They are not dependencies of `@onmark/runtime`,
 `@onmark/authoring`, or a Rust product crate; this preserves the vendor-free
 clock while measuring real vendor playheads rather than local imitations.
+The measured presentation now runs those playheads through the production
+`FrameEffect` lifecycle. `@onmark/runtime` owns that vendor-free interface and
+awaits it inside `Seek(frame)`; `@onmark/authoring` only carries an author-owned
+factory into the standard presentation bindings.
 
 The `protocol` module uses `serde` for stable browser and bundle-manifest JSON
 boundaries. Its optional `schema` feature exposes `schemars` only to repository
@@ -929,6 +933,14 @@ Gate five does not add animation spelling to the screenplay, infer capability
 from source inspection, virtualize ambient wall-clock APIs, or promise that an
 arbitrary component is seekable. Those require separate language or adapter
 evidence after this gate.
+
+The first bounded experiment and the production frame-effect boundary are now
+complete. The checked WAAPI, GSAP, and Three.js playheads all use the standard
+`PresentationRuntimeAdapter`: effects bind once during `Load`, apply in declared
+order during `Seek(frame)`, and finish before `FrameStaged(frame)`. Disposal is
+terminal and attempts every owned effect even after one cleanup failure. This
+does not yet grant random access; bundle capability metadata and Render Graph
+consumption remain the next Gate-five admission step.
 
 Every gate uses the final-direction contracts but implements only fields
 consumed by that gate. A failed gate blocks construction of the next gate's

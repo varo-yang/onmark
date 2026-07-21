@@ -209,10 +209,20 @@ only adapter whose frame behavior is exercised by Gate-one and Gate-two
 conformance. A custom adapter therefore gains no implied random-seek or
 partitioning guarantee merely by implementing `PresentationBindings`.
 
-When temporal capabilities become public, they will be declared by
-`@onmark/runtime`, not duplicated in authoring or TypeScript timing code. Their
-meaning, proof obligations, scheduling effect, and conformance tests must land
-with the API; an arbitrary string or boolean is not a capability contract.
+The public `FrameEffect` boundary is owned by `@onmark/runtime`. Authoring may
+provide a `frameEffects(plan)` factory to `createDomPresentationBindings`; the
+standard adapter invokes that factory once during `Load(plan)` and owns the
+returned effects until terminal disposal. On each `Seek(frame)`, effects apply
+in declaration order after solved video and overlay placement, and all returned
+promises resolve before `FrameStaged(frame)`. Effects receive the exact
+immutable `RuntimeFrame`; they do not receive a scheduler or a mutable timeline.
+Disposal attempts every effect even when one cleanup operation fails.
+
+This lifecycle is not itself a random-access declaration. Temporal capabilities
+remain closed values owned by `@onmark/runtime`, not arbitrary strings or
+booleans duplicated in authoring code. Their meaning, proof obligations, bundle
+identity, scheduling effect, and conformance tests land together. Until bundle
+metadata carries one, custom presentation code remains sequential.
 
 ## Assets
 
@@ -251,11 +261,12 @@ Not allowed:
 
 Gate five admits animation only through measured, paused playheads driven by an
 exact `RuntimeFrame`. Its initial conformance matrix covers WAAPI, GSAP, and
-Three.js without making those libraries runtime dependencies. Static CSS
-transitions that depend on load timing, free-running library tickers, and
-ambient `requestAnimationFrame` progress remain outside the deterministic
-contract. The experiment does not itself publish an adapter API; capability
-metadata and the frame-effect lifecycle land only after the measurements pass.
+Three.js through the standard frame-effect lifecycle without making those
+libraries runtime dependencies. Static CSS transitions that depend on load
+timing, free-running library tickers, and ambient `requestAnimationFrame`
+progress remain outside the deterministic contract. Passing this lifecycle
+does not grant a bundle random access; capability metadata lands only with its
+partitioning proof.
 
 ## Failures and cleanup
 

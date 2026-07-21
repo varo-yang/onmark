@@ -63,11 +63,40 @@ test("presents videos and overlays on their Rust-owned intervals", async () => {
   assert.equal(recorder.allDisposed(), true);
 });
 
+test("applies frame effects at each exact authored frame", async () => {
+  const recorder = new PresentationRecorder();
+  const adapter = new PresentationRuntimeAdapter(recorder.bindings, 100);
+  const plan = { ...presentationPlan(), videos: [] };
+
+  await adapter.load(plan);
+  await adapter.prepare(runtimeFrameAt(10, plan.frameRate));
+  for (const index of [17, 12, 17]) {
+    const frame = runtimeFrameAt(index, plan.frameRate);
+    await adapter.seek(frame);
+    await adapter.confirm(frame);
+  }
+
+  assert.deepEqual(recorder.effects[0]?.appliedFrames, [17, 12, 17]);
+  await adapter.dispose();
+  assert.equal(recorder.allDisposed(), true);
+});
+
 test("releases every bound effect after one cleanup failure", async () => {
   const recorder = new PresentationRecorder();
   const adapter = new PresentationRuntimeAdapter(recorder.bindings, 100);
   await adapter.load(presentationPlan());
   recorder.videos[0]?.rejectVisibility();
+
+  await assert.rejects(adapter.dispose(), RuntimeAdapterError);
+
+  assert.equal(recorder.allDisposed(), true);
+});
+
+test("releases videos and overlays after frame-effect cleanup fails", async () => {
+  const recorder = new PresentationRecorder();
+  const adapter = new PresentationRuntimeAdapter(recorder.bindings, 100);
+  await adapter.load(presentationPlan());
+  recorder.rejectEffectCleanup();
 
   await assert.rejects(adapter.dispose(), RuntimeAdapterError);
 
@@ -134,9 +163,16 @@ interface RecordedOverlay {
   visible: boolean;
 }
 
+interface RecordedFrameEffect {
+  readonly appliedFrames: number[];
+  disposed: boolean;
+}
+
 class PresentationRecorder {
+  readonly effects: RecordedFrameEffect[] = [];
   readonly overlays: RecordedOverlay[] = [];
   readonly videos: RecordedVideo[] = [];
+  #rejectEffectCleanup = false;
   #rejectedOverlayIndex: number | undefined;
   #rejectedVideoCleanupIndex: number | undefined;
 
@@ -195,7 +231,32 @@ class PresentationRecorder {
         },
       };
     },
+    bindFrameEffects: () => {
+      const recorded: RecordedFrameEffect = {
+        appliedFrames: [],
+        disposed: false,
+      };
+      this.effects.push(recorded);
+      return [
+        {
+          async apply(frame): Promise<void> {
+            await Promise.resolve();
+            recorded.appliedFrames.push(frame.index);
+          },
+          dispose: async (): Promise<void> => {
+            recorded.disposed = true;
+            if (this.#rejectEffectCleanup) {
+              throw new Error("frame-effect cleanup failed");
+            }
+          },
+        },
+      ];
+    },
   };
+
+  rejectEffectCleanup(): void {
+    this.#rejectEffectCleanup = true;
+  }
 
   rejectOverlayBindingAt(index: number): void {
     this.#rejectedOverlayIndex = index;
@@ -216,7 +277,9 @@ class PresentationRecorder {
     return (
       this.videos.every(
         ({ disposed, element }) => disposed && !element.hasSource,
-      ) && this.overlays.every(({ disposed }) => disposed)
+      ) &&
+      this.overlays.every(({ disposed }) => disposed) &&
+      this.effects.every(({ disposed }) => disposed)
     );
   }
 }

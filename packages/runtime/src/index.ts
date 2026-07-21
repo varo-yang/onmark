@@ -22,6 +22,7 @@ export {
 } from "./video.js";
 export {
   PresentationRuntimeAdapter,
+  type FrameEffect,
   type OverlayPresentation,
   type PresentationBindings,
   type RuntimeOverlay,

@@ -7,7 +7,12 @@ import {
   PRESENTATION_CLASSES,
   createDomPresentationBindings,
 } from "../src/index.js";
-import type { RuntimeOverlay, RuntimeVideo } from "@onmark/runtime/types";
+import type {
+  FrameEffect,
+  RuntimeOverlay,
+  RuntimePlan,
+  RuntimeVideo,
+} from "@onmark/runtime/types";
 
 test("binds video and overlay facts into semantic presentation nodes", () => {
   const browser = new FakeDocument();
@@ -72,6 +77,38 @@ test("maps every overlay role to its stable semantic class", () => {
     ],
   );
 });
+
+test("binds one immutable frame-effect collection to the loaded plan", () => {
+  const browser = new FakeDocument();
+  const effect: FrameEffect = {
+    apply(): void {},
+    dispose(): void {},
+  };
+  let received: RuntimePlan | undefined;
+  const bindings = createDomPresentationBindings({
+    document: asBrowserDocument(browser),
+    frameEffects(plan) {
+      received = plan;
+      return [effect];
+    },
+    videoSource: () => "unused",
+  });
+
+  const effects = bindings.bindFrameEffects(PLAN);
+
+  assert.equal(received, PLAN);
+  assert.deepEqual(effects, [effect]);
+  assert.equal(Object.isFrozen(effects), true);
+});
+
+const PLAN: RuntimePlan = {
+  timelineVersion: 1,
+  frameRate: { numerator: 30, denominator: 1 },
+  evaluation: { start: 0, end: 1 },
+  output: { start: 0, end: 1 },
+  videos: [],
+  overlays: [],
+};
 
 const VIDEO: RuntimeVideo = {
   assetId:

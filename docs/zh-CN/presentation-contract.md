@@ -189,10 +189,19 @@ API 或 screenplay annotation。production
 adapter 是唯一由 Gate 一和 Gate 二 conformance 覆盖其帧行为的 adapter。因此，自定义 adapter 即使实现了
 `PresentationBindings`，也不会自动获得 random seek 或 partition 的保证。
 
-temporal capability 成为公开能力时，声明将由 `@onmark/runtime`
-拥有，不能在 authoring 或 TypeScript timing
-code 再复制一份。其语义、证明义务、调度影响和 conformance
-test 必须和 API 一起落地；任意字符串或 boolean 不是 capability contract。
+公开的 `FrameEffect` boundary 由 `@onmark/runtime` 拥有。authoring 可以向
+`createDomPresentationBindings` 提供 `frameEffects(plan)` factory；标准 adapter
+会在 `Load(plan)` 时调用一次，并独占返回的 effect 直到 terminal
+disposal。每次 `Seek(frame)` 中，effect 会在 solved video 与 overlay placement
+之后按声明顺序 apply，所有返回 promise 都必须在 `FrameStaged(frame)`
+前完成。effect 只获得精确 immutable `RuntimeFrame`，不会得到 scheduler 或 mutable
+timeline。单个 cleanup 失败后仍会尝试 dispose 全部 effect。
+
+这条 lifecycle 本身不是 random-access 声明。temporal capability 仍是
+`@onmark/runtime` 拥有的封闭值，而不是 authoring code 复制的任意 string 或
+boolean；它的语义、proof obligation、bundle identity、scheduling effect 与
+conformance test 必须一起落地。在 bundle metadata 携带 capability 之前，custom
+presentation code 仍按 sequential 处理。
 
 ## 素材
 
@@ -226,7 +235,7 @@ presentation 代码必须在 runtime frame clock 下确定。
 - 在 TypeScript 里重写 cue、delay、duration 或 partition 逻辑；
 - 无界等待、队列或 retained buffer。
 
-Gate 五只接纳由精确 `RuntimeFrame` 驱动、playhead 已暂停的动画。首个 conformance matrix 覆盖 WAAPI、GSAP 与 Three.js，但不会让这些库成为 runtime dependency。依赖加载时刻的静态 CSS transition、free-running library ticker 和 ambient `requestAnimationFrame` progress 仍不属于确定性合约。实验本身不发布 adapter API；只有测量通过后，capability metadata 与 frame-effect lifecycle 才会一起落地。
+Gate 五只接纳由精确 `RuntimeFrame` 驱动、playhead 已暂停的动画。首个 conformance matrix 通过标准 frame-effect lifecycle 覆盖 WAAPI、GSAP 与 Three.js，但不会让这些库成为 runtime dependency。依赖加载时刻的静态 CSS transition、free-running library ticker 和 ambient `requestAnimationFrame` progress 仍不属于确定性合约。通过 lifecycle 不等于 bundle 获得 random access；capability metadata 只会与 partitioning proof 一起落地。
 
 ## 失败与清理
 

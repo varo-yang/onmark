@@ -2,9 +2,11 @@
 // Layout remains presentation-owned; runtime remains the sole timing owner.
 
 import type {
+  FrameEffect,
   OverlayPresentation,
   PresentationBindings,
   RuntimeOverlay,
+  RuntimePlan,
   RuntimeVideo,
   VideoPresentation,
 } from "@onmark/runtime/types";
@@ -21,9 +23,13 @@ export const PRESENTATION_CLASSES = Object.freeze({
 /** Resolves one immutable video placement to its materialized browser source. */
 export type VideoSource = (placement: RuntimeVideo) => string;
 
+/** Creates the paused effects owned by one loaded presentation. */
+export type FrameEffectFactory = (plan: RuntimePlan) => readonly FrameEffect[];
+
 /** Browser effects required to bind solved facts into an author-owned document. */
 export interface DomPresentationOptions {
   readonly document: Document;
+  readonly frameEffects?: FrameEffectFactory;
   readonly videoSource: VideoSource;
 }
 
@@ -31,13 +37,16 @@ export interface DomPresentationOptions {
 export function createDomPresentationBindings(
   options: DomPresentationOptions,
 ): PresentationBindings {
-  const { document, videoSource } = options;
+  const { document, frameEffects, videoSource } = options;
   const bindings: PresentationBindings = {
     bindVideo(placement, index) {
       return bindVideo(document, videoSource, placement, index);
     },
     bindOverlay(placement, index) {
       return bindOverlay(document, placement, index);
+    },
+    bindFrameEffects(plan) {
+      return Object.freeze([...(frameEffects?.(plan) ?? [])]);
     },
   };
   return Object.freeze(bindings);

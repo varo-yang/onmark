@@ -37,10 +37,19 @@ export interface OverlayPresentation {
   dispose(): void;
 }
 
+/** One paused browser effect driven exclusively by the authored frame. */
+export interface FrameEffect {
+  /** Applies the exact frame before the runtime reports it as staged. */
+  apply(frame: RuntimeFrame): void | Promise<void>;
+  /** Releases resources retained by this effect. */
+  dispose(): void | Promise<void>;
+}
+
 /** Browser effects supplied by one presentation entry point. */
 export interface PresentationBindings {
   bindVideo(placement: RuntimeVideo, index: number): VideoPresentation;
   bindOverlay(placement: RuntimeOverlay, index: number): OverlayPresentation;
+  bindFrameEffects(plan: RuntimePlan): readonly FrameEffect[];
 }
 
 interface BoundVideo {
@@ -56,6 +65,7 @@ interface BoundOverlay {
 
 interface LoadedPresentation {
   readonly kind: "loaded";
+  readonly effects: readonly FrameEffect[];
   readonly frameRate: RuntimePlan["frameRate"];
   readonly videos: readonly BoundVideo[];
   readonly overlays: readonly BoundOverlay[];
@@ -100,13 +110,20 @@ export class PresentationRuntimeAdapter implements RuntimeAdapter {
       );
     }
 
+    let effects: readonly FrameEffect[] = [];
     const videos: BoundVideo[] = [];
     const overlays: BoundOverlay[] = [];
     try {
       await this.#loadVideos(plan, videos);
       this.#bindOverlays(plan, overlays);
+      effects = this.#bindings.bindFrameEffects(plan);
+      effects = ownFrameEffects(effects);
     } catch (error) {
-      const cleanupFailure = releasePresentation(videos, overlays);
+      const cleanupFailure = await releasePresentation(
+        effects,
+        videos,
+        overlays,
+      );
       if (cleanupFailure !== undefined) {
         // Incomplete release makes the adapter terminal; retrying would bind
         // new effects beside browser state that no longer has one owner.
@@ -117,6 +134,7 @@ export class PresentationRuntimeAdapter implements RuntimeAdapter {
 
     this.#state = {
       kind: "loaded",
+      effects,
       frameRate: plan.frameRate,
       videos,
       overlays,
@@ -140,6 +158,7 @@ export class PresentationRuntimeAdapter implements RuntimeAdapter {
       hideVideos(state.videos);
       const videos = await stageVideos(frame, state);
       presentOverlays(frame, state.overlays);
+      await applyFrameEffects(frame, state.effects);
       this.#staged = { frame, videos };
     } catch (error) {
       discardStagedVideos(state.videos);
@@ -173,7 +192,8 @@ export class PresentationRuntimeAdapter implements RuntimeAdapter {
     this.#state = { kind: "disposed" };
     this.#staged = undefined;
 
-    const failure = releasePresentation(
+    const failure = await releasePresentation(
+      loaded?.effects ?? [],
       loaded?.videos ?? [],
       loaded?.overlays ?? [],
     );
@@ -219,6 +239,12 @@ export class PresentationRuntimeAdapter implements RuntimeAdapter {
 }
 
 // ── Frame application ──
+
+function ownFrameEffects(
+  effects: readonly FrameEffect[],
+): readonly FrameEffect[] {
+  return Object.freeze([...effects]);
+}
 
 async function stageVideos(
   frame: RuntimeFrame,
@@ -272,6 +298,15 @@ function hideVideos(videos: readonly BoundVideo[]): void {
   }
 }
 
+async function applyFrameEffects(
+  frame: RuntimeFrame,
+  effects: readonly FrameEffect[],
+): Promise<void> {
+  for (const effect of effects) {
+    await effect.apply(frame);
+  }
+}
+
 // ── Terminal cleanup ──
 
 function presentationLoadFailure(
@@ -287,11 +322,12 @@ function presentationLoadFailure(
   return RuntimeAdapterError.fromUnknown(error, "presentation failed to load");
 }
 
-function releasePresentation(
+async function releasePresentation(
+  effects: readonly FrameEffect[],
   videos: readonly BoundVideo[],
   overlays: readonly BoundOverlay[],
-): unknown | undefined {
-  let failure: unknown;
+): Promise<unknown | undefined> {
+  let failure = await releaseFrameEffects(effects);
   for (const video of videos) {
     const releaseFailure = releaseVideo(video);
     failure ??= releaseFailure;
@@ -299,6 +335,20 @@ function releasePresentation(
   for (const overlay of overlays) {
     const releaseFailure = releaseOverlay(overlay);
     failure ??= releaseFailure;
+  }
+  return failure;
+}
+
+async function releaseFrameEffects(
+  effects: readonly FrameEffect[],
+): Promise<unknown | undefined> {
+  let failure: unknown;
+  for (const effect of effects) {
+    try {
+      await effect.dispose();
+    } catch (error) {
+      failure ??= error;
+    }
   }
   return failure;
 }

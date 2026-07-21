@@ -16,76 +16,48 @@ import {
 
 import {
   installRuntimeHost,
-  RuntimeAdapterError,
-  type RuntimeAdapter,
+  materializedVideoSource,
+  PresentationRuntimeAdapter,
+  type FrameEffect,
   type RuntimeFrame,
-  type RuntimePlan,
 } from "@onmark/runtime";
+import { createDomPresentationBindings } from "@onmark/authoring";
 
 import "./temporal-experiment.css";
 
 const ANIMATION_SECONDS = 1;
 const MARKER_TRAVEL_PIXELS = 160;
+const VIDEO_READINESS_TIMEOUT_MILLISECONDS = 1_000;
 
-class TemporalExperiment implements RuntimeAdapter {
-  readonly #stage = experimentStage();
-  readonly #waapi = waapiEffect(this.#stage);
-  readonly #gsap = gsapEffect(this.#stage);
-  readonly #three = threeEffect(this.#stage);
-  #state: "disposed" | "empty" | "loaded" = "empty";
+const bindings = createDomPresentationBindings({
+  document,
+  frameEffects: temporalEffects,
+  videoSource: materializedVideoSource,
+});
+installRuntimeHost(
+  new PresentationRuntimeAdapter(
+    bindings,
+    VIDEO_READINESS_TIMEOUT_MILLISECONDS,
+  ),
+);
 
-  async load(_plan: RuntimePlan): Promise<void> {
-    if (this.#state !== "empty") {
-      throw new RuntimeAdapterError(
-        "operation",
-        "temporal experiment requires the empty state",
-      );
-    }
-    this.#state = "loaded";
-  }
+function temporalEffects(): readonly FrameEffect[] {
+  const stage = experimentStage();
+  const stageLifecycle: FrameEffect = {
+    apply(frame: RuntimeFrame): void {
+      stage.dataset["frame"] = String(frame.index);
+    },
+    dispose(): void {
+      stage.remove();
+    },
+  };
 
-  async prepare(frame: RuntimeFrame): Promise<void> {
-    this.#apply(frame);
-  }
-
-  async seek(frame: RuntimeFrame): Promise<void> {
-    this.#apply(frame);
-  }
-
-  async confirm(_frame: RuntimeFrame): Promise<void> {}
-
-  async dispose(): Promise<void> {
-    if (this.#state === "disposed") {
-      return;
-    }
-    this.#state = "disposed";
-    this.#waapi.cancel();
-    this.#gsap.dispose();
-    this.#three.dispose();
-    this.#stage.remove();
-  }
-
-  #apply(frame: RuntimeFrame): void {
-    if (this.#state !== "loaded") {
-      throw new RuntimeAdapterError(
-        "operation",
-        "temporal experiment requires a loaded plan",
-      );
-    }
-
-    const time = Math.min(frame.timeSeconds, ANIMATION_SECONDS);
-    this.#waapi.currentTime = time * 1_000;
-    this.#gsap.seek(time);
-    this.#three.seek(time);
-    this.#stage.dataset["frame"] = String(frame.index);
-  }
-}
-
-installRuntimeHost(new TemporalExperiment());
-
-interface SeekableEffect {
-  seek(timeSeconds: number): void;
-  dispose(): void;
+  return [
+    waapiEffect(stage),
+    gsapEffect(stage),
+    threeEffect(stage),
+    stageLifecycle,
+  ];
 }
 
 function experimentStage(): HTMLElement {
@@ -102,17 +74,25 @@ function marker(stage: HTMLElement, className: string): HTMLElement {
   return element;
 }
 
-function waapiEffect(stage: HTMLElement): Animation {
+function waapiEffect(stage: HTMLElement): FrameEffect {
   const element = marker(stage, "experiment-waapi");
   const [animation] = element.getAnimations();
   if (animation === undefined) {
     throw new TypeError("the CSS animation did not produce a WAAPI playhead");
   }
   animation.pause();
-  return animation;
+  return {
+    apply(frame): void {
+      animation.currentTime = effectTime(frame) * 1_000;
+    },
+    dispose(): void {
+      animation.cancel();
+      element.remove();
+    },
+  };
 }
 
-function gsapEffect(stage: HTMLElement): SeekableEffect {
+function gsapEffect(stage: HTMLElement): FrameEffect {
   const element = marker(stage, "experiment-gsap");
   const timeline = gsap.timeline({ paused: true });
   timeline.to(element, {
@@ -123,16 +103,17 @@ function gsapEffect(stage: HTMLElement): SeekableEffect {
   });
 
   return {
-    seek(timeSeconds): void {
-      timeline.seek(timeSeconds, true);
+    apply(frame): void {
+      timeline.seek(effectTime(frame), true);
     },
     dispose(): void {
       timeline.kill();
+      element.remove();
     },
   };
 }
 
-function threeEffect(stage: HTMLElement): SeekableEffect {
+function threeEffect(stage: HTMLElement): FrameEffect {
   const canvas = document.createElement("canvas");
   canvas.className = "experiment-webgl";
   stage.append(canvas);
@@ -159,8 +140,8 @@ function threeEffect(stage: HTMLElement): SeekableEffect {
   mixer.clipAction(clip).play();
 
   return {
-    seek(timeSeconds): void {
-      mixer.setTime(timeSeconds);
+    apply(frame): void {
+      mixer.setTime(effectTime(frame));
       renderer.render(scene, camera);
     },
     dispose(): void {
@@ -171,4 +152,8 @@ function threeEffect(stage: HTMLElement): SeekableEffect {
       canvas.remove();
     },
   };
+}
+
+function effectTime(frame: RuntimeFrame): number {
+  return Math.min(frame.timeSeconds, ANIMATION_SECONDS);
 }
