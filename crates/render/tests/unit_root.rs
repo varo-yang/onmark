@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 
 use onmark_core::compiler;
 use onmark_core::model::{
-    AssetMetadata, AssetRef, Duration, FrameRate, FrozenAsset, FrozenAssetId, SourceId, Timebase,
-    VideoMetadata, VideoTiming,
+    AssetMetadata, AssetRef, Duration, FrameRate, FrozenAsset, FrozenAssetId,
+    PresentationTemporalCapability, SourceId, Timebase, VideoMetadata, VideoTiming,
 };
 use onmark_core::protocol::{BundleFile, BundleManifest};
 use onmark_render::{
@@ -44,7 +44,13 @@ fn materializes_verified_bundle_and_asset_bytes() {
 
 #[test]
 fn materializes_the_checked_in_bundle_contract() {
-    let root = conformance_bundle();
+    for version in ["bundle-v1", "bundle-v2"] {
+        materialize_conformance_bundle(version);
+    }
+}
+
+fn materialize_conformance_bundle(version: &str) {
+    let root = conformance_bundle(version);
     let source = fs::read_to_string(root.join(BundleManifest::FILE_NAME))
         .expect("the conformance manifest is readable");
     let manifest = serde_json::from_str::<BundleManifest>(&source)
@@ -146,8 +152,12 @@ fn rejects_payload_or_bundle_identity_drift() {
     let error = materialize(&fixture).expect_err("changed payload identity must be rejected");
     assert_eq!(error.kind(), UnitRootErrorKind::DigestMismatch);
 
-    let invalid = BundleManifest::new(digest(b"wrong identity"), fixture.manifest.files().to_vec())
-        .expect("the deliberately wrong identity is well formed");
+    let invalid = BundleManifest::new(
+        PresentationTemporalCapability::Sequential,
+        digest(b"wrong identity"),
+        fixture.manifest.files().to_vec(),
+    )
+    .expect("the deliberately wrong identity is well formed");
     let error = UnitRoot::materialize(
         fixture.bundle.path(),
         &invalid,
@@ -216,8 +226,12 @@ fn rejects_file_limits_before_bundle_identity_work() {
         BundleFile::new("index.html", 1, digest(b"index")).expect("index is valid"),
         BundleFile::new("presentation.js", 1, digest(b"script")).expect("script is valid"),
     ];
-    let manifest = BundleManifest::new(digest(b"wrong identity"), files)
-        .expect("the deliberately wrong identity is well formed");
+    let manifest = BundleManifest::new(
+        PresentationTemporalCapability::Sequential,
+        digest(b"wrong identity"),
+        files,
+    )
+    .expect("the deliberately wrong identity is well formed");
 
     let error = UnitRoot::materialize(bundle.path(), &manifest, [], limits(2, 4_096))
         .expect_err("the file bound must reject work before identity hashing");
@@ -288,17 +302,24 @@ impl Fixture {
 struct BundleIdentity<'a> {
     version: u16,
     entry_point: &'a str,
+    temporal_capability: &'a str,
     files: &'a [BundleFile],
 }
 
 fn manifest(files: Vec<BundleFile>) -> BundleManifest {
     let identity = BundleIdentity {
-        version: 1,
+        version: 2,
         entry_point: "index.html",
+        temporal_capability: PresentationTemporalCapability::Sequential.as_str(),
         files: &files,
     };
     let identity = serde_json::to_vec(&identity).expect("the fixture identity serializes");
-    BundleManifest::new(digest(&identity), files).expect("the fixture manifest is canonical")
+    BundleManifest::new(
+        PresentationTemporalCapability::Sequential,
+        digest(&identity),
+        files,
+    )
+    .expect("the fixture manifest is canonical")
 }
 
 fn materialize(fixture: &Fixture) -> Result<UnitRoot, onmark_render::UnitRootError> {
@@ -314,10 +335,11 @@ fn read(path: &Path) -> Vec<u8> {
     fs::read(path).expect("the materialized fixture is readable")
 }
 
-fn conformance_bundle() -> PathBuf {
+fn conformance_bundle(version: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
-        .join("conformance/protocol/bundle-v1")
+        .join("conformance/protocol")
+        .join(version)
 }
 
 fn static_timeline() -> onmark_core::timeline::TimelineIr {

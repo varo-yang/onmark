@@ -7,10 +7,12 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { build, type OutputFile } from "esbuild";
+import type { PresentationTemporalCapability } from "@onmark/runtime/types";
 
 import {
   BUNDLE_ENTRY_POINT,
   BUNDLE_MANIFEST_FILE,
+  BUNDLE_TEMPORAL_CAPABILITIES,
   BUNDLE_VERSION,
   type BundleFile as WireBundleFile,
   type BundleManifest as WireBundleManifest,
@@ -36,6 +38,7 @@ export interface BundleOptions {
   readonly entryPoint: string;
   readonly outputDirectory: string;
   readonly maxOutputBytes: number;
+  readonly temporalCapability: PresentationTemporalCapability;
 }
 
 /** Published directory and its owned immutable manifest snapshot. */
@@ -93,7 +96,7 @@ async function buildArtifact(
 ): Promise<BundleArtifact> {
   const generated = await compilePresentation(input.entryPoint, staging);
   const pending = presentationFiles(generated, staging);
-  const manifest = createManifest(pending);
+  const manifest = createManifest(pending, input.temporalCapability);
   const manifestBytes = encodeManifest(manifest);
   enforceOutputLimit(pending, manifestBytes, input.maxOutputBytes);
 
@@ -129,7 +132,23 @@ function validateOptions(options: BundleOptions): BundleOptions {
     entryPoint: resolve(options.entryPoint),
     outputDirectory: resolve(options.outputDirectory),
     maxOutputBytes: options.maxOutputBytes,
+    temporalCapability: validateTemporalCapability(options.temporalCapability),
   });
+}
+
+function validateTemporalCapability(
+  capability: PresentationTemporalCapability,
+): PresentationTemporalCapability {
+  const admitted = BUNDLE_TEMPORAL_CAPABILITIES.find(
+    (candidate) => candidate === capability,
+  );
+  if (admitted !== undefined) {
+    return admitted;
+  }
+  throw new BundleError(
+    "configuration",
+    "temporal capability must be sequential or randomAccess",
+  );
 }
 
 async function compilePresentation(
@@ -207,11 +226,15 @@ function entryDocument(styles: readonly string[]): string {
   return `${lines.join("\n")}\n`;
 }
 
-function createManifest(files: NonEmpty<PendingFile>): BundleManifest {
+function createManifest(
+  files: NonEmpty<PendingFile>,
+  temporalCapability: PresentationTemporalCapability,
+): BundleManifest {
   const entries = manifestFiles(files);
   const identity = JSON.stringify({
     version: BUNDLE_VERSION,
     entryPoint: BUNDLE_ENTRY_POINT,
+    temporalCapability,
     files: entries,
   });
 
@@ -219,6 +242,7 @@ function createManifest(files: NonEmpty<PendingFile>): BundleManifest {
     version: BUNDLE_VERSION,
     bundleId: sha256(new TextEncoder().encode(identity)),
     entryPoint: BUNDLE_ENTRY_POINT,
+    temporalCapability,
     files: entries,
   });
 }

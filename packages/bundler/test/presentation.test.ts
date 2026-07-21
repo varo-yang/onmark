@@ -43,15 +43,29 @@ test("builds a deterministic immutable presentation artifact", async () => {
       entryPoint,
       outputDirectory: join(workspace, "first"),
       maxOutputBytes: 1_000_000,
+      temporalCapability: "sequential",
     });
     const second = await bundlePresentation({
       entryPoint,
       outputDirectory: join(workspace, "second"),
       maxOutputBytes: 1_000_000,
+      temporalCapability: "sequential",
+    });
+    const randomAccess = await bundlePresentation({
+      entryPoint,
+      outputDirectory: join(workspace, "random-access"),
+      maxOutputBytes: 1_000_000,
+      temporalCapability: "randomAccess",
     });
 
     assert.deepEqual(first.manifest, second.manifest);
     assert.equal(first.manifest.bundleId, bundleIdentity(first.manifest));
+    assert.deepEqual(first.manifest.files, randomAccess.manifest.files);
+    assert.notEqual(first.manifest.bundleId, randomAccess.manifest.bundleId);
+    assert.equal(
+      randomAccess.manifest.bundleId,
+      bundleIdentity(randomAccess.manifest),
+    );
     assert.deepEqual(
       first.manifest.files.map((file) => file.path),
       [BUNDLE_ENTRY_POINT, "presentation.css", "presentation.js"],
@@ -75,6 +89,7 @@ function bundleIdentity(manifest: BundleManifest): string {
   const identity = JSON.stringify({
     version: manifest.version,
     entryPoint: manifest.entryPoint,
+    temporalCapability: manifest.temporalCapability,
     files: manifest.files,
   });
   const digest = createHash("sha256").update(identity).digest("hex");
@@ -98,6 +113,7 @@ test("does not publish an oversized or pre-existing artifact", async () => {
         entryPoint,
         outputDirectory,
         maxOutputBytes: 1,
+        temporalCapability: "sequential",
       }),
       (error: unknown) =>
         error instanceof BundleError && error.kind === "outputLimit",
@@ -110,12 +126,14 @@ test("does not publish an oversized or pre-existing artifact", async () => {
       entryPoint,
       outputDirectory,
       maxOutputBytes: 1_000_000,
+      temporalCapability: "sequential",
     });
     await assert.rejects(
       bundlePresentation({
         entryPoint,
         outputDirectory,
         maxOutputBytes: 1_000_000,
+        temporalCapability: "sequential",
       }),
       (error: unknown) =>
         error instanceof BundleError && error.kind === "output",
@@ -129,12 +147,13 @@ test("keeps the checked-in video presentation bundle current", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "onmark-bundler-test-"));
   try {
     const repository = fileURLToPath(new URL("../../../..", import.meta.url));
-    const expected = join(repository, "conformance/protocol/bundle-v1");
+    const expected = join(repository, "conformance/protocol/bundle-v2");
     const outputDirectory = join(workspace, "bundle");
     await bundlePresentation({
       entryPoint: join(repository, "conformance/browser/video-presentation.ts"),
       outputDirectory,
       maxOutputBytes: 1_000_000,
+      temporalCapability: "randomAccess",
     });
 
     const files = (await readdir(expected)).sort();
@@ -163,6 +182,7 @@ test("bundles the Gate-five temporal experiment with its browser libraries", asy
       ),
       outputDirectory,
       maxOutputBytes: 2_000_000,
+      temporalCapability: "randomAccess",
     });
 
     assert.deepEqual((await readdir(outputDirectory)).sort(), [

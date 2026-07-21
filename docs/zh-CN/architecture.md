@@ -267,12 +267,13 @@ IR，并在 solve 阶段收到 authored asset diagnostic。
 ### D. 构建 browser bundle
 
 Bundler 把用户组件、Onmark
-runtime、CSS 和静态依赖打成不可变 bundle。bundle 只包含绘制能力，不包含时间求解逻辑。目标 manifest 会记录 chunk、字体、外部素材、runtime 版本和能力声明，并进入缓存键。Gate 一当前 manifest 只记录固定 entry
-document 与实际保留文件；这些文件的 hash 已经绑定注入的 runtime 与编译后 CSS。`bundleId`
-是紧凑 UTF-8 JSON identity `{version,entryPoint,files}`
-的 SHA-256；file 按 portable path 排序，每个 identity entry 的字段顺序固定为
+runtime、CSS 和静态依赖打成不可变 bundle。bundle 只包含绘制能力，不包含时间求解逻辑。目标 manifest 会记录 chunk、字体、外部素材、runtime 版本和能力声明，并进入缓存键。V1 只记录固定 entry
+document 与实际保留文件；reader 会把缺失的 capability 保守解释为 `sequential`。V2 强制携带
+`sequential` 或 `randomAccess`，并把它纳入 `bundleId`。V1 的紧凑 UTF-8 JSON identity 是
+`{version,entryPoint,files}`，V2 是
+`{version,entryPoint,temporalCapability,files}`；file 按 portable path 排序，每个 identity entry 的字段顺序固定为
 `{bytes,path,sha256}`。这是 versioned contract，不是 pretty-printed
-manifest 的偶然表现。V1 包含一到 99,999 个 payload
+manifest 的偶然表现。manifest 包含一到 99,999 个 payload
 file；path 只能使用小写 portable ASCII，最长 1,024 bytes，不能进入 unit-owned
 namespace，也不能让一个 file 成为另一个 file 的目录祖先。其余字段只在 authoring 或 execution 真正消费时加入。
 
@@ -1121,7 +1122,7 @@ frame 与 decoded audio 仍然等价。Gate 四没有加入 cloud conformance、
 
 Gate 五不增加 screenplay animation 拼写，不从 source inspection 猜 capability，不虚拟化 ambient wall-clock API，也不承诺任意 component 可 seek。这些能力必须在本关之后分别取得语言或 adapter 证据。
 
-首个有界实验与 production frame-effect boundary 现已完成。checked WAAPI、GSAP 与 Three.js playhead 全部通过标准 `PresentationRuntimeAdapter`：effect 在 `Load` 时绑定一次，在 `Seek(frame)` 内按声明顺序 apply，并在 `FrameStaged(frame)` 前完成。dispose 是 terminal 的，单个 cleanup 失败后仍会尝试释放全部 owned effect。这并未授予 random access；bundle capability metadata 与 Render Graph consumption 是 Gate 五下一步 admission 工作。
+有界实验、production frame-effect boundary 与 capability-driven partition admission 现已完成。checked WAAPI、GSAP 与 Three.js playhead 全部通过标准 `PresentationRuntimeAdapter`：effect 在 `Load` 时绑定一次，在 `Seek(frame)` 内按声明顺序 apply，并在 `FrameStaged(frame)` 前完成。dispose 是 terminal 的，单个 cleanup 失败后仍会尝试释放全部 owned effect。Bundle V2 把封闭 capability 纳入 content identity；V1 与未指定的 CLI 输入保守地按 sequential 执行。只有显式 `randomAccess` 才允许 Render Graph 生成 shot-scoped unit，并由独立进程与 whole/multi-unit raw-RGBA conformance 共同守住。
 
 每一关都使用最终方向的 IR 和协议，但只实现本关真实消费的部分。上一关没有稳定通过，不创建下一关的空架子。
 

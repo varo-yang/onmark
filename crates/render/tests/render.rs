@@ -8,7 +8,10 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use onmark_core::compiler;
-use onmark_core::model::{AssetRef, FrameRate, FrozenAsset, FrozenAssetId, SourceId, Timebase};
+use onmark_core::model::{
+    AssetRef, FrameRate, FrozenAsset, FrozenAssetId, PresentationTemporalCapability, SourceId,
+    Timebase,
+};
 use onmark_core::protocol::{
     BrowserCommand, BrowserEvent, BrowserOverlayKind, BrowserPlan, BrowserRequest, BundleManifest,
     RequestId, WireFrame,
@@ -42,7 +45,9 @@ async fn rejects_units_that_do_not_match_the_partition_plan_before_launching_bro
         r#"<film><scene><shot duration="1s" /><shot duration="1s" /></scene></film>"#,
         &BTreeMap::new(),
     );
-    let partitions = RenderGraph::from_timeline(&timeline).into_partition();
+    let partitions =
+        RenderGraph::from_timeline(&timeline, PresentationTemporalCapability::RandomAccess)
+            .into_partition();
     let directory = tempdir().expect("the test output directory must be available");
     let output = directory.path().join("partitioned.mp4");
     let limits = EncodeLimits::new(Duration::from_secs(1), 2, 2, 2)
@@ -169,7 +174,7 @@ async fn renders_the_gate_one_plan_to_a_verified_mp4() {
 
 #[tokio::test]
 #[ignore = "requires ONMARK_HEADLESS_SHELL, ONMARK_FFMPEG, and ONMARK_FFPROBE"]
-async fn renders_gate_four_media_equally_as_one_or_two_units() {
+async fn renders_random_access_media_equally_as_one_or_two_units() {
     let directory = tempdir().expect("the test output directory must be available");
     let fixture = GateFourFixture::materialize(directory.path()).await;
     let whole_output = directory.path().join("whole.mp4");
@@ -179,7 +184,7 @@ async fn renders_gate_four_media_equally_as_one_or_two_units() {
     let whole = executor
         .render(fixture.whole_film, &whole_output)
         .await
-        .expect("the whole-film Gate-four plan must render");
+        .expect("the whole-film random-access plan must render");
     let partitioned = executor
         .render_partitioned(
             &fixture.partition_plan,
@@ -769,6 +774,7 @@ async fn temporal_experiment_fixture(workspace: &Path) -> Url {
         .args(["--output"])
         .arg(&output)
         .args(["--max-output-bytes", "2000000"])
+        .args(["--temporal-capability", "randomAccess"])
         .output();
     let bundled = timeout(Duration::from_secs(30), bundled)
         .await
@@ -778,6 +784,14 @@ async fn temporal_experiment_fixture(workspace: &Path) -> Url {
         bundled.status.success(),
         "{}",
         String::from_utf8_lossy(&bundled.stderr),
+    );
+    let manifest = fs::read_to_string(output.join(BundleManifest::FILE_NAME))
+        .expect("the experiment bundle must contain its manifest");
+    let manifest: BundleManifest =
+        serde_json::from_str(&manifest).expect("the experiment manifest must be valid");
+    assert_eq!(
+        manifest.temporal_capability(),
+        PresentationTemporalCapability::RandomAccess,
     );
 
     Url::from_file_path(output.join(BundleManifest::ENTRY_POINT))
@@ -897,11 +911,13 @@ impl GateFourFixture {
         let timeline = solve_timeline(&source, &assets);
         let timeline = compiler::import_captions(timeline, [caption_track()])
             .expect("fixture captions must enter the frame grid");
-        let partition_plan = RenderGraph::from_timeline(&timeline).into_partition();
+        let partition_plan =
+            RenderGraph::from_timeline(&timeline, PresentationTemporalCapability::RandomAccess)
+                .into_partition();
         assert_eq!(
             partition_plan.units().len(),
             2,
-            "the gate-two fixture must produce two local units",
+            "the random-access fixture must produce two local units",
         );
 
         let materialized_assets = vec![
@@ -979,11 +995,15 @@ struct FixtureBundle {
 
 impl FixtureBundle {
     fn load() -> Self {
-        let directory = repository().join("conformance/protocol/bundle-v1");
+        let directory = repository().join("conformance/protocol/bundle-v2");
         let manifest = fs::read_to_string(directory.join(BundleManifest::FILE_NAME))
             .expect("the executable bundle manifest is readable");
-        let manifest =
+        let manifest: BundleManifest =
             serde_json::from_str(&manifest).expect("the executable bundle manifest is valid");
+        assert_eq!(
+            manifest.temporal_capability(),
+            PresentationTemporalCapability::RandomAccess,
+        );
 
         Self {
             directory,

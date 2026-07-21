@@ -37,6 +37,8 @@ test("publishes a bundle through the executable boundary", async () => {
       outputDirectory,
       "--max-output-bytes",
       "1000000",
+      "--temporal-capability",
+      "sequential",
     ]);
 
     assert.equal(result.code, 0, result.stderr);

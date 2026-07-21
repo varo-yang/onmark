@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use onmark_core::compiler;
-use onmark_core::model::{FrameRate, SourceId, Timebase};
+use onmark_core::model::{FrameRate, PresentationTemporalCapability, SourceId, Timebase};
 use onmark_core::protocol::BundleManifest;
 use onmark_core::render_graph::{PartitionPlan, RenderGraph};
 use onmark_core::timeline::TimelineIr;
@@ -76,7 +76,9 @@ async fn refuses_to_reuse_an_artifact_from_a_different_capture_environment() {
 async fn assembles_two_independent_worker_processes_equivalently_to_one_local_film() {
     let directory = tempdir().expect("the worker fixture directory is available");
     let timeline = two_shot_timeline();
-    let partitions = RenderGraph::from_timeline(&timeline).into_partition();
+    let partitions =
+        RenderGraph::from_timeline(&timeline, PresentationTemporalCapability::RandomAccess)
+            .into_partition();
     assert_eq!(
         partitions.units().len(),
         2,
@@ -124,7 +126,9 @@ async fn assembles_two_independent_worker_processes_equivalently_to_one_local_fi
 async fn partition_workers_match_the_whole_film_raw_rgba_sequence() {
     let directory = tempdir().expect("the worker fixture directory is available");
     let timeline = two_shot_timeline();
-    let partition_plan = RenderGraph::from_timeline(&timeline).into_partition();
+    let partition_plan =
+        RenderGraph::from_timeline(&timeline, PresentationTemporalCapability::RandomAccess)
+            .into_partition();
     let profile = render_profile();
     let manifest = bundle_manifest();
     let units = partition_units(&timeline, &partition_plan, &manifest, profile);
@@ -397,7 +401,7 @@ fn bundle_manifest() -> BundleManifest {
 fn bundle() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
-        .join("conformance/protocol/bundle-v1")
+        .join("conformance/protocol/bundle-v2")
 }
 
 fn headless_shell() -> PathBuf {

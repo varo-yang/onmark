@@ -19,9 +19,9 @@ authored music, shot-local effects, voice-over, and imported SRT/WebVTT/ASS
 captions through the same local whole-film and partitioned paths, with both
 canonical raw-RGBA frames and decoded audio checked for equivalence.
 
-Deployment work remains frozen. Gate five has not admitted a production
-animation API; deterministic CSS, GSAP, and Three.js temporal capabilities must
-first earn their contract through bounded experiments.
+Deployment work remains frozen. Gate five now admits exact-frame effects and a
+closed presentation temporal capability after bounded WAAPI, GSAP, and Three.js
+experiments. Unknown presentation code remains sequential.
 
 The completed foundation includes the pure compiler and versioned wire types in
 `onmark-core`; bounded ffprobe and strict SubRip/WebVTT/ASS normalization in
@@ -42,11 +42,17 @@ onmark render film.onmark
 onmark render film.onmark --presentation browser.ts --output review.mp4
 onmark render film.onmark --fps 30000/1001 --width 1920 --height 1080
 onmark render film.onmark --subtitle captions.vtt
+onmark render film.onmark --temporal-capability randomAccess
 ```
 
 `--subtitle` imports strict UTF-8 `.srt`, `.vtt`, or `.ass` files without adding
 external-format syntax to the screenplay. Invalid files produce diagnostics
 against their own path and byte spans before browser or media processes start.
+
+`--temporal-capability` defaults to `sequential`. Use `randomAccess` only after
+conformance proves that every requested frame depends solely on immutable input
+and that exact frame; the declaration changes bundle identity and permits the
+Render Graph to split shot-scoped units.
 
 Rendering requires `onmark-bundle` and its Node.js runtime, Chrome for Testing's
 `chrome-headless-shell`, `ffmpeg`, and `ffprobe` to be installed. The renderer

@@ -1,0 +1,93 @@
+{
+  "$defs": {
+    "BundleFile": {
+      "additionalProperties": false,
+      "description": "One content-addressed presentation payload file.",
+      "properties": {
+        "bytes": {
+          "format": "uint64",
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "path": {
+          "maxLength": 1024,
+          "pattern": "^[a-z0-9._-]+(?:/[a-z0-9._-]+)*$",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "bytes",
+        "path",
+        "sha256"
+      ],
+      "type": "object"
+    },
+    "BundleVersion": {
+      "const": 2,
+      "description": "Version of the immutable presentation-bundle contract.",
+      "format": "uint16",
+      "maximum": 65535,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "PresentationTemporalCapability": {
+      "description": "Proven relationship between a presentation's output and requested frames.\n\nUnknown presentation code is [`Sequential`](Self::Sequential). Random\naccess is an explicit claim that each requested frame depends only on\nimmutable inputs and that exact frame.",
+      "oneOf": [
+        {
+          "const": "sequential",
+          "description": "Frames must be evaluated as one screenplay-ordered sequence.",
+          "type": "string"
+        },
+        {
+          "const": "randomAccess",
+          "description": "Any requested frame can be evaluated independently.",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$id": "https://onmark.dev/schemas/bundle-manifest-v2.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Stable description of one immutable presentation artifact.",
+  "properties": {
+    "bundleId": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "entryPoint": {
+      "const": "index.html",
+      "type": "string"
+    },
+    "files": {
+      "items": {
+        "$ref": "#/$defs/BundleFile"
+      },
+      "maxItems": 99999,
+      "minItems": 1,
+      "type": "array"
+    },
+    "temporalCapability": {
+      "$ref": "#/$defs/PresentationTemporalCapability"
+    },
+    "version": {
+      "$ref": "#/$defs/BundleVersion"
+    }
+  },
+  "required": [
+    "version",
+    "bundleId",
+    "entryPoint",
+    "temporalCapability",
+    "files"
+  ],
+  "title": "BundleManifest",
+  "type": "object",
+  "x-onmark-asset-directory": "assets/sha256",
+  "x-onmark-manifest-file": "manifest.json"
+}

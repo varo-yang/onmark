@@ -131,7 +131,7 @@ pub(super) async fn run(args: RenderArgs) -> Result<RenderOutcome, CliError> {
     let timeline = compiler::import_captions(timeline, caption_track)?;
 
     let bundle = PresentationBundler::new(executables.bundler)
-        .bundle(&presentation)
+        .bundle(&presentation, args.temporal_capability)
         .await?;
     let (partitions, units) = materialize_units(&timeline, profile, &bundle, frozen)?;
 
@@ -157,7 +157,8 @@ fn materialize_units(
 ) -> Result<(PartitionPlan, Vec<ExecutableUnit>), CliError> {
     let materialized = frozen.into_materialized()?;
     let bundle_directory = bundle.directory();
-    let partitions = RenderGraph::from_timeline(timeline).into_partition();
+    let partitions = RenderGraph::from_timeline(timeline, bundle.manifest().temporal_capability())
+        .into_partition();
     let mut units = Vec::with_capacity(partitions.units().len());
 
     for partition in partitions.units() {

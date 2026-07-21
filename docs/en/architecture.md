@@ -193,17 +193,18 @@ Gate-one `FrozenAssetId` uses SHA-256 and the canonical `sha256:<lowercase-hex>`
 spelling. The hashing operation belongs at the IO freezing boundary; core owns
 only the validated identity and deterministic mapping.
 
-The bundle manifest has the same separation. Its target contract identifies an
+The bundle manifest has the same separation. Its contract identifies an
 immutable presentation artifact and its entry point, runtime version, fonts,
-static dependencies, and declared temporal capabilities. Gate one's current
-manifest records only the fixed entry document and the exact retained files;
-their hashes already bind the injected runtime and compiled CSS. Additional
-fields appear only when authoring or execution consumes them. The manifest does
-not contain timing rules. Its `bundleId` is SHA-256 over the UTF-8 compact JSON
-identity `{version,entryPoint,files}`; files are sorted by portable path and
-each identity entry is ordered as `{bytes,path,sha256}`. This encoding is a
-versioned contract, not an incidental pretty-printed manifest representation. V1
-contains one to 99,999 payload files. Paths are lowercase portable ASCII, at
+static dependencies, and declared temporal capability. V1 records the fixed
+entry document and retained files; readers conservatively interpret its absent
+capability as `sequential`. V2 requires `sequential` or `randomAccess` and binds
+that value into `bundleId`. The V1 identity is
+`{version,entryPoint,files}`; V2 is
+`{version,entryPoint,temporalCapability,files}`. Both use SHA-256 over UTF-8
+compact JSON, with files sorted by portable path and each entry ordered as
+`{bytes,path,sha256}`. This is a versioned contract, not an incidental
+pretty-printed representation. A manifest contains one to 99,999 payload files.
+Paths are lowercase portable ASCII, at
 most 1,024 bytes, cannot enter unit-owned namespaces, and cannot make one file
 the directory ancestor of another. Materialization turns frozen bundle and asset
 identities into local paths or browser URLs immediately before execution and
@@ -934,13 +935,16 @@ from source inspection, virtualize ambient wall-clock APIs, or promise that an
 arbitrary component is seekable. Those require separate language or adapter
 evidence after this gate.
 
-The first bounded experiment and the production frame-effect boundary are now
-complete. The checked WAAPI, GSAP, and Three.js playheads all use the standard
+The bounded experiment, production frame-effect boundary, and capability-driven
+partition admission are now complete. The checked WAAPI, GSAP, and Three.js
+playheads all use the standard
 `PresentationRuntimeAdapter`: effects bind once during `Load`, apply in declared
 order during `Seek(frame)`, and finish before `FrameStaged(frame)`. Disposal is
-terminal and attempts every owned effect even after one cleanup failure. This
-does not yet grant random access; bundle capability metadata and Render Graph
-consumption remain the next Gate-five admission step.
+terminal and attempts every owned effect even after one cleanup failure. Bundle
+V2 binds the closed capability into content identity. V1 and unspecified CLI
+input remain sequential; explicit `randomAccess` lets the Render Graph produce
+shot-scoped units, backed by independent-process and whole/multi-unit raw-RGBA
+conformance.
 
 Every gate uses the final-direction contracts but implements only fields
 consumed by that gate. A failed gate blocks construction of the next gate's

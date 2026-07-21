@@ -203,11 +203,12 @@ parameters, a mutable side channel, or an invented `presents` attribute.
 
 ## Temporal capabilities
 
-`stateless`, `warmup`, and `sequential` are architectural categories, not a
-public adapter API or screenplay annotation today. The production adapter is the
-only adapter whose frame behavior is exercised by Gate-one and Gate-two
-conformance. A custom adapter therefore gains no implied random-seek or
-partitioning guarantee merely by implementing `PresentationBindings`.
+The public closed capability is `PresentationTemporalCapability`, owned by
+`@onmark/runtime`. It currently admits `sequential` and `randomAccess`;
+`warmup(n)` and wider dependency categories remain architectural ideas rather
+than public values. The CLI defaults unknown code to `sequential`, while the
+low-level bundler requires an explicit value. Sequential execution produces one
+whole-film Render Graph region.
 
 The public `FrameEffect` boundary is owned by `@onmark/runtime`. Authoring may
 provide a `frameEffects(plan)` factory to `createDomPresentationBindings`; the
@@ -218,11 +219,13 @@ promises resolve before `FrameStaged(frame)`. Effects receive the exact
 immutable `RuntimeFrame`; they do not receive a scheduler or a mutable timeline.
 Disposal attempts every effect even when one cleanup operation fails.
 
-This lifecycle is not itself a random-access declaration. Temporal capabilities
-remain closed values owned by `@onmark/runtime`, not arbitrary strings or
-booleans duplicated in authoring code. Their meaning, proof obligations, bundle
-identity, scheduling effect, and conformance tests land together. Until bundle
-metadata carries one, custom presentation code remains sequential.
+This lifecycle is not itself a random-access declaration. A presentation may
+be bundled with `randomAccess` only after conformance proves that every requested
+frame depends solely on immutable inputs and that exact frame. The declaration
+is explicit build metadata, never inferred from source or screenplay spelling.
+Bundle V2 includes it in canonical identity, and Rust consumes it before Render
+Graph partitioning. Legacy V1 bundles and omitted CLI declarations remain
+`sequential`.
 
 ## Assets
 

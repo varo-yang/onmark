@@ -9,9 +9,10 @@ use std::fmt;
 use std::fmt::Write as _;
 
 use serde::de::Error as _;
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::ser::SerializeStruct as _;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use crate::model::FrozenAssetId;
+use crate::model::{FrozenAssetId, PresentationTemporalCapability};
 
 const ENTRY_DOCUMENT: &str = "index.html";
 const MANIFEST_FILE: &str = "manifest.json";
@@ -25,7 +26,7 @@ const SHA256_HEX_BYTES: usize = 64;
 
 /// Version of the immutable presentation-bundle contract.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[cfg_attr(feature = "schema", schemars(extend("const" = 1)))]
+#[cfg_attr(feature = "schema", schemars(extend("const" = 2)))]
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(transparent)]
 pub struct BundleVersion(u16);
@@ -33,6 +34,8 @@ pub struct BundleVersion(u16);
 impl BundleVersion {
     /// First bundle manifest implemented by Gate one.
     pub const V1: Self = Self(1);
+    /// Manifest carrying presentation temporal capability.
+    pub const V2: Self = Self(2);
 
     /// Returns the stable integer representation.
     #[must_use]
@@ -47,10 +50,11 @@ impl<'de> Deserialize<'de> for BundleVersion {
         D: Deserializer<'de>,
     {
         let version = u16::deserialize(deserializer)?;
-        if version == Self::V1.get() {
-            return Ok(Self::V1);
+        match version {
+            1 => Ok(Self::V1),
+            2 => Ok(Self::V2),
+            _ => Err(D::Error::custom("unsupported bundle manifest version")),
         }
-        Err(D::Error::custom("unsupported bundle manifest version"))
     }
 }
 
@@ -59,12 +63,13 @@ impl<'de> Deserialize<'de> for BundleVersion {
 #[cfg_attr(
     feature = "schema",
     schemars(
+        rename_all = "camelCase",
+        deny_unknown_fields,
         extend("x-onmark-manifest-file" = MANIFEST_FILE),
         extend("x-onmark-asset-directory" = ASSET_SHA256_DIRECTORY)
     )
 )]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BundleManifest {
     version: BundleVersion,
     #[cfg_attr(
@@ -74,6 +79,7 @@ pub struct BundleManifest {
     bundle_id: Box<str>,
     #[cfg_attr(feature = "schema", schemars(extend("const" = ENTRY_DOCUMENT)))]
     entry_point: Box<str>,
+    temporal_capability: PresentationTemporalCapability,
     #[cfg_attr(
         feature = "schema",
         schemars(length(min = 1, max = MAX_BUNDLE_FILES))
@@ -88,7 +94,7 @@ impl BundleManifest {
     pub const FILE_NAME: &'static str = MANIFEST_FILE;
     /// Deterministic directory containing frozen SHA-256 assets.
     pub const ASSET_DIRECTORY: &'static str = ASSET_SHA256_DIRECTORY;
-    /// Maximum payload files representable by the V1 wire contract.
+    /// Maximum payload files representable by the current wire contract.
     pub const MAX_FILES: usize = MAX_BUNDLE_FILES;
 
     /// Returns the deterministic path of one frozen asset beneath a unit root.
@@ -102,17 +108,31 @@ impl BundleManifest {
         path
     }
 
-    /// Creates one canonical Gate-one bundle manifest.
+    /// Creates one canonical current-version bundle manifest.
     ///
     /// # Errors
     ///
     /// Returns [`InvalidBundleManifest`] when the identity, file count,
-    /// canonical path tree, or fixed entry document violates V1.
+    /// canonical path tree, or fixed entry document violates the contract.
     pub fn new(
+        temporal_capability: PresentationTemporalCapability,
         bundle_id: impl Into<Box<str>>,
         files: Vec<BundleFile>,
     ) -> Result<Self, InvalidBundleManifest> {
-        let bundle_id = bundle_id.into();
+        Self::from_parts(
+            BundleVersion::V2,
+            temporal_capability,
+            bundle_id.into(),
+            files,
+        )
+    }
+
+    fn from_parts(
+        version: BundleVersion,
+        temporal_capability: PresentationTemporalCapability,
+        bundle_id: Box<str>,
+        files: Vec<BundleFile>,
+    ) -> Result<Self, InvalidBundleManifest> {
         if !is_sha256(&bundle_id) {
             return Err(InvalidBundleManifest::InvalidBundleId);
         }
@@ -129,9 +149,10 @@ impl BundleManifest {
         }
 
         Ok(Self {
-            version: BundleVersion::V1,
+            version,
             bundle_id,
             entry_point: ENTRY_DOCUMENT.into(),
+            temporal_capability,
             files,
         })
     }
@@ -154,10 +175,75 @@ impl BundleManifest {
         &self.entry_point
     }
 
+    /// Returns the proven temporal behavior used by render planning.
+    #[must_use]
+    pub const fn temporal_capability(&self) -> PresentationTemporalCapability {
+        self.temporal_capability
+    }
+
+    /// Returns the canonical JSON identity payload whose SHA-256 names the bundle.
+    #[must_use]
+    pub const fn identity(&self) -> BundleIdentity<'_> {
+        BundleIdentity { manifest: self }
+    }
+
     /// Returns payload files in canonical path order.
     #[must_use]
     pub fn files(&self) -> &[BundleFile] {
         &self.files
+    }
+}
+
+/// Borrowed canonical bundle-identity projection.
+///
+/// Its serialized field order is part of each manifest version's wire contract.
+#[derive(Clone, Copy, Debug)]
+pub struct BundleIdentity<'a> {
+    manifest: &'a BundleManifest,
+}
+
+impl Serialize for BundleIdentity<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let manifest = self.manifest;
+        let field_count = match manifest.version {
+            BundleVersion::V1 => 3,
+            BundleVersion::V2 => 4,
+            _ => unreachable!("BundleVersion admits only supported manifest versions"),
+        };
+        let mut identity = serializer.serialize_struct("BundleIdentity", field_count)?;
+        identity.serialize_field("version", &manifest.version)?;
+        identity.serialize_field("entryPoint", &manifest.entry_point)?;
+        if manifest.version == BundleVersion::V2 {
+            identity
+                .serialize_field("temporalCapability", manifest.temporal_capability.as_str())?;
+        }
+        identity.serialize_field("files", &manifest.files)?;
+        identity.end()
+    }
+}
+
+impl Serialize for BundleManifest {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let field_count = match self.version {
+            BundleVersion::V1 => 4,
+            BundleVersion::V2 => 5,
+            _ => unreachable!("BundleVersion admits only supported manifest versions"),
+        };
+        let mut manifest = serializer.serialize_struct("BundleManifest", field_count)?;
+        manifest.serialize_field("version", &self.version)?;
+        manifest.serialize_field("bundleId", &self.bundle_id)?;
+        manifest.serialize_field("entryPoint", &self.entry_point)?;
+        if self.version == BundleVersion::V2 {
+            manifest.serialize_field("temporalCapability", self.temporal_capability.as_str())?;
+        }
+        manifest.serialize_field("files", &self.files)?;
+        manifest.end()
     }
 }
 
@@ -170,18 +256,39 @@ impl<'de> Deserialize<'de> for BundleManifest {
         if wire.entry_point.as_ref() != ENTRY_DOCUMENT {
             return Err(D::Error::custom("unsupported bundle entry point"));
         }
-        Self::new(wire.bundle_id, wire.files).map_err(D::Error::custom)
+        let temporal_capability = wire.temporal_capability().map_err(D::Error::custom)?;
+        Self::from_parts(
+            wire.version,
+            temporal_capability,
+            wire.bundle_id,
+            wire.files,
+        )
+        .map_err(D::Error::custom)
     }
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct BundleManifestWire {
-    #[serde(rename = "version")]
-    _version: BundleVersion,
+    version: BundleVersion,
     bundle_id: Box<str>,
     entry_point: Box<str>,
+    temporal_capability: Option<Box<str>>,
     files: Vec<BundleFile>,
+}
+
+impl BundleManifestWire {
+    fn temporal_capability(&self) -> Result<PresentationTemporalCapability, &'static str> {
+        match (self.version, self.temporal_capability.as_deref()) {
+            (BundleVersion::V1, None) => Ok(PresentationTemporalCapability::Sequential),
+            (BundleVersion::V1, Some(_)) => Err("bundle manifest V1 has no temporal capability"),
+            (BundleVersion::V2, None) => Err("bundle manifest V2 requires temporal capability"),
+            (BundleVersion::V2, Some(value)) => value
+                .parse()
+                .map_err(|_| "invalid bundle temporal capability"),
+            _ => Err("unsupported bundle manifest version"),
+        }
+    }
 }
 
 /// One content-addressed presentation payload file.
@@ -189,7 +296,7 @@ struct BundleManifestWire {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct BundleFile {
-    // Declaration order is part of the V1 canonical bundle-identity encoding.
+    // Declaration order is part of the canonical bundle-identity encoding.
     #[cfg_attr(feature = "schema", schemars(range(max = MAX_SAFE_INTEGER)))]
     bytes: u64,
     #[cfg_attr(
@@ -414,6 +521,8 @@ fn is_sha256(value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use crate::model::PresentationTemporalCapability;
+
     use super::{BundleFile, BundleManifest, InvalidBundleFile, InvalidBundleManifest};
 
     const DIGEST: &str = "sha256:0101010101010101010101010101010101010101010101010101010101010101";
@@ -421,8 +530,12 @@ mod tests {
     #[test]
     fn accepts_one_canonical_entry_document() {
         let file = BundleFile::new("index.html", 12, DIGEST).expect("the fixture file is valid");
-        let manifest =
-            BundleManifest::new(DIGEST, vec![file]).expect("the fixture manifest is canonical");
+        let manifest = BundleManifest::new(
+            PresentationTemporalCapability::Sequential,
+            DIGEST,
+            vec![file],
+        )
+        .expect("the fixture manifest is canonical");
 
         assert_eq!(manifest.entry_point(), "index.html");
         assert_eq!(manifest.files().len(), 1);
@@ -468,14 +581,29 @@ mod tests {
         let script = BundleFile::new("presentation.js", 1, DIGEST).expect("script is valid");
 
         assert_eq!(
-            BundleManifest::new(DIGEST, vec![script.clone(), index.clone()]),
+            BundleManifest::new(
+                PresentationTemporalCapability::Sequential,
+                DIGEST,
+                vec![script.clone(), index.clone()],
+            ),
             Err(InvalidBundleManifest::UnorderedFiles),
         );
         assert_eq!(
-            BundleManifest::new(DIGEST, vec![script]),
+            BundleManifest::new(
+                PresentationTemporalCapability::Sequential,
+                DIGEST,
+                vec![script],
+            ),
             Err(InvalidBundleManifest::MissingEntryPoint),
         );
-        assert!(BundleManifest::new(DIGEST, vec![index]).is_ok());
+        assert!(
+            BundleManifest::new(
+                PresentationTemporalCapability::Sequential,
+                DIGEST,
+                vec![index],
+            )
+            .is_ok()
+        );
     }
 
     #[test]
@@ -487,8 +615,45 @@ mod tests {
             BundleFile::new("index.html/child", 1, DIGEST).expect("the child path is valid");
 
         assert_eq!(
-            BundleManifest::new(DIGEST, vec![index, sibling, descendant]),
+            BundleManifest::new(
+                PresentationTemporalCapability::Sequential,
+                DIGEST,
+                vec![index, sibling, descendant],
+            ),
             Err(InvalidBundleManifest::FilePathConflict),
         );
+    }
+
+    #[test]
+    fn legacy_manifests_default_to_sequential_execution() {
+        let source = format!(
+            r#"{{"version":1,"bundleId":"{DIGEST}","entryPoint":"index.html","files":[{{"bytes":1,"path":"index.html","sha256":"{DIGEST}"}}]}}"#,
+        );
+        let manifest: BundleManifest =
+            serde_json::from_str(&source).expect("the legacy fixture is valid");
+
+        assert_eq!(manifest.version(), super::BundleVersion::V1);
+        assert_eq!(
+            manifest.temporal_capability(),
+            PresentationTemporalCapability::Sequential,
+        );
+        assert_eq!(
+            serde_json::to_value(manifest).expect("the legacy manifest serializes")["version"],
+            1,
+        );
+    }
+
+    #[test]
+    fn manifest_versions_reject_incompatible_capability_fields() {
+        for source in [
+            format!(
+                r#"{{"version":1,"bundleId":"{DIGEST}","entryPoint":"index.html","temporalCapability":"randomAccess","files":[{{"bytes":1,"path":"index.html","sha256":"{DIGEST}"}}]}}"#,
+            ),
+            format!(
+                r#"{{"version":2,"bundleId":"{DIGEST}","entryPoint":"index.html","files":[{{"bytes":1,"path":"index.html","sha256":"{DIGEST}"}}]}}"#,
+            ),
+        ] {
+            assert!(serde_json::from_str::<BundleManifest>(&source).is_err());
+        }
     }
 }

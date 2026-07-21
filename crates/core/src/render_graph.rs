@@ -1,14 +1,12 @@
 //! Pure render-dependency facts derived from solved Timeline IR.
 //!
-//! Gate two begins with the production Gate-one presentation contract: its
-//! video and overlay adapter has no state that crosses a shot boundary. That
-//! proof permits one region per shot today. It is not a general rule that
-//! shots are always independently renderable; a later temporal capability
-//! must widen or join regions here before partitioning can use it.
+//! Presentation temporal capability is consumed before regions become
+//! partitions. Unknown code remains one sequential region; only an explicit
+//! random-access proof permits shot-scoped units.
 
 use std::collections::BTreeSet;
 
-use crate::model::{FrameIndex, FrameInterval, FrozenAssetId};
+use crate::model::{FrameIndex, FrameInterval, FrozenAssetId, PresentationTemporalCapability};
 use crate::timeline::{TimelineContent, TimelineIr, TimelineShot};
 
 /// Render-dependency regions derived from one solved film.
@@ -23,10 +21,20 @@ pub struct RenderGraph {
 }
 
 impl RenderGraph {
-    /// Derives the Gate-two dependency graph from solved Timeline IR.
+    /// Derives dependency regions from solved facts and presentation behavior.
     #[must_use]
-    pub fn from_timeline(timeline: &TimelineIr) -> Self {
-        let mut regions: Vec<_> = timeline.shots().map(RenderRegion::from_shot).collect();
+    pub fn from_timeline(
+        timeline: &TimelineIr,
+        capability: PresentationTemporalCapability,
+    ) -> Self {
+        let mut regions = match capability {
+            PresentationTemporalCapability::Sequential => {
+                vec![RenderRegion::from_timeline(timeline)]
+            }
+            PresentationTemporalCapability::RandomAccess => {
+                timeline.shots().map(RenderRegion::from_shot).collect()
+            }
+        };
         assign_audio_assets(timeline, &mut regions);
 
         Self {
@@ -76,23 +84,38 @@ pub struct RenderRegion {
 }
 
 impl RenderRegion {
-    fn from_shot(shot: &TimelineShot) -> Self {
-        let mut media_assets = BTreeSet::new();
-
-        for content in shot.content() {
-            match content {
-                TimelineContent::Video(video) => {
-                    media_assets.insert(video.asset_id());
-                }
-                TimelineContent::VoiceOver(_) | TimelineContent::Overlay(_) => {}
-            }
+    fn from_timeline(timeline: &TimelineIr) -> Self {
+        let mut region = Self::empty(timeline.interval());
+        for shot in timeline.shots() {
+            region.media_assets.extend(Self::shot_assets(shot));
         }
+        region
+    }
 
+    fn from_shot(shot: &TimelineShot) -> Self {
         let interval = shot.timing().interval();
         Self {
             evaluation: interval,
             output: interval,
-            media_assets,
+            media_assets: Self::shot_assets(shot),
+        }
+    }
+
+    fn shot_assets(shot: &TimelineShot) -> BTreeSet<FrozenAssetId> {
+        let mut assets = BTreeSet::new();
+        for content in shot.content() {
+            if let TimelineContent::Video(video) = content {
+                assets.insert(video.asset_id());
+            }
+        }
+        assets
+    }
+
+    fn empty(interval: FrameInterval) -> Self {
+        Self {
+            evaluation: interval,
+            output: interval,
+            media_assets: BTreeSet::new(),
         }
     }
 
@@ -203,7 +226,7 @@ mod tests {
 
     use crate::model::{
         AudioGain, ByteOffset, ElementKind, FrameIndex, FrameInterval, FrameRate, FrozenAssetId,
-        SourceId, SourceSpan, Timebase,
+        PresentationTemporalCapability, SourceId, SourceSpan, Timebase,
     };
     use crate::timeline::{
         TimelineAudio, TimelineAudioKind, TimelineElement, TimelineIr, TimelineScene, TimelineShot,
@@ -214,7 +237,11 @@ mod tests {
     fn one_region_owns_audio_that_crosses_a_partition_boundary() {
         let asset = FrozenAssetId::from_sha256([7; 32]);
         let timeline = timeline_with_audio(asset, interval(5, 15));
-        let partition = super::RenderGraph::from_timeline(&timeline).into_partition();
+        let partition = super::RenderGraph::from_timeline(
+            &timeline,
+            PresentationTemporalCapability::RandomAccess,
+        )
+        .into_partition();
 
         assert!(partition.units()[0].requires_media_asset(asset));
         assert!(!partition.units()[1].requires_media_asset(asset));
@@ -224,7 +251,11 @@ mod tests {
     fn empty_audio_at_the_film_end_requires_no_render_asset() {
         let asset = FrozenAssetId::from_sha256([7; 32]);
         let timeline = timeline_with_audio(asset, interval(20, 20));
-        let partition = super::RenderGraph::from_timeline(&timeline).into_partition();
+        let partition = super::RenderGraph::from_timeline(
+            &timeline,
+            PresentationTemporalCapability::RandomAccess,
+        )
+        .into_partition();
 
         assert!(
             partition
@@ -232,6 +263,21 @@ mod tests {
                 .iter()
                 .all(|unit| !unit.requires_media_asset(asset))
         );
+    }
+
+    #[test]
+    fn sequential_presentations_form_one_film_region() {
+        let asset = FrozenAssetId::from_sha256([7; 32]);
+        let timeline = timeline_with_audio(asset, interval(5, 15));
+        let partition = super::RenderGraph::from_timeline(
+            &timeline,
+            PresentationTemporalCapability::Sequential,
+        )
+        .into_partition();
+
+        assert_eq!(partition.units().len(), 1);
+        assert_eq!(partition.units()[0].output(), interval(0, 20));
+        assert!(partition.units()[0].requires_media_asset(asset));
     }
 
     fn timeline_with_audio(asset: FrozenAssetId, audio_interval: FrameInterval) -> TimelineIr {

@@ -28,7 +28,11 @@ export {
   type RuntimeOverlay,
   type VideoPresentation,
 } from "./presentation.js";
-export { BUNDLE_ASSET_DIRECTORY } from "./generated/bundle-layout.js";
+export {
+  BUNDLE_ASSET_DIRECTORY,
+  PRESENTATION_TEMPORAL_CAPABILITIES,
+  type PresentationTemporalCapability,
+} from "./generated/bundle-layout.js";
 export {
   MAX_BROWSER_OVERLAYS,
   MAX_BROWSER_OVERLAY_TEXT_CHARACTERS,

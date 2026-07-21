@@ -9,7 +9,8 @@ mod message;
 mod plan;
 
 pub use bundle::{
-    BundleFile, BundleManifest, BundleVersion, InvalidBundleFile, InvalidBundleManifest,
+    BundleFile, BundleIdentity, BundleManifest, BundleVersion, InvalidBundleFile,
+    InvalidBundleManifest,
 };
 
 pub use message::{

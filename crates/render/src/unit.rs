@@ -536,7 +536,8 @@ mod tests {
     use onmark_core::compiler;
     use onmark_core::model::{
         AssetMetadata, AssetRef, AudioChannelLayout, AudioGain, AudioSampleRate, Duration,
-        FrameRate, FrozenAsset, FrozenAssetId, SourceId, Timebase, VideoMetadata, VideoTiming,
+        FrameRate, FrozenAsset, FrozenAssetId, PresentationTemporalCapability, SourceId, Timebase,
+        VideoMetadata, VideoTiming,
     };
     use onmark_core::protocol::BundleFile;
     use onmark_core::render_graph::RenderGraph;
@@ -636,7 +637,9 @@ mod tests {
             "unused.mp4",
             frozen,
         );
-        let partitions = RenderGraph::from_timeline(&timeline).into_partition();
+        let partitions =
+            RenderGraph::from_timeline(&timeline, PresentationTemporalCapability::RandomAccess)
+                .into_partition();
         let partition = partitions
             .units()
             .get(1)
@@ -745,7 +748,9 @@ mod tests {
             "voice.mp3",
             voice.clone(),
         );
-        let partitions = RenderGraph::from_timeline(&timeline).into_partition();
+        let partitions =
+            RenderGraph::from_timeline(&timeline, PresentationTemporalCapability::RandomAccess)
+                .into_partition();
         let partition = partitions
             .units()
             .get(1)
@@ -853,6 +858,11 @@ mod tests {
             "sha256:0101010101010101010101010101010101010101010101010101010101010101";
         let entry = BundleFile::new(BundleManifest::ENTRY_POINT, 1, DIGEST)
             .expect("the fixture entry is valid");
-        BundleManifest::new(DIGEST, vec![entry]).expect("the fixture manifest is valid")
+        BundleManifest::new(
+            PresentationTemporalCapability::Sequential,
+            DIGEST,
+            vec![entry],
+        )
+        .expect("the fixture manifest is valid")
     }
 }

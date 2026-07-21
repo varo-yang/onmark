@@ -9,8 +9,9 @@ import {
   bundlePresentation,
   type BundleOptions,
 } from "./presentation.js";
+import { BUNDLE_TEMPORAL_CAPABILITIES } from "./generated/bundle-manifest.js";
 
-const USAGE = `Usage: onmark-bundle --entry <path> --output <directory> --max-output-bytes <bytes>\n`;
+const USAGE = `Usage: onmark-bundle --entry <path> --output <directory> --max-output-bytes <bytes> --temporal-capability <sequential|randomAccess>\n`;
 
 type Command =
   | { readonly kind: "bundle"; readonly options: BundleOptions }
@@ -43,10 +44,18 @@ function parseArguments(arguments_: readonly string[]): Command {
   const maxOutputBytes = parseByteLimit(
     oneValue(values["max-output-bytes"], "--max-output-bytes"),
   );
+  const temporalCapability = parseTemporalCapability(
+    oneValue(values["temporal-capability"], "--temporal-capability"),
+  );
 
   return {
     kind: "bundle",
-    options: { entryPoint, maxOutputBytes, outputDirectory },
+    options: {
+      entryPoint,
+      maxOutputBytes,
+      outputDirectory,
+      temporalCapability,
+    },
   };
 }
 
@@ -60,12 +69,27 @@ function commandValues(arguments_: readonly string[]) {
         help: { type: "boolean" },
         "max-output-bytes": { type: "string", multiple: true },
         output: { type: "string", multiple: true },
+        "temporal-capability": { type: "string", multiple: true },
       },
       strict: true,
     }).values;
   } catch (error) {
     throw configuration("arguments are invalid", error);
   }
+}
+
+function parseTemporalCapability(
+  value: string,
+): BundleOptions["temporalCapability"] {
+  const capability = BUNDLE_TEMPORAL_CAPABILITIES.find(
+    (candidate) => candidate === value,
+  );
+  if (capability !== undefined) {
+    return capability;
+  }
+  throw configuration(
+    "--temporal-capability must be sequential or randomAccess",
+  );
 }
 
 function oneValue(values: readonly string[] | undefined, name: string): string {

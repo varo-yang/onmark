@@ -7,7 +7,10 @@ use std::time::Duration;
 
 use onmark_core::compiler;
 use onmark_core::diagnostics::Diagnostics;
-use onmark_core::model::{AssetRef, FrameRate, FrozenAsset, FrozenAssetId, SourceId, Timebase};
+use onmark_core::model::{
+    AssetRef, FrameRate, FrozenAsset, FrozenAssetId, PresentationTemporalCapability, SourceId,
+    Timebase,
+};
 use onmark_core::protocol::BundleManifest;
 use onmark_core::render_graph::{PartitionPlan, RenderGraph};
 use onmark_core::timeline::TimelineIr;
@@ -50,7 +53,9 @@ impl ConformanceFilm {
         .expect("the conformance probe limits are bounded");
         let catalog = freeze_catalog(&media, &probe);
         let timeline = solve(&catalog.facts);
-        let partitions = RenderGraph::from_timeline(&timeline).into_partition();
+        let partitions =
+            RenderGraph::from_timeline(&timeline, PresentationTemporalCapability::RandomAccess)
+                .into_partition();
         assert_eq!(partitions.units().len(), 2);
 
         let bundle = bundle_directory();
@@ -332,7 +337,7 @@ fn bundle_manifest(directory: &Path) -> BundleManifest {
 fn bundle_directory() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
-        .join("conformance/protocol/bundle-v1")
+        .join("conformance/protocol/bundle-v2")
 }
 
 fn unit_root_limits() -> UnitRootLimits {

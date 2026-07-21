@@ -9,7 +9,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read as _, Write};
 use std::path::Path;
 
-use onmark_core::protocol::{BundleFile, BundleManifest};
+use onmark_core::protocol::BundleManifest;
 use serde::Serialize;
 use sha2::{Digest as _, Sha256};
 use tempfile::{Builder as TempDirBuilder, TempDir};
@@ -42,22 +42,8 @@ pub(super) fn materialize(
     Ok(writer.finish())
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct BundleIdentity<'a> {
-    // Declaration order mirrors the V1 compact-JSON identity contract.
-    version: u16,
-    entry_point: &'a str,
-    files: &'a [BundleFile],
-}
-
 fn verify_bundle_identity(root: &Path, manifest: &BundleManifest) -> Result<(), UnitRootError> {
-    let identity = BundleIdentity {
-        version: manifest.version().get(),
-        entry_point: manifest.entry_point(),
-        files: manifest.files(),
-    };
-    if json_sha256(&identity) != manifest.bundle_id() {
+    if json_sha256(&manifest.identity()) != manifest.bundle_id() {
         return Err(failure(
             UnitRootErrorKind::BundleIdentity,
             &root.join(BundleManifest::FILE_NAME),

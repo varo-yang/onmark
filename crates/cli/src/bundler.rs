@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use std::process::{ExitStatus, Stdio};
 use std::time::Duration;
 
+use onmark_core::model::PresentationTemporalCapability;
 use onmark_core::protocol::BundleManifest;
 use tempfile::TempDir;
 use tokio::io::{AsyncRead, AsyncReadExt as _};
@@ -38,13 +39,17 @@ impl PresentationBundler {
         }
     }
 
-    pub(super) async fn bundle(&self, entry: &Path) -> Result<BundleArtifact, BundleError> {
+    pub(super) async fn bundle(
+        &self,
+        entry: &Path,
+        temporal_capability: PresentationTemporalCapability,
+    ) -> Result<BundleArtifact, BundleError> {
         let root = tempfile::Builder::new()
             .prefix("onmark-bundle-")
             .tempdir()
             .map_err(BundleError::TemporaryDirectory)?;
         let directory = root.path().join("presentation");
-        let mut child = self.spawn(entry, &directory)?;
+        let mut child = self.spawn(entry, &directory, temporal_capability)?;
         let stderr = child
             .stderr
             .take()
@@ -71,7 +76,12 @@ impl PresentationBundler {
         Ok(BundleArtifact { manifest, root })
     }
 
-    fn spawn(&self, entry: &Path, output: &Path) -> Result<tokio::process::Child, BundleError> {
+    fn spawn(
+        &self,
+        entry: &Path,
+        output: &Path,
+        temporal_capability: PresentationTemporalCapability,
+    ) -> Result<tokio::process::Child, BundleError> {
         let mut command = Command::new(&self.executable);
         command
             .arg("--entry")
@@ -80,6 +90,8 @@ impl PresentationBundler {
             .arg(output)
             .arg("--max-output-bytes")
             .arg(MAX_OUTPUT_BYTES.to_string())
+            .arg("--temporal-capability")
+            .arg(temporal_capability.as_str())
             .kill_on_drop(true)
             .stdin(Stdio::null())
             .stdout(Stdio::null())

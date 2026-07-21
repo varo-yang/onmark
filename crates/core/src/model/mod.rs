@@ -10,6 +10,7 @@ mod element;
 mod id;
 mod reference;
 mod source;
+mod temporal;
 mod time;
 
 pub use asset::{
@@ -29,6 +30,7 @@ pub use element::ElementKind;
 pub use id::{InvalidNodeId, NodeId};
 pub use reference::{AssetRef, CueId, EventRef, InvalidAssetRef};
 pub use source::{ByteOffset, InvalidSourceSpan, SourceId, SourceSpan};
+pub use temporal::{InvalidPresentationTemporalCapability, PresentationTemporalCapability};
 pub use time::{
     FrameConversionOverflow, FrameCount, FrameIndex, FrameInterval, FrameRate,
     InvalidFrameInterval, InvalidFrameRate, Rounding, Timebase,

@@ -186,7 +186,8 @@ impl Fixture {
             .arg("--width")
             .arg(WIDTH.to_string())
             .arg("--height")
-            .arg(HEIGHT.to_string());
+            .arg(HEIGHT.to_string())
+            .args(["--temporal-capability", "randomAccess"]);
         for (flag, variable) in [
             ("--browser", "ONMARK_HEADLESS_SHELL"),
             ("--bundler", "ONMARK_BUNDLER"),

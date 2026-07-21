@@ -100,8 +100,17 @@ fn browser_plan_retains_solved_overlay_facts() {
 }
 
 #[test]
-fn bundle_manifest_matches_the_versioned_wire_contract() {
-    let path = fixture("protocol", "bundle-v1/manifest.json");
+fn legacy_bundle_manifest_remains_readable() {
+    assert_bundle_manifest("bundle-v1/manifest.json");
+}
+
+#[test]
+fn current_bundle_manifest_matches_the_versioned_wire_contract() {
+    assert_bundle_manifest("bundle-v2/manifest.json");
+}
+
+fn assert_bundle_manifest(name: &str) {
+    let path = fixture("protocol", name);
     let source = std::fs::read_to_string(&path).expect("the bundle fixture must be readable");
     let manifest = serde_json::from_str::<BundleManifest>(&source)
         .expect("the bundle fixture must satisfy the Rust wire contract");

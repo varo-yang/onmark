@@ -9,7 +9,8 @@ use std::fs;
 use onmark_core::compiler;
 use onmark_core::model::{
     AssetMetadata, AssetRef, AudioChannelLayout, AudioSampleRate, Duration, FrameInterval,
-    FrameRate, FrozenAsset, FrozenAssetId, SourceId, Timebase, VideoMetadata, VideoTiming,
+    FrameRate, FrozenAsset, FrozenAssetId, PresentationTemporalCapability, SourceId, Timebase,
+    VideoMetadata, VideoTiming,
 };
 use onmark_core::render_graph::{PartitionPlan, RenderGraph};
 use onmark_core::timeline::TimelineIr;
@@ -26,7 +27,7 @@ fn independent_shots_form_separate_scoped_units() {
         ("voice.mp3", "1s"),
     ]);
     let timeline = solve_fixture(&source_path, &assets);
-    let graph = RenderGraph::from_timeline(&timeline);
+    let graph = RenderGraph::from_timeline(&timeline, PresentationTemporalCapability::RandomAccess);
     let mut renderer = PlanRenderer::new();
     renderer
         .render_graph(&graph)

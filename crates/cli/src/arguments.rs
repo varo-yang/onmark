@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 use clap::{Args, Parser, Subcommand};
 use onmark_core::model::FrameRate;
+use onmark_core::model::PresentationTemporalCapability;
 
 const DEFAULT_PRESENTATION: &str = "presentation.ts";
 
@@ -98,6 +99,10 @@ pub(super) struct RenderArgs {
     /// Standalone SRT, `WebVTT`, or ASS file.
     #[arg(long = "subtitle", value_name = "FILE")]
     pub(super) subtitle: Option<PathBuf>,
+
+    /// Proven presentation-time behavior used by render partitioning.
+    #[arg(long, default_value_t = PresentationTemporalCapability::Sequential)]
+    pub(super) temporal_capability: PresentationTemporalCapability,
 }
 
 impl RenderArgs {
@@ -147,6 +152,7 @@ mod tests {
     use std::path::Path;
 
     use clap::Parser;
+    use onmark_core::model::PresentationTemporalCapability;
 
     use super::{Cli, Command, WorkerCommand};
 
@@ -162,6 +168,10 @@ mod tests {
         assert_eq!(args.output(), Path::new("renders/film.mp4"));
         assert_eq!(args.frame_rate.numerator(), 30);
         assert_eq!(args.frame_rate.denominator(), 1);
+        assert_eq!(
+            args.temporal_capability,
+            PresentationTemporalCapability::Sequential,
+        );
     }
 
     #[test]
