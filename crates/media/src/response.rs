@@ -23,6 +23,7 @@ struct ProbeResponse {
 
 #[derive(Deserialize)]
 struct ProbeStream {
+    index: Option<u32>,
     codec_type: Option<Box<str>>,
     duration: Option<Box<str>>,
     codec_name: Option<Box<str>>,
@@ -32,6 +33,16 @@ struct ProbeStream {
     nb_frames: Option<Box<str>>,
     sample_rate: Option<Box<str>>,
     channels: Option<u32>,
+    #[serde(default)]
+    disposition: ProbeDisposition,
+}
+
+#[derive(Default, Deserialize)]
+struct ProbeDisposition {
+    #[serde(default, rename = "default")]
+    is_default: u8,
+    #[serde(default)]
+    attached_pic: u8,
 }
 
 #[derive(Deserialize)]
@@ -48,17 +59,10 @@ pub(crate) fn parse_metadata(path: &Path, bytes: &[u8]) -> Result<AssetMetadata,
         .map(|duration| parse_format_duration(path, &duration))
         .transpose()?;
 
-    let mut audio_stream = None;
-    let mut video_stream = None;
-    for stream in response.streams {
-        if stream.is_audio() && audio_stream.is_none() {
-            audio_stream = Some(stream);
-            continue;
-        }
-        if stream.is_video() && video_stream.is_none() {
-            video_stream = Some(stream);
-        }
-    }
+    let SelectedStreams {
+        audio: audio_stream,
+        video: video_stream,
+    } = select_streams(response.streams);
 
     let video = video_stream
         .map(|stream| parse_video(path, stream, format_duration))
@@ -80,6 +84,88 @@ pub(crate) fn parse_metadata(path: &Path, bytes: &[u8]) -> Result<AssetMetadata,
         (Some(audio), None) => Ok(AssetMetadata::audio_only(duration, audio)),
         (None, Some(video)) => Ok(AssetMetadata::video(duration, video)),
         (None, None) => Ok(AssetMetadata::without_media_tracks(duration)),
+    }
+}
+
+impl ProbeStream {
+    fn is_audio(&self) -> bool {
+        self.codec_type.as_deref() == Some("audio")
+    }
+
+    fn is_visual(&self) -> bool {
+        self.codec_type.as_deref() == Some("video") && self.disposition.attached_pic != 1
+    }
+
+    fn selection_key(&self) -> (StreamPriority, u32) {
+        (
+            if self.disposition.is_default == 1 {
+                StreamPriority::Default
+            } else {
+                StreamPriority::Other
+            },
+            self.index.unwrap_or(u32::MAX),
+        )
+    }
+}
+
+#[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
+enum StreamPriority {
+    Default,
+    Other,
+}
+
+#[derive(Default)]
+struct SelectedStreams {
+    audio: Option<ProbeStream>,
+    video: Option<ProbeStream>,
+}
+
+fn select_streams(streams: Vec<ProbeStream>) -> SelectedStreams {
+    let mut selected = SelectedStreams::default();
+    for stream in streams {
+        if stream.is_audio() {
+            select_stream(&mut selected.audio, stream);
+        } else if stream.is_visual() {
+            select_stream(&mut selected.video, stream);
+        }
+    }
+    selected
+}
+
+fn select_stream(selected: &mut Option<ProbeStream>, candidate: ProbeStream) {
+    let replace = match selected {
+        Some(current) => candidate.selection_key() < current.selection_key(),
+        None => true,
+    };
+    if replace {
+        *selected = Some(candidate);
+    }
+}
+
+fn parse_video(
+    path: &Path,
+    stream: ProbeStream,
+    format_duration: Option<Duration>,
+) -> Result<VideoMetadata, ProbeError> {
+    let duration = video_duration(path, stream.duration.as_deref(), format_duration)?;
+    let timing = parse_timing(path, &stream)?;
+    let codec = required_field(path, "codec name", stream.codec_name)?;
+    let pixel_format = required_field(path, "pixel format", stream.pix_fmt)?;
+
+    VideoMetadata::new(duration, codec, pixel_format, timing)
+        .map_err(|source| ProbeError::invalid_video(path, source.to_string()))
+}
+
+fn video_duration(
+    path: &Path,
+    stream_duration: Option<&str>,
+    format_duration: Option<Duration>,
+) -> Result<Duration, ProbeError> {
+    match stream_duration {
+        None | Some("N/A") => format_duration
+            .ok_or_else(|| ProbeError::invalid_video(path, "video stream has no duration")),
+        Some(duration) => Duration::parse(&format!("{duration}s"))
+            .map_err(|source| ProbeError::invalid_video_duration(path, duration, source)),
     }
 }
 
@@ -120,43 +206,6 @@ fn parse_audio_channels(
             format!("{channels}-channel audio is not supported"),
         )),
         None => Err(ProbeError::invalid_audio(path, "missing channel count")),
-    }
-}
-
-impl ProbeStream {
-    fn is_audio(&self) -> bool {
-        self.codec_type.as_deref() == Some("audio")
-    }
-
-    fn is_video(&self) -> bool {
-        self.codec_type.as_deref() == Some("video")
-    }
-}
-
-fn parse_video(
-    path: &Path,
-    stream: ProbeStream,
-    format_duration: Option<Duration>,
-) -> Result<VideoMetadata, ProbeError> {
-    let duration = video_duration(path, stream.duration.as_deref(), format_duration)?;
-    let timing = parse_timing(path, &stream)?;
-    let codec = required_field(path, "codec name", stream.codec_name)?;
-    let pixel_format = required_field(path, "pixel format", stream.pix_fmt)?;
-
-    VideoMetadata::new(duration, codec, pixel_format, timing)
-        .map_err(|source| ProbeError::invalid_video(path, source.to_string()))
-}
-
-fn video_duration(
-    path: &Path,
-    stream_duration: Option<&str>,
-    format_duration: Option<Duration>,
-) -> Result<Duration, ProbeError> {
-    match stream_duration {
-        None | Some("N/A") => format_duration
-            .ok_or_else(|| ProbeError::invalid_video(path, "video stream has no duration")),
-        Some(duration) => Duration::parse(&format!("{duration}s"))
-            .map_err(|source| ProbeError::invalid_video_duration(path, duration, source)),
     }
 }
 

@@ -28,6 +28,8 @@ const ENTRY_SOURCE = `
   });
 `;
 
+// ── Artifact construction ──
+
 test("builds a deterministic immutable presentation artifact", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "onmark-bundler-test-"));
   try {
@@ -85,16 +87,64 @@ test("builds a deterministic immutable presentation artifact", async () => {
   }
 });
 
-function bundleIdentity(manifest: BundleManifest): string {
-  const identity = JSON.stringify({
-    version: manifest.version,
-    entryPoint: manifest.entryPoint,
-    temporalCapability: manifest.temporalCapability,
-    files: manifest.files,
-  });
-  const digest = createHash("sha256").update(identity).digest("hex");
-  return `sha256:${digest}`;
-}
+test("carries local visual resources into the immutable bundle", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "onmark-bundler-test-"));
+  try {
+    const entryPoint = join(workspace, "presentation.ts");
+    const fontBytes = "font fixture bytes";
+    const svgBytes =
+      '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1" />';
+    await writeFile(entryPoint, ENTRY_SOURCE, "utf8");
+    await writeFile(
+      join(workspace, "presentation.css"),
+      '@font-face { font-family: "Onmark Test"; src: url("./body.woff2"); }\n' +
+        'body { background-image: url("./poster.svg"); }\n',
+      "utf8",
+    );
+    await writeFile(join(workspace, "body.woff2"), fontBytes);
+    await writeFile(join(workspace, "poster.svg"), svgBytes, "utf8");
+
+    const first = await bundlePresentation({
+      entryPoint,
+      outputDirectory: join(workspace, "first"),
+      maxOutputBytes: 1_000_000,
+      temporalCapability: "sequential",
+    });
+    const second = await bundlePresentation({
+      entryPoint,
+      outputDirectory: join(workspace, "second"),
+      maxOutputBytes: 1_000_000,
+      temporalCapability: "sequential",
+    });
+    assert.deepEqual(first.manifest, second.manifest);
+
+    const resources = first.manifest.files
+      .map((file) => file.path)
+      .filter((path) => path.startsWith("resources/"));
+    assert.equal(resources.length, 2);
+    assert.equal(
+      resources.every((path) => path === path.toLowerCase()),
+      true,
+    );
+    const svg = resources.find((path) => path.endsWith(".svg"));
+    const font = resources.find((path) => path.endsWith(".woff2"));
+    assert.ok(svg);
+    assert.ok(font);
+    assert.equal(await readFile(join(first.directory, svg), "utf8"), svgBytes);
+    assert.equal(
+      await readFile(join(first.directory, font), "utf8"),
+      fontBytes,
+    );
+    const references = await generatedText(first.directory);
+    for (const resource of resources) {
+      assert.equal(references.includes(resource), true);
+    }
+  } finally {
+    await rm(workspace, { force: true, recursive: true });
+  }
+});
+
+// ── Publication failures ──
 
 test("does not publish an oversized or pre-existing artifact", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "onmark-bundler-test-"));
@@ -143,6 +193,8 @@ test("does not publish an oversized or pre-existing artifact", async () => {
   }
 });
 
+// ── Checked fixtures ──
+
 test("keeps the checked-in video presentation bundle current", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "onmark-bundler-test-"));
   try {
@@ -156,8 +208,8 @@ test("keeps the checked-in video presentation bundle current", async () => {
       temporalCapability: "randomAccess",
     });
 
-    const files = (await readdir(expected)).sort();
-    assert.deepEqual((await readdir(outputDirectory)).sort(), files);
+    const files = await artifactFiles(expected);
+    assert.deepEqual(await artifactFiles(outputDirectory), files);
     for (const file of files) {
       assert.deepEqual(
         await readFile(join(outputDirectory, file)),
@@ -195,3 +247,42 @@ test("bundles the Gate-five temporal experiment with its browser libraries", asy
     await rm(workspace, { force: true, recursive: true });
   }
 });
+
+// ── Test support ──
+
+function bundleIdentity(manifest: BundleManifest): string {
+  const identity = JSON.stringify({
+    version: manifest.version,
+    entryPoint: manifest.entryPoint,
+    temporalCapability: manifest.temporalCapability,
+    files: manifest.files,
+  });
+  const digest = createHash("sha256").update(identity).digest("hex");
+  return `sha256:${digest}`;
+}
+
+async function artifactFiles(root: string, directory = ""): Promise<string[]> {
+  const files: string[] = [];
+  const entries = await readdir(join(root, directory), {
+    withFileTypes: true,
+  });
+  for (const entry of entries) {
+    const path = directory === "" ? entry.name : `${directory}/${entry.name}`;
+    if (entry.isDirectory()) {
+      files.push(...(await artifactFiles(root, path)));
+    } else if (entry.isFile()) {
+      files.push(path);
+    } else {
+      throw new Error(`bundle fixture contains unsupported entry ${path}`);
+    }
+  }
+  return files.sort();
+}
+
+async function generatedText(directory: string): Promise<string> {
+  const [script, style] = await Promise.all([
+    readFile(join(directory, "presentation.js"), "utf8"),
+    readFile(join(directory, "presentation.css"), "utf8"),
+  ]);
+  return `${script}\n${style}`;
+}

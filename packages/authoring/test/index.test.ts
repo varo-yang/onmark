@@ -9,6 +9,7 @@ import {
 } from "../src/index.js";
 import type {
   FrameEffect,
+  PresentationResource,
   RuntimeOverlay,
   RuntimePlan,
   RuntimeVideo,
@@ -22,7 +23,7 @@ test("binds video and overlay facts into semantic presentation nodes", () => {
   });
 
   const video = bindings.bindVideo(VIDEO, 3);
-  const overlay = bindings.bindOverlay(OVERLAY, 4);
+  const overlay = bindings.bindOverlay(OVERLAY);
   const videoNode = nodeAt(browser, 0);
   const overlayNode = nodeAt(browser, 1);
 
@@ -37,7 +38,7 @@ test("binds video and overlay facts into semantic presentation nodes", () => {
     overlayNode.className,
     `${PRESENTATION_CLASSES.overlay} ${PRESENTATION_CLASSES.title}`,
   );
-  assert.deepEqual(overlayNode.dataset, { onmarkPlacement: "4" });
+  assert.deepEqual(overlayNode.dataset, { onmarkComponent: "7" });
   assert.equal(overlayNode.hidden, true);
   assert.equal(overlayNode.tagName, "div");
   assert.equal(overlayNode.textContent, "Opening");
@@ -64,9 +65,9 @@ test("maps every overlay role to its stable semantic class", () => {
     videoSource: () => "unused",
   });
 
-  bindings.bindOverlay({ ...OVERLAY, kind: "title" }, 0);
-  bindings.bindOverlay({ ...OVERLAY, kind: "callToAction" }, 1);
-  bindings.bindOverlay({ ...OVERLAY, kind: "caption" }, 2);
+  bindings.bindOverlay({ ...OVERLAY, kind: "title" });
+  bindings.bindOverlay({ ...OVERLAY, kind: "callToAction" });
+  bindings.bindOverlay({ ...OVERLAY, kind: "caption" });
 
   assert.deepEqual(
     browser.nodes.map(({ className }) => className),
@@ -101,6 +102,31 @@ test("binds one immutable frame-effect collection to the loaded plan", () => {
   assert.equal(Object.isFrozen(effects), true);
 });
 
+test("binds one immutable resource collection to the loaded plan", () => {
+  const browser = new FakeDocument();
+  const resource: PresentationResource = {
+    id: "poster",
+    kind: "image",
+    prepare(): void {},
+    dispose(): void {},
+  };
+  let received: RuntimePlan | undefined;
+  const bindings = createDomPresentationBindings({
+    document: asBrowserDocument(browser),
+    resources(plan) {
+      received = plan;
+      return [resource];
+    },
+    videoSource: () => "unused",
+  });
+
+  const resources = bindings.bindResources(PLAN);
+
+  assert.equal(received, PLAN);
+  assert.deepEqual(resources, [resource]);
+  assert.equal(Object.isFrozen(resources), true);
+});
+
 const PLAN: RuntimePlan = {
   timelineVersion: 1,
   frameRate: { numerator: 30, denominator: 1 },
@@ -118,6 +144,7 @@ const VIDEO: RuntimeVideo = {
 };
 
 const OVERLAY: RuntimeOverlay = {
+  componentId: 7,
   kind: "title",
   text: "Opening",
   interval: { start: 0, end: 1 },

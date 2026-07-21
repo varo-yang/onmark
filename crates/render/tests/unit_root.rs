@@ -57,7 +57,7 @@ fn materialize_conformance_bundle(version: &str) {
         .expect("the conformance manifest satisfies the Rust wire contract");
     let unit = RenderUnit::whole_film(&static_timeline(), manifest, render_profile(), [])
         .expect("the fixture facts form one render unit");
-    let executable = ExecutableUnit::materialize(unit, &root, limits(4, 1024 * 1024))
+    let executable = ExecutableUnit::materialize(unit, &root, limits(8, 1024 * 1024))
         .expect("the checked-in bundle must materialize across the native boundary");
     let entry = executable
         .entry_url()

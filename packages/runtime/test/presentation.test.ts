@@ -27,10 +27,14 @@ test("presents videos and overlays on their Rust-owned intervals", async () => {
     ),
   );
   assert.deepEqual(
-    recorder.overlays.map(({ index, kind, text }) => ({ index, kind, text })),
+    recorder.overlays.map(({ componentId, kind, text }) => ({
+      componentId,
+      kind,
+      text,
+    })),
     [
-      { index: 0, kind: "title", text: "Opening" },
-      { index: 1, kind: "callToAction", text: "Buy now" },
+      { componentId: 4, kind: "title", text: "Opening" },
+      { componentId: 9, kind: "callToAction", text: "Buy now" },
     ],
   );
 
@@ -106,7 +110,7 @@ test("releases videos and overlays after frame-effect cleanup fails", async () =
 test("releases earlier effects when a later binding fails", async () => {
   const recorder = new PresentationRecorder();
   const adapter = new PresentationRuntimeAdapter(recorder.bindings, 100);
-  recorder.rejectOverlayBindingAt(1);
+  recorder.rejectOverlayBindingAt(9);
 
   await assert.rejects(adapter.load(presentationPlan()), RuntimeAdapterError);
 
@@ -117,7 +121,7 @@ test("reports incomplete cleanup after presentation loading fails", async () => 
   const recorder = new PresentationRecorder();
   const adapter = new PresentationRuntimeAdapter(recorder.bindings, 100);
   recorder.rejectVideoCleanupAt(0);
-  recorder.rejectOverlayBindingAt(1);
+  recorder.rejectOverlayBindingAt(9);
 
   await assert.rejects(
     adapter.load(presentationPlan()),
@@ -156,7 +160,7 @@ interface RecordedVideo {
 }
 
 interface RecordedOverlay {
-  readonly index: number;
+  readonly componentId: number;
   readonly kind: "callToAction" | "caption" | "title";
   readonly text: string;
   disposed: boolean;
@@ -173,7 +177,7 @@ class PresentationRecorder {
   readonly overlays: RecordedOverlay[] = [];
   readonly videos: RecordedVideo[] = [];
   #rejectEffectCleanup = false;
-  #rejectedOverlayIndex: number | undefined;
+  #rejectedOverlayComponentId: number | undefined;
   #rejectedVideoCleanupIndex: number | undefined;
 
   readonly bindings: PresentationBindings = {
@@ -210,12 +214,12 @@ class PresentationRecorder {
         },
       };
     },
-    bindOverlay: (placement, index) => {
-      if (index === this.#rejectedOverlayIndex) {
+    bindOverlay: (placement) => {
+      if (placement.componentId === this.#rejectedOverlayComponentId) {
         throw new Error("overlay binding failed");
       }
       const recorded: RecordedOverlay = {
-        index,
+        componentId: placement.componentId,
         kind: placement.kind,
         text: placement.text,
         disposed: false,
@@ -252,14 +256,15 @@ class PresentationRecorder {
         },
       ];
     },
+    bindResources: () => [],
   };
 
   rejectEffectCleanup(): void {
     this.#rejectEffectCleanup = true;
   }
 
-  rejectOverlayBindingAt(index: number): void {
-    this.#rejectedOverlayIndex = index;
+  rejectOverlayBindingAt(componentId: number): void {
+    this.#rejectedOverlayComponentId = componentId;
   }
 
   rejectVideoCleanupAt(index: number): void {
@@ -292,8 +297,14 @@ function presentationPlan(): BrowserPlan {
     output: { start: 10, end: 30 },
     videos: [video(1, 10, 20), video(2, 20, 30)],
     overlays: [
-      { kind: "title", text: "Opening", interval: { start: 10, end: 30 } },
       {
+        componentId: 4,
+        kind: "title",
+        text: "Opening",
+        interval: { start: 10, end: 30 },
+      },
+      {
+        componentId: 9,
         kind: "callToAction",
         text: "Buy now",
         interval: { start: 20, end: 30 },

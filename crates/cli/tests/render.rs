@@ -88,16 +88,7 @@ impl Fixture {
         let repository = repository();
         let screenplay = root.join("film.onmark");
         copy_fixture(&repository, screenplay_fixture, &screenplay);
-        copy_fixture(
-            &repository,
-            "browser/video-presentation.ts",
-            &root.join("presentation.ts"),
-        );
-        copy_fixture(
-            &repository,
-            "browser/video-presentation.css",
-            &root.join("video-presentation.css"),
-        );
+        copy_presentation(&repository, root);
 
         Self {
             root: root.to_owned(),
@@ -422,6 +413,29 @@ fn file_digest(path: &Path) -> [u8; 32] {
 fn copy_fixture(repository: &Path, source: &str, destination: &Path) {
     fs::copy(repository.join("conformance").join(source), destination)
         .expect("the conformance fixture is copied");
+}
+
+fn copy_presentation(repository: &Path, root: &Path) {
+    copy_fixture(
+        repository,
+        "browser/video-presentation.ts",
+        &root.join("presentation.ts"),
+    );
+    copy_fixture(
+        repository,
+        "browser/video-presentation.css",
+        &root.join("video-presentation.css"),
+    );
+
+    let resources = root.join("resources");
+    fs::create_dir(&resources).expect("the presentation resource directory is created");
+    for name in ["basic-regular.ttf", "poster.svg"] {
+        copy_fixture(
+            repository,
+            &format!("browser/resources/{name}"),
+            &resources.join(name),
+        );
+    }
 }
 
 fn required_path(variable: &str) -> PathBuf {

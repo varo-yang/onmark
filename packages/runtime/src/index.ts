@@ -29,6 +29,12 @@ export {
   type VideoPresentation,
 } from "./presentation.js";
 export {
+  MAX_PRESENTATION_RESOURCES,
+  PRESENTATION_RESOURCE_KINDS,
+  type PresentationResource,
+  type PresentationResourceKind,
+} from "./resource.js";
+export {
   BUNDLE_ASSET_DIRECTORY,
   PRESENTATION_TEMPORAL_CAPABILITIES,
   type PresentationTemporalCapability,

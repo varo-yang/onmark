@@ -3,7 +3,7 @@
 //! Conversion establishes JavaScript-safe integer and collection bounds before
 //! values cross the Rust/TypeScript boundary.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt;
 
@@ -163,6 +163,14 @@ impl BrowserPlan {
         if wire.overlays.len() > MAX_BROWSER_OVERLAYS {
             return Err(InvalidBrowserPlan::TooManyOverlays);
         }
+        let mut component_ids = BTreeSet::new();
+        if wire
+            .overlays
+            .iter()
+            .any(|overlay| !component_ids.insert(overlay.component_id))
+        {
+            return Err(InvalidBrowserPlan::DuplicateComponentId);
+        }
         if overlay_text_bytes(&wire.overlays) > MAX_BROWSER_OVERLAY_TEXT_BYTES {
             return Err(InvalidBrowserPlan::OverlayTextBudget);
         }
@@ -238,8 +246,10 @@ fn project_overlays(
 ) -> Result<Vec<BrowserOverlay>, InvalidBrowserPlan> {
     let mut overlays = Vec::new();
     let mut text_bytes = 0_usize;
+    let mut next_component_id = 0_u32;
 
     for overlay in timeline.overlays() {
+        let component_id = take_component_id(&mut next_component_id)?;
         let interval = overlay.timing().interval();
         if !interval.intersects(evaluation) {
             continue;
@@ -247,16 +257,21 @@ fn project_overlays(
         if !evaluation.contains_interval(interval) {
             return Err(InvalidBrowserPlan::OverlayCrossesEvaluation);
         }
-        push_browser_overlay(&mut overlays, &mut text_bytes, browser_overlay(overlay)?)?;
+        push_browser_overlay(
+            &mut overlays,
+            &mut text_bytes,
+            browser_overlay(overlay, component_id)?,
+        )?;
     }
     for caption in timeline.captions() {
+        let component_id = take_component_id(&mut next_component_id)?;
         let Some(interval) = intersection(caption.interval(), evaluation) else {
             continue;
         };
         push_browser_overlay(
             &mut overlays,
             &mut text_bytes,
-            browser_caption(caption, interval)?,
+            browser_caption(caption, component_id, interval)?,
         )?;
     }
 
@@ -393,11 +408,30 @@ pub enum BrowserOverlayKind {
     Caption,
 }
 
+/// Stable overlay identity retained across whole-film and partition plans.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(transparent)]
+pub struct BrowserComponentId(#[cfg_attr(feature = "schema", schemars(range(max = u32::MAX)))] u32);
+
+impl BrowserComponentId {
+    const fn new(value: u32) -> Self {
+        Self(value)
+    }
+
+    /// Returns the stable integer representation.
+    #[must_use]
+    pub const fn get(self) -> u32 {
+        self.0
+    }
+}
+
 /// One solved overlay placement consumed by the browser presentation.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct BrowserOverlay {
+    component_id: BrowserComponentId,
     kind: BrowserOverlayKind,
     #[cfg_attr(
         feature = "schema",
@@ -408,6 +442,12 @@ pub struct BrowserOverlay {
 }
 
 impl BrowserOverlay {
+    /// Returns the compiler-owned component identity.
+    #[must_use]
+    pub const fn component_id(&self) -> BrowserComponentId {
+        self.component_id
+    }
+
     /// Returns the presentation role selected by the screenplay element.
     #[must_use]
     pub const fn kind(&self) -> BrowserOverlayKind {
@@ -440,6 +480,7 @@ impl<'de> Deserialize<'de> for BrowserOverlay {
         }
 
         Ok(Self {
+            component_id: wire.component_id,
             kind: wire.kind,
             text: wire.text,
             interval: wire.interval,
@@ -450,6 +491,7 @@ impl<'de> Deserialize<'de> for BrowserOverlay {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct BrowserOverlayWire {
+    component_id: BrowserComponentId,
     kind: BrowserOverlayKind,
     text: Box<str>,
     interval: WireInterval,
@@ -473,7 +515,10 @@ fn browser_video(
     })
 }
 
-fn browser_overlay(overlay: &TimelineOverlay) -> Result<BrowserOverlay, InvalidBrowserPlan> {
+fn browser_overlay(
+    overlay: &TimelineOverlay,
+    component_id: BrowserComponentId,
+) -> Result<BrowserOverlay, InvalidBrowserPlan> {
     let element_kind = overlay.element().kind();
     let kind = match element_kind {
         ElementKind::Title => BrowserOverlayKind::Title,
@@ -490,6 +535,7 @@ fn browser_overlay(overlay: &TimelineOverlay) -> Result<BrowserOverlay, InvalidB
     }
 
     Ok(BrowserOverlay {
+        component_id,
         kind,
         text: text.into_boxed_str(),
         interval: WireInterval::try_from(overlay.timing().interval())?,
@@ -498,6 +544,7 @@ fn browser_overlay(overlay: &TimelineOverlay) -> Result<BrowserOverlay, InvalidB
 
 fn browser_caption(
     caption: &TimelineCaption,
+    component_id: BrowserComponentId,
     interval: FrameInterval,
 ) -> Result<BrowserOverlay, InvalidBrowserPlan> {
     if text_exceeds_limit(caption.text()) {
@@ -505,10 +552,19 @@ fn browser_caption(
     }
 
     Ok(BrowserOverlay {
+        component_id,
         kind: BrowserOverlayKind::Caption,
         text: caption.text().into(),
         interval: WireInterval::try_from(interval)?,
     })
+}
+
+fn take_component_id(next: &mut u32) -> Result<BrowserComponentId, InvalidBrowserPlan> {
+    let component_id = BrowserComponentId::new(*next);
+    *next = next
+        .checked_add(1)
+        .ok_or(InvalidBrowserPlan::TooManyOverlays)?;
+    Ok(component_id)
 }
 
 fn overlay_text_bytes(overlays: &[BrowserOverlay]) -> usize {
@@ -550,6 +606,8 @@ pub enum InvalidBrowserPlan {
     TooManyVideos,
     /// The plan contains more overlay placements than V1 can carry.
     TooManyOverlays,
+    /// Two overlay placements claim the same component identity.
+    DuplicateComponentId,
     /// A Timeline overlay carries a non-overlay element kind.
     InvalidOverlayKind(ElementKind),
     /// One overlay inscription exceeds the V1 character budget.
@@ -591,6 +649,9 @@ impl fmt::Display for InvalidBrowserPlan {
             Self::TooManyOverlays => {
                 formatter.write_str("browser plan exceeds the V1 overlay-placement limit")
             }
+            Self::DuplicateComponentId => {
+                formatter.write_str("browser overlay component identity is duplicated")
+            }
             Self::InvalidOverlayKind(kind) => {
                 write!(
                     formatter,
@@ -631,6 +692,7 @@ impl Error for InvalidBrowserPlan {
             | Self::OverlayCrossesEvaluation
             | Self::TooManyVideos
             | Self::TooManyOverlays
+            | Self::DuplicateComponentId
             | Self::InvalidOverlayKind(_)
             | Self::OverlayTextTooLong(_)
             | Self::CaptionTextTooLong
@@ -894,6 +956,23 @@ mod tests {
     }
 
     #[test]
+    fn rejects_duplicate_component_identity_at_the_wire_boundary() {
+        let plan = r#"{
+            "timelineVersion":1,
+            "frameRate":{"numerator":30,"denominator":1},
+            "evaluation":{"start":0,"end":1},
+            "output":{"start":0,"end":1},
+            "videos":[],
+            "overlays":[
+                {"componentId":7,"kind":"title","text":"A","interval":{"start":0,"end":1}},
+                {"componentId":7,"kind":"title","text":"B","interval":{"start":0,"end":1}}
+            ]
+        }"#;
+
+        assert!(serde_json::from_str::<BrowserPlan>(plan).is_err());
+    }
+
+    #[test]
     fn enumerates_video_and_overlay_placement_boundaries() {
         let asset_id = FrozenAssetId::from_sha256([1; 32]);
         let timeline = timeline_with_content_in(
@@ -971,6 +1050,24 @@ mod tests {
         assert_eq!(plan.overlays()[0].kind(), BrowserOverlayKind::Caption);
         assert_eq!(plan.overlays()[0].interval().start().get(), 1);
         assert_eq!(plan.overlays()[0].interval().end().get(), 2);
+    }
+
+    #[test]
+    fn retains_component_identity_when_a_partition_omits_earlier_overlays() {
+        let timeline = timeline_with_content_in(
+            vec![
+                overlay(ElementKind::Title, interval(0, 2), "Opening"),
+                overlay(ElementKind::CallToAction, interval(2, 4), "Buy now"),
+            ],
+            interval(0, 4),
+        );
+        let unit = interval(2, 4);
+
+        let plan = BrowserPlan::from_timeline_for_unit(&timeline, &BTreeMap::new(), unit, unit)
+            .expect("the second overlay fits its partition");
+
+        assert_eq!(plan.overlays().len(), 1);
+        assert_eq!(plan.overlays()[0].component_id().get(), 1);
     }
 
     #[test]

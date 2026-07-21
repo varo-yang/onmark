@@ -1,7 +1,7 @@
 # Onmark Presentation Contract
 
-> Status: Gate-one browser authoring contract, extended and reused through Gate
-> four.
+> Status: browser authoring contract through Gate five; its deterministic
+> resource extension is active in Gate six.
 
 Onmark uses two authored files at Gate one:
 
@@ -158,8 +158,9 @@ or derive a new media duration from the DOM.
 
 `@onmark/authoring` provides the default semantic DOM bindings:
 
-- `createDomPresentationBindings({ document, videoSource })` returns runtime
-  bindings for videos and overlays.
+- `createDomPresentationBindings({ document, videoSource, resources? })`
+  returns runtime bindings for videos, overlays, and explicitly registered
+  presentation resources.
 - Video placements become hidden `<video>` elements with the stable
   `onmark-video` class.
 - Title, CTA, and caption placements become hidden `<div>` elements with
@@ -172,15 +173,17 @@ The default facade is deliberately small. A presentation can implement
 rules apply: bindings create browser resources, `setVisible` applies visibility,
 and `dispose` releases resources terminally.
 
-More precisely, the production adapter calls `bindVideo(placement, index)` and
-`bindOverlay(placement, index)` once during `load`. A video binding supplies the
+More precisely, the production adapter calls `bindVideo(placement, index)`,
+`bindOverlay(placement)`, `bindResources(plan)`, and
+`bindFrameEffects(plan)` once during `load`. A video binding supplies the
 browser element, its materialized source, visibility effect, and terminal
 cleanup. An overlay binding supplies visibility and terminal cleanup. The
-`index` is the placement's stable position in the frozen plan; it is useful for
-DOM identity and is not a timing coordinate. On every `seek`, the runtime first
-hides videos, selects an admitted source frame from the authoritative output
-frame, presents ready videos, then applies solved overlay visibility. Bindings
-own those effects, not interval arithmetic.
+video `index` is its position in the frozen unit plan and is not a timing
+coordinate. Every overlay instead carries a compiler-owned `componentId` that
+remains stable when an earlier overlay is absent from a partition. On every
+`seek`, the runtime first hides videos, selects an admitted source frame from
+the authoritative output frame, presents ready videos, then applies solved
+overlay visibility. Bindings own those effects, not interval arithmetic.
 
 ## Plan facts, component selection, and props
 
@@ -192,6 +195,12 @@ sent by `Load(plan)`: frame rate, evaluation and output intervals, video
 placements, and title, CTA, or imported-caption overlay placements. Static
 values imported by `presentation.ts` are bundled program code, not screenplay
 props.
+
+Those existing overlay facts are the closed built-in component contract:
+`componentId` is stable identity, `kind` selects title, CTA, or caption, and
+`text` is that component's only authored property. This does not create a
+generic props channel or allow presentation code to reinterpret screenplay
+structure.
 
 This absence is intentional rather than an undocumented convention. A future
 presentation-selection or props feature must define, together, its screenplay
@@ -240,6 +249,46 @@ That helper derives `./assets/sha256/<digest>` from the frozen asset identity in
 the Rust-owned browser plan. Presentations should not reconstruct native paths,
 read source files, or assume a working directory. The renderer verifies bytes
 before the browser sees them.
+
+Gate six now lets presentation JavaScript or CSS import local AVIF, GIF, JPEG,
+PNG, SVG, WebP, OTF, TTF, WOFF, and WOFF2 files. The bundler copies those bytes
+under opaque `resources/` paths and includes them in the existing bounded,
+content-addressed manifest. Bundling proves byte identity only; browser
+readiness requires explicit registration:
+
+```ts
+interface PresentationResource {
+  readonly kind: "image" | "font" | "texture" | "custom";
+  readonly id: string;
+  prepare(): void | Promise<void>;
+  dispose(): void | Promise<void>;
+}
+```
+
+`resources(plan)` returns at most 256 resources. Their `kind:id` identities
+must be unique, nonblank, trimmed, and bounded. `Prepare` starts every resource
+concurrently under the adapter's shared readiness deadline, waits for every
+bounded outcome, and reports all timed-out identities as
+`<kind>:<id>:prepare`. Untyped preparation failures are contained behind the
+same identity. Terminal disposal awaits every resource in declaration order
+and retains the first cleanup failure without skipping later resources.
+The factory retains ownership of effects created before it returns; if it
+throws partway through construction, it must release those partial effects.
+The runtime takes ownership only of the returned collection.
+
+The resource owns the meaning of ready: an image waits for successful decode, a
+font waits for the exact face it will render, and a texture waits for upload to
+the presentation's graphics context. `dispose` must cancel preparation that is
+still pending after a deadline where the platform exposes cancellation, and it
+must always prevent a late completion from reinstalling disposed state.
+Registering an arbitrary promise without an owned browser resource does not
+satisfy this contract.
+
+`@onmark/authoring` provides `createImageResource({ document, id, source })`
+and `createFontResource({ face, fonts, id })`. The image helper exposes its
+owned element for authored layout and gates readiness on `decode()`. The font
+helper loads the exact `FontFace` before adding it to the supplied
+`FontFaceSet`; a completion after disposal cannot add the face back.
 
 ## Determinism rules
 

@@ -8,6 +8,7 @@ body,
 
 body {
   background: black;
+  font-family: "Onmark Conformance", sans-serif;
   overflow: hidden;
 }
 
@@ -20,10 +21,19 @@ body {
 .onmark-overlay {
   background: rgb(0 0 0 / 72%);
   color: white;
-  font-family: sans-serif;
   left: 16px;
   padding: 8px 12px;
   position: fixed;
+}
+
+.onmark-poster {
+  border-radius: 8px;
+  bottom: 16px;
+  outline: 4px solid var(--onmark-frame-accent);
+  position: fixed;
+  right: 16px;
+  width: 160px;
+  z-index: 1;
 }
 
 .onmark-title {

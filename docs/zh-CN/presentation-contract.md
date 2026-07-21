@@ -1,6 +1,6 @@
 # Onmark Presentation Contract
 
-> 状态：Gate 一浏览器 authoring 合约；Gate 二至 Gate 四扩展并复用。
+> 状态：已覆盖 Gate 一至 Gate 五；Gate 六正在扩展其确定性 resource 合约。
 
 Gate 一使用两个作者文件：
 
@@ -141,8 +141,8 @@ presentation 收到的 placement 已经包含绝对帧区间。它可以决定 t
 
 `@onmark/authoring` 提供默认语义 DOM bindings：
 
-- `createDomPresentationBindings({ document, videoSource })`
-  返回 runtime 可消费的 video/overlay bindings；
+- `createDomPresentationBindings({ document, videoSource, resources? })`
+  返回 runtime 可消费的 video、overlay 与显式注册 presentation resource bindings；
 - video placement 会变成隐藏的 `<video>`，并带稳定 class `onmark-video`；
 - title、CTA 与 caption placement 会变成隐藏的 `<div>`，并带
   `onmark-overlay` 以及 `onmark-title`、`onmark-call-to-action` 或
@@ -154,15 +154,13 @@ presentation 收到的 placement 已经包含绝对帧区间。它可以决定 t
 应用可见性，`dispose` 终止性释放资源。
 
 更精确地说，production adapter 会在 `load` 时各调用一次
-`bindVideo(placement, index)` 与 `bindOverlay(placement, index)`。video
-binding 提供浏览器 element、已 materialize 的 source、visibility
-effect 和终止性 cleanup；overlay
-binding 提供 visibility 与终止性 cleanup。`index`
-是 placement 在冻结 plan 中的稳定位置，仅用于 DOM identity，不是时间坐标。每次
-`seek` 时，runtime 先隐藏 video，再根据权威 output frame 选择已准入的 source
-frame、呈现 ready
-video，最后应用已求解 overlay 的 visibility。binding 拥有效果，不拥有 interval
-arithmetic。
+`bindVideo(placement, index)`、`bindOverlay(placement)`、`bindResources(plan)` 与
+`bindFrameEffects(plan)`。video binding 提供浏览器 element、已 materialize 的 source、visibility effect
+和终止性 cleanup；overlay binding 提供 visibility 与终止性 cleanup。video 的 `index`
+只是它在冻结 unit plan 中的位置，不是时间坐标。每个 overlay 则携带 compiler-owned
+`componentId`；即使更早的 overlay 没进入某个 partition，它也保持不变。每次 `seek` 时，runtime 先隐藏
+video，再根据权威 output frame 选择已准入的 source frame、呈现 ready video，最后应用已求解 overlay 的 visibility。
+binding 拥有效果，不拥有 interval arithmetic。
 
 ## Plan facts、组件选择与 props
 
@@ -174,6 +172,11 @@ arithmetic。
 placement，以及 title、CTA 或导入 caption 的 overlay placement。
 `presentation.ts` 静态 import 的值是 bundled program code，不是 screenplay
 props。
+
+这些既有 overlay fact 构成封闭的内建 component contract：`componentId`
+是稳定身份，`kind` 只选择 title、CTA 或 caption，`text` 是该 component
+唯一的 authored property。这不会创建通用 props 通道，也不允许 presentation
+重新解释 screenplay 结构。
 
 这项缺失是有意边界，不是未写下来的约定。未来的 presentation selection 或 props
 feature 必须一起定义：screenplay spelling、带类型的 schema/default、canonical
@@ -215,6 +218,37 @@ materializedVideoSource(placement);
 `./assets/sha256/<digest>`。presentation 不应该拼 native
 path、读取源码文件或假设 working
 directory。renderer 会在浏览器看到素材前验证字节。
+
+Gate 六现已允许 presentation JavaScript 或 CSS import 本地 AVIF、GIF、JPEG、PNG、SVG、WebP、OTF、
+TTF、WOFF 与 WOFF2 文件。bundler 会把原始 bytes 写入不透明的 `resources/` 路径，并纳入既有的有界、
+content-addressed manifest。bundle 只证明 byte identity；browser readiness 还必须显式注册：
+
+```ts
+interface PresentationResource {
+  readonly kind: "image" | "font" | "texture" | "custom";
+  readonly id: string;
+  prepare(): void | Promise<void>;
+  dispose(): void | Promise<void>;
+}
+```
+
+`resources(plan)` 最多返回 256 个 resource；其 `kind:id` identity 必须唯一、非空、去除首尾空白且长度
+有界。`Prepare` 会在 adapter 的共享 readiness deadline 下并发启动全部 resource、等待全部有界结果，
+并把所有超时 identity 报成 `<kind>:<id>:prepare`。未类型化的 preparation failure 也会被收敛到同一
+identity。terminal disposal 按声明顺序等待所有 resource；即使一个 cleanup 失败，也不会跳过后续
+resource，并只保留第一个 failure。
+factory 在返回前仍拥有自己创建的 effect；如果构造到一半抛错，它必须自行释放这些 partial
+effect。runtime 只接管已经返回的 collection。
+
+ready 的具体含义由 resource 自己拥有：image 等待成功 decode，font 等待将要渲染的精确 face，texture
+等待上传到 presentation 的 graphics context。deadline 后仍在 pending 的 preparation，在平台提供
+取消能力时必须由 `dispose` 取消；无论平台是否可取消，迟到的 completion 都不得重新安装已释放状态。
+只注册一个不拥有 browser resource 的任意 promise 不满足本合约。
+
+`@onmark/authoring` 提供 `createImageResource({ document, id, source })`
+与 `createFontResource({ face, fonts, id })`。image helper 暴露自有 element 供 authored
+layout 使用，并以 `decode()` 作为 readiness；font helper 先加载精确 `FontFace`，再把它加入传入的
+`FontFaceSet`，dispose 之后迟到的 completion 不会重新加入该 face。
 
 ## 确定性规则
 

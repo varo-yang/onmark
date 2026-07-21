@@ -25,6 +25,13 @@ conformance proves that the effect-bearing presentation produces identical
 canonical pixels as one whole-film unit or two independent units. Unknown
 presentation code remains sequential. Deployment work remains frozen.
 
+Gate six is active. It is adding content-addressed local image, SVG, and font
+resources; bounded browser readiness that names the resource still pending;
+and Rust-owned component identity for the existing closed overlay facts. It
+does not add a general props channel or change the screenplay surface without
+the repository's language-admission evidence, and it does not reopen deployment
+work or introduce a second timing system.
+
 The completed foundation includes the pure compiler and versioned wire types in
 `onmark-core`; bounded ffprobe and strict SubRip/WebVTT/ASS normalization in
 `onmark-media`; deterministic video and overlay presentation in

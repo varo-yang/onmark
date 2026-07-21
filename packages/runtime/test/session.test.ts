@@ -33,6 +33,7 @@ const plan: BrowserPlan = {
   ],
   overlays: [
     {
+      componentId: 0,
       kind: "title",
       text: "Opening",
       interval: { start: 12, end: 18 },
@@ -298,8 +299,14 @@ test("rejects invalid browser overlay facts before adapter loading", async () =>
   firstOverlay(emptyOverlay).interval = { start: 12, end: 12 };
   const escapedOverlay = structuredClone(plan);
   firstOverlay(escapedOverlay).interval = { start: 9, end: 18 };
+  const duplicateComponent = structuredClone(plan);
+  duplicateComponent.overlays.push({ ...firstOverlay(duplicateComponent) });
 
-  for (const invalidPlan of [emptyOverlay, escapedOverlay]) {
+  for (const invalidPlan of [
+    emptyOverlay,
+    escapedOverlay,
+    duplicateComponent,
+  ]) {
     const adapter = new RecordingAdapter();
     const session = new RuntimeSession(adapter);
     const rejected = await session.dispatch(

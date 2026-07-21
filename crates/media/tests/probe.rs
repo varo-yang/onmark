@@ -120,6 +120,32 @@ fn records_audio_presence_independently_of_visual_metadata() {
 }
 
 #[test]
+fn selects_default_media_streams_and_ignores_attached_pictures() {
+    let ffprobe = responsive_fixture_probe(8_192);
+    let metadata = ffprobe
+        .probe(Path::new("stream-selection.mp4"))
+        .expect("the default media streams are usable");
+
+    let video = metadata
+        .video_metadata()
+        .expect("the fixture has a selected video stream");
+    assert_eq!(video.duration(), MediaDuration::from_nanos(2_000_000_000));
+    assert_eq!(
+        video.timing(),
+        VideoTiming::Constant(FrameRate::new(30, 1).expect("30 fps is valid")),
+    );
+
+    let audio = metadata
+        .audio_metadata()
+        .expect("the fixture has a selected audio stream");
+    assert_eq!(
+        audio.sample_rate(),
+        AudioSampleRate::new(48_000).expect("48 kHz is valid"),
+    );
+    assert_eq!(audio.channel_layout(), AudioChannelLayout::Stereo);
+}
+
+#[test]
 fn derives_artifact_duration_from_streams_when_format_duration_is_absent() {
     let ffprobe = responsive_fixture_probe(4_096);
     let metadata = ffprobe

@@ -20,6 +20,19 @@ import {
 
 const AUTHORING_ENTRY = fileURLToPath(import.meta.resolve("@onmark/authoring"));
 const RUNTIME_ENTRY = fileURLToPath(import.meta.resolve("@onmark/runtime"));
+const VISUAL_RESOURCE_LOADERS = {
+  ".avif": "file",
+  ".gif": "file",
+  ".jpeg": "file",
+  ".jpg": "file",
+  ".otf": "file",
+  ".png": "file",
+  ".svg": "file",
+  ".ttf": "file",
+  ".webp": "file",
+  ".woff": "file",
+  ".woff2": "file",
+} as const;
 
 // ── Public contract
 
@@ -161,11 +174,13 @@ async function compilePresentation(
         "@onmark/authoring": AUTHORING_ENTRY,
         "@onmark/runtime": RUNTIME_ENTRY,
       },
+      assetNames: "resources/[hash]",
       bundle: true,
       entryNames: "presentation",
       entryPoints: [entryPoint],
       format: "esm",
       legalComments: "none",
+      loader: VISUAL_RESOURCE_LOADERS,
       minify: true,
       outdir: staging,
       platform: "browser",
@@ -184,10 +199,11 @@ function presentationFiles(
   outputFiles: readonly OutputFile[],
   staging: string,
 ): NonEmpty<PendingFile> {
-  const generated = outputFiles.map((file) => ({
+  const emitted = outputFiles.map((file) => ({
     contents: file.contents,
     path: artifactPath(staging, file.path),
   }));
+  const generated = canonicalResourcePaths(emitted);
   const scripts = generated.filter((file) => file.path.endsWith(".js"));
   if (scripts.length !== 1 || scripts[0]?.path !== "presentation.js") {
     throw new BundleError(
@@ -207,6 +223,40 @@ function presentationFiles(
   requireDistinctPaths(files);
 
   return canonicalFiles(files);
+}
+
+function canonicalResourcePaths(files: readonly PendingFile[]): PendingFile[] {
+  // Esbuild emits uppercase Base32 hashes, while the bundle wire contract owns
+  // lowercase portable paths. Normalize names and generated references at the
+  // same compiler boundary.
+  const renames = new Map<string, string>();
+  for (const file of files) {
+    if (file.path.startsWith("resources/")) {
+      renames.set(file.path, file.path.toLowerCase());
+    }
+  }
+
+  return files.map((file) => ({
+    contents: isGeneratedText(file.path)
+      ? rewriteResourceReferences(file.contents, renames)
+      : file.contents,
+    path: renames.get(file.path) ?? file.path,
+  }));
+}
+
+function rewriteResourceReferences(
+  contents: Uint8Array,
+  renames: ReadonlyMap<string, string>,
+): Uint8Array {
+  let source = new TextDecoder().decode(contents);
+  for (const [emitted, canonical] of renames) {
+    source = source.replaceAll(emitted, canonical);
+  }
+  return new TextEncoder().encode(source);
+}
+
+function isGeneratedText(path: string): boolean {
+  return path.endsWith(".css") || path.endsWith(".js");
 }
 
 function entryDocument(styles: readonly string[]): string {

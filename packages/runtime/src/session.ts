@@ -1,4 +1,4 @@
-// Sequential Gate-one browser protocol session.
+// Sequential browser protocol session.
 // Owns command ordering and state while a narrow adapter owns browser effects;
 // this split keeps protocol behavior deterministic and directly testable.
 
@@ -76,7 +76,7 @@ export class RuntimeAdapterError extends Error {
 
 // ── Protocol session ──
 
-/** Sequential Gate-one browser protocol session. */
+/** Sequential browser protocol session. */
 export class RuntimeSession {
   readonly #adapter: RuntimeAdapter;
   #state: SessionState = { kind: "empty" };
@@ -357,7 +357,12 @@ function planViolation(plan: BrowserPlan): string | undefined {
       return "plan video interval falls outside evaluation";
     }
   }
+  const componentIds = new Set<number>();
   for (const overlay of plan.overlays) {
+    if (componentIds.has(overlay.componentId)) {
+      return "plan overlay component identity is duplicated";
+    }
+    componentIds.add(overlay.componentId);
     if (overlay.interval.start >= overlay.interval.end) {
       return "plan overlay interval is empty or reversed";
     }
@@ -389,6 +394,7 @@ function snapshotPlan(plan: BrowserPlan): RuntimePlan {
   const overlays = Object.freeze(
     plan.overlays.map((overlay) =>
       Object.freeze({
+        componentId: overlay.componentId,
         kind: overlay.kind,
         text: overlay.text,
         interval: Object.freeze({ ...overlay.interval }),

@@ -10,3 +10,7 @@ export type {
   RuntimeOverlay,
   VideoPresentation,
 } from "./presentation.js";
+export type {
+  PresentationResource,
+  PresentationResourceKind,
+} from "./resource.js";

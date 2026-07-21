@@ -3,10 +3,10 @@
 
 import { BUNDLE_ASSET_DIRECTORY } from "./generated/bundle-layout.js";
 import type { RuntimeVideo, VideoFrameSelection } from "./media.js";
+import { requireReadinessTimeout } from "./resource.js";
 import { RuntimeAdapterError } from "./session.js";
 
 const FRAME_TOLERANCE_SECONDS = 0.000_001;
-const MAX_READINESS_TIMEOUT_MILLISECONDS = 24 * 60 * 60 * 1_000;
 
 type VideoEvent = "error" | "loadeddata" | "seeked";
 type ReadinessEvent = Exclude<VideoEvent, "error">;
@@ -59,7 +59,7 @@ export class DecodedVideo {
   #state: VideoState = "empty";
 
   constructor(element: BrowserVideoElement, timeoutMilliseconds: number) {
-    requireVideoReadinessTimeout(timeoutMilliseconds);
+    requireReadinessTimeout(timeoutMilliseconds);
     this.#element = element;
     this.#timeoutMilliseconds = timeoutMilliseconds;
   }
@@ -458,21 +458,6 @@ async function observedBeforeDeadline(
     return await Promise.race([observation, timeout]);
   } finally {
     clearTimeout(deadline);
-  }
-}
-
-/** Validates the bounded timer policy before browser effects are allocated. */
-export function requireVideoReadinessTimeout(
-  timeoutMilliseconds: number,
-): void {
-  if (
-    !Number.isSafeInteger(timeoutMilliseconds) ||
-    timeoutMilliseconds <= 0 ||
-    timeoutMilliseconds > MAX_READINESS_TIMEOUT_MILLISECONDS
-  ) {
-    throw new TypeError(
-      "video readiness timeout must be a positive integer no greater than one day",
-    );
   }
 }
 

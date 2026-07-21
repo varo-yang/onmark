@@ -561,9 +561,11 @@ termination fallback. Private ffprobe response types are translated once into
 core-owned `AssetMetadata`; JSON values and third-party error types do not
 define the stable API, while underlying errors remain available through the
 standard error source chain for debugging. Gate-one probing requests bounded
-stream-level facts for every stream: `codec_type` records audio presence and
-selects the first visual stream; `sample_rate` and `channels` fix the selected
-audio stream's sample grid and normalized channel layout; and `nb_frames`
+stream-level facts for every stream. Attached-picture video streams are not
+renderable media. Among the remaining video streams and among audio streams,
+the declared default stream wins; ties and absent defaults resolve to the
+lowest reported stream index. `sample_rate` and `channels` fix the selected
+audio stream's sample grid and normalized channel layout, while `nb_frames`
 identifies stills. It
 prefers a visual stream's duration and falls back to the container duration
 when ffprobe omits that stream field; a malformed explicit stream duration is
@@ -685,8 +687,13 @@ bounded and whose expected failures are typed. The production presentation
 adapter receives presentation-owned elements, sources, and visibility effects.
 It owns bounded media loading, exact source-frame selection, decoded-frame
 readiness, solved overlay visibility, and terminal cleanup without creating
-layout or canvas state. The materialized asset directory used by that adapter
-and by the bundler is generated from the Rust bundle schema.
+layout or canvas state. Gate six adds a closed `image | font | texture | custom`
+resource boundary at this same owner. A presentation may retain at most 256
+uniquely identified resources; `Prepare` starts them concurrently under one
+shared readiness policy, reports every timed-out `kind:id:prepare`, and terminal
+cleanup awaits all of them in declaration order. The materialized asset
+directory used by that adapter and by the bundler is generated from the Rust
+bundle schema.
 
 `@onmark/bundler` is the Node-only product build boundary, not repository
 automation. It may depend on Node built-ins, the public `@onmark/authoring` and
@@ -708,10 +715,18 @@ directory, and refuses an output path observed to exist before compilation or
 publication. The final directory rename prevents readers from observing a
 normally completed partial build, but portable Node filesystem APIs do not make
 the preceding absence check a cross-process no-clobber transaction. The current
-boundary deliberately has no watch mode, plugin API, cache, development server,
-or asset materialization policy. Esbuild's internal working memory remains
-governed by the pinned third-party implementation rather than the
-retained-output ceiling.
+Gate-six resource slice configures one closed `file`-loader set for local AVIF,
+GIF, JPEG, PNG, SVG, WebP, OTF, TTF, WOFF, and WOFF2 imports. Esbuild emits
+their original bytes beneath an opaque `resources/<hash>.<extension>` path.
+The bundler normalizes esbuild's uppercase Base32 names to the bundle contract's
+lowercase portable spelling and rewrites generated references at that same
+boundary; the existing manifest then owns the canonical SHA-256 and
+retained-byte bound.
+This step performs no image or font decoding and is not browser-readiness
+evidence. The boundary deliberately has no watch mode, plugin API, cache,
+development server, external fetch, or general asset-transformation policy.
+Esbuild's internal working memory remains governed by the pinned third-party
+implementation rather than the retained-output ceiling.
 
 Rust wire types are the source of truth. `cargo xtask schema` generates
 checked-in versioned JSON Schema, and CI requires regeneration to produce no
@@ -725,10 +740,11 @@ publication, an incompatible wire change requires a new protocol version and
 migration fixture. The `BrowserPlan` carries the output frame rate,
 evaluation/output intervals, primary-video placements, and title,
 call-to-action, or imported-caption overlays consumed by the production
-presentation adapter. Video placements
-identify immutable bytes, an absolute visible interval, and the admitted CFR
-source rate needed to verify decoded-frame selection; overlay placements carry
-only their semantic role, decoded text, and compiler-solved absolute interval.
+presentation adapter. Video placements identify immutable bytes, an absolute
+visible interval, and the admitted CFR source rate needed to verify decoded
+frame selection. Overlay placements carry a compiler-owned component identity
+that is stable across unit projections, their closed semantic role and decoded
+text properties, and the compiler-solved absolute interval.
 Materialized URLs remain render-owned facts, while DOM structure and CSS remain
 presentation-owned effects. This is the browser-facing projection of one Render
 Unit, not the Render Graph or partition plan itself. It may contain only facts
@@ -945,6 +961,39 @@ shot-scoped units. The pinned Linux exit conformance bundles that effect-bearing
 presentation, renders the same media, audio, and caption facts as one whole-film
 unit and two independent units, and compares their canonical raw-RGBA frame
 sequences before assembling the shared final output.
+
+**Gate six (active): deterministic visual resources and component binding.**
+This gate closes the browser-resource gap before performance work changes the
+capture path. Local image, SVG, and font bytes become frozen bundle resources
+with stable identities, declared resource facts, byte limits, and no ambient
+network fetch. The browser runtime owns one typed, bounded readiness boundary
+for video, image decode, font load, texture upload, and explicitly registered
+custom resources. A timeout names the pending resource and phase instead of
+collapsing into an anonymous presentation promise.
+
+Presentation bindings also receive a Rust-assigned component identity that is
+stable across unit projections, protocol-validated closed properties, solved
+intervals, and frozen asset references.
+Rust continues to own timing and resource facts; TypeScript decides only how
+those facts become DOM, CSS, Canvas, or WebGL. Gate six does not introduce free
+`start`/`end`, a second scheduler, arbitrary network access, or source-code
+inference of temporal capability. Any new screenplay spelling for images,
+component selection, or properties first requires the language-admission cases,
+prompts, graders, raw outputs, and retained baseline.
+
+The exit conformance renders one local film containing a font, image or SVG,
+video, captions, authored audio, and one admitted frame effect. Independent
+cold Chromium processes must produce equal canonical raw-RGBA sequences, and
+every capability that permits partitioning must remain equal to whole-film
+capture. Missing, changed, oversized, undecodable, or unready resources must
+fail through structured bounded errors that identify the resource. The checked
+bundle must remain content-addressed and self-contained.
+
+Gate six does not add parallel browser capture, lossy screenshot transport,
+hardware encoding, layered native-media composition, encoded worker segments,
+new cloud deployment, transitions, playback-rate control, a component
+marketplace, Player, or Studio. Those require separate measured performance or
+language gates after this resource contract is complete.
 
 Every gate uses the final-direction contracts but implements only fields
 consumed by that gate. A failed gate blocks construction of the next gate's

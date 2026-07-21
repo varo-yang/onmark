@@ -37,6 +37,10 @@ export type BrowserCommand =
  */
 export type WireFrame = number;
 /**
+ * Stable overlay identity retained across whole-film and partition plans.
+ */
+export type BrowserComponentId = number;
+/**
  * Closed overlay roles understood by the Gate-one presentation.
  */
 export type BrowserOverlayKind = "title" | "callToAction" | "caption";
@@ -92,6 +96,7 @@ export interface WireFrameRate {
  * One solved overlay placement consumed by the browser presentation.
  */
 export interface BrowserOverlay {
+  componentId: BrowserComponentId;
   interval: WireInterval;
   kind: BrowserOverlayKind;
   text: string;

@@ -20,8 +20,12 @@ these files as compatibility-sensitive data.
 by the native Chromium-to-FFmpeg smoke. It is generated from
 `browser/video-presentation.ts` by `@onmark/bundler`, embeds the production
 authoring bindings and runtime presentation adapter, and consumes materialized
-media from the unit root. The bundler test rebuilds it and requires
-byte-for-byte equality, so source, runtime, manifest, and payload cannot drift
+media from the unit root. Gate six adds one licensed local font and one authored
+SVG to this same fixture; browser preparation must decode or load both before
+capture. An exact-frame effect changes the poster accent from the absolute frame
+identity, so whole-film and partition capture also prove the admitted
+random-access lifecycle. The bundler test recursively rebuilds and compares
+every byte, so source, runtime, manifest, and nested payload cannot drift
 independently.
 
 Regenerate goldens after intentionally changing public behavior:
@@ -38,11 +42,13 @@ Review the resulting diff before committing it. Normal test runs compare
 current behavior with the checked-in artifacts and never rewrite them.
 
 `browser/gate-one.html` is a real Chromium fixture, not a golden file. Build
-`@onmark/runtime`, set `ONMARK_CHROME` to an explicit Chrome executable, and run:
+`@onmark/runtime`, set `ONMARK_HEADLESS_SHELL` to the pinned headless-shell
+executable, and run:
 
 ```bash
-ONMARK_CHROME=/path/to/chrome cargo test -p onmark-render --test render \
-  captures_stable_frames_across_the_real_browser_protocol -- --ignored
+ONMARK_HEADLESS_SHELL=/path/to/chrome-headless-shell \
+  cargo test -p onmark-render --test render \
+  captures_stable_raw_rgba_frames_across_independent_browser_sessions -- --ignored
 ```
 
 The smoke crosses the versioned browser protocol, captures two distinct frames,
@@ -54,7 +60,7 @@ streams every captured frame through `FFmpeg`, probes the published MP4, and
 requires decoded frame hashes to prove that the result contains motion:
 
 ```bash
-ONMARK_CHROME=/path/to/chrome \
+ONMARK_HEADLESS_SHELL=/path/to/chrome-headless-shell \
 ONMARK_FFMPEG=/path/to/ffmpeg \
 ONMARK_FFPROBE=/path/to/ffprobe \
 cargo test -p onmark-render --test render \

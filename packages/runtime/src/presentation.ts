@@ -12,11 +12,15 @@ import {
   type RuntimeAdapter,
   type RuntimePlan,
 } from "./session.js";
+import { DecodedVideo, type BrowserVideoElement } from "./video.js";
 import {
-  DecodedVideo,
-  requireVideoReadinessTimeout,
-  type BrowserVideoElement,
-} from "./video.js";
+  ownPresentationResources,
+  preparePresentationResources,
+  releasePresentationResources,
+  requireReadinessTimeout,
+  validatePresentationResources,
+  type PresentationResource,
+} from "./resource.js";
 
 // ── Presentation boundary ──
 
@@ -48,7 +52,8 @@ export interface FrameEffect {
 /** Browser effects supplied by one presentation entry point. */
 export interface PresentationBindings {
   bindVideo(placement: RuntimeVideo, index: number): VideoPresentation;
-  bindOverlay(placement: RuntimeOverlay, index: number): OverlayPresentation;
+  bindOverlay(placement: RuntimeOverlay): OverlayPresentation;
+  bindResources(plan: RuntimePlan): readonly PresentationResource[];
   bindFrameEffects(plan: RuntimePlan): readonly FrameEffect[];
 }
 
@@ -67,6 +72,7 @@ interface LoadedPresentation {
   readonly kind: "loaded";
   readonly effects: readonly FrameEffect[];
   readonly frameRate: RuntimePlan["frameRate"];
+  readonly resources: readonly PresentationResource[];
   readonly videos: readonly BoundVideo[];
   readonly overlays: readonly BoundOverlay[];
 }
@@ -86,20 +92,20 @@ type PresentationState =
   | LoadedPresentation
   | { readonly kind: "disposed" };
 
-/** Gate-one runtime adapter for presentation-owned browser effects. */
+/** Runtime adapter for presentation-owned browser effects. */
 export class PresentationRuntimeAdapter implements RuntimeAdapter {
   readonly #bindings: PresentationBindings;
-  readonly #videoTimeoutMilliseconds: number;
+  readonly #readinessTimeoutMilliseconds: number;
   #staged: StagedPresentation | undefined;
   #state: PresentationState = { kind: "empty" };
 
   constructor(
     bindings: PresentationBindings,
-    videoTimeoutMilliseconds: number,
+    readinessTimeoutMilliseconds: number,
   ) {
-    requireVideoReadinessTimeout(videoTimeoutMilliseconds);
+    requireReadinessTimeout(readinessTimeoutMilliseconds);
     this.#bindings = bindings;
-    this.#videoTimeoutMilliseconds = videoTimeoutMilliseconds;
+    this.#readinessTimeoutMilliseconds = readinessTimeoutMilliseconds;
   }
 
   async load(plan: RuntimePlan): Promise<void> {
@@ -111,16 +117,21 @@ export class PresentationRuntimeAdapter implements RuntimeAdapter {
     }
 
     let effects: readonly FrameEffect[] = [];
+    let resources: readonly PresentationResource[] = [];
     const videos: BoundVideo[] = [];
     const overlays: BoundOverlay[] = [];
     try {
-      await this.#loadVideos(plan, videos);
+      this.#bindVideos(plan, videos);
       this.#bindOverlays(plan, overlays);
+      resources = ownPresentationResources(this.#bindings.bindResources(plan));
+      validatePresentationResources(resources);
       effects = this.#bindings.bindFrameEffects(plan);
       effects = ownFrameEffects(effects);
+      await loadVideos(videos);
     } catch (error) {
       const cleanupFailure = await releasePresentation(
         effects,
+        resources,
         videos,
         overlays,
       );
@@ -136,13 +147,18 @@ export class PresentationRuntimeAdapter implements RuntimeAdapter {
       kind: "loaded",
       effects,
       frameRate: plan.frameRate,
+      resources,
       videos,
       overlays,
     };
   }
 
   async prepare(_frame: RuntimeFrame): Promise<void> {
-    this.#loadedState("prepare");
+    const state = this.#loadedState("prepare");
+    await preparePresentationResources(
+      state.resources,
+      this.#readinessTimeoutMilliseconds,
+    );
   }
 
   async seek(frame: RuntimeFrame): Promise<void> {
@@ -194,6 +210,7 @@ export class PresentationRuntimeAdapter implements RuntimeAdapter {
 
     const failure = await releasePresentation(
       loaded?.effects ?? [],
+      loaded?.resources ?? [],
       loaded?.videos ?? [],
       loaded?.overlays ?? [],
     );
@@ -205,23 +222,22 @@ export class PresentationRuntimeAdapter implements RuntimeAdapter {
     }
   }
 
-  async #loadVideos(plan: RuntimePlan, videos: BoundVideo[]): Promise<void> {
+  #bindVideos(plan: RuntimePlan, videos: BoundVideo[]): void {
     for (const [index, placement] of plan.videos.entries()) {
       const presentation = this.#bindings.bindVideo(placement, index);
       const resource = new DecodedVideo(
         presentation.element,
-        this.#videoTimeoutMilliseconds,
+        this.#readinessTimeoutMilliseconds,
       );
       const video = { placement, presentation, resource };
       videos.push(video);
       presentation.setVisible(false);
-      await resource.load(presentation.source);
     }
   }
 
   #bindOverlays(plan: RuntimePlan, overlays: BoundOverlay[]): void {
-    for (const [index, placement] of plan.overlays.entries()) {
-      const presentation = this.#bindings.bindOverlay(placement, index);
+    for (const placement of plan.overlays) {
+      const presentation = this.#bindings.bindOverlay(placement);
       overlays.push({ placement, presentation });
       presentation.setVisible(false);
     }
@@ -244,6 +260,12 @@ function ownFrameEffects(
   effects: readonly FrameEffect[],
 ): readonly FrameEffect[] {
   return Object.freeze([...effects]);
+}
+
+async function loadVideos(videos: readonly BoundVideo[]): Promise<void> {
+  for (const video of videos) {
+    await video.resource.load(video.presentation.source);
+  }
 }
 
 async function stageVideos(
@@ -324,10 +346,13 @@ function presentationLoadFailure(
 
 async function releasePresentation(
   effects: readonly FrameEffect[],
+  resources: readonly PresentationResource[],
   videos: readonly BoundVideo[],
   overlays: readonly BoundOverlay[],
 ): Promise<unknown | undefined> {
   let failure = await releaseFrameEffects(effects);
+  const resourceFailure = await releasePresentationResources(resources);
+  failure ??= resourceFailure;
   for (const video of videos) {
     const releaseFailure = releaseVideo(video);
     failure ??= releaseFailure;

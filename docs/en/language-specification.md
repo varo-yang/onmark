@@ -262,6 +262,11 @@ attribute, `definePresentation` declaration, or typed props channel in the
 current language. Its solved facts reach the browser only as the Rust-owned
 `BrowserPlan` delivered through the runtime `Load(plan)` command.
 
+The existing title, CTA, and imported-caption facts form a closed built-in
+component contract: the compiler assigns stable component identity and carries
+only the admitted semantic role, text, and solved interval. This is not a
+general screenplay props channel.
+
 This is a language boundary, not an undocumented implementation detail. A future
 screenplay-selected presentation or props feature must define its spelling,
 typed schema and defaults, canonical encoding, source-located diagnostics,

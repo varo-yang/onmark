@@ -114,6 +114,7 @@ test("rejects protocol payloads outside generated resource budgets", () => {
   assert.throws(() => decodeBrowserRequest(request), ProtocolDecodeError);
 
   const overlay = {
+    componentId: 0,
     kind: "title",
     text: "Opening",
     interval: { start: 0, end: 1 },

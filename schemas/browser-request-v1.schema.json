@@ -95,10 +95,20 @@
         }
       ]
     },
+    "BrowserComponentId": {
+      "description": "Stable overlay identity retained across whole-film and partition plans.",
+      "format": "uint32",
+      "maximum": 4294967295,
+      "minimum": 0,
+      "type": "integer"
+    },
     "BrowserOverlay": {
       "additionalProperties": false,
       "description": "One solved overlay placement consumed by the browser presentation.",
       "properties": {
+        "componentId": {
+          "$ref": "#/$defs/BrowserComponentId"
+        },
         "interval": {
           "$ref": "#/$defs/WireInterval"
         },
@@ -111,6 +121,7 @@
         }
       },
       "required": [
+        "componentId",
         "kind",
         "text",
         "interval"

@@ -319,6 +319,10 @@ declaration，也没有 screenplay 到 presentation 的 typed props
 channel。已求解的 screenplay facts 只会作为 Rust-owned
 `BrowserPlan`，通过 runtime 的 `Load(plan)` command 到达浏览器。
 
+既有 title、CTA 与导入 caption fact 构成封闭的内建 component
+contract：compiler 分配稳定 component identity，并且只携带已准入的语义角色、text
+与已求解 interval。这不是通用 screenplay props channel。
+
 这是语言边界，不是未写下来的实现细节。未来的 screenplay-selected
 presentation 或 props feature 必须一起定义其 spelling、typed
 schema/default、canonical encoding、带 source 的 diagnostic、bundle/cache

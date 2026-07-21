@@ -86,11 +86,13 @@ fn browser_plan_retains_solved_overlay_facts() {
         plan["overlays"],
         serde_json::json!([
             {
+                "componentId": 0,
                 "kind": "title",
                 "text": "Opening",
                 "interval": { "start": 15, "end": 75 }
             },
             {
+                "componentId": 1,
                 "kind": "callToAction",
                 "text": "Buy now",
                 "interval": { "start": 45, "end": 75 }

@@ -757,9 +757,10 @@ failure，`Drop` 只作 best-effort termination fallback。私有 ffprobe respon
 type 只在此边界翻译一次并产出 core-owned `AssetMetadata`；JSON
 value 与第三方 error type 不定义稳定 API，但底层 error 会通过标准 source
 chain 保留，供调试使用。Gate 一对每条 stream 请求有界的 stream-level
-facts：`codec_type` 记录音轨存在性并选择第一条视觉流，`sample_rate` 与
-`channels` 固定 selected audio stream 的 sample grid 与归一化 channel layout，`nb_frames`
-识别 still。视觉流优先使用自己的 duration；ffprobe 省略该字段时才回退到容器
+facts。attached-picture video stream 不属于可渲染媒体；其余 video stream 与 audio
+stream 分别优先选择声明为 default 的流，default 缺失或并列时按 ffprobe 报告的最低
+stream index 确定。`sample_rate` 与 `channels` 固定 selected audio stream 的 sample
+grid 与归一化 channel layout，`nb_frames` 识别 still。视觉流优先使用自己的 duration；ffprobe 省略该字段时才回退到容器
 duration，显式但格式错误的 stream duration 仍会被拒绝，不能被 fallback
 掩盖。仅当 ffprobe 中可解析的 `avg_frame_rate` 和 `r_frame_rate`
 约分为同一个精确有理帧率时，才把视觉流归为 constant；二者不一致或不可用时保守归为 variable。因此一 MiB
@@ -866,7 +867,10 @@ snapshot。浏览器具体工作只通过一个窄 adapter 进入，其等待必
 presentation adapter 接收 presentation-owned element、source 与 visibility
 effect；它负责有界媒体加载、精确 source-frame selection、decoded-frame
 readiness、已求解 overlay visibility 与 terminal
-cleanup，但不创建 layout 或 canvas state。adapter 与 bundler 使用的 materialized
+cleanup，但不创建 layout 或 canvas state。Gate 六在同一 owner 下加入封闭的
+`image | font | texture | custom` resource boundary。每个 presentation 最多保留 256 个具有唯一 identity
+的 resource；`Prepare` 在同一共享 readiness policy 下并发启动它们，报告全部超时的
+`kind:id:prepare`，terminal cleanup 则按声明顺序等待全部 resource。adapter 与 bundler 使用的 materialized
 asset directory 同样由 Rust bundle schema 生成。
 
 `@onmark/bundler` 是 Node-only 的产品构建边界，不是仓库自动化。它只允许依赖 Node
@@ -883,10 +887,13 @@ wire type 解析。manifest shape 与 layout constants 都来自 Rust protocol
 contract 的生成结果，不在 TypeScript 手写第二份。构建显式限制最终保留字节数，经输出目录同级的私有 staging
 directory 写入，并拒绝构建前或发布前已存在的输出路径。最后一次 directory
 rename 能防止读者看到正常完成过程中的半成品，但 Node 的可移植文件系统 API 无法把此前的 absent
-check 变成跨进程 no-clobber transaction。当前边界刻意不提供 watch、plugin
-API、cache、development server 或 asset materialization
-policy。Esbuild 内部工作内存仍由固定的第三方实现管理，不受 retained-output
-ceiling 约束。
+check 变成跨进程 no-clobber transaction。Gate 六首个 resource slice 为本地 AVIF、GIF、JPEG、PNG、
+SVG、WebP、OTF、TTF、WOFF 与 WOFF2 import 配置一份封闭的 `file` loader 集合。Esbuild 把原始 bytes
+写到不透明的 `resources/<hash>.<extension>` 路径；bundler 会在同一边界把 esbuild 的大写 Base32 名
+归一为 bundle contract 的小写 portable spelling，并同步改写 generated reference。随后由既有 manifest
+独占 canonical SHA-256 与 retained-byte bound；本步骤不解码 image/font，也不构成 browser readiness 证据。当前边界刻意不提供
+watch、plugin API、cache、development server、external fetch 或通用 asset transformation policy。
+Esbuild 内部工作内存仍由固定的第三方实现管理，不受 retained-output ceiling 约束。
 
 ### AWS Lambda 是适配器，不是第二套引擎
 
@@ -984,8 +991,8 @@ types，不再从 schema 反向生成第二套 Rust 类型。
 rate、evaluation/output interval、primary-video
 placement，以及 title、call-to-action 或导入 caption overlay。video placement 记录 immutable
 asset identity、绝对可见区间和验证 decoded-frame selection 所需的 admitted CFR
-source rate；overlay placement 只记录语义角色、decoded
-text 与 compiler 已求解的绝对区间。materialized URL 仍是 render-owned
+source rate；overlay placement 记录跨 unit projection 保持稳定的 compiler-owned
+component identity、封闭的语义角色与 decoded text property，以及 compiler 已求解的绝对区间。materialized URL 仍是 render-owned
 fact，DOM 结构与 CSS 则始终是 presentation-owned effect。这是一条 Render
 Unit 的 browser-facing projection，不是 Render Graph 或 partition
 plan 本身。它只能包含浏览器真实消费的事实；output path、cache
@@ -1130,6 +1137,31 @@ sequential 执行，只有显式 `randomAccess` 才允许 Render Graph 生成 sh
 退出 conformance 会 bundle 这条带 effect 的 presentation，让同一组 media、audio 与 caption fact
 分别作为 whole-film unit 和两个独立 unit 渲染，在通过 canonical raw-RGBA frame sequence
 等价检查后再用共享路径组装最终输出。
+
+### 第六关（进行中）：确定性视觉资源与组件绑定
+
+本关先补齐 browser resource 地基，再允许后续性能关卡改变 capture path。本地 image、SVG 与 font
+bytes 作为带稳定 identity、明确 resource fact、字节上限且不依赖 ambient network fetch 的 frozen bundle
+resource 进入既有管线。browser runtime 为 video、image decode、font load、texture upload 与显式注册的
+custom resource 提供一条 typed、bounded readiness boundary；超时必须指出仍未就绪的 resource 与 phase，
+不能退化为匿名 presentation promise。
+
+Presentation binding 同时获得由 Rust 分配、跨 unit projection 稳定的 component identity，通过 protocol
+校验的封闭 properties、solved interval 与 frozen asset reference。Rust 继续独占 timing 与 resource fact；TypeScript 只决定这些
+fact 如何成为 DOM、CSS、Canvas 或 WebGL。本关不引入自由 `start`/`end`、第二个 scheduler、任意网络访问，
+也不通过扫描 source code 推断 temporal capability。image、component selection 或 properties 的任何新
+screenplay 拼写，都必须先提交语言准入所需的 cases、prompts、grader、raw output 与保留 baseline。
+
+退出 conformance 使用一条同时包含 font、image 或 SVG、video、caption、authored audio 与一个已接纳
+frame effect 的本地影片。相互独立的 cold Chromium process 必须得到相同 canonical raw-RGBA sequence；
+每种允许分片的 capability 也必须与 whole-film capture 等价。missing、changed、oversized、undecodable
+或 unready resource 必须通过能指出具体 resource 的 structured bounded error 失败。checked bundle
+必须保持 content-addressed 与 self-contained。
+
+本关不加入 parallel browser capture、lossy screenshot transport、hardware encoding、layered native-media
+composition、encoded worker segment、新 cloud deployment、transition、playback-rate control、component
+marketplace、Player 或 Studio。这些能力必须等待本资源契约完成后，再进入独立的 measured performance
+或 language gate。
 
 每一关都使用最终方向的 IR 和协议，但只实现本关真实消费的部分。上一关没有稳定通过，不创建下一关的空架子。
 
