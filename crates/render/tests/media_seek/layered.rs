@@ -379,6 +379,9 @@ fn configure_encoded_output(
         "-an",
         "-c:v",
         "libx264",
+        // Match the production encoder's bounded reference-frame queue.
+        "-threads",
+        "1",
         "-pix_fmt",
         "yuv420p",
         "-movflags",

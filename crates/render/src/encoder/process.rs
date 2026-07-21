@@ -36,6 +36,10 @@ pub(super) fn spawn_ffmpeg(
             OsStr::new("-an"),
             OsStr::new("-c:v"),
             OsStr::new("libx264"),
+            // Encoder threads retain full-resolution reference frames. Keep
+            // that memory independent of the worker's available CPU count.
+            OsStr::new("-threads"),
+            OsStr::new("1"),
             OsStr::new("-pix_fmt"),
             OsStr::new("yuv420p"),
             OsStr::new("-movflags"),
