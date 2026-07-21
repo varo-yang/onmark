@@ -25,6 +25,7 @@ const WIDTH: u32 = 320;
 const HEIGHT: u32 = 180;
 const FRAME_COUNT: u64 = 60;
 const PROCESS_TIMEOUT: Duration = Duration::from_secs(30);
+const UNIT_ROOT_FILE_LIMIT: usize = 16;
 
 #[tokio::test]
 #[ignore = "requires ONMARK_HEADLESS_SHELL and a built @onmark/runtime package"]
@@ -376,7 +377,8 @@ fn capture_environment() -> CaptureEnvironmentId {
 }
 
 fn unit_root_limits() -> UnitRootLimits {
-    UnitRootLimits::new(4, 64 * 1024 * 1024).expect("the fixture unit limits are bounded")
+    UnitRootLimits::new(UNIT_ROOT_FILE_LIMIT, 64 * 1024 * 1024)
+        .expect("the fixture unit limits are bounded")
 }
 
 fn executor() -> RenderExecutor {

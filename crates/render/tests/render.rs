@@ -35,6 +35,7 @@ const WIDTH: u32 = 320;
 const HEIGHT: u32 = 180;
 const FRAME_COUNT: u64 = 75;
 const TWO_UNIT_FRAME_COUNT: u64 = 60;
+const UNIT_ROOT_FILE_LIMIT: usize = 16;
 const TEMPORAL_SEEK_SEQUENCE: [u64; 4] = [17, 3, 29, 17];
 const MICROS_PER_SECOND: i64 = 1_000_000;
 const AUDIO_TIMESTAMP_TOLERANCE_MICROS: u64 = 25_000;
@@ -1014,7 +1015,7 @@ impl FixtureBundle {
     }
 
     fn materialize(&self, unit: RenderUnit) -> ExecutableUnit {
-        let limits = UnitRootLimits::new(8, 64 * 1024 * 1024)
+        let limits = UnitRootLimits::new(UNIT_ROOT_FILE_LIMIT, 64 * 1024 * 1024)
             .expect("the fixture materialization limits are bounded");
 
         ExecutableUnit::materialize(unit, &self.directory, limits)
