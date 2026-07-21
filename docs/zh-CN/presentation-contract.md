@@ -225,8 +225,7 @@ presentation 代码必须在 runtime frame clock 下确定。
 - 在 TypeScript 里重写 cue、delay、duration 或 partition 逻辑；
 - 无界等待、队列或 retained buffer。
 
-CSS animation 暂缓，直到 runtime 有明确的 temporal capability
-model。依赖加载时刻的静态 CSS transition 不是 Gate 一确定性输出合约。
+Gate 五只接纳由精确 `RuntimeFrame` 驱动、playhead 已暂停的动画。首个 conformance matrix 覆盖 WAAPI、GSAP 与 Three.js，但不会让这些库成为 runtime dependency。依赖加载时刻的静态 CSS transition、free-running library ticker 和 ambient `requestAnimationFrame` progress 仍不属于确定性合约。实验本身不发布 adapter API；只有测量通过后，capability metadata 与 frame-effect lifecycle 才会一起落地。
 
 ## 失败与清理
 

@@ -32,6 +32,7 @@ const WIDTH: u32 = 320;
 const HEIGHT: u32 = 180;
 const FRAME_COUNT: u64 = 75;
 const TWO_UNIT_FRAME_COUNT: u64 = 60;
+const TEMPORAL_SEEK_SEQUENCE: [u64; 4] = [17, 3, 29, 17];
 const MICROS_PER_SECOND: i64 = 1_000_000;
 const AUDIO_TIMESTAMP_TOLERANCE_MICROS: u64 = 25_000;
 
@@ -124,6 +125,22 @@ async fn captures_stable_raw_rgba_frames_across_independent_browser_sessions() {
     assert_eq!(
         first, second,
         "locked browser sessions must capture equal RGBA"
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires ONMARK_BUNDLER and ONMARK_HEADLESS_SHELL"]
+async fn seeks_browser_animation_playheads_deterministically() {
+    let directory = tempdir().expect("the experiment workspace must be available");
+    let fixture = temporal_experiment_fixture(directory.path()).await;
+    let first = capture_temporal_sequence(&fixture).await;
+    let second = capture_temporal_sequence(&fixture).await;
+
+    assert_eq!(first, second, "independent browser processes must agree");
+    assert_eq!(first[0], first[3], "repeated exact frames must agree");
+    assert!(
+        first.windows(2).any(|frames| frames[0] != frames[1]),
+        "the experiment must contain visible temporal change",
     );
 }
 
@@ -371,6 +388,51 @@ async fn capture_protocol_fingerprint(fixture: &Url) -> RawRgbaHash {
     let fingerprint = result.expect("the real browser protocol must capture deterministic frames");
     shutdown.expect("headless shell must shut down cleanly");
     fingerprint
+}
+
+async fn capture_temporal_sequence(fixture: &Url) -> Vec<RawRgbaHash> {
+    let mut session = BrowserSession::launch(
+        headless_shell(),
+        BrowserLaunchPolicy::local(),
+        render_profile(),
+        browser_limits(Duration::from_secs(10)),
+    )
+    .await
+    .expect("headless shell must launch");
+    let result = exercise_temporal_sequence(&mut session, fixture).await;
+    let shutdown = session.shutdown().await;
+
+    let fingerprints = result.expect("the temporal experiment must capture every frame");
+    shutdown.expect("headless shell must shut down cleanly");
+    fingerprints
+}
+
+async fn exercise_temporal_sequence(
+    session: &mut BrowserSession,
+    fixture: &Url,
+) -> Result<Vec<RawRgbaHash>, Box<dyn Error>> {
+    load_and_prepare(session, fixture).await?;
+    let frame_rate = gate_one_plan().frame_rate();
+    let mut fingerprints = Vec::with_capacity(TEMPORAL_SEEK_SEQUENCE.len());
+    let mut request_id = 3_u32;
+
+    for index in TEMPORAL_SEEK_SEQUENCE {
+        stage(session, request_id, index).await?;
+        let captured = session.capture_frame(frame(index), frame_rate).await?;
+        confirm(session, request_id + 1, index).await?;
+        fingerprints.push(captured.raw_rgba_hash());
+        request_id += 2;
+    }
+
+    let disposed = session
+        .dispatch(&BrowserRequest::new(
+            RequestId::new(request_id),
+            BrowserCommand::Dispose,
+        ))
+        .await?;
+    assert_eq!(disposed.event(), &BrowserEvent::Disposed);
+
+    Ok(fingerprints)
 }
 
 async fn exercise_protocol(
@@ -697,6 +759,29 @@ fn browser_fixture() -> Url {
     let runtime = repository.join("packages/runtime/dist/src/index.js");
     assert!(runtime.is_file(), "run `pnpm --dir packages/runtime build`");
     Url::from_file_path(fixture).expect("the fixture path is absolute")
+}
+
+async fn temporal_experiment_fixture(workspace: &Path) -> Url {
+    let output = workspace.join("temporal-bundle");
+    let bundled = Command::new(required_path("ONMARK_BUNDLER"))
+        .args(["--entry"])
+        .arg(repository().join("conformance/browser/temporal-experiment.ts"))
+        .args(["--output"])
+        .arg(&output)
+        .args(["--max-output-bytes", "2000000"])
+        .output();
+    let bundled = timeout(Duration::from_secs(30), bundled)
+        .await
+        .expect("the experiment bundle must finish before its deadline")
+        .expect("the presentation bundler must start");
+    assert!(
+        bundled.status.success(),
+        "{}",
+        String::from_utf8_lossy(&bundled.stderr),
+    );
+
+    Url::from_file_path(output.join(BundleManifest::ENTRY_POINT))
+        .expect("the experiment bundle path is absolute")
 }
 
 fn render_fixture(name: &str) -> Url {

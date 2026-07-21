@@ -509,6 +509,12 @@ dependency performs no IO. Test targets may use `proptest` for time algebra and
 `syn` for the cooperative module dependency-law check; neither development
 dependency is linked into library consumers or runtime artifacts.
 
+The Gate-five browser experiment pins GSAP, Three.js, and Three.js declarations
+as repository development dependencies. They are bundled only into the checked
+conformance presentation. They are not dependencies of `@onmark/runtime`,
+`@onmark/authoring`, or a Rust product crate; this preserves the vendor-free
+clock while measuring real vendor playheads rather than local imitations.
+
 The `protocol` module uses `serde` for stable browser and bundle-manifest JSON
 boundaries. Its optional `schema` feature exposes `schemars` only to repository
 generation; product binaries do not enable it. All repository-only automation
@@ -890,9 +896,35 @@ film music, a shot-local effect, voice-over, and imported captions. Gate four
 added no cloud conformance, deployment command, subtitle editor, speech
 generation, or animation adapter.
 
-Gate five begins with bounded CSS, GSAP, and Three.js temporal-capability
-experiments. A production API, seekability declaration, or screenplay spelling
-must wait for those measurements and an explicit Gate-five exit contract.
+**Gate five: deterministic browser effects.** This gate begins with bounded
+CSS, GSAP, and Three.js experiments before admitting a production API. Its exit
+contract is:
+
+- the integral `RuntimeFrame.index` remains the sole frame identity; browser
+  seconds are only a projection used to set an effect's playhead;
+- paused WAAPI animation, a paused GSAP timeline, and a Three.js
+  `AnimationMixer` plus explicit render all reproduce the same pixels when
+  frames are requested in and out of order;
+- the checked experiment repeats that non-monotonic sequence in independent
+  locked Chromium processes and compares canonical raw-RGBA fingerprints;
+- an admitted frame-effect boundary runs inside `Seek(frame)` and resolves
+  before `FrameStaged(frame)`; it cannot create a second scheduler, free-running
+  clock, hidden queue, or unbounded readiness wait;
+- bundle metadata carries one closed temporal capability owned by
+  `@onmark/runtime`; unknown presentation code remains sequential, while random
+  access is accepted only for an adapter whose conformance proves that any
+  requested frame depends solely on immutable inputs and that exact frame;
+- the Render Graph consumes that capability before partitioning. Whole-film
+  and multi-unit capture must produce equal canonical raw-RGBA sequences for
+  every capability that permits a split;
+- official WAAPI, GSAP, and Three.js integration remains vendor-specific code
+  above the vendor-free runtime clock rather than dependencies of
+  `onmark-core` or `@onmark/runtime`.
+
+Gate five does not add animation spelling to the screenplay, infer capability
+from source inspection, virtualize ambient wall-clock APIs, or promise that an
+arbitrary component is seekable. Those require separate language or adapter
+evidence after this gate.
 
 Every gate uses the final-direction contracts but implements only fields
 consumed by that gate. A failed gate blocks construction of the next gate's

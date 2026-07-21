@@ -246,9 +246,13 @@ Not allowed:
 - cue, delay, duration, or partition logic reimplemented in TypeScript;
 - unbounded waits, queues, or retained buffers.
 
-CSS animation is deferred until the runtime has a declared temporal capability
-model for it. Static CSS transitions that depend on load timing are not a
-deterministic Gate-one output contract.
+Gate five admits animation only through measured, paused playheads driven by an
+exact `RuntimeFrame`. Its initial conformance matrix covers WAAPI, GSAP, and
+Three.js without making those libraries runtime dependencies. Static CSS
+transitions that depend on load timing, free-running library tickers, and
+ambient `requestAnimationFrame` progress remain outside the deterministic
+contract. The experiment does not itself publish an adapter API; capability
+metadata and the frame-effect lifecycle land only after the measurements pass.
 
 ## Failures and cleanup
 

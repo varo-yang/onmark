@@ -179,6 +179,7 @@ jobs:
 
       - name: Run native and release-CLI conformance
         env:
+          ONMARK_BUNDLER: ${{ runner.temp }}/onmark-tools/onmark-bundle
           ONMARK_CLI: ${{ github.workspace }}/target/release/onmark
           ONMARK_HEADLESS_SHELL: ${{ runner.temp }}/onmark-tools/chrome-headless-shell
           ONMARK_FFMPEG: /usr/bin/ffmpeg

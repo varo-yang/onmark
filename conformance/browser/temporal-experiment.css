@@ -1,0 +1,57 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  width: 100%;
+}
+
+body {
+  background: #10131a;
+}
+
+.experiment-stage {
+  height: 100%;
+  position: relative;
+  width: 100%;
+}
+
+.experiment-marker {
+  height: 32px;
+  left: 24px;
+  position: absolute;
+  width: 32px;
+}
+
+.experiment-waapi {
+  animation: experiment-travel 1s linear both paused;
+  background: #ff5d73;
+  top: 24px;
+}
+
+.experiment-gsap {
+  background: #55d98b;
+  top: 74px;
+}
+
+.experiment-webgl {
+  bottom: 8px;
+  height: 72px;
+  position: absolute;
+  right: 8px;
+  width: 96px;
+}
+
+@keyframes experiment-travel {
+  from {
+    transform: translateX(0) rotate(0deg);
+  }
+
+  to {
+    transform: translateX(160px) rotate(180deg);
+  }
+}

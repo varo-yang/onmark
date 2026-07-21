@@ -150,3 +150,28 @@ test("keeps the checked-in video presentation bundle current", async () => {
     await rm(workspace, { force: true, recursive: true });
   }
 });
+
+test("bundles the Gate-five temporal experiment with its browser libraries", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "onmark-bundler-test-"));
+  try {
+    const repository = fileURLToPath(new URL("../../../..", import.meta.url));
+    const outputDirectory = join(workspace, "bundle");
+    await bundlePresentation({
+      entryPoint: join(
+        repository,
+        "conformance/browser/temporal-experiment.ts",
+      ),
+      outputDirectory,
+      maxOutputBytes: 2_000_000,
+    });
+
+    assert.deepEqual((await readdir(outputDirectory)).sort(), [
+      BUNDLE_ENTRY_POINT,
+      BUNDLE_MANIFEST_FILE,
+      "presentation.css",
+      "presentation.js",
+    ]);
+  } finally {
+    await rm(workspace, { force: true, recursive: true });
+  }
+});

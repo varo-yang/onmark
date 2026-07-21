@@ -4,11 +4,16 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "noEmit": true,
+    "skipLibCheck": true,
     "paths": {
       "@onmark/authoring": ["../../packages/authoring/src/index.ts"],
       "@onmark/runtime": ["../../packages/runtime/src/index.ts"]
     },
     "types": []
   },
-  "include": ["environment.d.ts", "video-presentation.ts"]
+  "include": [
+    "environment.d.ts",
+    "temporal-experiment.ts",
+    "video-presentation.ts"
+  ]
 }
