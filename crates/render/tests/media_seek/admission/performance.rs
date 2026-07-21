@@ -229,16 +229,19 @@ impl AdmissionEvidence {
                 "layered-admission:\n",
                 "  environment: {environment}\n",
                 "  fixture: {fixture}\n",
-                "  runs: {ADMISSION_RUNS}\n",
-                "  browser-ms: {:.2}\n",
-                "  layered-ms: {:.2}\n",
-                "  browser-peak-kib: {}\n",
-                "  layered-peak-kib: {}",
+                "  runs: {runs}\n",
+                "  browser-ms: {browser_ms:.2}\n",
+                "  layered-ms: {layered_ms:.2}\n",
+                "  browser-peak-kib: {browser_peak_kib}\n",
+                "  layered-peak-kib: {layered_peak_kib}",
             ),
-            self.browser_time.as_secs_f64() * 1_000.0,
-            self.layered_time.as_secs_f64() * 1_000.0,
-            self.browser_rss_kib,
-            self.layered_rss_kib,
+            environment = environment,
+            fixture = fixture,
+            runs = ADMISSION_RUNS,
+            browser_ms = self.browser_time.as_secs_f64() * 1_000.0,
+            layered_ms = self.layered_time.as_secs_f64() * 1_000.0,
+            browser_peak_kib = self.browser_rss_kib,
+            layered_peak_kib = self.layered_rss_kib,
         );
     }
 }
@@ -251,15 +254,16 @@ fn report_runs(
         println!(
             concat!(
                 "layered-admission-run-{index}:\n",
-                "  browser-ms: {:.2}\n",
-                "  layered-ms: {:.2}\n",
-                "  browser-peak-kib: {}\n",
-                "  layered-peak-kib: {}",
+                "  browser-ms: {browser_ms:.2}\n",
+                "  layered-ms: {layered_ms:.2}\n",
+                "  browser-peak-kib: {browser_peak_kib}\n",
+                "  layered-peak-kib: {layered_peak_kib}",
             ),
-            browser.elapsed.as_secs_f64() * 1_000.0,
-            layered.elapsed.as_secs_f64() * 1_000.0,
-            browser.incremental_peak_rss_kib(),
-            layered.incremental_peak_rss_kib(),
+            index = index,
+            browser_ms = browser.elapsed.as_secs_f64() * 1_000.0,
+            layered_ms = layered.elapsed.as_secs_f64() * 1_000.0,
+            browser_peak_kib = browser.incremental_peak_rss_kib(),
+            layered_peak_kib = layered.incremental_peak_rss_kib(),
         );
     }
 }
