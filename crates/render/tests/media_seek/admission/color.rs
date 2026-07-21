@@ -20,7 +20,7 @@ use crate::{
 const CHANNEL_ERROR_BOUND: u8 = 4;
 
 #[tokio::test]
-#[ignore = "requires pinned Linux Chromium, FFmpeg, ffprobe, and built runtime"]
+#[ignore = "requires pinned Linux Chromium, FFmpeg, and ffprobe"]
 async fn keeps_bt709_patches_within_bound() {
     assert_eq!(
         env::consts::OS,

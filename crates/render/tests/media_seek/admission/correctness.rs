@@ -16,7 +16,7 @@ use crate::{
 };
 
 #[tokio::test]
-#[ignore = "requires pinned Linux Chromium, FFmpeg, ffprobe, and built runtime"]
+#[ignore = "requires pinned Linux Chromium, FFmpeg, and ffprobe"]
 async fn selects_exact_cfr_frames() {
     assert_linux();
 
@@ -54,7 +54,7 @@ async fn selects_exact_cfr_frames() {
 }
 
 #[tokio::test]
-#[ignore = "requires pinned Linux Chromium, FFmpeg, ffprobe, and built runtime"]
+#[ignore = "requires pinned Linux Chromium, FFmpeg, and ffprobe"]
 async fn repeats_and_matches_partitions() {
     assert_linux();
 

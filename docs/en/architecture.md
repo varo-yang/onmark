@@ -1050,6 +1050,13 @@ For this path the capture-environment identity covers the pinned `FFmpeg`
 binary and composition policy in addition to Chromium, fonts, launch policy,
 and other pixel-affecting host facts.
 
+The reviewed Gate-seven record in
+`conformance/layered-media-admission.md` passes these thresholds at commit
+`abb391b`: median wall time is 23.95% of the equally thread-bounded baseline,
+and median incremental peak RSS is 79.73%. This evidence admits implementation
+of the explicit production capability; it does not silently switch the
+authoritative path or weaken the remaining capability and conformance work.
+
 Gate seven does not add VFR, new codecs, HDR, hardware acceleration, lossy
 screenshot transport, parallel browser capture, transitions, playback-rate
 control, a Player, Studio, component marketplace, or new screenplay spelling.

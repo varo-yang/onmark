@@ -93,15 +93,14 @@ Gate seven's layered-media candidate remains test-only. Shared Linux CI runs
 its cold-repeatability, whole-versus-partition, and frozen BT.709 patch-bound
 checks. The performance gate is deliberately separate because shared-runner
 noise must not admit a production pixel path. On the pinned admission machine,
-build the runtime and run the five alternating 1,920×1,080 baseline/candidate
-samples explicitly:
+run the five alternating 1,920×1,080 baseline/candidate samples explicitly:
 
 ```bash
-pnpm --filter @onmark/runtime build
 ONMARK_HEADLESS_SHELL=/path/to/pinned/chrome-headless-shell \
 ONMARK_FFMPEG=/path/to/pinned/ffmpeg \
 ONMARK_FFPROBE=/path/to/pinned/ffprobe \
 ONMARK_CAPTURE_ENVIRONMENT=sha256:<locked-environment-digest> \
+ONMARK_ISOLATED_WORKER=1 \
 ONMARK_MEDIA_EXPERIMENT_WIDTH=1920 \
 ONMARK_MEDIA_EXPERIMENT_HEIGHT=1080 \
 cargo test -p onmark-render --test media_seek \
@@ -111,4 +110,6 @@ cargo test -p onmark-render --test media_seek \
 
 The test prints every raw timing/RSS sample, the two medians, the frozen source
 digest, and the capture-environment identity. A reviewed evidence record is
-required before the candidate can leave the experiment target.
+required before the candidate can leave the experiment target. The admitted
+Gate-seven result is recorded in
+[`layered-media-admission.md`](layered-media-admission.md).

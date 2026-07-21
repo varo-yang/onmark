@@ -40,7 +40,9 @@ native media decode and composition. Admission requires deterministic cold
 runs, exact whole-film/partition equivalence within the candidate path, declared
 color conformance, bounded streaming without a temporary PNG sequence, at least
 a twofold latency improvement, and no more than 85% of the baseline peak RSS.
-It is an execution optimization, not new screenplay syntax or a hidden fallback.
+The locked experiment now passes at 4.18× the baseline speed and 79.73% of its
+peak RSS. The candidate remains test-only until its explicit capability and
+executor branch land; it is not new screenplay syntax or a hidden fallback.
 
 The completed foundation includes the pure compiler and versioned wire types in
 `onmark-core`; bounded ffprobe and strict SubRip/WebVTT/ASS normalization in
