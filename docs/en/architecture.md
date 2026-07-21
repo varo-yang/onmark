@@ -247,18 +247,21 @@ After `Prepare`, native execution issues one visual, non-capturing
 `HeadlessExperimental.beginFrame` at a fixed pre-baseline timestamp to
 initialize the page surface. It is not a warm-up tick: `noDisplayUpdates` is
 false, and the command is awaited before capture begins. Real captures start at
-a later fixed positive compositor baseline; the exact absolute frame and
-rational frame rate contribute only a deterministic offset from that baseline.
+a later fixed positive compositor baseline. From there, a session-owned clock
+advances by one fixed positive step per capture transaction. The rational frame
+rate remains the declared CDP frame interval, but neither it nor the authored
+frame determines transaction identity. Authored time may move backward or
+repeat; Chromium's compositor clock never does.
 `Seek(frame)` applies browser state, registers decoded-media observers, and
 returns `FrameStaged(frame)` after media seeking without waiting for compositor
 presentation.
 
 At a plan-owned video or overlay boundary, native first issues one non-capturing
-visual BeginFrame at a fixed sub-millisecond timestamp immediately before the
-exact authored capture timestamp. That bounded placement commit gives a newly
-visible layer one compositor turn without advancing screenplay time. Native then
-issues one `HeadlessExperimental.beginFrame` command that both commits and
-captures a lossless PNG at the exact timestamp.
+visual BeginFrame at a fixed sub-millisecond offset immediately before the
+current compositor transaction's capture tick. That bounded placement commit
+gives a newly visible layer one compositor turn without advancing screenplay
+time. Native then issues one `HeadlessExperimental.beginFrame` command that both
+commits and captures a lossless PNG at the transaction tick.
 
 Headless shell may omit `screenshotData` when the compositor reports no visual
 damage. Native normally reuses the last valid PNG, but never does so at a
@@ -269,7 +272,8 @@ than looping.
 `Confirm(frame)` waits for the pre-registered media observer before native
 accepts the captured payload. At a placement boundary the observer may complete
 on the pre-capture commit. After confirmation, native performs one bounded
-reconciliation capture at the existing positive epsilon. A no-damage response
+reconciliation capture at the transaction's next positive sub-millisecond
+tick. A no-damage response
 reuses the exact capture without copying its PNG payload; new pixels replace it.
 Only then may native execution write the payload. This closes the race in which
 the media observer and exact screenshot become ready on opposite sides of the

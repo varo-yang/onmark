@@ -181,7 +181,7 @@ async fn render_frames(
         if boundary {
             let started = Instant::now();
             png = browser
-                .recapture_png_after_confirmation(frame, frame_rate)
+                .recapture_png_after_confirmation(frame)
                 .await
                 .map_err(|source| RenderError::browser(output, source))?;
             metrics.readback += started.elapsed();

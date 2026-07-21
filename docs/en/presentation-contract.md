@@ -117,19 +117,22 @@ deadlock a target controlled by CDP BeginFrameControl. `FrameStaged(frame)`
 therefore means browser state is ready to enter the compositor. Native then
 issues one normal capture-bearing `HeadlessExperimental.beginFrame` command for
 each output frame. At a video or overlay boundary, native first commits the
-staged placement without a screenshot at a fixed sub-millisecond timestamp
-immediately before the exact authored capture timestamp. This gives a newly
-visible layer one compositor turn without retaining unrelated inactive layers or
+staged placement without a screenshot at a fixed sub-millisecond offset before
+the current compositor transaction's capture tick. This gives a newly visible
+layer one compositor turn without retaining unrelated inactive layers or
 advancing screenplay time. The capture command then commits frame state and
-captures the PNG at the exact timestamp. A no-damage response normally reuses
+captures the PNG at that tick. These compositor ticks advance strictly in
+capture order; `RuntimeFrame.index` remains authored time and may move backward
+or repeat. A no-damage response normally reuses
 the preceding PNG, but a boundary never does so; a missing boundary or first
 screenshot receives one bounded sub-millisecond retry. `Confirm(frame)` waits
 for the already-registered callback. At a placement boundary that observer may
 complete on the pre-capture commit; runtime media state cannot change between
 that commit and exact capture. `FrameReady(frame)` therefore means the exact
 capture's staged media passed decoded-media confirmation before native accepts
-it. A boundary then performs one bounded reconciliation capture at the existing
-positive epsilon. Chromium may omit its pixels when confirmation caused no
+it. A boundary then performs one bounded reconciliation capture at the
+transaction's next positive sub-millisecond tick. Chromium may omit its pixels
+when confirmation caused no
 further compositor damage, in which case native reuses the exact capture; new
 pixels replace it. A confirmation failure discards the captured payload before
 it can enter an encoder or frame artifact.
