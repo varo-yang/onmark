@@ -137,9 +137,10 @@ async fn captures_stable_raw_rgba_frames_across_independent_browser_sessions() {
 #[ignore = "requires ONMARK_BUNDLER and ONMARK_HEADLESS_SHELL"]
 async fn seeks_browser_animation_playheads_deterministically() {
     let directory = tempdir().expect("the experiment workspace must be available");
-    let fixture = temporal_experiment_fixture(directory.path()).await;
-    let first = capture_temporal_sequence(&fixture).await;
-    let second = capture_temporal_sequence(&fixture).await;
+    let bundle = FixtureBundle::build_temporal(directory.path()).await;
+    let entry = bundle.entry_url();
+    let first = capture_temporal_sequence(&entry).await;
+    let second = capture_temporal_sequence(&entry).await;
 
     assert_eq!(first, second, "independent browser processes must agree");
     assert_eq!(first[0], first[3], "repeated exact frames must agree");
@@ -176,7 +177,8 @@ async fn renders_the_gate_one_plan_to_a_verified_mp4() {
 #[ignore = "requires ONMARK_HEADLESS_SHELL, ONMARK_FFMPEG, and ONMARK_FFPROBE"]
 async fn renders_random_access_media_equally_as_one_or_two_units() {
     let directory = tempdir().expect("the test output directory must be available");
-    let fixture = GateFourFixture::materialize(directory.path()).await;
+    let bundle = FixtureBundle::checked_in();
+    let fixture = GateFourFixture::materialize(directory.path(), &bundle).await;
     let whole_output = directory.path().join("whole.mp4");
     let partitioned_output = directory.path().join("partitioned.mp4");
     let executor = real_executor(TWO_UNIT_FRAME_COUNT);
@@ -205,10 +207,11 @@ async fn renders_random_access_media_equally_as_one_or_two_units() {
 }
 
 #[tokio::test]
-#[ignore = "requires ONMARK_HEADLESS_SHELL, ONMARK_FFMPEG, and ONMARK_FFPROBE"]
-async fn assembles_worker_frame_artifacts_equivalently_to_the_whole_film() {
+#[ignore = "requires ONMARK_BUNDLER, ONMARK_HEADLESS_SHELL, ONMARK_FFMPEG, and ONMARK_FFPROBE"]
+async fn assembles_temporal_frame_artifacts_equivalently_to_the_whole_film() {
     let directory = tempdir().expect("the test output directory must be available");
-    let fixture = GateFourFixture::materialize(directory.path()).await;
+    let bundle = FixtureBundle::build_temporal(directory.path()).await;
+    let fixture = GateFourFixture::materialize(directory.path(), &bundle).await;
     let whole_artifact_path = directory.path().join("whole-film.onmark-frames");
     let assembled_output = directory.path().join("assembled-from-artifacts.mp4");
     let executor = real_executor(TWO_UNIT_FRAME_COUNT);
@@ -766,38 +769,6 @@ fn browser_fixture() -> Url {
     Url::from_file_path(fixture).expect("the fixture path is absolute")
 }
 
-async fn temporal_experiment_fixture(workspace: &Path) -> Url {
-    let output = workspace.join("temporal-bundle");
-    let bundled = Command::new(required_path("ONMARK_BUNDLER"))
-        .args(["--entry"])
-        .arg(repository().join("conformance/browser/temporal-experiment.ts"))
-        .args(["--output"])
-        .arg(&output)
-        .args(["--max-output-bytes", "2000000"])
-        .args(["--temporal-capability", "randomAccess"])
-        .output();
-    let bundled = timeout(Duration::from_secs(30), bundled)
-        .await
-        .expect("the experiment bundle must finish before its deadline")
-        .expect("the presentation bundler must start");
-    assert!(
-        bundled.status.success(),
-        "{}",
-        String::from_utf8_lossy(&bundled.stderr),
-    );
-    let manifest = fs::read_to_string(output.join(BundleManifest::FILE_NAME))
-        .expect("the experiment bundle must contain its manifest");
-    let manifest: BundleManifest =
-        serde_json::from_str(&manifest).expect("the experiment manifest must be valid");
-    assert_eq!(
-        manifest.temporal_capability(),
-        PresentationTemporalCapability::RandomAccess,
-    );
-
-    Url::from_file_path(output.join(BundleManifest::ENTRY_POINT))
-        .expect("the experiment bundle path is absolute")
-}
-
 fn render_fixture(name: &str) -> Url {
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures")
@@ -849,7 +820,7 @@ fn solve_timeline(
 }
 
 fn executable_gate_one_unit(frozen: FrozenAsset, source: PathBuf) -> ExecutableUnit {
-    let bundle = FixtureBundle::load();
+    let bundle = FixtureBundle::checked_in();
     let timeline = gate_one_video_timeline(frozen.clone());
     let materialized =
         MaterializedAsset::new(frozen, source).expect("the fixture source path is present");
@@ -880,7 +851,7 @@ struct GateFourFixture {
 }
 
 impl GateFourFixture {
-    async fn materialize(workspace: &Path) -> Self {
+    async fn materialize(workspace: &Path, bundle: &FixtureBundle) -> Self {
         let video_path = workspace.join("source.mp4");
         let voice_over_path = workspace.join("voice.m4a");
         let music_path = workspace.join("music.wav");
@@ -912,7 +883,7 @@ impl GateFourFixture {
         let timeline = compiler::import_captions(timeline, [caption_track()])
             .expect("fixture captions must enter the frame grid");
         let partition_plan =
-            RenderGraph::from_timeline(&timeline, PresentationTemporalCapability::RandomAccess)
+            RenderGraph::from_timeline(&timeline, bundle.manifest.temporal_capability())
                 .into_partition();
         assert_eq!(
             partition_plan.units().len(),
@@ -930,7 +901,6 @@ impl GateFourFixture {
             MaterializedAsset::new(effect, effect_path)
                 .expect("the fixture sound-effect source path is present"),
         ];
-        let bundle = FixtureBundle::load();
         let whole_film = RenderUnit::whole_film(
             &timeline,
             bundle.manifest.clone(),
@@ -994,8 +964,35 @@ struct FixtureBundle {
 }
 
 impl FixtureBundle {
-    fn load() -> Self {
+    fn checked_in() -> Self {
         let directory = repository().join("conformance/protocol/bundle-v2");
+        Self::from_directory(directory)
+    }
+
+    async fn build_temporal(workspace: &Path) -> Self {
+        let directory = workspace.join("temporal-bundle");
+        let bundled = Command::new(required_path("ONMARK_BUNDLER"))
+            .args(["--entry"])
+            .arg(repository().join("conformance/browser/temporal-experiment.ts"))
+            .args(["--output"])
+            .arg(&directory)
+            .args(["--max-output-bytes", "2000000"])
+            .args(["--temporal-capability", "randomAccess"])
+            .output();
+        let bundled = timeout(Duration::from_secs(30), bundled)
+            .await
+            .expect("the experiment bundle must finish before its deadline")
+            .expect("the presentation bundler must start");
+        assert!(
+            bundled.status.success(),
+            "{}",
+            String::from_utf8_lossy(&bundled.stderr),
+        );
+
+        Self::from_directory(directory)
+    }
+
+    fn from_directory(directory: PathBuf) -> Self {
         let manifest = fs::read_to_string(directory.join(BundleManifest::FILE_NAME))
             .expect("the executable bundle manifest is readable");
         let manifest: BundleManifest =
@@ -1009,6 +1006,11 @@ impl FixtureBundle {
             directory,
             manifest,
         }
+    }
+
+    fn entry_url(&self) -> Url {
+        Url::from_file_path(self.directory.join(BundleManifest::ENTRY_POINT))
+            .expect("the fixture bundle path is absolute")
     }
 
     fn materialize(&self, unit: RenderUnit) -> ExecutableUnit {

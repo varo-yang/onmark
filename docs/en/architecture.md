@@ -905,9 +905,9 @@ film music, a shot-local effect, voice-over, and imported captions. Gate four
 added no cloud conformance, deployment command, subtitle editor, speech
 generation, or animation adapter.
 
-**Gate five: deterministic browser effects.** This gate begins with bounded
-CSS, GSAP, and Three.js experiments before admitting a production API. Its exit
-contract is:
+**Gate five (complete): deterministic browser effects.** This gate began with
+bounded CSS, GSAP, and Three.js experiments before admitting a production API.
+Its exit contract was:
 
 - the integral `RuntimeFrame.index` remains the sole frame identity; browser
   seconds are only a projection used to set an effect's playhead;
@@ -935,16 +935,16 @@ from source inspection, virtualize ambient wall-clock APIs, or promise that an
 arbitrary component is seekable. Those require separate language or adapter
 evidence after this gate.
 
-The bounded experiment, production frame-effect boundary, and capability-driven
-partition admission are now complete. The checked WAAPI, GSAP, and Three.js
-playheads all use the standard
+The checked WAAPI, GSAP, and Three.js playheads all use the standard
 `PresentationRuntimeAdapter`: effects bind once during `Load`, apply in declared
 order during `Seek(frame)`, and finish before `FrameStaged(frame)`. Disposal is
 terminal and attempts every owned effect even after one cleanup failure. Bundle
 V2 binds the closed capability into content identity. V1 and unspecified CLI
 input remain sequential; explicit `randomAccess` lets the Render Graph produce
-shot-scoped units, backed by independent-process and whole/multi-unit raw-RGBA
-conformance.
+shot-scoped units. The pinned Linux exit conformance bundles that effect-bearing
+presentation, renders the same media, audio, and caption facts as one whole-film
+unit and two independent units, and compares their canonical raw-RGBA frame
+sequences before assembling the shared final output.
 
 Every gate uses the final-direction contracts but implements only fields
 consumed by that gate. A failed gate blocks construction of the next gate's

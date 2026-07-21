@@ -7,7 +7,7 @@ agents.
 screenplay → deterministic Timeline IR → browser frames + audio plan → MP4
 ```
 
-Delivery gates one through four are complete. Gate one renders and
+Delivery gates one through five are complete. Gate one renders and
 independently verifies one real screenplay through the compiler, browser
 protocol, Chromium, and FFmpeg. Gate two partitions one media-bearing two-shot
 film into two local Render Units and proves that their assembled decoded video
@@ -19,9 +19,11 @@ authored music, shot-local effects, voice-over, and imported SRT/WebVTT/ASS
 captions through the same local whole-film and partitioned paths, with both
 canonical raw-RGBA frames and decoded audio checked for equivalence.
 
-Deployment work remains frozen. Gate five now admits exact-frame effects and a
-closed presentation temporal capability after bounded WAAPI, GSAP, and Three.js
-experiments. Unknown presentation code remains sequential.
+Gate five admits exact-frame effects and a closed presentation temporal
+capability after bounded WAAPI, GSAP, and Three.js experiments. Its exit
+conformance proves that the effect-bearing presentation produces identical
+canonical pixels as one whole-film unit or two independent units. Unknown
+presentation code remains sequential. Deployment work remains frozen.
 
 The completed foundation includes the pure compiler and versioned wire types in
 `onmark-core`; bounded ffprobe and strict SubRip/WebVTT/ASS normalization in

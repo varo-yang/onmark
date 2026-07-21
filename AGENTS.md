@@ -2,10 +2,11 @@
 
 Onmark is a screenplay-first, browser-rendered video compiler and execution engine. Rust owns deterministic compilation and native execution; TypeScript owns authoring and the browser runtime.
 
-**Current phase:** delivery gates one through four are complete. Gate five is
-the only implementation goal. Its bounded WAAPI, GSAP, and Three.js experiment,
-exact-frame effect lifecycle, and capability-driven partition admission are
-implemented; remaining work must close the documented Gate-five exit contract.
+**Current phase:** delivery gates one through five are complete. Gate five
+proved that exact-frame WAAPI, GSAP, and Three.js effects remain deterministic
+under non-monotonic seek and whole-film versus partitioned execution. No new
+implementation gate is active; define its evidence and exit contract before
+adding another product capability.
 Deployment work remains frozen: do not add a coordinator, database, queue,
 lease system, cloud workflow, infrastructure definition, or another provider
 adapter. Do not add screenplay animation spelling or infer temporal capability
