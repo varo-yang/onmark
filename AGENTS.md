@@ -2,17 +2,15 @@
 
 Onmark is a screenplay-first, browser-rendered video compiler and execution engine. Rust owns deterministic compilation and native execution; TypeScript owns authoring and the browser runtime.
 
-**Current phase:** delivery gates one through seven are complete. Gate seven
-admits layered native-media composition only for an explicit, checked visual
-capability; the Chromium-media path remains available for every other
-presentation. No Gate-eight contract has been admitted. Do not create its code
-skeleton or implement a deferred capability before its evidence and boundaries
-are recorded in the architecture document. Gate seven adds no screenplay
-spelling.
+**Current phase:** delivery gates one through seven are complete. Gate eight is
+the only implementation goal: add deterministic interactive preview without a
+second compiler, timing solver, presentation runtime, or final-render path.
+Preview must consume the existing compiled browser plan, immutable presentation
+bundle, materialized assets, and runtime host. It adds no screenplay spelling.
 Deployment work remains frozen: do not add a coordinator, database, queue,
 lease system, cloud workflow, infrastructure definition, or another provider
-adapter. Do not add screenplay animation spelling, infer temporal or visual
-separability from source inspection, or hide a pixel-path fallback.
+adapter. Do not add Studio source mutation, transition spelling, infer temporal
+or visual separability from source inspection, or hide a pixel-path fallback.
 
 ## Read before changing code
 
@@ -63,7 +61,7 @@ Do not create coordinator, Lambda, render-graph, planner, syntax, or diagnostics
 
 `onmark-core` module dependencies are enforced as a DAG: model is foundational; syntax/diagnostics/timeline may depend on model; compiler may depend on all four; protocol may depend on model/diagnostics/timeline. Domain modules never depend on protocol. New edges require an architecture-doc change and dependency-law test update.
 
-`@onmark/runtime` is below authoring and bundler. Runtime owns frame hooks and temporal capability declarations. Authoring may import its types-only entrypoint; runtime never imports authoring or bundler.
+`@onmark/runtime` is below authoring, bundler, and player. Runtime owns frame hooks and temporal capability declarations. Authoring may import its types-only entrypoint; player uses only its public facade; runtime never imports authoring, bundler, or player.
 
 Rust wire types generate checked-in schemas and TypeScript codecs. Generated files are never hand-edited; CI regeneration must produce no diff.
 

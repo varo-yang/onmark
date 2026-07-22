@@ -416,7 +416,7 @@ onmark/
 │   ├── render/     # browser, FFmpeg encoding, local executor
 │   └── cli/        # native tool face and composition root
 ├── packages/
-│   ├── runtime/ authoring/ bundler/
+│   ├── runtime/ authoring/ bundler/ player/
 ├── scripts/     # repository-only generation and quality checks
 ├── deploy/aws-lambda/  # Rust Lambda/S3 adapter after artifact conformance
 ├── schemas/ conformance/ evals/ examples/ docs/
@@ -429,20 +429,22 @@ the first `onmark-cli` whole-film composition root. Media is a separate crate
 because server-side compile/lint loops need probing and standalone-subtitle
 normalization without Chromium; this is both a distinct dependency budget and a
 real consumer. Runtime is a separate package because it executes inside the
-browser and is consumed by authoring and bundling. Authoring is a separate
-browser package because user presentations consume its public DOM contract
-independently while runtime must not depend upward on author-facing effects;
+browser and is consumed by authoring, bundling, and preview. Authoring is a
+separate browser package because user presentations consume its public DOM
+contract independently while runtime must not depend upward on author-facing effects;
 its only product dependency is runtime's types-only public surface. Bundler is
 a separate package because it executes under Node, owns the esbuild and
-filesystem dependency budget, and produces a
-presentation directory consumed independently by native rendering. The CLI is a
+filesystem dependency budget, and produces a presentation directory consumed
+independently by native rendering. The CLI is a
 distinct release artifact that combines core compilation, media probing, the
 bundler process, and native rendering without moving their implementation
-details into one crate. `onmark-aws-lambda` is a distinct Rust release artifact
-because Lambda is a different runtime and its handler owns the `aws-config`,
-`aws-sdk-s3`, and `lambda_runtime` dependency budget. Its deployment-only
-browser boundary additionally uses `sha2`, `tar`, and `zstd` to verify and
-expand one bounded immutable payload. The package-only
+details into one crate. Player is a separate framework-neutral browser artifact
+consumed by CLI preview and external applications; its sole product dependency
+is runtime's public facade. `onmark-aws-lambda` is a distinct Rust release
+artifact because Lambda is a different runtime and its handler owns the
+`aws-config`, `aws-sdk-s3`, and `lambda_runtime` dependency budget. Its
+deployment-only browser boundary additionally uses `sha2`, `tar`, and `zstd`
+to verify and expand one bounded immutable payload. The package-only
 `onmark-aws-lambda-package` binary adds deterministic ZIP encoding without
 linking the AWS runtime; it is a deployment-operator tool, not repository
 automation or an authored-video command. Those archive types and policies stop
@@ -1089,6 +1091,69 @@ Gate seven does not add VFR, new codecs, HDR, hardware acceleration, lossy
 screenshot transport, parallel browser capture, transitions, playback-rate
 control, a Player, Studio, component marketplace, or new screenplay spelling.
 Those remain separate measured or language gates.
+
+**Gate eight (active): deterministic interactive preview.** This gate adds one
+authoring feedback loop without creating another compiler, timing solver,
+presentation runtime, or final-render path. Preview consumes the same accepted
+whole-film `BrowserPlan`, immutable presentation bundle, materialized assets,
+and `@onmark/runtime` host as native execution. Rust continues to own every
+interval and exact frame identity. Browser playback may use a monotonic clock
+only to decide when to request the next integer frame; it may not derive
+authored intervals, accumulate fractional timeline state, or change final
+render output.
+
+`@onmark/player` is permitted as a new package because external browser
+applications consume it independently and it is a separate release artifact.
+Its only product dependency is the public `@onmark/runtime` surface; it never
+reaches into generated or session internals. It does not depend on authoring or
+bundler internals, compile screenplay source, inspect presentation source, or
+own asset discovery. Its framework-neutral controller owns one bounded
+runtime-host session, exact seek/play/pause state, and terminal cleanup.
+`onmark-cli preview` is its first product consumer.
+Framework adapters and a component marketplace remain later consumers rather
+than dependencies of the player core.
+
+The `onmark-cli` composition root will add bounded local preview orchestration.
+It compiles and freezes the screenplay through the existing Rust pipeline,
+builds the current presentation artifact, materializes only referenced bytes,
+and serves one private root on a loopback address. Path traversal, non-loopback
+binding, ambient project-file access, and unbounded request bodies or
+connections are rejected. General web hosting and remote collaboration are not
+part of this gate.
+
+Preview audio does not become a Web Audio reimplementation of the native mix.
+The CLI projects the existing render-owned audio plan through the existing
+bounded `FFmpeg` path into one temporary preview asset. The player may seek and
+play that asset as a clock projection, while integer frame identity remains
+authoritative for visuals. A late preview may skip display frames to catch up;
+it may never invent an intermediate frame or claim that interactive wall-clock
+playback is final-render determinism.
+
+Gate eight exits only when one real Gate-seven film containing moving video,
+captions, authored audio, visual resources, and an admitted frame effect passes
+all of these checks:
+
+- exact non-monotonic seeks display the same canonical pixels as the locked
+  browser-authoritative reference capture at those frame identities;
+- play, pause, resume, end, and repeated seek preserve integer frame identity
+  without growing an implicit command queue;
+- preview uses the checked presentation bundle and materialized asset bytes,
+  and a missing, changed, oversized, undecodable, or unready resource fails
+  through a bounded typed boundary;
+- audio seek and playback stay within one output-frame duration of the selected
+  visual frame, while exact paused seeks settle on the requested frame;
+- disposal releases the runtime session, media handles, server, temporary root,
+  and preview audio after both success and injected failure; and
+- no screenplay syntax, native pixel-path admission, partition rule, cloud
+  adapter, Studio mutation API, or production encoder behavior changes.
+
+Gate eight does not broaden the layered native-media profile. CSS, DOM, and
+WebGL layout remain presentation-owned; `cover`, `contain`, crop, transform,
+picture-in-picture, and transitions are not duplicated as Rust layout semantics
+merely to accelerate them. Any future native layout recipe needs an explicit
+presentation contract and independent pixel and performance evidence. Studio,
+source editing, hot-module replacement, transition spelling, and collaborative
+authoring remain separate gates.
 
 Every gate uses the final-direction contracts but implements only fields
 consumed by that gate. A failed gate blocks construction of the next gate's
