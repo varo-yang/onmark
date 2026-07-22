@@ -4,7 +4,6 @@ use std::env;
 
 use onmark_core::model::FrameRate;
 use sha2::{Digest as _, Sha256};
-use tempfile::tempdir;
 use url::Url;
 
 use super::color::empty_transparent_fixture;
@@ -73,7 +72,7 @@ async fn repeats_and_matches_partitions() {
 
 impl StrategyFixture {
     async fn build_resampled(source_rate: FrameRate, output_rate: FrameRate) -> Self {
-        let directory = tempdir().expect("the rate-fixture directory must be available");
+        let directory = crate::experiment_directory("rate-conversion");
         let indices = (0..BENCHMARK_FRAME_COUNT).collect::<Vec<_>>();
         let media = directory.path().join("rate-conversion.mp4");
         crate::generate_video(&media, source_rate, crate::FixtureTiming::Constant).await;

@@ -6,7 +6,6 @@ use std::io::{BufWriter, Write as _};
 use std::path::Path;
 
 use onmark_core::model::FrameRate;
-use tempfile::tempdir;
 use tokio::process::Command;
 use tokio::time::timeout;
 use url::Url;
@@ -49,7 +48,7 @@ async fn keeps_bt709_patches_within_bound() {
 
 impl StrategyFixture {
     async fn build_color() -> Self {
-        let directory = tempdir().expect("the color-fixture directory must be available");
+        let directory = crate::experiment_directory("color");
         let frame_rate = FrameRate::new(30, 1).expect("the color-fixture rate is valid");
         let indices = (0..BENCHMARK_FRAME_COUNT).collect::<Vec<_>>();
         let media = directory.path().join("colors.mp4");

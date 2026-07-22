@@ -36,7 +36,7 @@ use onmark_render::{
     UnsupportedVideo,
 };
 use serde::Deserialize;
-use tempfile::{TempDir, tempdir};
+use tempfile::{Builder as TempDirBuilder, TempDir};
 use tokio::process::Command;
 use tokio::time::timeout;
 use url::Url;
@@ -106,7 +106,7 @@ struct StrategyFixture {
 
 impl StrategyFixture {
     async fn build() -> Self {
-        let directory = tempdir().expect("the benchmark directory must be available");
+        let directory = experiment_directory("benchmark");
         let frame_rate = FrameRate::new(30, 1).expect("the benchmark rate is valid");
         let indices = (0..BENCHMARK_FRAME_COUNT).collect::<Vec<_>>();
         let media = directory.path().join("benchmark.mp4");
@@ -322,7 +322,7 @@ fn report_strategies(measurements: &StrategyMeasurements, evidence: &StrategyEvi
 }
 
 async fn run_case(name: &str, frame_rate: FrameRate, timing: FixtureTiming) {
-    let directory = tempdir().expect("the experiment directory must be available");
+    let directory = experiment_directory(name);
     let media = directory.path().join(format!("{name}.mp4"));
     generate_video(&media, frame_rate, timing).await;
     let Some(source_video) = admitted_source_video(&media, timing).await else {
@@ -989,11 +989,36 @@ fn transparent_overlay_fixture() -> Url {
 }
 
 fn fixture_root(fixture: &Url) -> PathBuf {
-    fixture
+    let path = fixture
         .to_file_path()
-        .expect("the browser fixture must be a file URL")
-        .parent()
+        .expect("the browser fixture must be a file URL");
+    let repository = repository();
+
+    // Handwritten modules import the built runtime across repository
+    // directories. Experiment media is staged beneath the same private root.
+    if path.starts_with(&repository) {
+        return repository;
+    }
+
+    path.parent()
         .expect("the browser fixture must have a parent directory")
+        .to_owned()
+}
+
+fn experiment_directory(name: &str) -> TempDir {
+    let target = repository().join("target");
+    fs::create_dir_all(&target).expect("the Cargo target directory must be available");
+    TempDirBuilder::new()
+        .prefix(&format!("onmark-{name}-"))
+        .tempdir_in(target)
+        .expect("the private experiment directory must be available")
+}
+
+fn repository() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("render is nested at crates/render")
         .to_owned()
 }
 
