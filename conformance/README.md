@@ -78,7 +78,7 @@ equality is asserted before lossy MP4 encoding, not inferred from independently
 encoded output:
 
 ```bash
-ONMARK_CHROME=/path/to/chrome \
+ONMARK_HEADLESS_SHELL=/path/to/chrome-headless-shell \
 ONMARK_BUNDLER=/path/to/onmark-bundle \
 ONMARK_FFMPEG=/path/to/ffmpeg \
 ONMARK_FFPROBE=/path/to/ffprobe \

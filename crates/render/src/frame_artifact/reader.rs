@@ -45,7 +45,7 @@ impl<'a> FrameArtifactFingerprintSequence<'a> {
     ) -> Result<Option<RawRgbaHash>, FrameArtifactError> {
         loop {
             if let Some(reader) = self.reader.as_mut() {
-                if let Some(fingerprint) = reader.next_fingerprint().await? {
+                if let Some(fingerprint) = reader.next_verified_fingerprint().await? {
                     return Ok(Some(fingerprint));
                 }
                 self.reader = None;
@@ -96,6 +96,26 @@ impl FrameArtifactReader {
         let fingerprint = self.read_fingerprint().await?;
         self.finish_record(&record)?;
 
+        Ok(Some(fingerprint))
+    }
+
+    async fn next_verified_fingerprint(
+        &mut self,
+    ) -> Result<Option<RawRgbaHash>, FrameArtifactError> {
+        let Some(frame) = self.next_frame().await? else {
+            return Ok(None);
+        };
+        let fingerprint = frame
+            .png()
+            .decode_rgba(self.header.descriptor.profile)
+            .map_err(|source| FrameArtifactError::pixels(&self.path, source))?
+            .fingerprint();
+        if fingerprint != frame.raw_rgba_hash() {
+            return Err(FrameArtifactError::invalid(
+                &self.path,
+                "frame artifact raw-RGBA fingerprint does not match its PNG pixels",
+            ));
+        }
         Ok(Some(fingerprint))
     }
 

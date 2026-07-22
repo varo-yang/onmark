@@ -54,6 +54,19 @@ pub(crate) enum SyntaxErrorKind {
     UnexpectedClosingTag { found: Box<str> },
     /// XML machinery outside the screenplay surface was authored.
     UnsupportedDirective { directive: UnsupportedDirective },
+    /// Retaining more source structure would exceed a compiler safety bound.
+    ResourceLimit { resource: SyntaxResource },
+}
+
+/// Bounded syntax resource exhausted by authored input.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum SyntaxResource {
+    /// UTF-8 source bytes.
+    SourceBytes,
+    /// Retained elements, attributes, or text nodes.
+    Items,
+    /// Open element nesting.
+    NestingDepth,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

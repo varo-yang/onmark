@@ -169,7 +169,7 @@ async fn verify_audio(path: &Path, environment: &RemoteEnvironment) {
         .expect("the output has exactly one audio stream");
     assert_eq!(stream.codec_name.as_ref(), "aac");
     assert_eq!(stream.sample_rate.as_ref(), "48000");
-    assert_eq!(stream.channels, 1);
+    assert_eq!(stream.channels, 2);
     let actual = timestamp_micros(
         &response
             .packets

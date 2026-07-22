@@ -26,6 +26,7 @@ use crate::diagnostic;
 use crate::environment::Executables;
 use crate::execution;
 use crate::failure::CliError;
+use crate::input;
 use crate::subtitle::SubtitleImport;
 
 pub(super) struct AuthoredReport {
@@ -83,8 +84,12 @@ pub(super) async fn run(args: RenderArgs) -> Result<RenderOutcome, CliError> {
     let presentation = args.presentation();
     let output = args.output();
     let profile = RenderProfile::new(args.width, args.height)?;
-    let source = fs::read_to_string(&args.screenplay)
-        .map_err(|error| CliError::read_screenplay(&args.screenplay, error))?;
+    let source = input::read_utf8(
+        &args.screenplay,
+        u64::try_from(onmark_core::syntax::MAX_SCREENPLAY_BYTES)
+            .expect("the screenplay byte limit fits in u64"),
+    )
+    .map_err(|error| CliError::read_screenplay(&args.screenplay, error))?;
 
     let resolved = compilation::resolve(&source);
     let (film, diagnostics) = resolved.into_parts();

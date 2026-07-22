@@ -13,6 +13,7 @@
   },
   "include": [
     "environment.d.ts",
+    "layered-presentation.ts",
     "temporal-experiment.ts",
     "video-presentation.ts"
   ]

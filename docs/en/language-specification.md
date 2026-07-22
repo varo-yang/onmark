@@ -1,7 +1,9 @@
 # Onmark Language Specification
 
-> Status: Gate-four language contract. Deferred capabilities are listed
-> explicitly.
+> Status: current screenplay language. Gate four admitted the present authored
+> audio and subtitle surface; later completed gates changed presentation and
+> execution behavior without adding screenplay spelling. Deferred language
+> capabilities are listed explicitly.
 
 ## Purpose
 
@@ -82,6 +84,12 @@ Text and attribute values support the five predefined XML entities (`amp`, `lt`,
 allowed by XML 1.0. Other named entities, malformed references, surrogate
 values, out-of-range Unicode values, and XML-forbidden characters are syntax
 errors. Onmark does not process DTDs, custom entities, or external entities.
+
+Markup ingestion is bounded before semantic binding. One screenplay may contain
+at most 8 MiB of UTF-8 source, 65,536 retained syntax items, and 32 simultaneously
+open elements. Crossing one of these limits emits one stable resource-limit
+diagnostic and stops syntax recovery; the compiler does not retain or recurse
+through the rejected suffix.
 
 ## Time
 
@@ -199,6 +207,7 @@ Initial markup diagnostics are:
 | `ONM-SYNTAX-005` | the source ends before an open element is closed                            |
 | `ONM-SYNTAX-006` | a closing tag appears without an open element                               |
 | `ONM-SYNTAX-007` | an XML declaration, processing instruction, or document type is unsupported |
+| `ONM-SYNTAX-008` | screenplay markup exceeds a bounded syntax resource                         |
 
 Initial binding, resolution, and timing diagnostics are:
 
@@ -215,7 +224,7 @@ Initial binding, resolution, and timing diagnostics are:
 | `ONM-TIME-001`   | an authored duration is invalid or outside the exact range            |
 | `ONM-TIME-002`   | a shot has no media-derived or explicit duration source               |
 | `ONM-TIME-003`   | explicit and media-derived shot durations compete                     |
-| `ONM-TIME-004`   | resolved shot content starts or ends outside its owning shot           |
+| `ONM-TIME-004`   | resolved shot content starts or ends outside its owning shot          |
 | `ONM-TIME-005`   | an exact time does not fit in the selected frame domain               |
 | `ONM-TIME-006`   | a film has no shot with a positive solved duration                    |
 | `ONM-ASSET-001`  | renderable media has no frozen artifact reference                     |

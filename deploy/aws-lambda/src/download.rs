@@ -16,7 +16,6 @@ use crate::error::{DeploymentError, S3ObjectRole};
 use crate::invocation::ObjectPrefix;
 use crate::storage::S3Storage;
 
-const REQUEST_BYTES: u64 = 16 * 1024 * 1024;
 const COPY_BUFFER_BYTES: usize = 64 * 1024;
 
 /// One worker-input tree and the bounds applied while materializing it.
@@ -48,8 +47,12 @@ impl S3Storage {
     ) -> Result<WorkerCaptureRequest, DeploymentError> {
         let key = input.key(WorkerCaptureRequest::FILE_NAME);
         let object = S3Object::new(input.bucket(), &key);
-        let bytes =
-            Box::pin(self.read_object(S3ObjectRole::WorkerRequest, object, REQUEST_BYTES)).await?;
+        let bytes = Box::pin(self.read_object(
+            S3ObjectRole::WorkerRequest,
+            object,
+            WorkerCaptureRequest::MAX_JSON_BYTES,
+        ))
+        .await?;
 
         serde_json::from_slice(&bytes)
             .map_err(|source| DeploymentError::request(input.bucket(), &key, source))

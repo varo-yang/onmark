@@ -70,6 +70,8 @@ impl WorkerCaptureRequest {
     pub const FILE_NAME: &'static str = "request.json";
     /// Fixed directory containing immutable presentation payload files.
     pub const BUNDLE_DIRECTORY: &'static str = "bundle";
+    /// Maximum retained JSON bytes accepted at a worker request boundary.
+    pub const MAX_JSON_BYTES: u64 = 16 * 1024 * 1024;
 
     pub(crate) fn new(
         capture_environment: CaptureEnvironmentId,

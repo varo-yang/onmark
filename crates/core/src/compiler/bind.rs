@@ -380,7 +380,7 @@ fn unknown_element(element: &Element) -> Diagnostic {
             "element <{}> is not part of the screenplay language",
             element.name()
         ),
-        "use a Gate-one screenplay element or remove this element",
+        "use a screenplay element from the current language or remove this element",
     )
 }
 
@@ -493,7 +493,9 @@ mod tests {
     use crate::diagnostics::DiagnosticCode;
     use crate::model::{ElementKind, NodeId, SourceId};
 
-    use super::{BindReport, LinkedCue, LinkedElement, LinkedFilm, LinkedShotContent, bind};
+    use super::{
+        BindReport, LinkedAudio, LinkedCue, LinkedElement, LinkedFilm, LinkedShotContent, bind,
+    };
 
     fn bind_source(source: SourceId, text: &str) -> BindReport {
         let parsed = parse(source, text);
@@ -533,7 +535,7 @@ mod tests {
     proptest! {
         #[test]
         fn linked_ids_and_the_film_index_describe_the_same_nodes(
-            ids in proptest::collection::btree_set("[a-z0-9-]{1,8}", 9..=9),
+            ids in proptest::collection::btree_set("[a-z0-9-]{1,8}", 11..=11),
         ) {
             let ids = ids.into_iter().collect::<Vec<_>>();
             let source = screenplay_with_ids(&ids);
@@ -553,14 +555,16 @@ mod tests {
             concat!(
                 "<film id=\"{}\">",
                 "<cues id=\"{}\"><cue id=\"{}\"/></cues>",
+                "<music id=\"{}\"/>",
                 "<scene id=\"{}\"><shot id=\"{}\">",
                 "<video id=\"{}\"/>",
                 "<vo id=\"{}\">voice</vo>",
+                "<sfx id=\"{}\"/>",
                 "<title id=\"{}\">title</title>",
                 "<cta id=\"{}\">action</cta>",
                 "</shot></scene></film>",
             ),
-            ids[0], ids[1], ids[2], ids[3], ids[4], ids[5], ids[6], ids[7], ids[8],
+            ids[0], ids[1], ids[2], ids[3], ids[4], ids[5], ids[6], ids[7], ids[8], ids[9], ids[10],
         )
     }
 
@@ -569,10 +573,12 @@ mod tests {
             ElementKind::Film,
             ElementKind::Cues,
             ElementKind::Cue,
+            ElementKind::Music,
             ElementKind::Scene,
             ElementKind::Shot,
             ElementKind::Video,
             ElementKind::VoiceOver,
+            ElementKind::SoundEffect,
             ElementKind::Title,
             ElementKind::CallToAction,
         ];
@@ -607,12 +613,14 @@ mod tests {
             elements.push(cues.element());
             elements.extend(cues.cues().iter().map(LinkedCue::element));
         }
+        elements.extend(film.music().iter().map(LinkedAudio::element));
 
         for scene in film.scenes() {
             elements.push(scene.element());
             for shot in scene.shots() {
                 elements.push(shot.element());
                 elements.extend(shot.content().iter().map(LinkedShotContent::element));
+                elements.extend(shot.sound_effects().iter().map(LinkedAudio::element));
             }
         }
 

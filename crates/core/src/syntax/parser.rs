@@ -11,9 +11,12 @@ use xmlparser::{ElementEnd, StrSpan, Token, Tokenizer};
 use super::builder::TreeBuilder;
 use super::reference;
 use super::{
-    Attribute, AttributeName, ElementName, Node, SourceDocument, SyntaxError, SyntaxErrorKind,
-    TextNode, UnsupportedDirective,
+    Attribute, AttributeName, ElementName, MAX_SCREENPLAY_BYTES, Node, SourceDocument, SyntaxError,
+    SyntaxErrorKind, SyntaxResource, TextNode, UnsupportedDirective,
 };
+
+const MAX_RETAINED_ITEMS: usize = 65_536;
+const MAX_NESTING_DEPTH: usize = 32;
 
 /// Internal syntax output consumed by the compiler facade.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -30,7 +33,22 @@ impl SyntaxReport {
 
 #[must_use]
 pub(crate) fn parse(source: SourceId, text: &str) -> SyntaxReport {
-    Parser::new(source, text).parse()
+    Parser::new(source, text, SyntaxLimits::DEFAULT).parse()
+}
+
+#[derive(Clone, Copy)]
+struct SyntaxLimits {
+    source_bytes: usize,
+    retained_items: usize,
+    nesting_depth: usize,
+}
+
+impl SyntaxLimits {
+    const DEFAULT: Self = Self {
+        source_bytes: MAX_SCREENPLAY_BYTES,
+        retained_items: MAX_RETAINED_ITEMS,
+        nesting_depth: MAX_NESTING_DEPTH,
+    };
 }
 
 /// Single owner of the recovered tree and syntax errors for one source buffer.
@@ -38,24 +56,41 @@ struct Parser<'a> {
     source: SourceText<'a>,
     tree: TreeBuilder,
     errors: Vec<SyntaxError>,
+    limits: SyntaxLimits,
+    retained_items: usize,
 }
 
 impl<'a> Parser<'a> {
-    fn new(source: SourceId, text: &'a str) -> Self {
+    fn new(source: SourceId, text: &'a str, limits: SyntaxLimits) -> Self {
         Self {
             source: SourceText::new(source, text),
             tree: TreeBuilder::new(),
             errors: Vec::new(),
+            limits,
+            retained_items: 0,
         }
     }
 
     fn parse(mut self) -> SyntaxReport {
+        if self.source.text.len() > self.limits.source_bytes {
+            let offset = source_limit_offset(self.source.text, self.limits.source_bytes);
+            self.reject_resource(
+                SyntaxResource::SourceBytes,
+                self.source.range(offset, offset),
+            );
+            return self.report();
+        }
+
         let completed = match self.leading_markup() {
             Tokenization::ContinueAt(start) => self.consume_tokens(start),
             Tokenization::Stop => false,
         };
         self.finish_open_elements(completed);
 
+        self.report()
+    }
+
+    fn report(self) -> SyntaxReport {
         let source_span = self.source.range(ByteOffset::new(0), self.source.end());
 
         SyntaxReport {
@@ -98,7 +133,8 @@ impl<'a> Parser<'a> {
         let text = self.source.text;
         for token in Tokenizer::from_fragment(text, start..text.len()) {
             match token {
-                Ok(token) => self.consume(token),
+                Ok(token) if self.consume(token) => {}
+                Ok(_) => return false,
                 Err(error) => {
                     self.reject_tokenizer_error(error);
                     return false;
@@ -108,7 +144,7 @@ impl<'a> Parser<'a> {
         true
     }
 
-    fn consume(&mut self, token: Token<'a>) {
+    fn consume(&mut self, token: Token<'a>) -> bool {
         match token {
             Token::ElementStart {
                 prefix,
@@ -121,21 +157,27 @@ impl<'a> Parser<'a> {
                 value,
                 span,
             } => self.add_attribute(prefix, local, value, span),
-            Token::ElementEnd { end, span } => self.end_element(end, span),
+            Token::ElementEnd { end, span } => {
+                self.end_element(end, span);
+                true
+            }
             Token::Text { text } => self.add_text(text),
             Token::Cdata { text, .. } => self.add_cdata(text),
             Token::ProcessingInstruction { span, .. } => {
                 self.reject_directive(UnsupportedDirective::ProcessingInstruction, span);
+                true
             }
             Token::Declaration { span, .. } => {
                 self.reject_directive(UnsupportedDirective::XmlDeclaration, span);
+                true
             }
             Token::DtdStart { span, .. } | Token::EmptyDtd { span, .. } => {
                 self.reject_directive(UnsupportedDirective::DocumentTypeDeclaration, span);
+                true
             }
             // Comments have no syntax-tree representation. `DtdStart` already
             // rejects the whole declaration, so its remaining tokens are noise.
-            Token::Comment { .. } | Token::EntityDeclaration { .. } | Token::DtdEnd { .. } => {}
+            Token::Comment { .. } | Token::EntityDeclaration { .. } | Token::DtdEnd { .. } => true,
         }
     }
 
@@ -153,9 +195,22 @@ impl<'a> Parser<'a> {
         ));
     }
 
-    fn start_element(&mut self, prefix: StrSpan<'a>, local: StrSpan<'a>, span: StrSpan<'a>) {
+    fn start_element(
+        &mut self,
+        prefix: StrSpan<'a>,
+        local: StrSpan<'a>,
+        span: StrSpan<'a>,
+    ) -> bool {
+        if self.tree.open_depth() >= self.limits.nesting_depth {
+            self.reject_resource(SyntaxResource::NestingDepth, self.source.span(span));
+            return false;
+        }
+        if !self.retain_item(span) {
+            return false;
+        }
         let name = self.element_name(prefix, local);
         self.tree.start_element(name, byte_offset(span.start()));
+        true
     }
 
     fn add_attribute(
@@ -164,7 +219,10 @@ impl<'a> Parser<'a> {
         local: StrSpan<'a>,
         value: StrSpan<'a>,
         span: StrSpan<'a>,
-    ) {
+    ) -> bool {
+        if !self.retain_item(span) {
+            return false;
+        }
         let name = self.attribute_name(prefix, local);
         let value_span = self.source.span(value);
         let attribute_span = self.source.span(span);
@@ -177,6 +235,7 @@ impl<'a> Parser<'a> {
         if let Some(error) = self.tree.add_attribute(attribute) {
             self.errors.push(error);
         }
+        true
     }
 
     fn end_element(&mut self, end: ElementEnd<'a>, span: StrSpan<'a>) {
@@ -200,16 +259,40 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn add_text(&mut self, text: StrSpan<'a>) {
+    fn add_text(&mut self, text: StrSpan<'a>) -> bool {
+        if !self.retain_item(text) {
+            return false;
+        }
         let span = self.source.span(text);
         let (decoded, mut errors) = reference::decode(self.source.id, text.as_str(), span.start());
         self.errors.append(&mut errors);
         self.tree.append(Node::Text(TextNode::new(decoded, span)));
+        true
     }
 
-    fn add_cdata(&mut self, text: StrSpan<'a>) {
+    fn add_cdata(&mut self, text: StrSpan<'a>) -> bool {
+        if !self.retain_item(text) {
+            return false;
+        }
         let text = TextNode::new(Box::from(text.as_str()), self.source.span(text));
         self.tree.append(Node::Text(text));
+        true
+    }
+
+    fn retain_item(&mut self, span: StrSpan<'a>) -> bool {
+        if self.retained_items == self.limits.retained_items {
+            self.reject_resource(SyntaxResource::Items, self.source.span(span));
+            return false;
+        }
+        self.retained_items += 1;
+        true
+    }
+
+    fn reject_resource(&mut self, resource: SyntaxResource, span: SourceSpan) {
+        self.errors.push(SyntaxError::new(
+            SyntaxErrorKind::ResourceLimit { resource },
+            span,
+        ));
     }
 
     fn finish_open_elements(&mut self, completed: bool) {
@@ -303,6 +386,16 @@ fn byte_offset(value: usize) -> ByteOffset {
     ByteOffset::new(u64::try_from(value).expect("Onmark source offsets fit in u64"))
 }
 
+fn source_limit_offset(text: &str, limit: usize) -> ByteOffset {
+    // Diagnostic renderers slice source at span boundaries, so an otherwise
+    // arbitrary byte ceiling must retreat to a valid UTF-8 boundary.
+    let mut offset = limit.min(text.len());
+    while !text.is_char_boundary(offset) {
+        offset -= 1;
+    }
+    byte_offset(offset)
+}
+
 fn byte_offset_at(text: &str, row: u32, column: u32) -> ByteOffset {
     let mut current_row = 1;
     let mut current_column = 1;
@@ -330,7 +423,7 @@ mod tests {
     use crate::model::{SourceId, SourceSpan};
     use crate::syntax::{Node, SourceDocument};
 
-    use super::parse;
+    use super::{Parser, SyntaxLimits, parse};
 
     #[test]
     fn preserves_multiple_top_level_elements_for_binding() {
@@ -338,6 +431,69 @@ mod tests {
 
         assert!(errors.is_empty());
         assert_eq!(document.nodes().len(), 2);
+    }
+
+    #[test]
+    fn stops_before_retaining_excessive_nesting() {
+        let source = format!("{}{}", "<x>".repeat(5), "</x>".repeat(5));
+        let limits = SyntaxLimits {
+            source_bytes: source.len(),
+            retained_items: 32,
+            nesting_depth: 4,
+        };
+        let (_, errors) = Parser::new(SourceId::new(0), &source, limits)
+            .parse()
+            .into_parts();
+
+        assert_eq!(errors.len(), 1);
+        assert!(matches!(
+            errors[0].kind(),
+            super::SyntaxErrorKind::ResourceLimit {
+                resource: super::SyntaxResource::NestingDepth,
+            }
+        ));
+    }
+
+    #[test]
+    fn stops_before_retaining_excessive_items() {
+        let item_source = "<film a=\"1\" b=\"2\"/>";
+        let item_limits = SyntaxLimits {
+            source_bytes: item_source.len(),
+            retained_items: 2,
+            nesting_depth: 4,
+        };
+        let (_, item_errors) = Parser::new(SourceId::new(0), item_source, item_limits)
+            .parse()
+            .into_parts();
+        assert!(matches!(
+            item_errors[0].kind(),
+            super::SyntaxErrorKind::ResourceLimit {
+                resource: super::SyntaxResource::Items,
+            }
+        ));
+    }
+
+    #[test]
+    fn locates_the_source_byte_limit_at_a_utf8_boundary() {
+        let limits = SyntaxLimits {
+            source_bytes: 2,
+            retained_items: 8,
+            nesting_depth: 4,
+        };
+        let source = "a电";
+        let (_, errors) = Parser::new(SourceId::new(0), source, limits)
+            .parse()
+            .into_parts();
+
+        assert!(matches!(
+            errors[0].kind(),
+            super::SyntaxErrorKind::ResourceLimit {
+                resource: super::SyntaxResource::SourceBytes,
+            }
+        ));
+        assert!(source.is_char_boundary(
+            usize::try_from(errors[0].span().start().get()).expect("the fixture offset fits usize"),
+        ));
     }
 
     #[test]

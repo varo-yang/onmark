@@ -29,6 +29,10 @@ impl TreeBuilder {
         });
     }
 
+    pub(super) fn open_depth(&self) -> usize {
+        self.stack.len()
+    }
+
     pub(super) fn add_attribute(&mut self, attribute: Attribute) -> Option<SyntaxError> {
         let pending = self
             .pending

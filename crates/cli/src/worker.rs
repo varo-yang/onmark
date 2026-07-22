@@ -16,6 +16,7 @@ use crate::arguments::{WorkerArgs, WorkerCaptureArgs, WorkerCommand};
 use crate::environment;
 use crate::execution;
 use crate::failure::CliError;
+use crate::input;
 
 pub(super) struct WorkerOutcome {
     artifact: FrameArtifact,
@@ -71,8 +72,8 @@ async fn capture(args: WorkerCaptureArgs) -> Result<WorkerOutcome, CliError> {
 
 fn read_request(input: &Path) -> Result<WorkerCaptureRequest, CliError> {
     let path = input.join(WorkerCaptureRequest::FILE_NAME);
-    let source =
-        fs::read_to_string(&path).map_err(|source| CliError::read_worker_request(&path, source))?;
+    let source = input::read_utf8(&path, WorkerCaptureRequest::MAX_JSON_BYTES)
+        .map_err(|source| CliError::read_worker_request(&path, source))?;
     serde_json::from_str(&source).map_err(|source| CliError::parse_worker_request(&path, source))
 }
 

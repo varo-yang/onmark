@@ -251,10 +251,10 @@ impl FrameArtifact {
     /// Verifies that two same-environment artifact sequences have equal
     /// raw-RGBA fingerprints.
     ///
-    /// This is a bounded equivalence check: it streams each PNG through a
-    /// fixed hash buffer and retains only one fingerprint from each sequence.
-    /// It deliberately compares canonical pixels rather than PNG compression
-    /// bytes.
+    /// This is a bounded equivalence check: it decodes one profile-sized PNG
+    /// from each sequence at a time, verifies its recorded fingerprint, and
+    /// retains only the recomputed fingerprints. It deliberately compares
+    /// canonical pixels rather than PNG compression bytes.
     ///
     /// # Errors
     ///
@@ -350,7 +350,13 @@ pub struct FrameArtifactError {
     kind: FrameArtifactErrorKind,
     path: PathBuf,
     message: Box<str>,
-    source: Option<io::Error>,
+    source: Option<FrameArtifactErrorSource>,
+}
+
+#[derive(Debug)]
+enum FrameArtifactErrorSource {
+    Io(io::Error),
+    Pixels(Box<crate::BrowserError>),
 }
 
 impl FrameArtifactError {
@@ -393,7 +399,16 @@ impl FrameArtifactError {
             kind,
             path: path.to_owned(),
             message: message.into(),
-            source: Some(source),
+            source: Some(FrameArtifactErrorSource::Io(source)),
+        }
+    }
+
+    pub(super) fn pixels(path: &Path, source: crate::BrowserError) -> Self {
+        Self {
+            kind: FrameArtifactErrorKind::InvalidArtifact,
+            path: path.to_owned(),
+            message: "failed to decode frame artifact PNG pixels".into(),
+            source: Some(FrameArtifactErrorSource::Pixels(Box::new(source))),
         }
     }
 }
@@ -406,7 +421,10 @@ impl fmt::Display for FrameArtifactError {
 
 impl Error for FrameArtifactError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
-        self.source.as_ref().map(|source| source as _)
+        self.source.as_ref().map(|source| match source {
+            FrameArtifactErrorSource::Io(source) => source as _,
+            FrameArtifactErrorSource::Pixels(source) => source.as_ref() as _,
+        })
     }
 }
 
@@ -579,26 +597,15 @@ mod tests {
     #[tokio::test]
     async fn compares_ordered_raw_rgba_fingerprints_across_artifacts() {
         let directory = tempdir().expect("the fixture directory is available");
-        let expected = artifact(
-            &directory.path().join("expected.onmark-frames"),
-            &[[1; RawRgbaHash::BYTE_LENGTH], [2; RawRgbaHash::BYTE_LENGTH]],
-        )
-        .await;
-        let matching_first = artifact(
-            &directory.path().join("matching-first.onmark-frames"),
-            &[[1; RawRgbaHash::BYTE_LENGTH]],
-        )
-        .await;
+        let expected = artifact(&directory.path().join("expected.onmark-frames"), &[1, 2]).await;
+        let matching_first =
+            artifact(&directory.path().join("matching-first.onmark-frames"), &[1]).await;
         let matching_second = artifact(
             &directory.path().join("matching-second.onmark-frames"),
-            &[[2; RawRgbaHash::BYTE_LENGTH]],
+            &[2],
         )
         .await;
-        let different = artifact(
-            &directory.path().join("different.onmark-frames"),
-            &[[3; RawRgbaHash::BYTE_LENGTH]],
-        )
-        .await;
+        let different = artifact(&directory.path().join("different.onmark-frames"), &[3]).await;
 
         FrameArtifact::verify_raw_rgba_equivalence(
             std::slice::from_ref(&expected),
@@ -619,16 +626,8 @@ mod tests {
     #[tokio::test]
     async fn rejects_raw_rgba_sequences_with_different_lengths() {
         let directory = tempdir().expect("the fixture directory is available");
-        let complete = artifact(
-            &directory.path().join("complete.onmark-frames"),
-            &[[1; RawRgbaHash::BYTE_LENGTH], [2; RawRgbaHash::BYTE_LENGTH]],
-        )
-        .await;
-        let prefix = artifact(
-            &directory.path().join("prefix.onmark-frames"),
-            &[[1; RawRgbaHash::BYTE_LENGTH]],
-        )
-        .await;
+        let complete = artifact(&directory.path().join("complete.onmark-frames"), &[1, 2]).await;
+        let prefix = artifact(&directory.path().join("prefix.onmark-frames"), &[1]).await;
 
         let short = FrameArtifact::verify_raw_rgba_equivalence(
             std::slice::from_ref(&complete),
@@ -654,13 +653,13 @@ mod tests {
         let directory = tempdir().expect("the fixture directory is available");
         let expected = artifact_in_environment(
             &directory.path().join("expected.onmark-frames"),
-            &[[1; RawRgbaHash::BYTE_LENGTH]],
+            &[1],
             CaptureEnvironmentId::from_sha256([7; CaptureEnvironmentId::BYTE_LENGTH]),
         )
         .await;
         let actual = artifact_in_environment(
             &directory.path().join("actual.onmark-frames"),
-            &[[1; RawRgbaHash::BYTE_LENGTH]],
+            &[1],
             CaptureEnvironmentId::from_sha256([8; CaptureEnvironmentId::BYTE_LENGTH]),
         )
         .await;
@@ -676,6 +675,36 @@ mod tests {
             error.kind(),
             FrameArtifactErrorKind::CaptureEnvironmentMismatch
         );
+    }
+
+    #[tokio::test]
+    async fn rejects_a_recorded_fingerprint_that_does_not_match_its_png() {
+        let directory = tempdir().expect("the fixture directory is available");
+        let path = directory.path().join("forged.onmark-frames");
+        let png = encoded_png(7);
+        let mut writer = FrameArtifactWriter::create(&path, descriptor(), limits())
+            .await
+            .expect("the artifact writer can stage one frame");
+        writer
+            .write_frame(&CapturedFrame::recorded(
+                png,
+                RawRgbaHash::from_bytes([0; RawRgbaHash::BYTE_LENGTH]),
+            ))
+            .await
+            .expect("the forged record remains structurally encodable");
+        let artifact = writer
+            .finish()
+            .await
+            .expect("the forged artifact has a self-consistent payload checksum");
+
+        let error = FrameArtifact::verify_raw_rgba_equivalence(
+            std::slice::from_ref(&artifact),
+            std::slice::from_ref(&artifact),
+        )
+        .await
+        .expect_err("pixel equivalence must recompute the recorded fingerprint");
+
+        assert_eq!(error.kind(), FrameArtifactErrorKind::InvalidArtifact);
     }
 
     #[tokio::test]
@@ -769,7 +798,7 @@ mod tests {
     }
 
     fn limits() -> FrameArtifactLimits {
-        FrameArtifactLimits::new(2, 128, 64).expect("the fixture limits are bounded")
+        FrameArtifactLimits::new(2, 1_024, 512).expect("the fixture limits are bounded")
     }
 
     fn descriptor() -> FrameArtifactDescriptor {
@@ -788,7 +817,7 @@ mod tests {
             output: FrameInterval::new(FrameIndex::new(4), FrameIndex::new(4 + frames))
                 .expect("the fixture interval is ordered"),
             frame_rate: FrameRate::new(30, 1).expect("the fixture rate is valid"),
-            profile: RenderProfile::new(320, 180).expect("the fixture profile is valid"),
+            profile: RenderProfile::new(2, 2).expect("the fixture profile is valid"),
             capture_environment,
             visual_plan_digest: [1; 32],
         }
@@ -799,26 +828,21 @@ mod tests {
     }
 
     fn captured_frame() -> CapturedFrame {
-        CapturedFrame::recorded(
-            EncodedPng::new(vec![1]),
-            RawRgbaHash::from_bytes([1; RawRgbaHash::BYTE_LENGTH]),
-        )
+        CapturedFrame::from_png(encoded_png(1), descriptor().profile)
+            .expect("the fixture PNG has canonical RGBA pixels")
     }
 
-    async fn artifact(
-        path: &Path,
-        raw_rgba_hashes: &[[u8; RawRgbaHash::BYTE_LENGTH]],
-    ) -> FrameArtifact {
-        artifact_in_environment(path, raw_rgba_hashes, capture_environment()).await
+    async fn artifact(path: &Path, colors: &[u8]) -> FrameArtifact {
+        artifact_in_environment(path, colors, capture_environment()).await
     }
 
     async fn artifact_in_environment(
         path: &Path,
-        raw_rgba_hashes: &[[u8; RawRgbaHash::BYTE_LENGTH]],
+        colors: &[u8],
         capture_environment: CaptureEnvironmentId,
     ) -> FrameArtifact {
-        let frames = u64::try_from(raw_rgba_hashes.len())
-            .expect("the fixture frame count fits the artifact domain");
+        let frames =
+            u64::try_from(colors.len()).expect("the fixture frame count fits the artifact domain");
         let mut writer = FrameArtifactWriter::create(
             path,
             descriptor_with_environment(frames, capture_environment),
@@ -826,12 +850,12 @@ mod tests {
         )
         .await
         .expect("the artifact writer can stage fixture frames");
-        for raw_rgba_hash in raw_rgba_hashes {
+        for color in colors {
             writer
-                .write_frame(&CapturedFrame::recorded(
-                    EncodedPng::new(vec![1]),
-                    RawRgbaHash::from_bytes(*raw_rgba_hash),
-                ))
+                .write_frame(
+                    &CapturedFrame::from_png(encoded_png(*color), descriptor().profile)
+                        .expect("the fixture PNG has canonical RGBA pixels"),
+                )
                 .await
                 .expect("the frame fits the artifact limits");
         }
@@ -839,5 +863,20 @@ mod tests {
             .finish()
             .await
             .expect("the artifact publishes atomically")
+    }
+
+    fn encoded_png(color: u8) -> EncodedPng {
+        let mut bytes = Vec::new();
+        let mut encoder = png::Encoder::new(&mut bytes, 2, 2);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder
+            .write_header()
+            .expect("the fixture PNG header is valid");
+        writer
+            .write_image_data(&[color; 16])
+            .expect("the fixture pixels are valid");
+        writer.finish().expect("the fixture PNG is complete");
+        EncodedPng::new(bytes)
     }
 }

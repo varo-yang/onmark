@@ -1,8 +1,10 @@
-//! Disposable media-strategy experiment across real Chromium and `FFmpeg`.
+//! Layered-media admission and retained strategy evidence across Chromium and
+//! `FFmpeg`.
 //!
-//! The test stays opt-in because it compares experimental media paths rather
-//! than enforcing the renderer's release contract. It measures selection and
-//! repeatability without turning a research path into a product API.
+//! The admission modules enforce Gate seven's frame-selection, color, partition,
+//! and pinned-performance claims. The broader opt-in comparison remains here as
+//! reproducible evidence for the strategy decision; production rendering lives
+//! in the crate rather than importing this harness.
 
 #[path = "media_seek/admission.rs"]
 mod admission;

@@ -15,7 +15,7 @@ pub enum DiagnosticCode {
     InvalidNodeId,
     /// A valid node ID is declared more than once in one film.
     DuplicateNodeId,
-    /// An element name is outside the Gate-one screenplay vocabulary.
+    /// An element name is outside the current screenplay vocabulary.
     UnknownElement,
     /// No top-level film element exists.
     MissingFilmRoot,
@@ -69,6 +69,8 @@ pub enum DiagnosticCode {
     UnexpectedClosingTag,
     /// XML machinery outside the screenplay surface is authored.
     UnsupportedMarkupDirective,
+    /// Screenplay syntax exceeds a bounded compiler resource.
+    ScreenplayResourceLimit,
     /// A standalone subtitle file violates its selected format grammar.
     InvalidSubtitleFile,
     /// A standalone subtitle file uses presentation semantics not represented by caption facts.
@@ -111,6 +113,7 @@ impl DiagnosticCode {
             Self::UnclosedElement => "ONM-SYNTAX-005",
             Self::UnexpectedClosingTag => "ONM-SYNTAX-006",
             Self::UnsupportedMarkupDirective => "ONM-SYNTAX-007",
+            Self::ScreenplayResourceLimit => "ONM-SYNTAX-008",
             Self::InvalidSubtitleFile => "ONM-CAPTION-001",
             Self::UnsupportedSubtitleFeature => "ONM-CAPTION-002",
             Self::SubtitleResourceLimit => "ONM-CAPTION-003",
@@ -149,6 +152,7 @@ impl DiagnosticCode {
             | Self::UnclosedElement
             | Self::UnexpectedClosingTag
             | Self::UnsupportedMarkupDirective
+            | Self::ScreenplayResourceLimit
             | Self::InvalidSubtitleFile
             | Self::UnsupportedSubtitleFeature
             | Self::SubtitleResourceLimit => Severity::Error,
@@ -218,6 +222,7 @@ mod tests {
             (DiagnosticCode::UnclosedElement, "ONM-SYNTAX-005"),
             (DiagnosticCode::UnexpectedClosingTag, "ONM-SYNTAX-006"),
             (DiagnosticCode::UnsupportedMarkupDirective, "ONM-SYNTAX-007"),
+            (DiagnosticCode::ScreenplayResourceLimit, "ONM-SYNTAX-008"),
             (DiagnosticCode::InvalidSubtitleFile, "ONM-CAPTION-001"),
             (
                 DiagnosticCode::UnsupportedSubtitleFeature,

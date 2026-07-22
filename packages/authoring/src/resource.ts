@@ -59,6 +59,7 @@ class OwnedImageResource implements ImageResource {
   async prepare(): Promise<void> {
     this.#requireActive();
     await this.element.decode();
+    this.#requireActive();
   }
 
   dispose(): void {

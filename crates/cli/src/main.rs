@@ -12,6 +12,7 @@ mod diagnostic;
 mod environment;
 mod execution;
 mod failure;
+mod input;
 mod render;
 mod subtitle;
 mod worker;

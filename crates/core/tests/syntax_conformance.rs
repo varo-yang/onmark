@@ -43,6 +43,11 @@ fn an_unclosed_doctype_reports_a_fatal_fragment_boundary() {
     assert_invalid_fixture("unclosed-doctype");
 }
 
+#[test]
+fn excessive_nesting_stops_at_the_bounded_syntax_boundary() {
+    assert_invalid_fixture("resource-limit");
+}
+
 fn assert_invalid_fixture(name: &str) {
     let source_path = fixture("syntax", &format!("invalid/{name}.onmark"));
     let expected_path = fixture("syntax", &format!("invalid/{name}.diagnostics.txt"));

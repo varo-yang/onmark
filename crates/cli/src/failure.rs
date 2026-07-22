@@ -18,6 +18,7 @@ use tokio::task::JoinError;
 use crate::assets::AssetError;
 use crate::bundler::BundleError;
 use crate::environment::EnvironmentError;
+use crate::input::BoundedReadError;
 use crate::subtitle::SubtitleLoadError;
 
 #[derive(Debug)]
@@ -25,11 +26,11 @@ pub(super) enum CliError {
     Environment(EnvironmentError),
     ReadScreenplay {
         path: PathBuf,
-        source: io::Error,
+        source: BoundedReadError,
     },
     ReadWorkerRequest {
         path: PathBuf,
-        source: io::Error,
+        source: BoundedReadError,
     },
     ParseWorkerRequest {
         path: PathBuf,
@@ -59,14 +60,14 @@ pub(super) enum CliError {
 }
 
 impl CliError {
-    pub(super) fn read_screenplay(path: &Path, source: io::Error) -> Self {
+    pub(super) fn read_screenplay(path: &Path, source: BoundedReadError) -> Self {
         Self::ReadScreenplay {
             path: path.to_owned(),
             source,
         }
     }
 
-    pub(super) fn read_worker_request(path: &Path, source: io::Error) -> Self {
+    pub(super) fn read_worker_request(path: &Path, source: BoundedReadError) -> Self {
         Self::ReadWorkerRequest {
             path: path.to_owned(),
             source,
@@ -155,9 +156,10 @@ impl Error for CliError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Environment(source) => Some(source),
-            Self::ReadScreenplay { source, .. }
-            | Self::ReadWorkerRequest { source, .. }
-            | Self::InspectPresentation { source, .. }
+            Self::ReadScreenplay { source, .. } | Self::ReadWorkerRequest { source, .. } => {
+                Some(source)
+            }
+            Self::InspectPresentation { source, .. }
             | Self::CreateOutputDirectory { source, .. } => Some(source),
             Self::ParseWorkerRequest { source, .. } => Some(source),
             Self::WorkerTask(source) => Some(source),

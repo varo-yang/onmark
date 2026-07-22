@@ -59,6 +59,21 @@ test("does not install a font whose load completes after disposal", async () => 
   assert.deepEqual(fonts.added, []);
 });
 
+test("does not finish an image decode after disposal", async () => {
+  const image = new DeferredImage();
+  const resource = createImageResource({
+    document: imageDocument(image),
+    id: "poster",
+    source: "./resources/poster.svg",
+  });
+
+  const preparation = resource.prepare();
+  resource.dispose();
+  image.ready();
+
+  await assert.rejects(preparation, TypeError);
+});
+
 class FakeImage {
   decodeCalls = 0;
   removeCalls = 0;
@@ -76,6 +91,19 @@ class FakeImage {
 
   remove(): void {
     this.removeCalls += 1;
+  }
+}
+
+class DeferredImage extends FakeImage {
+  readonly #decoded = Promise.withResolvers<void>();
+
+  override decode(): Promise<void> {
+    this.decodeCalls += 1;
+    return this.#decoded.promise;
+  }
+
+  ready(): void {
+    this.#decoded.resolve();
   }
 }
 

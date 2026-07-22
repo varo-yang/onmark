@@ -9,7 +9,7 @@ ONM-STRUCT-004 error @0:137..142 element <title> is not allowed inside <scene>
 ONM-ID-001 error @0:175..183 shot ID is invalid: node ID cannot contain ASCII whitespace
   help: remove ASCII whitespace or replace it with a visible separator
 ONM-STRUCT-001 error @0:193..198 element <audio> is not part of the screenplay language
-  help: use a Gate-one screenplay element or remove this element
+  help: use a screenplay element from the current language or remove this element
 ONM-STRUCT-004 error @0:225..230 element <scene> is not allowed inside <shot>
   help: move <scene> to a valid screenplay container
 ONM-ID-002 error @0:260..264 shot ID "sale" is already used in this film

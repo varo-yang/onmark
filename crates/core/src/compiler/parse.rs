@@ -5,7 +5,9 @@
 
 use crate::diagnostics::{Diagnostic, DiagnosticCode, Diagnostics};
 use crate::model::{SourceId, SourceSpan};
-use crate::syntax::{self, SourceDocument, SyntaxError, SyntaxErrorKind, UnsupportedDirective};
+use crate::syntax::{
+    self, SourceDocument, SyntaxError, SyntaxErrorKind, SyntaxResource, UnsupportedDirective,
+};
 
 use super::diagnostic::author_diagnostic;
 
@@ -82,6 +84,7 @@ fn translate_error(error: &SyntaxError) -> Diagnostic {
         SyntaxErrorKind::UnsupportedDirective { directive } => {
             unsupported_directive(error.span(), *directive)
         }
+        SyntaxErrorKind::ResourceLimit { resource } => resource_limit(error.span(), *resource),
     }
 }
 
@@ -169,6 +172,30 @@ fn unsupported_directive(primary: SourceSpan, directive: UnsupportedDirective) -
         primary,
         format!("{name} is not supported in a screenplay"),
         format!("remove the {name}"),
+    )
+}
+
+fn resource_limit(primary: SourceSpan, resource: SyntaxResource) -> Diagnostic {
+    let (message, help) = match resource {
+        SyntaxResource::SourceBytes => (
+            "screenplay source exceeds the compiler byte limit",
+            "split the screenplay or remove generated markup",
+        ),
+        SyntaxResource::Items => (
+            "screenplay markup contains too many retained items",
+            "split the screenplay or remove repeated elements, attributes, and text",
+        ),
+        SyntaxResource::NestingDepth => (
+            "screenplay markup is nested beyond the compiler depth limit",
+            "flatten the markup to the screenplay's film, scene, shot, and content structure",
+        ),
+    };
+
+    author_diagnostic(
+        DiagnosticCode::ScreenplayResourceLimit,
+        primary,
+        message,
+        help,
     )
 }
 

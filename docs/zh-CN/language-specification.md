@@ -1,6 +1,7 @@
 # Onmark 语言规格书
 
-> 状态：Gate 四语言契约。延后能力会被明确列出，不与当前语义混写。
+> 状态：当前剧本语言。Gate 四准入了现有 authored audio 与 subtitle
+> 表面；之后已经完成的 gate 只改变 presentation 与 execution 行为，没有新增剧本拼写。延后语言能力会被明确列出，不与当前语义混写。
 
 ## 1. 语言为什么存在
 
@@ -83,6 +84,9 @@ declaration 不进入剧本表面语言。
 
 文本和属性值支持 XML 的五个预定义实体（`amp`、`lt`、`gt`、`quot`、`apos`），以及指向 XML
 1.0 合法字符的十进制、十六进制引用。其他命名实体、格式错误的引用、surrogate、越过 Unicode 范围或被 XML 禁止的字符都是语法错误。Onmark 不处理 DTD、自定义实体和外部实体。
+
+标记输入在语义 bind 之前就有明确上界：单份剧本最多包含 8 MiB UTF-8
+源码、65,536 个被保留的 syntax item，以及 32 个同时打开的元素。越过任一上界只产生一条稳定的资源诊断并停止 syntax recovery；编译器不会保留或递归进入被拒绝的后缀。
 
 ## 4. 包含与顺序
 
@@ -270,6 +274,7 @@ ONM-TIME-004 标题“立即购买”从第 13 秒开始，但所属 shot 在第
 | `ONM-SYNTAX-005` | 输入结束时仍有元素未闭合                                        |
 | `ONM-SYNTAX-006` | 结束标签没有对应的打开元素                                      |
 | `ONM-SYNTAX-007` | 不支持 XML declaration、processing instruction 或 document type |
+| `ONM-SYNTAX-008` | 剧本标记越过有界 syntax 资源                                    |
 
 首批 bind、resolve 与 timing 诊断为：
 

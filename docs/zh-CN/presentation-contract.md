@@ -96,7 +96,8 @@ Load(plan) -> Prepare(evaluationStart)
   -> (Seek(frame) -> FrameStaged(frame)
       -> [native placement-boundary commit]
       -> native BeginFrame capture
-      -> Confirm(frame) -> FrameReady(frame))*
+      -> Confirm(frame) -> FrameReady(frame)
+      -> [native placement-boundary reconciliation capture])*
   -> Dispose
 ```
 

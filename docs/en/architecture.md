@@ -340,6 +340,11 @@ then streams verified frames through the same one continuous visual encoder used
 by Gate two and materializes and mixes all audio once at the assembled output
 origin.
 
+Artifact checksums prove storage integrity; recorded fingerprints are not trusted
+as pixel evidence by themselves. Reuse and equivalence checks decode each bounded
+PNG in order, recompute its canonical raw-RGBA fingerprint, and retain at most one
+decoded frame while comparing the sequence.
+
 This is intentionally not a remote-frame queue: a worker owns a contiguous unit
 and publishes one artifact only after its browser session has completed. Nor is
 it an encoded-segment cache. Independently AAC-muxed MP4 segments are not
@@ -474,6 +479,14 @@ string. The worker materializes inputs in a private root and publishes one frame
 artifact. Reuse and assembly require that environment identity alongside the
 unit identity. The command accepts no screenplay and never recompiles source;
 the short-lived invocation owner or object-store adapter publishes requests.
+
+The CLI reads screenplay source through an 8 MiB sentinel-bounded UTF-8 reader
+before core parsing, and core independently enforces syntax byte, retained-item,
+and nesting limits. Worker capture applies the same boundary discipline to its
+different trust domain: request JSON is capped at 16 MiB by one render-owned
+constant shared by the local command and deployment adapter. Neither entry point
+uses a convenience whole-file read that can allocate from an untrusted file
+length.
 
 `onmark-cli` resolves every external executable before starting process work,
 then follows one linear path: read and compile, freeze and probe referenced
