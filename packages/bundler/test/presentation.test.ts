@@ -230,7 +230,7 @@ test("keeps the checked-in video presentation bundle current", async () => {
       outputDirectory,
       maxOutputBytes: 1_000_000,
       temporalCapability: "randomAccess",
-      visualCapability: "separableOverlay",
+      visualCapability: "browserComposite",
     });
 
     const files = await artifactFiles(expected);

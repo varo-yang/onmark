@@ -1,9 +1,9 @@
 {
   "version": 3,
-  "bundleId": "sha256:e490a253d2fb2917faf4710c8d7baaabedfd4a6d98f0213930b25dec6e3450cd",
+  "bundleId": "sha256:deabb39e9218d0693afaf1dc2c9dd8f6d01e7c8a3b8a55eae4c53a89fe57e25c",
   "entryPoint": "index.html",
   "temporalCapability": "randomAccess",
-  "visualCapability": "separableOverlay",
+  "visualCapability": "browserComposite",
   "files": [
     {
       "bytes": 299,
