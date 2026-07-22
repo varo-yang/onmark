@@ -866,10 +866,18 @@ fn render_fixture(name: &str) -> Url {
 }
 
 fn fixture_root(fixture: &Url) -> PathBuf {
-    fixture
+    let path = fixture
         .to_file_path()
-        .expect("the browser fixture must be a file URL")
-        .parent()
+        .expect("the browser fixture must be a file URL");
+    let repository = repository();
+
+    // Checked-in fixture modules import the built runtime across repository
+    // directories. Ephemeral bundles are self-contained beneath their parent.
+    if path.starts_with(&repository) {
+        return repository;
+    }
+
+    path.parent()
         .expect("the browser fixture must have a parent directory")
         .to_owned()
 }
