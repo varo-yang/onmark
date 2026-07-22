@@ -2,12 +2,13 @@
 
 Onmark is a screenplay-first, browser-rendered video compiler and execution engine. Rust owns deterministic compilation and native execution; TypeScript owns authoring and the browser runtime.
 
-**Current phase:** delivery gates one through six are complete. Gate seven is
-the only implementation goal: admit layered native-media composition only
-after its checked experiment satisfies the architecture document's frozen
-pixel, color, latency, memory, and bounded-streaming contract. The existing
-Chromium-media path remains the production default until every admission
-condition passes. Gate seven adds no screenplay spelling.
+**Current phase:** delivery gates one through seven are complete. Gate seven
+admits layered native-media composition only for an explicit, checked visual
+capability; the Chromium-media path remains available for every other
+presentation. No Gate-eight contract has been admitted. Do not create its code
+skeleton or implement a deferred capability before its evidence and boundaries
+are recorded in the architecture document. Gate seven adds no screenplay
+spelling.
 Deployment work remains frozen: do not add a coordinator, database, queue,
 lease system, cloud workflow, infrastructure definition, or another provider
 adapter. Do not add screenplay animation spelling, infer temporal or visual

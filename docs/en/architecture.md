@@ -998,7 +998,7 @@ new cloud deployment, transitions, playback-rate control, a component
 marketplace, Player, or Studio. Those require separate measured performance or
 language gates after this resource contract is complete.
 
-**Gate seven (active): admitted layered native-media composition.** This gate
+**Gate seven (complete): admitted layered native-media composition.** This gate
 may change the authoritative pixel path only for a presentation that explicitly
 declares a closed visual-separability capability. Source inspection, an empty
 video list, or a successful transparent screenshot is not evidence of that
@@ -1060,12 +1060,13 @@ For this path the capture-environment identity covers the pinned `FFmpeg`
 binary and composition policy in addition to Chromium, fonts, launch policy,
 and other pixel-affecting host facts.
 
-The reviewed Gate-seven record in
+The reviewed Gate-seven admission record in
 `conformance/layered-media-admission.md` passes these thresholds at commit
 `abb391b`: median wall time is 23.95% of the equally thread-bounded baseline,
 and median incremental peak RSS is 79.73%. This evidence admits implementation
-of the explicit production capability; it does not silently switch the
-authoritative path or weaken the remaining capability and conformance work.
+of the explicit production capability; it does not switch the pixel path for
+presentations without that capability or weaken the remaining capability and
+conformance work.
 
 The production branch retains one compositor across a local render sequence.
 Its media inputs are concatenated inside that process before one transparent
@@ -1078,8 +1079,11 @@ capacity-one channel is the only frame queue. `FFmpeg` framesync owns one
 explicit foreground lookahead: the second fixed-size RGBA frame releases the
 first composed frame, and closing the input releases the final frame. Local
 execution drains each canonical frame without retaining its pixels; workers
-retain and fingerprint one RGBA frame at a time. The locked real-process exit
-fixture must still pass before Gate seven closes.
+retain and fingerprint one RGBA frame at a time. Production commits `d62a5d1`,
+`d94081f`, and `0f2b3c1` implement and correct this branch. Shared Linux CI run
+[`29886364671`](https://github.com/varo-yang/onmark/actions/runs/29886364671)
+passes the quality suite and locked real-process exit fixture at `0f2b3c1`,
+closing Gate seven.
 
 Gate seven does not add VFR, new codecs, HDR, hardware acceleration, lossy
 screenshot transport, parallel browser capture, transitions, playback-rate

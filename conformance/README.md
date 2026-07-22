@@ -90,11 +90,13 @@ CI runs all real-process conformance on Ubuntu 24.04 with Chrome for Testing
 are supplied to every test; neither the runner's browser nor an ambient media
 tool can silently change the measured environment.
 
-Gate seven's layered-media candidate remains test-only. Shared Linux CI runs
-its cold-repeatability, whole-versus-partition, and frozen BT.709 patch-bound
-checks. The performance gate is deliberately separate because shared-runner
-noise must not admit a production pixel path. On the pinned admission machine,
-run the five alternating 1,920×1,080 baseline/candidate samples explicitly:
+Gate seven's production layered-media path is enabled only for the explicit
+`separableOverlay` capability. Shared Linux CI runs its cold-repeatability,
+whole-versus-partition, frozen BT.709 patch-bound, and real-process exit checks.
+The original performance admission remains reproducible but separate because
+shared-runner noise must not decide a production pixel path. On the pinned
+admission machine, run the five alternating 1,920×1,080 baseline/candidate
+samples explicitly:
 
 ```bash
 ONMARK_HEADLESS_SHELL=/path/to/pinned/chrome-headless-shell \
@@ -110,7 +112,6 @@ cargo test -p onmark-render --test media_seek \
 ```
 
 The test prints every raw timing/RSS sample, the two medians, the frozen source
-digest, and the capture-environment identity. A reviewed evidence record is
-required before the candidate can leave the experiment target. The admitted
-Gate-seven result is recorded in
+digest, and the capture-environment identity. The reviewed admission and
+production-exit evidence is recorded in
 [`layered-media-admission.md`](layered-media-admission.md).

@@ -1,11 +1,12 @@
 # Gate-seven layered-media admission
 
-This record admits the layered native-media candidate for production
-integration. It does not itself change the authoritative render path. The
-explicit capability, versioned plan fact, executor branch, and whole/partition
-conformance remain separate implementation work.
+This record contains the reviewed admission and production-exit evidence for
+the layered native-media path. The admission experiment did not itself change
+the authoritative render path; the later production commits add the explicit
+capability, versioned plan fact, bounded executor branch, and whole/partition
+conformance.
 
-## Reviewed implementation
+## Reviewed admission experiment
 
 - commit: `abb391bb88efb97b436583245e71488e4da489b2`
 - fixture: `sha256:8a1ed5d5e93f975da60b1d9632ca56c3ececdf17d34bea5cc5cea3d833ecd515`
@@ -71,3 +72,18 @@ passed cold repeatability, whole-versus-partition equality, the four-level
 BT.709 patch bound, and exact CFR selection including 24-to-30 conversion and
 nonzero partition starts. The performance machine repeated the 1,920×1,080
 whole/partition check before admission; all 60 canonical frames matched.
+
+## Production exit
+
+The admitted branch was integrated and corrected in this sequence:
+
+- `d62a5d1` implements the explicit capability and production compositor;
+- `d94081f` fixes admission of the locked layered render fixture;
+- `0f2b3c1` replaces the blocking foreground transport with bounded raw-RGBA
+  streaming and one explicit framesync lookahead.
+
+Shared Linux CI run
+[`29886364671`](https://github.com/varo-yang/onmark/actions/runs/29886364671)
+passed the complete quality suite and native real-process conformance at commit
+`0f2b3c1b2882eb5bed5a77ee4462d66a53214957`. The exit fixture exercises the
+production branch rather than the experiment target. Gate seven is complete.

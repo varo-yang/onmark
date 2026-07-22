@@ -7,10 +7,7 @@ agents.
 screenplay → deterministic Timeline IR → browser frames + audio plan → MP4
 ```
 
-Delivery gates one through six are complete. Gate seven is implementing the
-explicit layered native-media path admitted by its checked performance and
-memory evidence; it remains active until the locked real-process fixture proves
-the production branch. Gate one renders and
+Delivery gates one through seven are complete. Gate one renders and
 independently verifies one real screenplay through the compiler, browser
 protocol, Chromium, and FFmpeg. Gate two partitions one media-bearing two-shot
 film into two local Render Units and proves that their assembled decoded video
@@ -35,17 +32,14 @@ stable across unit projections. Its Linux exit conformance proves equal pixels
 across cold browsers and whole-film versus partitioned execution without adding
 a general props channel, new screenplay spelling, or a second timing system.
 
-Gate seven keeps the existing Chromium-media renderer authoritative while a
-checked experiment evaluates transparent browser presentation over persistent
-native media decode and composition. Admission requires deterministic cold
-runs, exact whole-film/partition equivalence within the candidate path, declared
-color conformance, bounded streaming without a temporary PNG sequence, at least
-a twofold latency improvement, and no more than 85% of the baseline peak RSS.
-The locked experiment passes at 4.18× the baseline speed and 79.73% of its peak
-RSS. The explicit capability and bounded production executor branch are now
-implemented; Gate seven remains active until the locked real-process exit
-fixture confirms the production path. It is not new screenplay syntax or a
-hidden fallback.
+Gate seven admits transparent browser presentation over persistent native media
+decode and composition for an explicitly separable visual capability. Its
+locked experiment passes at 4.18× the Chromium-media baseline speed and 79.73%
+of its peak RSS. The production executor preserves a bounded stream, exact
+whole-film/partition equivalence, declared color conformance, and the existing
+Chromium-media path for presentations without the capability. The real-process
+exit fixture passes; this is neither new screenplay syntax nor a hidden
+fallback.
 
 The completed foundation includes the pure compiler and versioned wire types in
 `onmark-core`; bounded ffprobe and strict SubRip/WebVTT/ASS normalization in
