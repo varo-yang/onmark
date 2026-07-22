@@ -1215,8 +1215,10 @@ production branch 在一次本地 render sequence 内保留同一条 compositor 
 media input 先在该 process 内拼接，再统一应用一条透明 browser stream，因此 partition 不会产生 encoded
 segment，也不会逐帧启动 decoder。单个 process 最多接受 64 个含媒体的 unit；更大的 sequence 会在 launch
 前失败，而不是打开无界 decoder 集合。capture worker 对自己的单个 Render Unit 使用同一 compositor，并把
-每个 canonical RGBA 结果写入现有 lossless frame artifact。唯一 frame queue 的容量固定为一：本地只回传
-每帧 fingerprint，worker 每次只保留一张 RGBA frame。锁定的 real-process exit fixture 通过后 Gate 七才算关闭。
+每个 canonical RGBA 结果写入现有 lossless frame artifact。唯一 frame queue 的容量固定为一。
+`FFmpeg` framesync 显式拥有一帧 foreground lookahead；第二张固定尺寸 RGBA frame 释放第一张合成结果，
+关闭 input 后释放最后一帧。本地只排空 canonical frame 而不保留 pixels，worker 每次只保留并 fingerprint
+一张 RGBA frame。锁定的 real-process exit fixture 通过后 Gate 七才算关闭。
 
 Gate 七不加入 VFR、新 codec、HDR、hardware acceleration、lossy screenshot transport、parallel browser
 capture、transition、playback-rate control、Player、Studio、component marketplace 或新的 screenplay

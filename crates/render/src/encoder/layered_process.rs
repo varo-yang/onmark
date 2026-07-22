@@ -82,13 +82,16 @@ pub(super) fn spawn(executable: &Path, job: &LayeredJob) -> Result<Child, Encode
     for media in &job.media {
         command.arg("-i").arg(&media.path);
     }
+    let dimensions = format!("{}x{}", job.profile.width(), job.profile.height());
     command.args([
         "-f",
-        "image2pipe",
+        "rawvideo",
         "-framerate",
         &rate,
-        "-vcodec",
-        "png",
+        "-video_size",
+        &dimensions,
+        "-pixel_format",
+        "rgba",
         "-i",
         "pipe:0",
         "-filter_complex",
@@ -232,21 +235,13 @@ pub(super) async fn read_frames(
     retains_pixels: bool,
     sender: mpsc::Sender<CanonicalFrame>,
 ) -> io::Result<()> {
-    for _ in 0..frame_count {
-        let mut pixels = vec![0; frame_bytes];
-        output.read_exact(&mut pixels).await?;
-        let fingerprint = RawRgbaHash::from_bytes(Sha256::digest(&pixels).into());
-        let frame = if retains_pixels {
-            CanonicalFrame::Pixels {
-                bytes: pixels.into_boxed_slice(),
-                fingerprint,
-            }
-        } else {
-            CanonicalFrame::Fingerprint(fingerprint)
-        };
-        if sender.send(frame).await.is_err() {
-            return Ok(());
-        }
+    let receiver_open = if retains_pixels {
+        retain_frames(&mut output, frame_bytes, frame_count, &sender).await?
+    } else {
+        drain_frames(&mut output, frame_bytes, frame_count, &sender).await?
+    };
+    if !receiver_open {
+        return Ok(());
     }
 
     let mut trailing = [0];
@@ -257,6 +252,43 @@ pub(super) async fn read_frames(
         ));
     }
     Ok(())
+}
+
+async fn retain_frames(
+    output: &mut tokio::process::ChildStdout,
+    frame_bytes: usize,
+    frame_count: u64,
+    sender: &mpsc::Sender<CanonicalFrame>,
+) -> io::Result<bool> {
+    for _ in 0..frame_count {
+        let mut pixels = vec![0; frame_bytes];
+        output.read_exact(&mut pixels).await?;
+        let fingerprint = RawRgbaHash::from_bytes(Sha256::digest(&pixels).into());
+        let frame = CanonicalFrame::Pixels {
+            bytes: pixels.into_boxed_slice(),
+            fingerprint,
+        };
+        if sender.send(frame).await.is_err() {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+async fn drain_frames(
+    output: &mut tokio::process::ChildStdout,
+    frame_bytes: usize,
+    frame_count: u64,
+    sender: &mpsc::Sender<CanonicalFrame>,
+) -> io::Result<bool> {
+    let mut pixels = vec![0; frame_bytes];
+    for _ in 0..frame_count {
+        output.read_exact(&mut pixels).await?;
+        if sender.send(CanonicalFrame::Consumed).await.is_err() {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 pub(super) fn frame_bytes(profile: RenderProfile, output: &Path) -> Result<usize, EncodeError> {

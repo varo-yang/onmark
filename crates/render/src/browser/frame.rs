@@ -38,6 +38,25 @@ impl EncodedPng {
     pub fn into_bytes(self) -> Vec<u8> {
         Arc::try_unwrap(self.0).unwrap_or_else(|bytes| bytes.as_ref().clone())
     }
+
+    pub(crate) fn decode_rgba(&self, profile: RenderProfile) -> Result<DecodedRgba, BrowserError> {
+        decode_rgba(self, profile)
+    }
+}
+
+/// One profile-sized browser frame normalized for native pixel composition.
+pub(crate) struct DecodedRgba {
+    bytes: Box<[u8]>,
+}
+
+impl DecodedRgba {
+    pub(crate) fn as_bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+
+    pub(crate) fn fingerprint(&self) -> RawRgbaHash {
+        RawRgbaHash::from_bytes(Sha256::digest(&self.bytes).into())
+    }
 }
 
 /// SHA-256 of one canonical, exact 8-bit RGBA browser frame.
@@ -68,7 +87,7 @@ pub struct CapturedFrame {
 
 impl CapturedFrame {
     pub(crate) fn from_png(png: EncodedPng, profile: RenderProfile) -> Result<Self, BrowserError> {
-        let raw_rgba_hash = raw_rgba_hash(&png, profile)?;
+        let raw_rgba_hash = png.decode_rgba(profile)?.fingerprint();
         Ok(Self { png, raw_rgba_hash })
     }
 
@@ -89,7 +108,7 @@ impl CapturedFrame {
     }
 }
 
-fn raw_rgba_hash(png: &EncodedPng, profile: RenderProfile) -> Result<RawRgbaHash, BrowserError> {
+fn decode_rgba(png: &EncodedPng, profile: RenderProfile) -> Result<DecodedRgba, BrowserError> {
     let expected = expected_rgba_bytes(profile)?;
     // The profile has already bounded a frame. Give the decoder that same
     // budget before it sees untrusted compressed pixels.
@@ -116,7 +135,7 @@ fn raw_rgba_hash(png: &EncodedPng, profile: RenderProfile) -> Result<RawRgbaHash
     let info = reader
         .next_frame(&mut output)
         .map_err(|source| BrowserError::png("failed to read captured PNG pixels", source))?;
-    let pixels = &output[..info.buffer_size()];
+    output.truncate(info.buffer_size());
     // APNG may expose a subframe even when its image header matched the
     // profile.
     if info.width != profile.width() || info.height != profile.height() {
@@ -130,16 +149,16 @@ fn raw_rgba_hash(png: &EncodedPng, profile: RenderProfile) -> Result<RawRgbaHash
         ));
     }
 
-    let hash = match info.color_type {
-        ColorType::Rgba => hash_rgba(pixels, expected)?,
-        ColorType::Rgb => hash_rgb_as_rgba(pixels, expected)?,
+    let bytes = match info.color_type {
+        ColorType::Rgba => checked_rgba(output, expected)?,
+        ColorType::Rgb => rgb_to_rgba(&output, expected)?,
         _ => {
             return Err(BrowserError::capture_pixels(
                 "captured PNG does not decode to RGB or RGBA pixels",
             ));
         }
     };
-    Ok(RawRgbaHash::from_bytes(hash))
+    Ok(DecodedRgba { bytes })
 }
 
 fn expected_rgba_bytes(profile: RenderProfile) -> Result<usize, BrowserError> {
@@ -155,16 +174,16 @@ fn expected_rgba_bytes(profile: RenderProfile) -> Result<usize, BrowserError> {
         .ok_or_else(|| BrowserError::capture_pixels("render profile exceeds RGBA accounting"))
 }
 
-fn hash_rgba(pixels: &[u8], expected: usize) -> Result<[u8; 32], BrowserError> {
+fn checked_rgba(pixels: Vec<u8>, expected: usize) -> Result<Box<[u8]>, BrowserError> {
     if pixels.len() != expected {
         return Err(BrowserError::capture_pixels(
             "captured RGBA PNG has an unexpected pixel length",
         ));
     }
-    Ok(Sha256::digest(pixels).into())
+    Ok(pixels.into_boxed_slice())
 }
 
-fn hash_rgb_as_rgba(pixels: &[u8], expected: usize) -> Result<[u8; 32], BrowserError> {
+fn rgb_to_rgba(pixels: &[u8], expected: usize) -> Result<Box<[u8]>, BrowserError> {
     let rgb_bytes = expected / RGBA_CHANNELS * 3;
     if pixels.len() != rgb_bytes {
         return Err(BrowserError::capture_pixels(
@@ -172,12 +191,12 @@ fn hash_rgb_as_rgba(pixels: &[u8], expected: usize) -> Result<[u8; 32], BrowserE
         ));
     }
 
-    let mut hasher = Sha256::new();
+    let mut rgba = Vec::with_capacity(expected);
     for pixel in pixels.chunks_exact(3) {
-        hasher.update(pixel);
-        hasher.update([u8::MAX]);
+        rgba.extend_from_slice(pixel);
+        rgba.push(u8::MAX);
     }
-    Ok(hasher.finalize().into())
+    Ok(rgba.into_boxed_slice())
 }
 
 #[cfg(test)]
@@ -243,6 +262,37 @@ mod tests {
         .expect("the canonical PNG decodes");
 
         assert_eq!(rgb.raw_rgba_hash(), rgba.raw_rgba_hash());
+    }
+
+    #[test]
+    fn exposes_normalized_rgba_bytes_to_native_composition() {
+        let profile = RenderProfile::new(2, 2).expect("the four-pixel profile is valid");
+        let rgb = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+        let expected = [
+            1,
+            2,
+            3,
+            u8::MAX,
+            4,
+            5,
+            6,
+            u8::MAX,
+            7,
+            8,
+            9,
+            u8::MAX,
+            10,
+            11,
+            12,
+            u8::MAX,
+        ];
+        let png = encoded_png(png::ColorType::Rgb, 2, 2, &rgb);
+
+        let decoded = png
+            .decode_rgba(profile)
+            .expect("the browser pixels normalize to RGBA");
+
+        assert_eq!(decoded.as_bytes(), &expected);
     }
 
     #[test]

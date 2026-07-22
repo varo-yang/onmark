@@ -19,6 +19,7 @@ mod video;
 mod visual;
 mod worker;
 
+pub(crate) use browser::DecodedRgba;
 pub use browser::{
     BrowserError, BrowserErrorKind, BrowserLaunchPolicy, BrowserLimits, BrowserSession,
     CapturedFrame, EncodedPng, InvalidBrowserLimits, RawRgbaHash,

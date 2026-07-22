@@ -255,8 +255,11 @@ impl FrameSink<'_> {
             Self::Artifact(writer) => write_artifact(writer, profile, png, metrics, output).await?,
             Self::LayeredVideo(compositor) => {
                 let started = Instant::now();
+                let foreground = png
+                    .decode_rgba(profile)
+                    .map_err(|source| RenderError::browser(output, source))?;
                 compositor
-                    .write_video_frame(&png)
+                    .write_video_frame(&foreground)
                     .await
                     .map_err(|source| RenderError::encoder(output, source))?;
                 metrics.write += started.elapsed();
@@ -282,26 +285,36 @@ async fn write_layered_artifact(
     output: &Path,
 ) -> Result<(), RenderError> {
     let started = Instant::now();
+    let foreground = foreground
+        .decode_rgba(profile)
+        .map_err(|source| RenderError::browser(output, source))?;
     let frame = compositor
         .write_frame(&foreground)
         .await
         .map_err(|source| RenderError::encoder(output, source))?;
-    let CanonicalFrame::Pixels {
-        bytes: pixels,
-        fingerprint,
-    } = frame
-    else {
+    if let Some(frame) = frame {
+        write_canonical_artifact(artifact, profile, frame, output).await?;
+    }
+    metrics.write += started.elapsed();
+    Ok(())
+}
+
+pub(super) async fn write_canonical_artifact(
+    artifact: &mut FrameArtifactWriter,
+    profile: RenderProfile,
+    frame: CanonicalFrame,
+    output: &Path,
+) -> Result<(), RenderError> {
+    let CanonicalFrame::Pixels { bytes, fingerprint } = frame else {
         return Err(invalid_plan(
             output,
             "layered worker composition did not retain canonical pixels",
         ));
     };
     artifact
-        .write_rgba_frame(&pixels, fingerprint, profile)
+        .write_rgba_frame(&bytes, fingerprint, profile)
         .await
-        .map_err(|source| RenderError::artifact(output, source))?;
-    metrics.write += started.elapsed();
-    Ok(())
+        .map_err(|source| RenderError::artifact(output, source))
 }
 
 async fn write_artifact(

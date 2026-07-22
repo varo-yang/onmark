@@ -1074,9 +1074,12 @@ a decoder per frame. One process accepts at most 64 media-bearing units; larger
 sequences fail before launch instead of opening an unbounded decoder set. A
 capture worker uses the same compositor for its one Render Unit and packages
 each canonical RGBA result into the existing lossless frame artifact. A
-capacity-one channel is the only frame queue: local execution returns only each
-fingerprint, while workers retain one RGBA frame at a time. The locked
-real-process exit fixture must still pass before Gate seven closes.
+capacity-one channel is the only frame queue. `FFmpeg` framesync owns one
+explicit foreground lookahead: the second fixed-size RGBA frame releases the
+first composed frame, and closing the input releases the final frame. Local
+execution drains each canonical frame without retaining its pixels; workers
+retain and fingerprint one RGBA frame at a time. The locked real-process exit
+fixture must still pass before Gate seven closes.
 
 Gate seven does not add VFR, new codecs, HDR, hardware acceleration, lossy
 screenshot transport, parallel browser capture, transitions, playback-rate

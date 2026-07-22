@@ -17,6 +17,7 @@ use onmark_core::render_graph::PartitionPlan;
 
 use self::capture::{
     CaptureSurface, CaptureTask, FrameSink, RequestSequence, render_session, validate_plan,
+    write_canonical_artifact,
 };
 use self::output::StagedOutput;
 use crate::encoder::{AudioInput, LayeredCompletion, LayeredJob, LayeredMediaInput, LayeredOutput};
@@ -253,19 +254,22 @@ impl FrameCaptureExecutor {
             compositor: &mut compositor,
             artifact: writer,
         };
-        let metrics = self
+        let mut metrics = self
             .capture_unit(unit, &mut frames, requests, output)
             .await?;
+        let started = Instant::now();
         let completion = compositor
             .finish()
             .await
             .map_err(|source| RenderError::encoder(output, source))?;
-        if !matches!(completion, LayeredCompletion::Frames) {
+        let LayeredCompletion::Frames(final_frame) = completion else {
             return Err(invalid_plan(
                 output,
                 "layered worker composition unexpectedly produced encoded video",
             ));
-        }
+        };
+        write_canonical_artifact(writer, unit.profile(), final_frame, output).await?;
+        metrics.write += started.elapsed();
         Ok(metrics)
     }
 

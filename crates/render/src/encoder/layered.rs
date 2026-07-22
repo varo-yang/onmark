@@ -23,7 +23,7 @@ use super::layered_process::{frame_bytes, read_frames, spawn, take_pipe, validat
 use super::limits::EncodeLimits;
 use super::process::{CapturedStderr, capture_stderr};
 use super::session::{EncodedVideo, with_stderr};
-use crate::{EncodedPng, RawRgbaHash, RenderProfile};
+use crate::{DecodedRgba, RawRgbaHash, RenderProfile};
 
 const CLEANUP_TIMEOUT: Duration = Duration::from_secs(5);
 const FRAME_READER_FAILURE: TaskFailure = TaskFailure {
@@ -42,7 +42,7 @@ const STDERR_READER_FAILURE: TaskFailure = TaskFailure {
 /// Output retained from each canonical composed frame.
 #[derive(Debug)]
 pub(crate) enum CanonicalFrame {
-    Fingerprint(RawRgbaHash),
+    Consumed,
     Pixels {
         bytes: Box<[u8]>,
         fingerprint: RawRgbaHash,
@@ -112,7 +112,7 @@ pub(crate) struct LayeredSession {
 /// Terminal artifact produced by the chosen layered destination.
 pub(crate) enum LayeredCompletion {
     Video(EncodedVideo),
-    Frames,
+    Frames(CanonicalFrame),
 }
 
 impl LayeredSession {
@@ -169,32 +169,36 @@ impl LayeredSession {
 
     pub(crate) async fn write_frame(
         &mut self,
-        foreground: &EncodedPng,
-    ) -> Result<CanonicalFrame, EncodeError> {
+        foreground: &DecodedRgba,
+    ) -> Result<Option<CanonicalFrame>, EncodeError> {
         self.check_input(foreground)?;
         self.write_foreground(foreground).await?;
-        let frame = self.receive_frame().await?;
-
         self.submitted_frames += 1;
         self.input_bytes += u64::try_from(foreground.as_bytes().len())
             .expect("the checked foreground size fits the encoder accounting domain");
-        Ok(frame)
+
+        // FFmpeg framesync releases a foreground only after seeing the next
+        // timestamp. Keep that single-frame lookahead explicit and bounded.
+        if self.submitted_frames == 1 {
+            return Ok(None);
+        }
+        self.receive_frame().await.map(Some)
     }
 
     pub(crate) async fn write_video_frame(
         &mut self,
-        foreground: &EncodedPng,
+        foreground: &DecodedRgba,
     ) -> Result<(), EncodeError> {
         match self.write_frame(foreground).await? {
-            CanonicalFrame::Fingerprint(_fingerprint) => Ok(()),
-            CanonicalFrame::Pixels { .. } => Err(self.error(
+            None | Some(CanonicalFrame::Consumed) => Ok(()),
+            Some(CanonicalFrame::Pixels { .. }) => Err(self.error(
                 EncodeErrorKind::FrameRead,
                 "local layered composition unexpectedly retained frame pixels",
             )),
         }
     }
 
-    async fn write_foreground(&mut self, foreground: &EncodedPng) -> Result<(), EncodeError> {
+    async fn write_foreground(&mut self, foreground: &DecodedRgba) -> Result<(), EncodeError> {
         let Some(input) = self.input.as_mut() else {
             return Err(self.error(
                 EncodeErrorKind::ProcessControl,
@@ -244,6 +248,7 @@ impl LayeredSession {
         }
 
         self.input.take();
+        let final_frame = self.receive_frame().await?;
         let status = self.wait_for_exit().await?;
         let stderr = self.finish_process_output().await?;
         if !status.success() {
@@ -258,14 +263,28 @@ impl LayeredSession {
             ));
         }
 
+        let completion = match (&self.destination, final_frame) {
+            (LayeredOutput::Video(path), CanonicalFrame::Consumed) => LayeredCompletion::Video(
+                EncodedVideo::completed(path.to_owned(), self.submitted_frames),
+            ),
+            (LayeredOutput::Frames, frame @ CanonicalFrame::Pixels { .. }) => {
+                LayeredCompletion::Frames(frame)
+            }
+            (LayeredOutput::Video(_), CanonicalFrame::Pixels { .. }) => {
+                return Err(self.error(
+                    EncodeErrorKind::FrameRead,
+                    "local layered composition unexpectedly retained frame pixels",
+                ));
+            }
+            (LayeredOutput::Frames, CanonicalFrame::Consumed) => {
+                return Err(self.error(
+                    EncodeErrorKind::FrameRead,
+                    "layered worker composition did not retain final frame pixels",
+                ));
+            }
+        };
         self.completed = true;
-        Ok(match self.destination.video_path() {
-            Some(path) => LayeredCompletion::Video(EncodedVideo::completed(
-                path.to_owned(),
-                self.submitted_frames,
-            )),
-            None => LayeredCompletion::Frames,
-        })
+        Ok(completion)
     }
 
     async fn wait_for_exit(&mut self) -> Result<ExitStatus, EncodeError> {
@@ -308,7 +327,7 @@ impl LayeredSession {
         stderr_result
     }
 
-    fn check_input(&self, foreground: &EncodedPng) -> Result<(), EncodeError> {
+    fn check_input(&self, foreground: &DecodedRgba) -> Result<(), EncodeError> {
         if self.submitted_frames >= self.expected_frames {
             return Err(self.error(
                 EncodeErrorKind::FrameLimit,
