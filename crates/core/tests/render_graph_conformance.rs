@@ -10,7 +10,7 @@ use onmark_core::compiler;
 use onmark_core::model::{
     AssetMetadata, AssetRef, AudioChannelLayout, AudioSampleRate, Duration, FrameInterval,
     FrameRate, FrozenAsset, FrozenAssetId, PresentationTemporalCapability, SourceId, Timebase,
-    VideoMetadata, VideoTiming,
+    VideoDimensions, VideoMetadata, VideoTiming,
 };
 use onmark_core::render_graph::{PartitionPlan, RenderGraph};
 use onmark_core::timeline::TimelineIr;
@@ -83,6 +83,7 @@ fn frozen_assets<const N: usize>(entries: [(&str, &str); N]) -> BTreeMap<AssetRe
             } else {
                 let video = VideoMetadata::new(
                     duration,
+                    VideoDimensions::new(1_920, 1_080).expect("fixture dimensions are positive"),
                     "h264",
                     "yuv420p",
                     VideoTiming::Constant(

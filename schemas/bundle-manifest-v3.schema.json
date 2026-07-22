@@ -28,7 +28,7 @@
       "type": "object"
     },
     "BundleVersion": {
-      "const": 2,
+      "const": 3,
       "description": "Version of the immutable presentation-bundle contract.",
       "format": "uint16",
       "maximum": 65535,
@@ -49,9 +49,24 @@
           "type": "string"
         }
       ]
+    },
+    "PresentationVisualCapability": {
+      "description": "Proven relationship between browser presentation pixels and primary media.\n\nUnknown presentation code is [`BrowserComposite`](Self::BrowserComposite).\nA separable overlay is an explicit claim that the browser output is a\ntransparent foreground independent of the primary video beneath it.",
+      "oneOf": [
+        {
+          "const": "browserComposite",
+          "description": "Chromium owns the complete frame, including primary media.",
+          "type": "string"
+        },
+        {
+          "const": "separableOverlay",
+          "description": "Chromium owns only a transparent foreground over native primary media.",
+          "type": "string"
+        }
+      ]
     }
   },
-  "$id": "https://onmark.dev/schemas/bundle-manifest-v2.schema.json",
+  "$id": "https://onmark.dev/schemas/bundle-manifest-v3.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "Stable description of one immutable presentation artifact.",
@@ -77,6 +92,9 @@
     },
     "version": {
       "$ref": "#/$defs/BundleVersion"
+    },
+    "visualCapability": {
+      "$ref": "#/$defs/PresentationVisualCapability"
     }
   },
   "required": [
@@ -84,6 +102,7 @@
     "bundleId",
     "entryPoint",
     "temporalCapability",
+    "visualCapability",
     "files"
   ],
   "title": "BundleManifest",

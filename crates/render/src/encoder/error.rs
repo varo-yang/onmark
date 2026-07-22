@@ -23,6 +23,8 @@ pub enum EncodeErrorKind {
     NoFrames,
     /// A frame could not be written to `FFmpeg`.
     InputWrite,
+    /// A composed frame could not be read from `FFmpeg`.
+    FrameRead,
     /// An encoding operation exceeded its bounded completion or inactivity deadline.
     Timeout,
     /// `FFmpeg` exited unsuccessfully.
@@ -62,6 +64,10 @@ impl EncodeError {
             message: message.into(),
             source: None,
         }
+    }
+
+    pub(super) fn message(&self) -> &str {
+        &self.message
     }
 
     pub(super) fn io(

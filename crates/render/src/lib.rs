@@ -16,6 +16,7 @@ mod profile;
 mod unit;
 mod unit_root;
 mod video;
+mod visual;
 mod worker;
 
 pub use browser::{
@@ -44,4 +45,5 @@ pub use unit_root::{
     UnitRootLimits,
 };
 pub use video::{AdmittedVideo, UnsupportedVideo};
+pub use visual::{LayeredMediaPlan, UnsupportedVisualComposition, VisualExecutionPlan};
 pub use worker::{WorkerCaptureRequest, WorkerCaptureVersion};

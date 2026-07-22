@@ -63,7 +63,11 @@ impl fmt::Display for PackageError {
             } => write!(formatter, "failed to {operation} {}", path.display()),
             Self::InvalidOptions(message) => write!(
                 formatter,
-                "{message}; expected --bootstrap <path> --browser-root <path> --output <directory>",
+                concat!(
+                    "{}; expected --bootstrap <path> --browser-root <path> ",
+                    "--ffmpeg <path> --output <directory>",
+                ),
+                message,
             ),
             Self::InvalidInput { path, reason } => {
                 write!(formatter, "invalid {reason}: {}", path.display())

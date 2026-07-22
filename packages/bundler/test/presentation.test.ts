@@ -46,18 +46,28 @@ test("builds a deterministic immutable presentation artifact", async () => {
       outputDirectory: join(workspace, "first"),
       maxOutputBytes: 1_000_000,
       temporalCapability: "sequential",
+      visualCapability: "browserComposite",
     });
     const second = await bundlePresentation({
       entryPoint,
       outputDirectory: join(workspace, "second"),
       maxOutputBytes: 1_000_000,
       temporalCapability: "sequential",
+      visualCapability: "browserComposite",
     });
     const randomAccess = await bundlePresentation({
       entryPoint,
       outputDirectory: join(workspace, "random-access"),
       maxOutputBytes: 1_000_000,
       temporalCapability: "randomAccess",
+      visualCapability: "browserComposite",
+    });
+    const separableOverlay = await bundlePresentation({
+      entryPoint,
+      outputDirectory: join(workspace, "separable-overlay"),
+      maxOutputBytes: 1_000_000,
+      temporalCapability: "sequential",
+      visualCapability: "separableOverlay",
     });
 
     assert.deepEqual(first.manifest, second.manifest);
@@ -67,6 +77,15 @@ test("builds a deterministic immutable presentation artifact", async () => {
     assert.equal(
       randomAccess.manifest.bundleId,
       bundleIdentity(randomAccess.manifest),
+    );
+    assert.deepEqual(first.manifest.files, separableOverlay.manifest.files);
+    assert.notEqual(
+      first.manifest.bundleId,
+      separableOverlay.manifest.bundleId,
+    );
+    assert.equal(
+      separableOverlay.manifest.bundleId,
+      bundleIdentity(separableOverlay.manifest),
     );
     assert.deepEqual(
       first.manifest.files.map((file) => file.path),
@@ -109,12 +128,14 @@ test("carries local visual resources into the immutable bundle", async () => {
       outputDirectory: join(workspace, "first"),
       maxOutputBytes: 1_000_000,
       temporalCapability: "sequential",
+      visualCapability: "browserComposite",
     });
     const second = await bundlePresentation({
       entryPoint,
       outputDirectory: join(workspace, "second"),
       maxOutputBytes: 1_000_000,
       temporalCapability: "sequential",
+      visualCapability: "browserComposite",
     });
     assert.deepEqual(first.manifest, second.manifest);
 
@@ -164,6 +185,7 @@ test("does not publish an oversized or pre-existing artifact", async () => {
         outputDirectory,
         maxOutputBytes: 1,
         temporalCapability: "sequential",
+        visualCapability: "browserComposite",
       }),
       (error: unknown) =>
         error instanceof BundleError && error.kind === "outputLimit",
@@ -177,6 +199,7 @@ test("does not publish an oversized or pre-existing artifact", async () => {
       outputDirectory,
       maxOutputBytes: 1_000_000,
       temporalCapability: "sequential",
+      visualCapability: "browserComposite",
     });
     await assert.rejects(
       bundlePresentation({
@@ -184,6 +207,7 @@ test("does not publish an oversized or pre-existing artifact", async () => {
         outputDirectory,
         maxOutputBytes: 1_000_000,
         temporalCapability: "sequential",
+        visualCapability: "browserComposite",
       }),
       (error: unknown) =>
         error instanceof BundleError && error.kind === "output",
@@ -199,13 +223,14 @@ test("keeps the checked-in video presentation bundle current", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "onmark-bundler-test-"));
   try {
     const repository = fileURLToPath(new URL("../../../..", import.meta.url));
-    const expected = join(repository, "conformance/protocol/bundle-v2");
+    const expected = join(repository, "conformance/protocol/bundle-v3");
     const outputDirectory = join(workspace, "bundle");
     await bundlePresentation({
       entryPoint: join(repository, "conformance/browser/video-presentation.ts"),
       outputDirectory,
       maxOutputBytes: 1_000_000,
       temporalCapability: "randomAccess",
+      visualCapability: "separableOverlay",
     });
 
     const files = await artifactFiles(expected);
@@ -235,6 +260,7 @@ test("bundles the Gate-five temporal experiment with its browser libraries", asy
       outputDirectory,
       maxOutputBytes: 2_000_000,
       temporalCapability: "randomAccess",
+      visualCapability: "browserComposite",
     });
 
     assert.deepEqual((await readdir(outputDirectory)).sort(), [
@@ -255,6 +281,7 @@ function bundleIdentity(manifest: BundleManifest): string {
     version: manifest.version,
     entryPoint: manifest.entryPoint,
     temporalCapability: manifest.temporalCapability,
+    visualCapability: manifest.visualCapability,
     files: manifest.files,
   });
   const digest = createHash("sha256").update(identity).digest("hex");

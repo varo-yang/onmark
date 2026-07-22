@@ -15,9 +15,11 @@ use onmark_core::model::FrameIndex;
 use onmark_core::protocol::{WireFrameRate, WireInterval};
 use onmark_core::render_graph::PartitionPlan;
 
-use self::capture::{FrameSink, RequestSequence, render_session, validate_plan};
+use self::capture::{
+    CaptureSurface, CaptureTask, FrameSink, RequestSequence, render_session, validate_plan,
+};
 use self::output::StagedOutput;
-use crate::encoder::AudioInput;
+use crate::encoder::{AudioInput, LayeredCompletion, LayeredJob, LayeredMediaInput, LayeredOutput};
 use crate::unit::MAX_AUDIO_TRACKS;
 use crate::{
     BrowserLaunchPolicy, BrowserLimits, BrowserSession, CaptureEnvironmentId, EncodedVideo,
@@ -135,6 +137,7 @@ pub struct FrameCaptureExecutor {
     browser_executable: PathBuf,
     launch_policy: BrowserLaunchPolicy,
     browser_limits: BrowserLimits,
+    ffmpeg: Ffmpeg,
 }
 
 impl FrameCaptureExecutor {
@@ -148,11 +151,13 @@ impl FrameCaptureExecutor {
         browser_executable: impl Into<PathBuf>,
         launch_policy: BrowserLaunchPolicy,
         browser_limits: BrowserLimits,
+        ffmpeg: Ffmpeg,
     ) -> Self {
         Self {
             browser_executable: browser_executable.into(),
             launch_policy,
             browser_limits,
+            ffmpeg,
         }
     }
 
@@ -210,10 +215,8 @@ impl FrameCaptureExecutor {
                 }
                 Err(error) => return Err(RenderError::artifact(artifact, error)),
             };
-        let mut frames = FrameSink::Artifact(&mut writer);
-
         let metrics = self
-            .capture_unit(unit, &mut frames, requests, artifact)
+            .capture_artifact_frames(unit, &mut writer, requests, artifact)
             .await?;
         let artifact = match writer.finish().await {
             Ok(artifact) => artifact,
@@ -227,6 +230,43 @@ impl FrameCaptureExecutor {
             artifact,
             metrics: Some(metrics),
         })
+    }
+
+    async fn capture_artifact_frames(
+        &self,
+        unit: &ExecutableUnit,
+        writer: &mut crate::frame_artifact::FrameArtifactWriter,
+        requests: RequestSequence,
+        output: &Path,
+    ) -> Result<FrameCaptureMetrics, RenderError> {
+        if unit.visual_execution().layered_media().is_none() {
+            let mut frames = FrameSink::Artifact(writer);
+            return self.capture_unit(unit, &mut frames, requests, output).await;
+        }
+
+        let job = layered_job(std::slice::from_ref(unit), LayeredOutput::Frames, output)?;
+        let mut compositor = self
+            .ffmpeg
+            .start_layered(job)
+            .map_err(|source| RenderError::encoder(output, source))?;
+        let mut frames = FrameSink::LayeredArtifact {
+            compositor: &mut compositor,
+            artifact: writer,
+        };
+        let metrics = self
+            .capture_unit(unit, &mut frames, requests, output)
+            .await?;
+        let completion = compositor
+            .finish()
+            .await
+            .map_err(|source| RenderError::encoder(output, source))?;
+        if !matches!(completion, LayeredCompletion::Frames) {
+            return Err(invalid_plan(
+                output,
+                "layered worker composition unexpectedly produced encoded video",
+            ));
+        }
+        Ok(metrics)
     }
 
     async fn reuse_artifact(
@@ -248,7 +288,15 @@ impl FrameCaptureExecutor {
         requests: RequestSequence,
         output: &Path,
     ) -> Result<FrameCaptureMetrics, RenderError> {
-        let plan = unit.browser_plan();
+        let foreground = unit
+            .visual_execution()
+            .layered_media()
+            .is_some()
+            .then(|| unit.browser_plan().foreground_only());
+        let (plan, surface) = match foreground.as_ref() {
+            Some(plan) => (plan, CaptureSurface::Transparent),
+            None => (unit.browser_plan(), CaptureSurface::Opaque),
+        };
         let launch_started = Instant::now();
         let mut browser = BrowserSession::launch(
             &self.browser_executable,
@@ -265,12 +313,15 @@ impl FrameCaptureExecutor {
 
         let render_result = render_session(
             &mut browser,
-            plan,
-            requests,
-            unit.entry_url().as_str(),
             frames,
             &mut metrics,
-            output,
+            CaptureTask {
+                plan,
+                requests,
+                entry_url: unit.entry_url().as_str(),
+                surface,
+                output,
+            },
         )
         .await;
         let shutdown_started = Instant::now();
@@ -306,6 +357,7 @@ impl RenderExecutor {
                 browser_executable,
                 BrowserLaunchPolicy::local(),
                 browser_limits,
+                ffmpeg.clone(),
             ),
             ffmpeg,
         }
@@ -432,21 +484,78 @@ impl RenderExecutor {
             frame_rate,
             requests,
         } = self.validate_sequence(&units, expected_output, output)?;
+        if units[0].visual_execution().layered_media().is_some() {
+            return self
+                .render_layered_sequence(&units, requests, audio, frame_rate, output)
+                .await;
+        }
+        self.render_browser_sequence(&units, requests, audio, frame_rate, output)
+            .await
+    }
+
+    async fn render_browser_sequence(
+        &self,
+        units: &[ExecutableUnit],
+        requests: Vec<RequestSequence>,
+        audio: Vec<AudioInput>,
+        frame_rate: WireFrameRate,
+        output: &Path,
+    ) -> Result<EncodedVideo, RenderError> {
         let staging = StagedOutput::new(output)?;
         let mut encoder = self
             .ffmpeg
             .start(staging.visual_path(), frame_rate)
             .map_err(|source| RenderError::encoder(output, source))?;
-
         for (unit, requests) in units.iter().zip(requests) {
             let mut frames = FrameSink::Encoder(&mut encoder);
             self.capture
                 .capture_unit(unit, &mut frames, requests, output)
                 .await?;
         }
-
         self.finish_sequence(encoder, staging, audio, frame_rate, output)
             .await
+    }
+
+    async fn render_layered_sequence(
+        &self,
+        units: &[ExecutableUnit],
+        requests: Vec<RequestSequence>,
+        audio: Vec<AudioInput>,
+        frame_rate: WireFrameRate,
+        output: &Path,
+    ) -> Result<EncodedVideo, RenderError> {
+        let staging = StagedOutput::new(output)?;
+        let job = layered_job(
+            units,
+            LayeredOutput::Video(staging.visual_path().to_owned()),
+            output,
+        )?;
+        let mut compositor = self
+            .ffmpeg
+            .start_layered(job)
+            .map_err(|source| RenderError::encoder(output, source))?;
+        let mut frames = FrameSink::LayeredVideo(&mut compositor);
+        for (unit, requests) in units.iter().zip(requests) {
+            self.capture
+                .capture_unit(unit, &mut frames, requests, output)
+                .await?;
+        }
+        let completion = compositor
+            .finish()
+            .await
+            .map_err(|source| RenderError::encoder(output, source))?;
+        let LayeredCompletion::Video(visual) = completion else {
+            return Err(invalid_plan(
+                output,
+                "layered local composition did not produce encoded video",
+            ));
+        };
+        let video = self
+            .ffmpeg
+            .mix_audio(visual, audio, frame_rate, staging.mixed_path())
+            .await
+            .map_err(|source| RenderError::encoder(output, source))?;
+        staging.publish(video, output)
     }
 
     async fn finish_sequence(
@@ -630,7 +739,71 @@ fn validate_unit_identity(
             "render units do not share one frame rate",
         ));
     }
+    if actual.visual_execution().capability() != expected.visual_execution().capability() {
+        return Err(invalid_plan(
+            output,
+            "render units do not share one visual execution path",
+        ));
+    }
     Ok(())
+}
+
+fn layered_job(
+    units: &[ExecutableUnit],
+    destination: LayeredOutput,
+    diagnostic_path: &Path,
+) -> Result<LayeredJob, RenderError> {
+    let Some(first) = units.first() else {
+        return Err(invalid_plan(
+            diagnostic_path,
+            "layered render sequence contains no units",
+        ));
+    };
+    let media = units
+        .iter()
+        .map(|unit| layered_media_input(unit, diagnostic_path))
+        .collect::<Result<Vec<_>, _>>()?;
+    let frames = media
+        .iter()
+        .try_fold(0_u64, |total, media| total.checked_add(media.frames));
+    let Some(frames) = frames else {
+        return Err(sequence_too_large(diagnostic_path));
+    };
+    Ok(LayeredJob {
+        media,
+        output_frame_rate: first.browser_plan().frame_rate(),
+        frames,
+        profile: first.profile(),
+        destination,
+        diagnostic_path: diagnostic_path.to_owned(),
+    })
+}
+
+fn layered_media_input(
+    unit: &ExecutableUnit,
+    output: &Path,
+) -> Result<LayeredMediaInput, RenderError> {
+    let path = unit
+        .layered_media_path()
+        .ok_or_else(|| invalid_plan(output, "render unit has no layered media"))?;
+    let [video] = unit.browser_plan().videos() else {
+        return Err(invalid_plan(
+            output,
+            "layered render unit does not contain one primary video",
+        ));
+    };
+    let frames = unit
+        .browser_plan()
+        .output()
+        .end()
+        .get()
+        .checked_sub(unit.browser_plan().output().start().get())
+        .ok_or_else(|| invalid_plan(output, "layered render unit has a reversed output"))?;
+    Ok(LayeredMediaInput {
+        path,
+        source_frame_rate: video.source_frame_rate(),
+        frames,
+    })
 }
 
 fn extend_frame_budget(

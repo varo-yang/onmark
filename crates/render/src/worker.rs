@@ -14,7 +14,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use crate::unit_root::AssetSource;
 use crate::{
     CaptureEnvironmentId, ExecutableUnit, FrameArtifactId, RenderProfile, UnitRoot, UnitRootError,
-    UnitRootLimits,
+    UnitRootLimits, VisualExecutionPlan,
 };
 
 /// Version of the worker capture-request contract.
@@ -23,8 +23,8 @@ use crate::{
 pub struct WorkerCaptureVersion(u16);
 
 impl WorkerCaptureVersion {
-    /// Capture request with an explicit locked-environment identity.
-    pub const V2: Self = Self(2);
+    /// Only worker capture-request version accepted by this build.
+    pub const CURRENT: Self = Self(2);
 
     /// Returns the stable integer representation.
     #[must_use]
@@ -39,8 +39,8 @@ impl<'de> Deserialize<'de> for WorkerCaptureVersion {
         D: Deserializer<'de>,
     {
         let version = u16::deserialize(deserializer)?;
-        if version == Self::V2.get() {
-            return Ok(Self::V2);
+        if version == Self::CURRENT.get() {
+            return Ok(Self::CURRENT);
         }
         Err(D::Error::custom(
             "unsupported worker capture request version",
@@ -62,6 +62,7 @@ pub struct WorkerCaptureRequest {
     bundle: BundleManifest,
     browser_plan: BrowserPlan,
     profile: RenderProfile,
+    visual_execution: VisualExecutionPlan,
 }
 
 impl WorkerCaptureRequest {
@@ -70,20 +71,20 @@ impl WorkerCaptureRequest {
     /// Fixed directory containing immutable presentation payload files.
     pub const BUNDLE_DIRECTORY: &'static str = "bundle";
 
-    /// Creates one portable request for one already-composed render unit.
-    #[must_use]
-    pub fn new(
+    pub(crate) fn new(
         capture_environment: CaptureEnvironmentId,
         bundle: BundleManifest,
         browser_plan: BrowserPlan,
         profile: RenderProfile,
+        visual_execution: VisualExecutionPlan,
     ) -> Self {
         Self {
-            version: WorkerCaptureVersion::V2,
+            version: WorkerCaptureVersion::CURRENT,
             capture_environment,
             bundle,
             browser_plan,
             profile,
+            visual_execution,
         }
     }
 
@@ -115,6 +116,12 @@ impl WorkerCaptureRequest {
     #[must_use]
     pub const fn profile(&self) -> RenderProfile {
         self.profile
+    }
+
+    /// Returns the admitted browser/native visual path.
+    #[must_use]
+    pub const fn visual_execution(&self) -> &VisualExecutionPlan {
+        &self.visual_execution
     }
 
     /// Returns the deployment-independent address of this capture result.
@@ -190,6 +197,7 @@ impl WorkerCaptureRequest {
             bundle: manifest,
             browser_plan,
             profile,
+            visual_execution,
             ..
         } = self;
         let assets = asset_ids(&browser_plan)
@@ -211,6 +219,7 @@ impl WorkerCaptureRequest {
             browser_plan,
             manifest.bundle_id(),
             profile,
+            visual_execution,
             root,
         ))
     }
@@ -229,12 +238,22 @@ impl<'de> Deserialize<'de> for WorkerCaptureRequest {
         D: Deserializer<'de>,
     {
         let wire = WorkerCaptureRequestWire::deserialize(deserializer)?;
-        Ok(Self::new(
+        let request = Self::new(
             wire.capture_environment,
             wire.bundle,
             wire.browser_plan,
             wire.profile,
-        ))
+            wire.visual_execution,
+        );
+        request
+            .visual_execution
+            .validate(
+                request.bundle.visual_capability(),
+                &request.browser_plan,
+                request.profile,
+            )
+            .map_err(D::Error::custom)?;
+        Ok(request)
     }
 }
 
@@ -247,6 +266,7 @@ struct WorkerCaptureRequestWire {
     bundle: BundleManifest,
     browser_plan: BrowserPlan,
     profile: RenderProfile,
+    visual_execution: VisualExecutionPlan,
 }
 
 #[cfg(test)]
@@ -259,7 +279,7 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<WorkerCaptureVersion>("2")
                 .expect("the environment-bound version parses"),
-            WorkerCaptureVersion::V2,
+            WorkerCaptureVersion::CURRENT,
         );
     }
 }

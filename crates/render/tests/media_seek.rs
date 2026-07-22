@@ -25,7 +25,7 @@ use std::time::{Duration, Instant};
 use onmark_core::compiler;
 use onmark_core::model::{
     AssetMetadata, AssetRef, Duration as MediaDuration, FrameRate, FrozenAsset, FrozenAssetId,
-    SourceId, Timebase, VideoColorProfile, VideoMetadata, VideoTiming,
+    SourceId, Timebase, VideoColorProfile, VideoDimensions, VideoMetadata, VideoTiming,
 };
 use onmark_core::protocol::{
     BrowserCommand, BrowserEvent, BrowserPlan, BrowserRequest, RequestId, WireFrame,
@@ -1038,8 +1038,10 @@ fn browser_plan_with_source_rate(
     source_frame_rate: FrameRate,
 ) -> BrowserPlan {
     let duration = MediaDuration::from_nanos(2_500_000_000);
+    let (width, height) = experiment_dimensions();
     let video = VideoMetadata::new(
         duration,
+        VideoDimensions::new(width, height).expect("fixture dimensions are positive"),
         "h264",
         "yuv420p",
         VideoTiming::Constant(source_frame_rate),

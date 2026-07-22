@@ -202,9 +202,35 @@ timeline。单个 cleanup 失败后仍会尝试 dispose 全部 effect。
 
 这条 lifecycle 本身不是 random-access 声明。只有 conformance 证明任意请求帧只依赖
 immutable input 与该精确帧后，presentation 才能以 `randomAccess` 构建。声明是显式 build
-metadata，不从 source 或 screenplay spelling 猜测。Bundle V2 把它纳入 canonical
-identity，Rust 在 Render Graph 分片前消费它；legacy V1 与未指定的 CLI 声明始终按
-`sequential` 处理。
+metadata，不从 source 或 screenplay spelling 猜测。当前 bundle manifest 把它纳入
+canonical identity，Rust 在 Render Graph 分片前消费它；未指定的 CLI 声明始终按
+`sequential` 处理，底层 bundler 则要求显式传值。
+
+## Visual capability
+
+`PresentationVisualCapability` 声明 Chromium 拥有哪些像素。它是 build metadata，
+不是 screenplay spelling，也绝不从 presentation source 猜测。CLI 默认使用
+`browserComposite`，底层 bundler 要求显式传值。
+
+- `browserComposite` 表示 Chromium 拥有包括主视频在内的完整画面，是未知
+  presentation code 的保守能力；
+- `separableOverlay` 表示 Chromium 只产出与主视频像素无关的透明前景，native
+  execution 可以先解码并安放主视频，再以 source-over 合成该前景。
+
+声明 `separableOverlay` 的 presentation 在 browser video placement 被移除后仍必须
+保持正确。它可以使用 solved interval、overlay fact、精确 frame identity 与 immutable
+visual resource；不得把 video 采样进 Canvas/WebGL，不得读取 media pixel，不得使用依赖
+背景的 filter 或 blend mode，也不得让前景像素以其他方式依赖下面的主画面。能力由
+conformance 接纳，不能因为 source scan 暂时没找到禁用 token 就获得信任。
+
+当前 native path 刻意比 presentation promise 更窄：必须恰好有一个覆盖完整 published
+interval 的主视频，冻结的 source dimensions 必须与 output profile 完全一致，并且完整
+color tuple 必须属于已准入的 BT.709 limited-range profile。这些检查避免 Rust 重造 CSS
+layout。声明能力却不满足 native profile 时，执行会在启动进程前失败，绝不偷偷回退到
+browser composition。
+
+当前 Bundle Manifest 把 temporal 与 visual capability 都纳入 canonical identity。
+bundle 是可重建产物而非 authored data；reader 只接受当前版本，旧 bundle 直接重建。
 
 ## 素材
 

@@ -178,7 +178,8 @@ Timeline solving consumes a catalog from `AssetRef` to `FrozenAssetId` plus
 normalized `AssetMetadata`, all owned by `onmark-core`. Metadata records exact
 artifact duration and, for each selected audio or visual stream, its exact
 stream duration. Visual metadata also records codec, pixel format, and either
-one exact rational frame rate or variable timing. Single-frame streams are
+one exact rational frame rate or variable timing, plus positive source-pixel
+dimensions and any complete admitted color tuple. Single-frame streams are
 represented separately because an exact reported frame count of one cannot
 establish a source rate. `onmark-media` produces metadata through probing, while
 a loader or composition root hashes and freezes the same bytes. ffprobe-specific
@@ -195,13 +196,12 @@ only the validated identity and deterministic mapping.
 
 The bundle manifest has the same separation. Its contract identifies an
 immutable presentation artifact and its entry point, runtime version, fonts,
-static dependencies, and declared temporal capability. V1 records the fixed
-entry document and retained files; readers conservatively interpret its absent
-capability as `sequential`. V2 requires `sequential` or `randomAccess` and binds
-that value into `bundleId`. The V1 identity is
-`{version,entryPoint,files}`; V2 is
-`{version,entryPoint,temporalCapability,files}`. Both use SHA-256 over UTF-8
-compact JSON, with files sorted by portable path and each entry ordered as
+static dependencies, and declared temporal and visual capabilities. The
+current manifest requires both capabilities and binds them into `bundleId`.
+Its identity is
+`{version,entryPoint,temporalCapability,visualCapability,files}`. It uses
+SHA-256 over UTF-8 compact JSON, with files sorted by portable path and each
+entry ordered as
 `{bytes,path,sha256}`. This is a versioned contract, not an incidental
 pretty-printed representation. A manifest contains one to 99,999 payload files.
 Paths are lowercase portable ASCII, at
@@ -786,20 +786,22 @@ environment, so the Runtime API starts before heavy browser I/O and warm
 invocations reuse the verified private installation.
 
 The package-only `onmark-aws-lambda-package` binary consumes a prebuilt
-`provided.al2023.arm64` bootstrap and an expanded browser root. It sorts
+`provided.al2023.arm64` bootstrap, a self-contained Linux arm64 `FFmpeg`
+executable, and an expanded browser root. It sorts
 portable browser paths, rejects links and special files, normalizes tar
 ownership, modes, and timestamps, applies a fixed single-threaded zstd policy,
 and fixes ZIP order, timestamps, permissions, and compression levels. Its
 sibling-staged output directory contains the ZIP and a canonical manifest with
-SHA-256 identities for the bootstrap, browser archive, and final package. A
+SHA-256 identities for the bootstrap, browser archive, `FFmpeg`, and final package. A
 final directory rename hides normally completed partial output, but portable
 filesystem APIs cannot turn the preceding absence check into a cross-process
 no-clobber transaction. The capture-environment identity conservatively covers
-the bootstrap, browser archive, target, and isolated-worker launch policy. This
-proves identical outputs for identical locked inputs; cross-compilation remains
-the job of a pinned Linux arm64 builder such as Cargo Lambda, not of the
-packager. Packaging rejects non-Linux-arm64 executables and reserves ten MiB
-beneath Lambda's 250 MiB unzipped-package ceiling.
+the bootstrap, browser archive, `FFmpeg`, target, and isolated-worker launch
+policy. The bootstrap digest also owns the native composition policy compiled
+into `onmark-render`. This proves identical outputs for identical locked inputs;
+cross-compilation remains the job of a pinned Linux arm64 builder such as Cargo
+Lambda, not of the packager. Packaging rejects non-Linux-arm64 executables and
+reserves ten MiB beneath Lambda's 250 MiB unzipped-package ceiling.
 
 The deployment config owns S3 transport budgets: a five-second connection
 timeout, a 45-second attempt timeout, a 90-second operation timeout, and at most
@@ -954,11 +956,12 @@ evidence after this gate.
 The checked WAAPI, GSAP, and Three.js playheads all use the standard
 `PresentationRuntimeAdapter`: effects bind once during `Load`, apply in declared
 order during `Seek(frame)`, and finish before `FrameStaged(frame)`. Disposal is
-terminal and attempts every owned effect even after one cleanup failure. Bundle
-V2 binds the closed capability into content identity. V1 and unspecified CLI
-input remain sequential; explicit `randomAccess` lets the Render Graph produce
-shot-scoped units. The pinned Linux exit conformance bundles that effect-bearing
-presentation, renders the same media, audio, and caption facts as one whole-film
+terminal and attempts every owned effect even after one cleanup failure. The
+current bundle manifest binds the closed capability into content identity.
+Unspecified CLI input remains sequential; explicit `randomAccess` lets the
+Render Graph produce shot-scoped units. The pinned Linux exit conformance
+bundles that effect-bearing presentation, renders the same media, audio, and
+caption facts as one whole-film
 unit and two independent units, and compares their canonical raw-RGBA frame
 sequences before assembling the shared final output.
 
@@ -1011,6 +1014,13 @@ buffer an unbounded frame sequence, start one decoder per frame, or silently
 fall back between native and Chromium decode/color paths. Local and remote
 workers consume the same Render Unit and executor path.
 
+Production admission initially accepts exactly one primary video whose solved
+placement equals the published interval, whose frozen source dimensions equal
+the output profile, and whose complete color tuple is BT.709 limited range.
+This is a layout proof, not a permanent full-screen convention: broader
+`cover`, `contain`, crop, and transform behavior requires explicit typed facts
+and independent evidence. Rust never infers those CSS decisions.
+
 Native frame-rate conversion may not inherit `FFmpeg`'s default `fps` rounding.
 The candidate projects each source PTS from the Rust-owned source/output
 rationals onto the first output frame whose midpoint selects that source frame;
@@ -1056,6 +1066,17 @@ The reviewed Gate-seven record in
 and median incremental peak RSS is 79.73%. This evidence admits implementation
 of the explicit production capability; it does not silently switch the
 authoritative path or weaken the remaining capability and conformance work.
+
+The production branch retains one compositor across a local render sequence.
+Its media inputs are concatenated inside that process before one transparent
+browser stream is applied, so partitioning does not create encoded segments or
+a decoder per frame. One process accepts at most 64 media-bearing units; larger
+sequences fail before launch instead of opening an unbounded decoder set. A
+capture worker uses the same compositor for its one Render Unit and packages
+each canonical RGBA result into the existing lossless frame artifact. A
+capacity-one channel is the only frame queue: local execution returns only each
+fingerprint, while workers retain one RGBA frame at a time. The locked
+real-process exit fixture must still pass before Gate seven closes.
 
 Gate seven does not add VFR, new codecs, HDR, hardware acceleration, lossy
 screenshot transport, parallel browser capture, transitions, playback-rate

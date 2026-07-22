@@ -1,0 +1,30 @@
+html,
+body {
+  background: transparent;
+  height: 100%;
+  margin: 0;
+  width: 100%;
+}
+
+body {
+  overflow: hidden;
+}
+
+.onmark-overlay {
+  background: rgb(0 0 0 / 72%);
+  color: white;
+  left: 16px;
+  padding: 8px 12px;
+  position: fixed;
+}
+
+.onmark-title {
+  font: 700 24px sans-serif;
+  top: 16px;
+}
+
+.onmark-call-to-action,
+.onmark-caption {
+  bottom: 16px;
+  font: 600 18px sans-serif;
+}

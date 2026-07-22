@@ -137,6 +137,18 @@ impl BrowserPlan {
         &self.overlays
     }
 
+    /// Projects the same solved unit without browser-owned primary media.
+    ///
+    /// Render execution may use this only after an independent visual
+    /// capability proves that Chromium owns a transparent foreground. The
+    /// full plan remains the artifact-identity source.
+    #[must_use]
+    pub fn foreground_only(&self) -> Self {
+        let mut foreground = self.clone();
+        foreground.videos.clear();
+        foreground
+    }
+
     /// Returns the start and end frame of every browser placement.
     ///
     /// Placement visibility is constant between these boundaries. Native
@@ -154,7 +166,7 @@ impl BrowserPlan {
     }
 
     fn checked(wire: BrowserPlanWire) -> Result<Self, InvalidBrowserPlan> {
-        if wire.timeline_version != TimelineVersion::V1.get() {
+        if wire.timeline_version != TimelineVersion::CURRENT.get() {
             return Err(InvalidBrowserPlan::UnsupportedTimelineVersion);
         }
         if wire.videos.len() > MAX_BROWSER_VIDEOS {
@@ -602,15 +614,15 @@ pub enum InvalidBrowserPlan {
     VideoCrossesEvaluation,
     /// An overlay would need clipping at the unit evaluation boundary.
     OverlayCrossesEvaluation,
-    /// The plan contains more video placements than V1 can carry.
+    /// The plan contains more video placements than the current contract can carry.
     TooManyVideos,
-    /// The plan contains more overlay placements than V1 can carry.
+    /// The plan contains more overlay placements than the current contract can carry.
     TooManyOverlays,
     /// Two overlay placements claim the same component identity.
     DuplicateComponentId,
     /// A Timeline overlay carries a non-overlay element kind.
     InvalidOverlayKind(ElementKind),
-    /// One overlay inscription exceeds the V1 character budget.
+    /// One overlay inscription exceeds the current character budget.
     OverlayTextTooLong(ElementKind),
     /// One imported caption exceeds the per-placement text budget.
     CaptionTextTooLong,
@@ -644,10 +656,10 @@ impl fmt::Display for InvalidBrowserPlan {
                 formatter.write_str("browser overlay crosses the evaluation boundary")
             }
             Self::TooManyVideos => {
-                formatter.write_str("browser plan exceeds the V1 video-placement limit")
+                formatter.write_str("browser plan exceeds the video-placement limit")
             }
             Self::TooManyOverlays => {
-                formatter.write_str("browser plan exceeds the V1 overlay-placement limit")
+                formatter.write_str("browser plan exceeds the overlay-placement limit")
             }
             Self::DuplicateComponentId => {
                 formatter.write_str("browser overlay component identity is duplicated")
@@ -659,13 +671,10 @@ impl fmt::Display for InvalidBrowserPlan {
                 )
             }
             Self::OverlayTextTooLong(kind) => {
-                write!(
-                    formatter,
-                    "browser {kind} text exceeds the V1 character limit"
-                )
+                write!(formatter, "browser {kind} text exceeds the character limit")
             }
             Self::CaptionTextTooLong => {
-                formatter.write_str("browser caption text exceeds the V1 character limit")
+                formatter.write_str("browser caption text exceeds the character limit")
             }
             Self::OverlayTextBudget => {
                 formatter.write_str("browser overlay text exceeds the request byte budget")
@@ -995,6 +1004,11 @@ mod tests {
             boundaries,
             BTreeSet::from([wire_frame(0), wire_frame(2), wire_frame(4)]),
         );
+
+        let foreground = plan.foreground_only();
+        assert!(foreground.videos().is_empty());
+        assert_eq!(foreground.overlays(), plan.overlays());
+        assert_eq!(foreground.output(), plan.output());
     }
 
     #[test]

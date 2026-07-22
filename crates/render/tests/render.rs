@@ -160,7 +160,8 @@ async fn renders_the_gate_one_plan_to_a_verified_mp4() {
     generate_source_video(&source, "2.5").await;
     let frozen = freeze_asset(&source).await;
     let executor = real_executor(100);
-    let unit = executable_gate_one_unit(frozen, source);
+    let bundle = FixtureBundle::checked_in();
+    let unit = executable_video_unit(&bundle, frozen, source);
 
     let video = executor
         .render(unit, &output)
@@ -170,6 +171,56 @@ async fn renders_the_gate_one_plan_to_a_verified_mp4() {
     assert_eq!(video.path(), output);
     assert_eq!(video.frames(), FRAME_COUNT);
     assert!(output.metadata().expect("the MP4 must exist").len() > 0);
+    assert_video_stream(&output, FRAME_COUNT).await;
+    assert_decodable_motion(&output).await;
+}
+
+#[tokio::test]
+#[ignore = "requires Linux ONMARK_BUNDLER, ONMARK_HEADLESS_SHELL, ONMARK_FFMPEG, and ONMARK_FFPROBE"]
+async fn renders_and_repeats_the_production_layered_path() {
+    let directory = tempdir().expect("the test output directory must be available");
+    let bundle = FixtureBundle::build_layered(directory.path()).await;
+    let source = directory.path().join("source.mp4");
+    let output = directory.path().join("layered.mp4");
+    let first_path = directory.path().join("first.onmark-frames");
+    let second_path = directory.path().join("second.onmark-frames");
+    generate_source_video(&source, "2.5").await;
+    let frozen = freeze_asset(&source).await;
+    let executor = real_executor(100);
+
+    let rendered = executor
+        .render(
+            executable_video_unit(&bundle, frozen.clone(), source.clone()),
+            &output,
+        )
+        .await
+        .expect("the admitted layered path must render one MP4");
+    let first = executor
+        .capture_frame_artifact(
+            &executable_video_unit(&bundle, frozen.clone(), source.clone()),
+            capture_environment(),
+            &first_path,
+            frame_artifact_limits(),
+        )
+        .await
+        .expect("the first layered worker capture must publish");
+    let second = executor
+        .capture_frame_artifact(
+            &executable_video_unit(&bundle, frozen, source),
+            capture_environment(),
+            &second_path,
+            frame_artifact_limits(),
+        )
+        .await
+        .expect("the repeated layered worker capture must publish");
+
+    FrameArtifact::verify_raw_rgba_equivalence(
+        std::slice::from_ref(&first),
+        std::slice::from_ref(&second),
+    )
+    .await
+    .expect("independent layered workers must produce equal canonical pixels");
+    assert_eq!(rendered.frames(), FRAME_COUNT);
     assert_video_stream(&output, FRAME_COUNT).await;
     assert_decodable_motion(&output).await;
 }
@@ -758,7 +809,7 @@ fn real_executor(max_frames: u64) -> RenderExecutor {
 }
 
 fn frame_artifact_limits() -> FrameArtifactLimits {
-    FrameArtifactLimits::new(TWO_UNIT_FRAME_COUNT, 64 * 1024 * 1024, 8 * 1024 * 1024)
+    FrameArtifactLimits::new(100, 64 * 1024 * 1024, 8 * 1024 * 1024)
         .expect("the fixture artifact limits are bounded")
 }
 
@@ -820,8 +871,11 @@ fn solve_timeline(
     timeline.expect("the fixture solves")
 }
 
-fn executable_gate_one_unit(frozen: FrozenAsset, source: PathBuf) -> ExecutableUnit {
-    let bundle = FixtureBundle::checked_in();
+fn executable_video_unit(
+    bundle: &FixtureBundle,
+    frozen: FrozenAsset,
+    source: PathBuf,
+) -> ExecutableUnit {
     let timeline = gate_one_video_timeline(frozen.clone());
     let materialized =
         MaterializedAsset::new(frozen, source).expect("the fixture source path is present");
@@ -966,19 +1020,48 @@ struct FixtureBundle {
 
 impl FixtureBundle {
     fn checked_in() -> Self {
-        let directory = repository().join("conformance/protocol/bundle-v2");
+        let directory = repository().join("conformance/protocol/bundle-v3");
         Self::from_directory(directory)
     }
 
     async fn build_temporal(workspace: &Path) -> Self {
-        let directory = workspace.join("temporal-bundle");
+        Self::build(
+            workspace,
+            "temporal-bundle",
+            "temporal-experiment.ts",
+            "randomAccess",
+            "browserComposite",
+        )
+        .await
+    }
+
+    async fn build_layered(workspace: &Path) -> Self {
+        Self::build(
+            workspace,
+            "layered-bundle",
+            "layered-presentation.ts",
+            "sequential",
+            "separableOverlay",
+        )
+        .await
+    }
+
+    async fn build(
+        workspace: &Path,
+        directory_name: &str,
+        entry_name: &str,
+        temporal_capability: &str,
+        visual_capability: &str,
+    ) -> Self {
+        let directory = workspace.join(directory_name);
         let bundled = Command::new(required_path("ONMARK_BUNDLER"))
             .args(["--entry"])
-            .arg(repository().join("conformance/browser/temporal-experiment.ts"))
+            .arg(repository().join("conformance/browser").join(entry_name))
             .args(["--output"])
             .arg(&directory)
             .args(["--max-output-bytes", "2000000"])
-            .args(["--temporal-capability", "randomAccess"])
+            .args(["--temporal-capability", temporal_capability])
+            .args(["--visual-capability", visual_capability])
             .output();
         let bundled = timeout(Duration::from_secs(30), bundled)
             .await
@@ -998,11 +1081,6 @@ impl FixtureBundle {
             .expect("the executable bundle manifest is readable");
         let manifest: BundleManifest =
             serde_json::from_str(&manifest).expect("the executable bundle manifest is valid");
-        assert_eq!(
-            manifest.temporal_capability(),
-            PresentationTemporalCapability::RandomAccess,
-        );
-
         Self {
             directory,
             manifest,

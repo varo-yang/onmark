@@ -7,7 +7,7 @@ use std::future::Future;
 use std::path::Path;
 use std::time::Instant;
 
-use onmark_render::{FrameCaptureMetrics, WorkerCaptureRequest};
+use onmark_render::{Ffmpeg, FrameCaptureMetrics, WorkerCaptureRequest};
 use tempfile::TempDir;
 
 use crate::browser::BrowserRuntime;
@@ -18,6 +18,8 @@ use crate::error::DeploymentError;
 use crate::invocation::{CaptureInvocation, CaptureResult};
 use crate::publication::ArtifactPublication;
 use crate::storage::S3Storage;
+
+const PACKAGED_FFMPEG: &str = "/var/task/ffmpeg";
 
 /// One sequential Lambda capture worker backed by the shared renderer.
 pub(crate) struct CaptureHandler {
@@ -39,6 +41,8 @@ impl CaptureHandler {
         let browser = BrowserRuntime::new(
             configuration.browser().clone(),
             Configuration::browser_limits(),
+            Ffmpeg::new(PACKAGED_FFMPEG, Configuration::encode_limits())
+                .expect("the deployed FFmpeg path and limits are fixed and nonempty"),
         );
 
         Ok(Self {

@@ -10,14 +10,15 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use onmark_render::{
-    BrowserLimits, CaptureEnvironmentId, FrameArtifactLimits, InvalidCaptureEnvironmentId,
-    UnitRootLimits,
+    BrowserLimits, CaptureEnvironmentId, EncodeLimits, FrameArtifactLimits,
+    InvalidCaptureEnvironmentId, UnitRootLimits,
 };
 
 use crate::browser::{BrowserArchiveDigest, BrowserPackage, InvalidBrowserArchiveDigest};
 use crate::invocation::{InvalidObjectPrefix, ObjectPrefix};
 
 const BROWSER_DEADLINE: Duration = Duration::from_mins(12);
+const ENCODER_INACTIVITY_TIMEOUT: Duration = Duration::from_mins(2);
 // Leave two minutes of the Lambda 15-minute ceiling for multipart abort and
 // runtime response delivery after the worker stops accepting new work.
 const INVOCATION_WORK_DEADLINE: Duration = Duration::from_mins(13);
@@ -26,6 +27,8 @@ const MAX_FRAME_ARTIFACT_FRAMES: u64 = 1_000_000;
 const MAX_FRAME_ARTIFACT_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 const MAX_FRAME_ARTIFACT_FILE_BYTES: u64 = MAX_FRAME_ARTIFACT_BYTES + 1024 * 1024;
 const MAX_FRAME_BYTES: usize = 64 * 1024 * 1024;
+const MAX_ENCODER_INPUT_BYTES: u64 = 128 * 1024 * 1024 * 1024;
+const MAX_PROCESS_STDERR_BYTES: usize = 1024 * 1024;
 const MAX_INPUT_FILES: usize = 10_000;
 // A publish collision temporarily retains worker input, the renderer's copied
 // unit root, the newly captured artifact, and the artifact being verified for
@@ -104,6 +107,16 @@ impl Configuration {
             MAX_FRAME_BYTES,
         )
         .expect("the Lambda artifact policy stays within the renderer safety envelope")
+    }
+
+    pub(crate) fn encode_limits() -> EncodeLimits {
+        EncodeLimits::new(
+            ENCODER_INACTIVITY_TIMEOUT,
+            MAX_FRAME_ARTIFACT_FRAMES,
+            MAX_ENCODER_INPUT_BYTES,
+            MAX_PROCESS_STDERR_BYTES,
+        )
+        .expect("the Lambda encoder policy stays within the renderer safety envelope")
     }
 
     pub(crate) fn unit_root_limits() -> UnitRootLimits {

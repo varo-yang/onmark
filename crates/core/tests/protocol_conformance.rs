@@ -8,7 +8,7 @@ use std::fmt::Write as _;
 use onmark_core::compiler;
 use onmark_core::model::{
     AssetMetadata, AssetRef, Duration, FrameRate, FrozenAsset, FrozenAssetId, SourceId, Timebase,
-    VideoMetadata, VideoTiming,
+    VideoDimensions, VideoMetadata, VideoTiming,
 };
 use onmark_core::protocol::{
     BrowserCommand, BrowserEvent, BrowserPlan, BrowserRequest, BrowserResponse, BundleManifest,
@@ -102,13 +102,8 @@ fn browser_plan_retains_solved_overlay_facts() {
 }
 
 #[test]
-fn legacy_bundle_manifest_remains_readable() {
-    assert_bundle_manifest("bundle-v1/manifest.json");
-}
-
-#[test]
 fn current_bundle_manifest_matches_the_versioned_wire_contract() {
-    assert_bundle_manifest("bundle-v2/manifest.json");
+    assert_bundle_manifest("bundle-v3/manifest.json");
 }
 
 fn assert_bundle_manifest(name: &str) {
@@ -147,8 +142,14 @@ fn gate_one_timeline() -> (TimelineIr, FrozenAssetId, FrameRate) {
     let rate = FrameRate::new(30, 1).expect("the fixture frame rate is valid");
     let asset_id = FrozenAssetId::from_sha256([1; 32]);
     let duration = Duration::from_nanos(2_500_000_000);
-    let video = VideoMetadata::new(duration, "h264", "yuv420p", VideoTiming::Constant(rate))
-        .expect("the fixture video metadata is normalized");
+    let video = VideoMetadata::new(
+        duration,
+        VideoDimensions::new(1_920, 1_080).expect("fixture dimensions are positive"),
+        "h264",
+        "yuv420p",
+        VideoTiming::Constant(rate),
+    )
+    .expect("the fixture video metadata is normalized");
     let asset = AssetRef::parse("opening.mp4").expect("the fixture asset is valid");
     let assets = BTreeMap::from([(
         asset,

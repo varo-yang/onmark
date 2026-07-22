@@ -9,9 +9,20 @@ import {
   bundlePresentation,
   type BundleOptions,
 } from "./presentation.js";
-import { BUNDLE_TEMPORAL_CAPABILITIES } from "./generated/bundle-manifest.js";
+import {
+  BUNDLE_TEMPORAL_CAPABILITIES,
+  BUNDLE_VISUAL_CAPABILITIES,
+} from "./generated/bundle-manifest.js";
 
-const USAGE = `Usage: onmark-bundle --entry <path> --output <directory> --max-output-bytes <bytes> --temporal-capability <sequential|randomAccess>\n`;
+const USAGE = [
+  "Usage: onmark-bundle",
+  "  --entry <path>",
+  "  --output <directory>",
+  "  --max-output-bytes <bytes>",
+  "  --temporal-capability <sequential|randomAccess>",
+  "  --visual-capability <browserComposite|separableOverlay>",
+  "",
+].join("\n");
 
 type Command =
   | { readonly kind: "bundle"; readonly options: BundleOptions }
@@ -47,6 +58,9 @@ function parseArguments(arguments_: readonly string[]): Command {
   const temporalCapability = parseTemporalCapability(
     oneValue(values["temporal-capability"], "--temporal-capability"),
   );
+  const visualCapability = parseVisualCapability(
+    oneValue(values["visual-capability"], "--visual-capability"),
+  );
 
   return {
     kind: "bundle",
@@ -55,6 +69,7 @@ function parseArguments(arguments_: readonly string[]): Command {
       maxOutputBytes,
       outputDirectory,
       temporalCapability,
+      visualCapability,
     },
   };
 }
@@ -70,6 +85,7 @@ function commandValues(arguments_: readonly string[]) {
         "max-output-bytes": { type: "string", multiple: true },
         output: { type: "string", multiple: true },
         "temporal-capability": { type: "string", multiple: true },
+        "visual-capability": { type: "string", multiple: true },
       },
       strict: true,
     }).values;
@@ -89,6 +105,20 @@ function parseTemporalCapability(
   }
   throw configuration(
     "--temporal-capability must be sequential or randomAccess",
+  );
+}
+
+function parseVisualCapability(
+  value: string,
+): BundleOptions["visualCapability"] {
+  const capability = BUNDLE_VISUAL_CAPABILITIES.find(
+    (candidate) => candidate === value,
+  );
+  if (capability !== undefined) {
+    return capability;
+  }
+  throw configuration(
+    "--visual-capability must be browserComposite or separableOverlay",
   );
 }
 

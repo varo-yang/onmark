@@ -132,7 +132,7 @@ impl Ffprobe {
                 OsStr::new("error"),
                 OsStr::new("-show_entries"),
                 OsStr::new(
-                    "format=duration:stream=index,codec_type,codec_name,pix_fmt,color_range,\
+                    "format=duration:stream=index,codec_type,codec_name,pix_fmt,width,height,color_range,\
                      color_space,color_transfer,color_primaries,duration,avg_frame_rate,\
                      r_frame_rate,nb_frames,sample_rate,channels:\
                      stream_disposition=default,attached_pic",

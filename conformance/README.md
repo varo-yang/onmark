@@ -15,8 +15,7 @@ directories also retain their payload bytes so native materialization verifies
 the declared size, digest, identity, and entry document together. Review all of
 these files as compatibility-sensitive data.
 
-`protocol/bundle-v1/` preserves the legacy sequential contract.
-`protocol/bundle-v2/` is the current self-contained random-access fixture used
+`protocol/bundle-v3/` is the current self-contained random-access fixture used
 by the native Chromium-to-FFmpeg smoke. It is generated from
 `browser/video-presentation.ts` by `@onmark/bundler`, embeds the production
 authoring bindings and runtime presentation adapter, and consumes materialized
@@ -26,7 +25,9 @@ capture. An exact-frame effect changes the poster accent from the absolute frame
 identity, so whole-film and partition capture also prove the admitted
 random-access lifecycle. The bundler test recursively rebuilds and compares
 every byte, so source, runtime, manifest, and nested payload cannot drift
-independently.
+independently. Bundle artifacts are ephemeral build products rather than user
+data; only the current manifest is accepted, and older artifacts must be
+rebuilt instead of carrying compatibility branches in the reader.
 
 Regenerate goldens after intentionally changing public behavior:
 

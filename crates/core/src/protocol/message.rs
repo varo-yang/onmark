@@ -26,8 +26,8 @@ const MAX_PENDING_RESOURCE_CHARACTERS: usize = 1_024;
 pub struct ProtocolVersion(u16);
 
 impl ProtocolVersion {
-    /// First browser protocol implemented by Gate one.
-    pub const V1: Self = Self(1);
+    /// Only browser protocol version accepted by this build.
+    pub const CURRENT: Self = Self(1);
 
     /// Returns the stable integer representation.
     #[must_use]
@@ -42,8 +42,8 @@ impl<'de> Deserialize<'de> for ProtocolVersion {
         D: Deserializer<'de>,
     {
         let version = u16::deserialize(deserializer)?;
-        if version == Self::V1.get() {
-            return Ok(Self::V1);
+        if version == Self::CURRENT.get() {
+            return Ok(Self::CURRENT);
         }
 
         Err(D::Error::custom("unsupported browser protocol version"))
@@ -89,7 +89,7 @@ impl BrowserRequest {
     #[must_use]
     pub const fn new(request_id: RequestId, command: BrowserCommand) -> Self {
         Self {
-            version: ProtocolVersion::V1,
+            version: ProtocolVersion::CURRENT,
             request_id,
             command,
         }
@@ -173,7 +173,7 @@ impl BrowserResponse {
     #[must_use]
     pub const fn new(request_id: RequestId, event: BrowserEvent) -> Self {
         Self {
-            version: ProtocolVersion::V1,
+            version: ProtocolVersion::CURRENT,
             request_id,
             event,
         }
@@ -266,7 +266,7 @@ impl ProtocolFailure {
     ///
     /// # Errors
     ///
-    /// Returns [`InvalidProtocolFailure`] when the report exceeds its V1 wire
+    /// Returns [`InvalidProtocolFailure`] when the report exceeds its wire
     /// budget or contains a blank message or resource description.
     pub fn new(
         code: ProtocolFailureCode,
@@ -344,13 +344,13 @@ struct ProtocolFailureWire {
 pub enum InvalidProtocolFailure {
     /// The direct failure explanation contains no visible content.
     BlankMessage,
-    /// The direct failure explanation exceeds the V1 character limit.
+    /// The direct failure explanation exceeds the current character limit.
     MessageTooLong,
-    /// The report contains more pending resources than V1 can carry.
+    /// The report contains more pending resources than the current contract can carry.
     TooManyPendingResources,
     /// One pending-resource description contains no visible content.
     BlankPendingResource(usize),
-    /// One pending-resource description exceeds the V1 character limit.
+    /// One pending-resource description exceeds the current character limit.
     PendingResourceTooLong(usize),
 }
 
@@ -359,7 +359,7 @@ impl fmt::Display for InvalidProtocolFailure {
         match self {
             Self::BlankMessage => formatter.write_str("protocol failure message cannot be blank"),
             Self::MessageTooLong => {
-                formatter.write_str("protocol failure message exceeds the V1 character limit")
+                formatter.write_str("protocol failure message exceeds the character limit")
             }
             Self::TooManyPendingResources => {
                 formatter.write_str("protocol failure has too many pending resources")
@@ -373,7 +373,7 @@ impl fmt::Display for InvalidProtocolFailure {
             Self::PendingResourceTooLong(index) => {
                 write!(
                     formatter,
-                    "pending resource at index {index} exceeds the V1 character limit"
+                    "pending resource at index {index} exceeds the character limit"
                 )
             }
         }

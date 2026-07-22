@@ -5,6 +5,7 @@
 
 use std::path::Path;
 
+use png::{BitDepth, ColorType, Encoder};
 use sha2::{Digest as _, Sha256};
 use tempfile::{NamedTempFile, TempPath};
 use tokio::fs::{File, OpenOptions};
@@ -14,7 +15,7 @@ use super::format::{
     FRAME_LENGTH_BYTES, FrameArtifactDescriptor, HEADER_BYTES, Header, RAW_RGBA_HASH_BYTES,
 };
 use super::{FrameArtifact, FrameArtifactError, FrameArtifactErrorKind, FrameArtifactLimits};
-use crate::CapturedFrame;
+use crate::{CapturedFrame, EncodedPng, RawRgbaHash, RenderProfile};
 
 /// The only mutable state while one worker owns an unpublished artifact.
 pub(crate) struct FrameArtifactWriter {
@@ -122,6 +123,18 @@ impl FrameArtifactWriter {
         self.frames = next.frames;
         self.payload_bytes = next.payload_bytes;
         Ok(())
+    }
+
+    /// Encodes one canonical native RGBA frame into the lossless artifact form.
+    pub(crate) async fn write_rgba_frame(
+        &mut self,
+        pixels: &[u8],
+        fingerprint: RawRgbaHash,
+        profile: RenderProfile,
+    ) -> Result<(), FrameArtifactError> {
+        let png = encode_rgba(pixels, profile, &self.output)?;
+        self.write_frame(&CapturedFrame::recorded(png, fingerprint))
+            .await
     }
 
     /// Finalizes the fixed header and publishes the staged bytes without replacement.
@@ -254,6 +267,33 @@ impl FrameArtifactWriter {
             payload_bytes,
         })
     }
+}
+
+fn encode_rgba(
+    pixels: &[u8],
+    profile: RenderProfile,
+    output: &Path,
+) -> Result<EncodedPng, FrameArtifactError> {
+    let mut bytes = Vec::new();
+    let mut encoder = Encoder::new(&mut bytes, profile.width(), profile.height());
+    encoder.set_color(ColorType::Rgba);
+    encoder.set_depth(BitDepth::Eight);
+    let mut writer = encoder.write_header().map_err(|source| {
+        FrameArtifactError::new(
+            FrameArtifactErrorKind::Output,
+            output,
+            format!("failed to start native frame PNG encoding: {source}"),
+        )
+    })?;
+    writer.write_image_data(pixels).map_err(|source| {
+        FrameArtifactError::new(
+            FrameArtifactErrorKind::Output,
+            output,
+            format!("failed to encode native frame PNG: {source}"),
+        )
+    })?;
+    drop(writer);
+    Ok(EncodedPng::new(bytes))
 }
 
 async fn write_all(

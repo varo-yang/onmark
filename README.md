@@ -7,9 +7,10 @@ agents.
 screenplay → deterministic Timeline IR → browser frames + audio plan → MP4
 ```
 
-Delivery gates one through six are complete; Gate seven is measuring an
-explicitly admitted layered native-media path before it may alter production
-pixels. Gate one renders and
+Delivery gates one through six are complete. Gate seven is implementing the
+explicit layered native-media path admitted by its checked performance and
+memory evidence; it remains active until the locked real-process fixture proves
+the production branch. Gate one renders and
 independently verifies one real screenplay through the compiler, browser
 protocol, Chromium, and FFmpeg. Gate two partitions one media-bearing two-shot
 film into two local Render Units and proves that their assembled decoded video
@@ -40,9 +41,11 @@ native media decode and composition. Admission requires deterministic cold
 runs, exact whole-film/partition equivalence within the candidate path, declared
 color conformance, bounded streaming without a temporary PNG sequence, at least
 a twofold latency improvement, and no more than 85% of the baseline peak RSS.
-The locked experiment now passes at 4.18× the baseline speed and 79.73% of its
-peak RSS. The candidate remains test-only until its explicit capability and
-executor branch land; it is not new screenplay syntax or a hidden fallback.
+The locked experiment passes at 4.18× the baseline speed and 79.73% of its peak
+RSS. The explicit capability and bounded production executor branch are now
+implemented; Gate seven remains active until the locked real-process exit
+fixture confirms the production path. It is not new screenplay syntax or a
+hidden fallback.
 
 The completed foundation includes the pure compiler and versioned wire types in
 `onmark-core`; bounded ffprobe and strict SubRip/WebVTT/ASS normalization in
@@ -64,6 +67,7 @@ onmark render film.onmark --presentation browser.ts --output review.mp4
 onmark render film.onmark --fps 30000/1001 --width 1920 --height 1080
 onmark render film.onmark --subtitle captions.vtt
 onmark render film.onmark --temporal-capability randomAccess
+onmark render film.onmark --visual-capability separableOverlay
 ```
 
 `--subtitle` imports strict UTF-8 `.srt`, `.vtt`, or `.ass` files without adding
@@ -74,6 +78,12 @@ against their own path and byte spans before browser or media processes start.
 conformance proves that every requested frame depends solely on immutable input
 and that exact frame; the declaration changes bundle identity and permits the
 Render Graph to split shot-scoped units.
+
+`--visual-capability` defaults to `browserComposite`. The
+`separableOverlay` declaration is reserved for presentations whose transparent
+foreground remains independent of primary-video pixels under the checked
+presentation contract. It enters bundle identity and is never inferred from
+source inspection.
 
 Rendering requires `onmark-bundle` and its Node.js runtime, Chrome for Testing's
 `chrome-headless-shell`, `ffmpeg`, and `ffprobe` to be installed. The renderer
@@ -89,7 +99,8 @@ Gate three introduced a narrow local worker entry point for already-composed
 visual work:
 
 ```bash
-onmark worker capture --input worker-input --output opening.onmark-frames --browser /path/to/chrome-headless-shell
+onmark worker capture --input worker-input --output opening.onmark-frames \
+  --browser /path/to/chrome-headless-shell --ffmpeg /path/to/ffmpeg
 ```
 
 `worker-input` contains a versioned `request.json`, including the locked

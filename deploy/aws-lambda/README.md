@@ -95,7 +95,8 @@ the SwiftShader manifest only to the Chromium child; it does not mutate the
 Lambda process environment.
 
 The AWS package owns a separate deterministic operator tool. Build the Rust
-bootstrap for Linux arm64 first, then package it with one expanded browser root:
+bootstrap and a self-contained `FFmpeg` executable for Linux arm64 first, then
+package them with one expanded browser root:
 
 ```sh
 cargo run --locked \
@@ -106,6 +107,7 @@ cargo run --locked \
   -- \
   --bootstrap target/lambda/onmark-aws-lambda/bootstrap \
   --browser-root /path/to/locked-browser \
+  --ffmpeg /path/to/locked-linux-arm64/ffmpeg \
   --output dist/onmark-aws-lambda
 ```
 
@@ -121,22 +123,24 @@ completed run never exposes a partial package. Portable directory rename does
 not make the preceding absence check a cross-process no-clobber transaction;
 operators must assign one output directory to one packaging process.
 
-The ZIP carries the executable `bootstrap` and `browser.tar.zst`. The builder
+The ZIP carries the executable `bootstrap`, `browser.tar.zst`, and the pinned
+Linux arm64 `ffmpeg` binary used by layered workers. The builder
 normalizes browser traversal order, tar metadata, zstd settings, and ZIP entry
 metadata; it rejects links and special files and reuses the adapter's runtime
-archive limits. Both executables must be Linux arm64 ELF files, and their
-combined unzipped package payload may not exceed 240 MiB, leaving headroom
-below Lambda's 250 MiB ceiling. The manifest records canonical SHA-256
-identities for both inputs and the final ZIP. Its `browserArchive.sha256` value
-configures `ONMARK_BROWSER_ARCHIVE_SHA256`, while `captureEnvironment`
-configures `ONMARK_CAPTURE_ENVIRONMENT`. `ONMARK_BROWSER_ARCHIVE` points to
-`/var/task/browser.tar.zst` after deployment.
+archive limits. All executable inputs must be Linux arm64 ELF files, and the
+complete unzipped package payload may not exceed 240 MiB, leaving headroom below
+Lambda's 250 MiB ceiling. The manifest records canonical SHA-256 identities for
+every input and the final ZIP. Its `browserArchive.sha256` value configures
+`ONMARK_BROWSER_ARCHIVE_SHA256`, while `captureEnvironment` configures
+`ONMARK_CAPTURE_ENVIRONMENT`. `ONMARK_BROWSER_ARCHIVE` points to
+`/var/task/browser.tar.zst` after deployment; the handler always launches the
+packaged `/var/task/ffmpeg` rather than searching `PATH`.
 
 Two runs over byte-identical locked inputs produce byte-identical ZIP and
-manifest files. This guarantee begins at the prebuilt bootstrap and expanded
-browser root; use a pinned Linux arm64 builder such as Cargo Lambda to produce
-the bootstrap. The packager does not claim that arbitrary host toolchains
-cross-compile identical ELF binaries.
+manifest files. This guarantee begins at the prebuilt bootstrap, FFmpeg, and
+expanded browser root; use a pinned Linux arm64 builder such as Cargo Lambda to
+produce the bootstrap. The packager does not claim that arbitrary host
+toolchains cross-compile identical ELF binaries.
 
 This command remains intentionally AWS-specific. Future GCP, container, or
 multi-machine adapters consume the same portable worker request and frame

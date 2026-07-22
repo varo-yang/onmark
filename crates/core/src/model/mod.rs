@@ -12,10 +12,12 @@ mod reference;
 mod source;
 mod temporal;
 mod time;
+mod visual;
 
 pub use asset::{
     AssetMetadata, AudioMetadata, FrozenAsset, FrozenAssetId, InvalidFrozenAssetId,
-    InvalidVideoMetadata, VideoColorProfile, VideoMetadata, VideoTiming,
+    InvalidVideoDimensions, InvalidVideoMetadata, VideoColorProfile, VideoDimensions,
+    VideoMetadata, VideoTiming,
 };
 pub use audio::{
     AudioChannelLayout, AudioGain, AudioSampleConversionOverflow, AudioSampleCount,
@@ -35,3 +37,4 @@ pub use time::{
     FrameConversionOverflow, FrameCount, FrameIndex, FrameInterval, FrameRate,
     InvalidFrameInterval, InvalidFrameRate, Rounding, Timebase,
 };
+pub use visual::{InvalidPresentationVisualCapability, PresentationVisualCapability};

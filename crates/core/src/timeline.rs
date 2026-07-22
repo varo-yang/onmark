@@ -15,8 +15,8 @@ use crate::model::{
 pub struct TimelineVersion(u16);
 
 impl TimelineVersion {
-    /// First Timeline IR version implemented by Gate one.
-    pub const V1: Self = Self(1);
+    /// Only Timeline IR version accepted by this build.
+    pub const CURRENT: Self = Self(1);
 
     /// Returns the stable integer representation.
     #[must_use]
@@ -49,7 +49,7 @@ impl TimelineIr {
         captions: Vec<TimelineCaption>,
     ) -> Self {
         Self {
-            version: TimelineVersion::V1,
+            version: TimelineVersion::CURRENT,
             timebase,
             element,
             interval,

@@ -7,12 +7,13 @@ use std::path::{Path, PathBuf};
 use onmark_core::compiler;
 use onmark_core::model::{
     AssetMetadata, AssetRef, Duration, FrameRate, FrozenAsset, FrozenAssetId,
-    PresentationTemporalCapability, SourceId, Timebase, VideoMetadata, VideoTiming,
+    PresentationTemporalCapability, PresentationVisualCapability, SourceId, Timebase,
+    VideoDimensions, VideoMetadata, VideoTiming,
 };
 use onmark_core::protocol::{BundleFile, BundleManifest};
 use onmark_render::{
-    CaptureEnvironmentId, ExecutableUnit, InvalidUnitRootLimits, MaterializedAsset, RenderProfile,
-    RenderUnit, UnitRoot, UnitRootErrorKind, UnitRootLimits,
+    CaptureEnvironmentId, InvalidUnitRootLimits, MaterializedAsset, RenderProfile, RenderUnit,
+    UnitRoot, UnitRootErrorKind, UnitRootLimits,
 };
 use serde::Serialize;
 use sha2::{Digest as _, Sha256};
@@ -44,9 +45,7 @@ fn materializes_verified_bundle_and_asset_bytes() {
 
 #[test]
 fn materializes_the_checked_in_bundle_contract() {
-    for version in ["bundle-v1", "bundle-v2"] {
-        materialize_conformance_bundle(version);
-    }
+    materialize_conformance_bundle("bundle-v3");
 }
 
 fn materialize_conformance_bundle(version: &str) {
@@ -55,17 +54,14 @@ fn materialize_conformance_bundle(version: &str) {
         .expect("the conformance manifest is readable");
     let manifest = serde_json::from_str::<BundleManifest>(&source)
         .expect("the conformance manifest satisfies the Rust wire contract");
-    let unit = RenderUnit::whole_film(&static_timeline(), manifest, render_profile(), [])
-        .expect("the fixture facts form one render unit");
-    let executable = ExecutableUnit::materialize(unit, &root, limits(8, 1024 * 1024))
+    let materialized = UnitRoot::materialize(&root, &manifest, [], limits(8, 1024 * 1024))
         .expect("the checked-in bundle must materialize across the native boundary");
-    let entry = executable
+    let entry = materialized
         .entry_url()
         .to_file_path()
         .expect("the executable entry is a local file");
 
     assert!(read(&entry).starts_with(b"<!doctype html>"));
-    assert_eq!(executable.profile(), render_profile());
 }
 
 #[test]
@@ -154,6 +150,7 @@ fn rejects_payload_or_bundle_identity_drift() {
 
     let invalid = BundleManifest::new(
         PresentationTemporalCapability::Sequential,
+        PresentationVisualCapability::BrowserComposite,
         digest(b"wrong identity"),
         fixture.manifest.files().to_vec(),
     )
@@ -228,6 +225,7 @@ fn rejects_file_limits_before_bundle_identity_work() {
     ];
     let manifest = BundleManifest::new(
         PresentationTemporalCapability::Sequential,
+        PresentationVisualCapability::BrowserComposite,
         digest(b"wrong identity"),
         files,
     )
@@ -279,6 +277,7 @@ impl Fixture {
                 Duration::from_nanos(1_000_000_000),
                 VideoMetadata::new(
                     Duration::from_nanos(1_000_000_000),
+                    VideoDimensions::new(1_920, 1_080).expect("fixture dimensions are positive"),
                     "h264",
                     "yuv420p",
                     VideoTiming::Constant(frame_rate()),
@@ -303,19 +302,22 @@ struct BundleIdentity<'a> {
     version: u16,
     entry_point: &'a str,
     temporal_capability: &'a str,
+    visual_capability: &'a str,
     files: &'a [BundleFile],
 }
 
 fn manifest(files: Vec<BundleFile>) -> BundleManifest {
     let identity = BundleIdentity {
-        version: 2,
+        version: 3,
         entry_point: "index.html",
         temporal_capability: PresentationTemporalCapability::Sequential.as_str(),
+        visual_capability: PresentationVisualCapability::BrowserComposite.as_str(),
         files: &files,
     };
     let identity = serde_json::to_vec(&identity).expect("the fixture identity serializes");
     BundleManifest::new(
         PresentationTemporalCapability::Sequential,
+        PresentationVisualCapability::BrowserComposite,
         digest(&identity),
         files,
     )

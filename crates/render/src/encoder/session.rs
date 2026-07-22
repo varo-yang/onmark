@@ -14,6 +14,7 @@ use tokio::task::JoinHandle;
 use tokio::time::timeout;
 
 use super::error::{EncodeError, EncodeErrorKind};
+use super::layered::{LayeredJob, LayeredSession};
 use super::limits::{EncodeLimits, InvalidFfmpeg};
 use super::process::{CapturedStderr, capture_stderr, spawn_ffmpeg};
 use super::{AudioInput, audio};
@@ -47,6 +48,10 @@ impl Ffmpeg {
 
     pub(crate) const fn max_frames(&self) -> u64 {
         self.limits.max_frames()
+    }
+
+    pub(crate) fn start_layered(&self, job: LayeredJob) -> Result<LayeredSession, EncodeError> {
+        LayeredSession::start(&self.executable, self.limits, job)
     }
 
     /// Starts one H.264 MP4 encoding session.
@@ -353,6 +358,10 @@ pub struct EncodedVideo {
 }
 
 impl EncodedVideo {
+    pub(super) fn completed(path: PathBuf, frames: u64) -> Self {
+        Self { path, frames }
+    }
+
     /// Returns the completed MP4 path.
     #[must_use]
     pub fn path(&self) -> &Path {

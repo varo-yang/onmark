@@ -18,7 +18,7 @@ use url::Url;
 pub use error::{UnitRootError, UnitRootErrorKind};
 
 use crate::encoder::AudioInput;
-use crate::{AudioPlan, MaterializedAsset, RenderProfile, RenderUnit};
+use crate::{AudioPlan, MaterializedAsset, RenderProfile, RenderUnit, VisualExecutionPlan};
 
 const MAX_FILES: usize = BundleManifest::MAX_FILES + 1;
 const MAX_BYTES: u64 = 1 << 40;
@@ -136,6 +136,7 @@ pub struct ExecutableUnit {
     browser_plan: BrowserPlan,
     bundle_id: Box<str>,
     profile: RenderProfile,
+    visual_execution: VisualExecutionPlan,
     audio: AudioPlan,
     root: UnitRoot,
 }
@@ -160,12 +161,13 @@ impl ExecutableUnit {
             limits,
         )?;
         let profile = unit.profile();
-        let (browser_plan, audio) = unit.into_execution_plans();
+        let (browser_plan, visual_execution, audio) = unit.into_execution_plans();
 
         Ok(Self {
             browser_plan,
             bundle_id,
             profile,
+            visual_execution,
             audio,
             root,
         })
@@ -175,12 +177,14 @@ impl ExecutableUnit {
         browser_plan: BrowserPlan,
         bundle_id: impl Into<Box<str>>,
         profile: RenderProfile,
+        visual_execution: VisualExecutionPlan,
         root: UnitRoot,
     ) -> Self {
         Self {
             browser_plan,
             bundle_id: bundle_id.into(),
             profile,
+            visual_execution,
             audio: AudioPlan::empty(),
             root,
         }
@@ -196,6 +200,20 @@ impl ExecutableUnit {
     #[must_use]
     pub const fn profile(&self) -> RenderProfile {
         self.profile
+    }
+
+    /// Returns the admitted browser/native visual path.
+    #[must_use]
+    pub const fn visual_execution(&self) -> &VisualExecutionPlan {
+        &self.visual_execution
+    }
+
+    pub(crate) fn layered_media_path(&self) -> Option<PathBuf> {
+        self.visual_execution.layered_media().map(|media| {
+            self.root
+                .path()
+                .join(BundleManifest::asset_path(media.asset_identity()))
+        })
     }
 
     pub(crate) fn bundle_id(&self) -> &str {

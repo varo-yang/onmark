@@ -90,8 +90,8 @@ impl Error for UnsupportedVideo {}
 #[cfg(test)]
 mod tests {
     use onmark_core::model::{
-        AssetMetadata, AudioChannelLayout, AudioSampleRate, Duration, FrameRate, VideoMetadata,
-        VideoTiming,
+        AssetMetadata, AudioChannelLayout, AudioSampleRate, Duration, FrameRate, VideoDimensions,
+        VideoMetadata, VideoTiming,
     };
 
     use super::{AdmittedVideo, UnsupportedVideo};
@@ -128,8 +128,14 @@ mod tests {
 
     fn video(codec: &str, timing: VideoTiming) -> AssetMetadata {
         let duration = Duration::from_nanos(1);
-        let metadata = VideoMetadata::new(duration, codec, "yuv420p", timing)
-            .expect("the fixture metadata is normalized");
+        let metadata = VideoMetadata::new(
+            duration,
+            VideoDimensions::new(1_920, 1_080).expect("fixture dimensions are positive"),
+            codec,
+            "yuv420p",
+            timing,
+        )
+        .expect("the fixture metadata is normalized");
         AssetMetadata::video(duration, metadata)
     }
 }

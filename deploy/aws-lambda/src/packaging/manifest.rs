@@ -20,19 +20,26 @@ pub(super) struct PackageManifest {
     capture_environment: String,
     bootstrap: Artifact,
     browser_archive: Artifact,
+    ffmpeg: Artifact,
     lambda_zip: Artifact,
 }
 
 impl PackageManifest {
-    pub(super) fn new(bootstrap: Artifact, browser: Artifact, package: Artifact) -> Self {
-        let capture_environment = capture_environment(&bootstrap, &browser);
+    pub(super) fn new(
+        bootstrap: Artifact,
+        browser: Artifact,
+        ffmpeg: Artifact,
+        package: Artifact,
+    ) -> Self {
+        let capture_environment = capture_environment(&bootstrap, &browser, &ffmpeg);
         Self {
-            version: 1,
+            version: 2,
             target: PACKAGE_TARGET,
             browser_launch_policy: CAPTURE_POLICY,
             capture_environment,
             bootstrap,
             browser_archive: browser,
+            ffmpeg,
             lambda_zip: package,
         }
     }
@@ -75,15 +82,17 @@ struct CaptureEnvironment<'a> {
     browser_launch_policy: &'static str,
     bootstrap_sha256: &'a str,
     browser_archive_sha256: &'a str,
+    ffmpeg_sha256: &'a str,
 }
 
-fn capture_environment(bootstrap: &Artifact, browser: &Artifact) -> String {
+fn capture_environment(bootstrap: &Artifact, browser: &Artifact, ffmpeg: &Artifact) -> String {
     let facts = CaptureEnvironment {
-        version: 1,
+        version: 2,
         target: PACKAGE_TARGET,
         browser_launch_policy: CAPTURE_POLICY,
         bootstrap_sha256: &bootstrap.sha256,
         browser_archive_sha256: &browser.sha256,
+        ffmpeg_sha256: &ffmpeg.sha256,
     };
     let bytes = serde_json::to_vec(&facts).expect("capture-environment facts are infallible JSON");
     format_digest(&Sha256::digest(bytes))

@@ -5,3 +5,8 @@ export const PRESENTATION_TEMPORAL_CAPABILITIES = Object.freeze([
   "randomAccess",
 ] as const);
 export type PresentationTemporalCapability = (typeof PRESENTATION_TEMPORAL_CAPABILITIES)[number];
+export const PRESENTATION_VISUAL_CAPABILITIES = Object.freeze([
+  "browserComposite",
+  "separableOverlay",
+] as const);
+export type PresentationVisualCapability = (typeof PRESENTATION_VISUAL_CAPABILITIES)[number];

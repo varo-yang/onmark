@@ -11,7 +11,16 @@ export type PresentationTemporalCapability = "sequential" | "randomAccess";
 /**
  * Version of the immutable presentation-bundle contract.
  */
-export type BundleVersion = 2;
+export type BundleVersion = 3;
+/**
+ * Proven relationship between browser presentation pixels and primary media.
+ *
+ * Unknown presentation code is [`BrowserComposite`](Self::BrowserComposite).
+ * A separable overlay is an explicit claim that the browser output is a
+ * transparent foreground independent of the primary video beneath it.
+ */
+export type PresentationVisualCapability =
+  "browserComposite" | "separableOverlay";
 
 /**
  * Stable description of one immutable presentation artifact.
@@ -26,6 +35,7 @@ export interface BundleManifest {
   files: [BundleFile, ...BundleFile[]];
   temporalCapability: PresentationTemporalCapability;
   version: BundleVersion;
+  visualCapability: PresentationVisualCapability;
 }
 /**
  * One content-addressed presentation payload file.
@@ -36,10 +46,14 @@ export interface BundleFile {
   sha256: string;
 }
 
-export const BUNDLE_VERSION = 2 as const;
+export const BUNDLE_VERSION = 3 as const;
 export const BUNDLE_TEMPORAL_CAPABILITIES = Object.freeze([
   "sequential",
   "randomAccess",
+] as const);
+export const BUNDLE_VISUAL_CAPABILITIES = Object.freeze([
+  "browserComposite",
+  "separableOverlay",
 ] as const);
 export const BUNDLE_ENTRY_POINT = "index.html" as const;
 export const BUNDLE_MANIFEST_FILE = "manifest.json" as const;

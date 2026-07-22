@@ -403,7 +403,7 @@ fn bundle_manifest() -> BundleManifest {
 fn bundle() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
-        .join("conformance/protocol/bundle-v2")
+        .join("conformance/protocol/bundle-v3")
 }
 
 fn headless_shell() -> PathBuf {

@@ -7,12 +7,16 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { build, type OutputFile } from "esbuild";
-import type { PresentationTemporalCapability } from "@onmark/runtime/types";
+import type {
+  PresentationTemporalCapability,
+  PresentationVisualCapability,
+} from "@onmark/runtime/types";
 
 import {
   BUNDLE_ENTRY_POINT,
   BUNDLE_MANIFEST_FILE,
   BUNDLE_TEMPORAL_CAPABILITIES,
+  BUNDLE_VISUAL_CAPABILITIES,
   BUNDLE_VERSION,
   type BundleFile as WireBundleFile,
   type BundleManifest as WireBundleManifest,
@@ -52,6 +56,7 @@ export interface BundleOptions {
   readonly outputDirectory: string;
   readonly maxOutputBytes: number;
   readonly temporalCapability: PresentationTemporalCapability;
+  readonly visualCapability: PresentationVisualCapability;
 }
 
 /** Published directory and its owned immutable manifest snapshot. */
@@ -109,7 +114,11 @@ async function buildArtifact(
 ): Promise<BundleArtifact> {
   const generated = await compilePresentation(input.entryPoint, staging);
   const pending = presentationFiles(generated, staging);
-  const manifest = createManifest(pending, input.temporalCapability);
+  const manifest = createManifest(
+    pending,
+    input.temporalCapability,
+    input.visualCapability,
+  );
   const manifestBytes = encodeManifest(manifest);
   enforceOutputLimit(pending, manifestBytes, input.maxOutputBytes);
 
@@ -146,6 +155,7 @@ function validateOptions(options: BundleOptions): BundleOptions {
     outputDirectory: resolve(options.outputDirectory),
     maxOutputBytes: options.maxOutputBytes,
     temporalCapability: validateTemporalCapability(options.temporalCapability),
+    visualCapability: validateVisualCapability(options.visualCapability),
   });
 }
 
@@ -161,6 +171,21 @@ function validateTemporalCapability(
   throw new BundleError(
     "configuration",
     "temporal capability must be sequential or randomAccess",
+  );
+}
+
+function validateVisualCapability(
+  capability: PresentationVisualCapability,
+): PresentationVisualCapability {
+  const admitted = BUNDLE_VISUAL_CAPABILITIES.find(
+    (candidate) => candidate === capability,
+  );
+  if (admitted !== undefined) {
+    return admitted;
+  }
+  throw new BundleError(
+    "configuration",
+    "visual capability must be browserComposite or separableOverlay",
   );
 }
 
@@ -279,12 +304,14 @@ function entryDocument(styles: readonly string[]): string {
 function createManifest(
   files: NonEmpty<PendingFile>,
   temporalCapability: PresentationTemporalCapability,
+  visualCapability: PresentationVisualCapability,
 ): BundleManifest {
   const entries = manifestFiles(files);
   const identity = JSON.stringify({
     version: BUNDLE_VERSION,
     entryPoint: BUNDLE_ENTRY_POINT,
     temporalCapability,
+    visualCapability,
     files: entries,
   });
 
@@ -293,6 +320,7 @@ function createManifest(
     bundleId: sha256(new TextEncoder().encode(identity)),
     entryPoint: BUNDLE_ENTRY_POINT,
     temporalCapability,
+    visualCapability,
     files: entries,
   });
 }

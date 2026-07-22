@@ -7,7 +7,7 @@ use std::path::Path;
 
 use onmark_core::model::{
     AssetMetadata, AudioChannelLayout, AudioMetadata, AudioSampleRate, Duration, FrameRate,
-    VideoColorProfile, VideoMetadata, VideoTiming,
+    VideoColorProfile, VideoDimensions, VideoMetadata, VideoTiming,
 };
 use serde::Deserialize;
 
@@ -37,6 +37,8 @@ struct ProbeStream {
     nb_frames: Option<Box<str>>,
     sample_rate: Option<Box<str>>,
     channels: Option<u32>,
+    width: Option<u32>,
+    height: Option<u32>,
     #[serde(default)]
     disposition: ProbeDisposition,
 }
@@ -156,8 +158,12 @@ fn parse_video(
     let color_profile = parse_color_profile(&stream);
     let codec = required_field(path, "codec name", stream.codec_name)?;
     let pixel_format = required_field(path, "pixel format", stream.pix_fmt)?;
+    let width = required_field(path, "width", stream.width)?;
+    let height = required_field(path, "height", stream.height)?;
+    let dimensions = VideoDimensions::new(width, height)
+        .map_err(|source| ProbeError::invalid_video(path, source))?;
 
-    let metadata = VideoMetadata::new(duration, codec, pixel_format, timing)
+    let metadata = VideoMetadata::new(duration, dimensions, codec, pixel_format, timing)
         .map_err(|source| ProbeError::invalid_video(path, source.to_string()))?;
     Ok(match color_profile {
         Some(profile) => metadata.with_color_profile(profile),

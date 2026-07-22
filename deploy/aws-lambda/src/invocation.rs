@@ -21,8 +21,8 @@ const ARTIFACT_DIRECTORY: &str = "frame-artifacts";
 pub struct CaptureInvocationVersion(u16);
 
 impl CaptureInvocationVersion {
-    /// First version of the immutable frame-capture invocation.
-    pub const V1: Self = Self(1);
+    /// Only capture invocation version accepted by this build.
+    pub const CURRENT: Self = Self(1);
 
     /// Returns the stable integer representation.
     #[must_use]
@@ -37,8 +37,8 @@ impl<'de> Deserialize<'de> for CaptureInvocationVersion {
         D: Deserializer<'de>,
     {
         let version = u16::deserialize(deserializer)?;
-        if version == Self::V1.get() {
-            return Ok(Self::V1);
+        if version == Self::CURRENT.get() {
+            return Ok(Self::CURRENT);
         }
         Err(D::Error::custom("unsupported AWS Lambda capture version"))
     }
@@ -141,7 +141,7 @@ impl CaptureInvocation {
     #[must_use]
     pub fn new(input: ObjectPrefix) -> Self {
         Self {
-            version: CaptureInvocationVersion::V1,
+            version: CaptureInvocationVersion::CURRENT,
             input,
         }
     }
@@ -290,7 +290,7 @@ impl CaptureResult {
     #[cfg(feature = "runtime")]
     pub(crate) fn new(artifact: ArtifactLocation, publication: Publication) -> Self {
         Self {
-            version: CaptureInvocationVersion::V1,
+            version: CaptureInvocationVersion::CURRENT,
             artifact,
             publication,
         }
@@ -386,7 +386,7 @@ mod tests {
             serde_json::from_str(&encoded).expect("the invocation parses once");
 
         assert_eq!(decoded, invocation);
-        assert_eq!(decoded.version(), CaptureInvocationVersion::V1);
+        assert_eq!(decoded.version(), CaptureInvocationVersion::CURRENT);
         assert_eq!(
             encoded,
             r#"{"version":1,"input":{"bucket":"onmark-inputs","prefix":"captures/film-a"}}"#

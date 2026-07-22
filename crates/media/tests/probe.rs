@@ -48,6 +48,8 @@ fn normalizes_exact_duration_from_ffprobe() {
         .expect("the fixture contains a video stream");
     assert_eq!(video.codec(), "h264");
     assert_eq!(video.pixel_format(), "yuv420p");
+    assert_eq!(video.dimensions().width(), 1_920);
+    assert_eq!(video.dimensions().height(), 1_080);
     assert_eq!(video.color_profile(), Some(VideoColorProfile::Bt709Limited),);
     assert_eq!(video.duration(), MediaDuration::from_nanos(2_000_000_000));
     assert_eq!(
@@ -332,6 +334,14 @@ fn translates_process_and_response_failures() {
     ));
     assert!(matches!(
         probe_error(&ffprobe, "invalid-video-duration.mp4"),
+        ProbeError::InvalidVideo(_)
+    ));
+    assert!(matches!(
+        probe_error(&ffprobe, "missing-video-width.mp4"),
+        ProbeError::InvalidVideo(_)
+    ));
+    assert!(matches!(
+        probe_error(&ffprobe, "zero-video-height.mp4"),
         ProbeError::InvalidVideo(_)
     ));
     assert!(matches!(

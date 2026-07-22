@@ -262,10 +262,56 @@ pub enum VideoColorProfile {
     Bt709Limited,
 }
 
+/// Positive source-pixel dimensions observed at the media boundary.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct VideoDimensions {
+    width: u32,
+    height: u32,
+}
+
+impl VideoDimensions {
+    /// Creates one normalized source raster.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InvalidVideoDimensions`] when either edge is zero.
+    pub const fn new(width: u32, height: u32) -> Result<Self, InvalidVideoDimensions> {
+        if width == 0 || height == 0 {
+            return Err(InvalidVideoDimensions);
+        }
+        Ok(Self { width, height })
+    }
+
+    /// Returns the source width in pixels.
+    #[must_use]
+    pub const fn width(self) -> u32 {
+        self.width
+    }
+
+    /// Returns the source height in pixels.
+    #[must_use]
+    pub const fn height(self) -> u32 {
+        self.height
+    }
+}
+
+/// Reason source-pixel dimensions were rejected.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct InvalidVideoDimensions;
+
+impl fmt::Display for InvalidVideoDimensions {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("video dimensions must be positive")
+    }
+}
+
+impl Error for InvalidVideoDimensions {}
+
 /// Normalized facts for the visual stream selected during probing.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct VideoMetadata {
     duration: Duration,
+    dimensions: VideoDimensions,
     codec: Box<str>,
     pixel_format: Box<str>,
     timing: VideoTiming,
@@ -282,6 +328,7 @@ impl VideoMetadata {
     /// once; downstream code receives trusted format names.
     pub fn new(
         duration: Duration,
+        dimensions: VideoDimensions,
         codec: impl Into<Box<str>>,
         pixel_format: impl Into<Box<str>>,
         timing: VideoTiming,
@@ -294,6 +341,7 @@ impl VideoMetadata {
 
         Ok(Self {
             duration,
+            dimensions,
             codec,
             pixel_format,
             timing,
@@ -313,6 +361,12 @@ impl VideoMetadata {
     #[must_use]
     pub const fn duration(&self) -> Duration {
         self.duration
+    }
+
+    /// Returns the selected stream's source-pixel dimensions.
+    #[must_use]
+    pub const fn dimensions(&self) -> VideoDimensions {
+        self.dimensions
     }
 
     /// Returns the normalized ffprobe codec name.
@@ -417,8 +471,8 @@ impl FrozenAsset {
 #[cfg(test)]
 mod tests {
     use super::{
-        AssetMetadata, AudioMetadata, FrozenAssetId, InvalidFrozenAssetId, InvalidVideoMetadata,
-        VideoMetadata, VideoTiming,
+        AssetMetadata, AudioMetadata, FrozenAssetId, InvalidFrozenAssetId, InvalidVideoDimensions,
+        InvalidVideoMetadata, VideoDimensions, VideoMetadata, VideoTiming,
     };
     use crate::model::{AudioChannelLayout, AudioSampleRate, Duration, FrameRate};
 
@@ -462,10 +516,12 @@ mod tests {
     #[test]
     fn video_metadata_rejects_names_that_are_not_normalized_tokens() {
         let rate = FrameRate::new(30, 1).expect("30 fps is valid");
+        let dimensions = video_dimensions();
 
         assert_eq!(
             VideoMetadata::new(
                 Duration::from_nanos(1),
+                dimensions,
                 "",
                 "yuv420p",
                 VideoTiming::Constant(rate),
@@ -475,6 +531,7 @@ mod tests {
         assert_eq!(
             VideoMetadata::new(
                 Duration::from_nanos(1),
+                dimensions,
                 "h264",
                 "yuv 420p",
                 VideoTiming::Constant(rate),
@@ -488,8 +545,14 @@ mod tests {
         let duration = Duration::from_nanos(1);
         let rate = FrameRate::new(30, 1).expect("30 fps is valid");
         let sample_rate = AudioSampleRate::new(48_000).expect("48 kHz is valid");
-        let video = VideoMetadata::new(duration, "h264", "yuv420p", VideoTiming::Constant(rate))
-            .expect("the video metadata is valid");
+        let video = VideoMetadata::new(
+            duration,
+            video_dimensions(),
+            "h264",
+            "yuv420p",
+            VideoTiming::Constant(rate),
+        )
+        .expect("the video metadata is valid");
         let audio = AssetMetadata::audio(duration, sample_rate, AudioChannelLayout::Stereo);
         let video_only = AssetMetadata::video(duration, video.clone());
         let audio_video = AssetMetadata::audio_video(
@@ -507,6 +570,20 @@ mod tests {
         assert!(audio_video.video_metadata().is_some());
         assert!(!without_tracks.has_audio_stream());
         assert!(without_tracks.video_metadata().is_none());
+    }
+
+    #[test]
+    fn video_dimensions_require_positive_axes() {
+        assert_eq!(VideoDimensions::new(0, 1_080), Err(InvalidVideoDimensions),);
+        assert_eq!(VideoDimensions::new(1_920, 0), Err(InvalidVideoDimensions),);
+
+        let dimensions = video_dimensions();
+        assert_eq!(dimensions.width(), 1_920);
+        assert_eq!(dimensions.height(), 1_080);
+    }
+
+    fn video_dimensions() -> VideoDimensions {
+        VideoDimensions::new(1_920, 1_080).expect("fixture dimensions are positive")
     }
 
     #[test]

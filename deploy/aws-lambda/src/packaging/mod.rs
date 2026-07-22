@@ -18,6 +18,7 @@ pub(crate) use self::error::PackageError;
 use self::manifest::{Artifact, PackageManifest};
 
 const ARCHIVE_NAME: &str = "browser.tar.zst";
+const FFMPEG_NAME: &str = "ffmpeg";
 const MANIFEST_NAME: &str = "manifest.json";
 const PACKAGE_NAME: &str = "onmark-aws-lambda.zip";
 const PACKAGE_TARGET: &str = "provided.al2023.arm64";
@@ -34,6 +35,7 @@ pub(crate) fn run(arguments: impl Iterator<Item = String>) -> Result<(), Package
 struct Options {
     bootstrap: PathBuf,
     browser_root: PathBuf,
+    ffmpeg: PathBuf,
     output: PathBuf,
 }
 
@@ -59,6 +61,7 @@ impl Options {
 struct OptionValues {
     bootstrap: Option<PathBuf>,
     browser_root: Option<PathBuf>,
+    ffmpeg: Option<PathBuf>,
     output: Option<PathBuf>,
 }
 
@@ -67,6 +70,7 @@ impl OptionValues {
         let slot = match flag {
             "--bootstrap" => &mut self.bootstrap,
             "--browser-root" => &mut self.browser_root,
+            "--ffmpeg" => &mut self.ffmpeg,
             "--output" => &mut self.output,
             _ => {
                 return Err(PackageError::InvalidOptions(
@@ -86,6 +90,7 @@ impl OptionValues {
         Ok(Options {
             bootstrap: require_option(self.bootstrap, "--bootstrap")?,
             browser_root: require_option(self.browser_root, "--browser-root")?,
+            ffmpeg: require_option(self.ffmpeg, "--ffmpeg")?,
             output: require_option(self.output, "--output")?,
         })
     }
@@ -137,7 +142,8 @@ impl PackageBuilder {
         require_executable_file(
             &self.options.browser_root.join(BROWSER_ARCHIVE_EXECUTABLE),
             ExecutableRole::Browser,
-        )
+        )?;
+        require_executable_file(&self.options.ffmpeg, ExecutableRole::Ffmpeg)
     }
 
     fn write_package(&self, staging: &Path) -> Result<(), PackageError> {
@@ -145,13 +151,20 @@ impl PackageBuilder {
         BrowserArchive::collect(&self.options.browser_root)?.write(&archive_path)?;
         let browser = Artifact::inspect(ARCHIVE_NAME, &archive_path)?;
         let bootstrap = Artifact::inspect("bootstrap", &self.options.bootstrap)?;
-        validate_unzipped_size(&bootstrap, &browser)?;
+        let ffmpeg = Artifact::inspect(FFMPEG_NAME, &self.options.ffmpeg)?;
+        validate_unzipped_size([&bootstrap, &browser, &ffmpeg])?;
 
         let package_path = staging.join(PACKAGE_NAME);
-        write_zip(&package_path, &self.options.bootstrap, &archive_path)?;
+        write_zip(
+            &package_path,
+            &self.options.bootstrap,
+            &archive_path,
+            &self.options.ffmpeg,
+        )?;
         let package = Artifact::inspect(PACKAGE_NAME, &package_path)?;
 
-        PackageManifest::new(bootstrap, browser, package).write(&staging.join(MANIFEST_NAME))?;
+        PackageManifest::new(bootstrap, browser, ffmpeg, package)
+            .write(&staging.join(MANIFEST_NAME))?;
         fs::remove_file(&archive_path).map_err(|source| {
             PackageError::io("remove staged browser archive", &archive_path, source)
         })
@@ -165,7 +178,12 @@ fn output_parent(output: &Path) -> &Path {
         .unwrap_or_else(|| Path::new("."))
 }
 
-fn write_zip(path: &Path, bootstrap: &Path, browser_archive: &Path) -> Result<(), PackageError> {
+fn write_zip(
+    path: &Path,
+    bootstrap: &Path,
+    browser_archive: &Path,
+    ffmpeg: &Path,
+) -> Result<(), PackageError> {
     let file =
         File::create(path).map_err(|source| PackageError::io("create Lambda ZIP", path, source))?;
     let mut zip = ZipWriter::new(file);
@@ -182,6 +200,13 @@ fn write_zip(path: &Path, bootstrap: &Path, browser_archive: &Path) -> Result<()
         browser_archive,
         CompressionMethod::Stored,
         0o644,
+    )?;
+    append_zip_file(
+        &mut zip,
+        FFMPEG_NAME,
+        ffmpeg,
+        CompressionMethod::Deflated,
+        0o755,
     )?;
     zip.finish().map_err(PackageError::Zip)?;
     Ok(())
@@ -211,6 +236,7 @@ fn append_zip_file(
 enum ExecutableRole {
     Bootstrap,
     Browser,
+    Ffmpeg,
 }
 
 impl ExecutableRole {
@@ -218,6 +244,7 @@ impl ExecutableRole {
         match self {
             Self::Bootstrap => "Lambda bootstrap",
             Self::Browser => "browser executable",
+            Self::Ffmpeg => "FFmpeg executable",
         }
     }
 
@@ -225,6 +252,7 @@ impl ExecutableRole {
         match self {
             Self::Bootstrap => "Lambda bootstrap is not a Linux arm64 ELF executable",
             Self::Browser => "browser executable is not a Linux arm64 ELF executable",
+            Self::Ffmpeg => "FFmpeg executable is not a Linux arm64 ELF executable",
         }
     }
 }
@@ -268,8 +296,12 @@ fn require_linux_arm64_elf(path: &Path, role: ExecutableRole) -> Result<(), Pack
     Ok(())
 }
 
-fn validate_unzipped_size(bootstrap: &Artifact, browser: &Artifact) -> Result<(), PackageError> {
-    let actual = bootstrap.bytes().saturating_add(browser.bytes());
+fn validate_unzipped_size<'a>(
+    artifacts: impl IntoIterator<Item = &'a Artifact>,
+) -> Result<(), PackageError> {
+    let actual = artifacts.into_iter().fold(0_u64, |total, artifact| {
+        total.saturating_add(artifact.bytes())
+    });
     if actual > MAX_UNZIPPED_PACKAGE_BYTES {
         return Err(PackageError::PackageLimit {
             actual,
@@ -299,7 +331,10 @@ mod tests {
     use tempfile::TempDir;
     use zip::ZipArchive;
 
-    use super::{ARCHIVE_NAME, MANIFEST_NAME, Options, PACKAGE_NAME, PackageBuilder, PackageError};
+    use super::{
+        ARCHIVE_NAME, FFMPEG_NAME, MANIFEST_NAME, Options, PACKAGE_NAME, PackageBuilder,
+        PackageError,
+    };
 
     #[test]
     fn parses_options_without_imposing_argument_order() {
@@ -310,11 +345,14 @@ mod tests {
             "bootstrap",
             "--browser-root",
             "browser",
+            "--ffmpeg",
+            "ffmpeg",
         ]))
         .expect("the complete options are valid");
 
         assert_eq!(options.bootstrap, std::path::Path::new("bootstrap"));
         assert_eq!(options.browser_root, std::path::Path::new("browser"));
+        assert_eq!(options.ffmpeg, std::path::Path::new("ffmpeg"));
         assert_eq!(options.output, std::path::Path::new("release"));
     }
 
@@ -342,6 +380,24 @@ mod tests {
     }
 
     #[test]
+    fn ffmpeg_bytes_change_the_capture_environment() {
+        let fixture = Fixture::new();
+        let first = fixture.root.path().join("first");
+        let second = fixture.root.path().join("second");
+        PackageBuilder::new(fixture.options(first.clone()))
+            .build()
+            .expect("the first package builds");
+        fs::write(&fixture.ffmpeg, arm64_elf(b"different ffmpeg"))
+            .expect("the FFmpeg fixture can change");
+        make_executable(&fixture.ffmpeg);
+        PackageBuilder::new(fixture.options(second.clone()))
+            .build()
+            .expect("the second package builds");
+
+        assert_ne!(capture_environment(&first), capture_environment(&second),);
+    }
+
+    #[test]
     fn emits_the_runtime_inputs_and_their_canonical_identities() {
         let fixture = Fixture::new();
         let output = fixture.root.path().join("release");
@@ -352,6 +408,7 @@ mod tests {
         let manifest: serde_json::Value =
             serde_json::from_slice(&read_artifact(&output, MANIFEST_NAME))
                 .expect("the manifest is JSON");
+        assert_eq!(manifest["version"], 2);
         assert_eq!(manifest["target"], "provided.al2023.arm64");
         assert!(
             manifest["captureEnvironment"]
@@ -359,16 +416,18 @@ mod tests {
                 .is_some_and(|digest| digest.starts_with("sha256:"))
         );
         assert_eq!(manifest["browserArchive"]["path"], ARCHIVE_NAME);
+        assert_eq!(manifest["ffmpeg"]["path"], FFMPEG_NAME);
 
         let file = fs::File::open(output.join(PACKAGE_NAME)).expect("the ZIP is readable");
         let mut zip = ZipArchive::new(file).expect("the ZIP is valid");
-        assert_eq!(zip.len(), 2);
+        assert_eq!(zip.len(), 3);
         let mut browser = Vec::new();
         zip.by_name(ARCHIVE_NAME)
             .expect("the ZIP carries the browser archive")
             .read_to_end(&mut browser)
             .expect("the browser archive is readable");
         assert!(!browser.is_empty());
+        assert!(zip.by_name(FFMPEG_NAME).is_ok());
     }
 
     #[test]
@@ -454,10 +513,21 @@ mod tests {
         fs::read(directory.join(name)).expect("the package artifact is readable")
     }
 
+    fn capture_environment(directory: &std::path::Path) -> String {
+        let manifest: serde_json::Value =
+            serde_json::from_slice(&read_artifact(directory, MANIFEST_NAME))
+                .expect("the package manifest is JSON");
+        manifest["captureEnvironment"]
+            .as_str()
+            .expect("the capture environment is a string")
+            .to_owned()
+    }
+
     struct Fixture {
         root: TempDir,
         bootstrap: std::path::PathBuf,
         browser: std::path::PathBuf,
+        ffmpeg: std::path::PathBuf,
     }
 
     impl Fixture {
@@ -465,18 +535,22 @@ mod tests {
             let root = TempDir::new().expect("the fixture root is writable");
             let bootstrap = root.path().join("bootstrap");
             let browser = root.path().join("browser");
+            let ffmpeg = root.path().join("ffmpeg");
             fs::create_dir(&browser).expect("the browser root is writable");
             fs::create_dir(browser.join("fonts")).expect("the fonts root is writable");
             fs::write(&bootstrap, arm64_elf(b"bootstrap")).expect("the bootstrap is writable");
+            fs::write(&ffmpeg, arm64_elf(b"ffmpeg")).expect("the FFmpeg fixture is writable");
             fs::write(browser.join("chrome-headless-shell"), arm64_elf(b"browser"))
                 .expect("the browser executable is writable");
             fs::write(browser.join("fonts/OpenSans.ttf"), b"font").expect("the font is writable");
             make_executable(&bootstrap);
+            make_executable(&ffmpeg);
             make_executable(&browser.join("chrome-headless-shell"));
             Self {
                 root,
                 bootstrap,
                 browser,
+                ffmpeg,
             }
         }
 
@@ -484,6 +558,7 @@ mod tests {
             Options {
                 bootstrap: self.bootstrap.clone(),
                 browser_root: self.browser.clone(),
+                ffmpeg: self.ffmpeg.clone(),
                 output,
             }
         }

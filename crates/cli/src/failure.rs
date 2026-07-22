@@ -10,7 +10,9 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use onmark_core::compiler::{CaptionProjectionError, SolveError};
-use onmark_render::{InvalidRenderProfile, InvalidRenderUnit, RenderError, UnitRootError};
+use onmark_render::{
+    InvalidFfmpeg, InvalidRenderProfile, InvalidRenderUnit, RenderError, UnitRootError,
+};
 use tokio::task::JoinError;
 
 use crate::assets::AssetError;
@@ -45,6 +47,7 @@ pub(super) enum CliError {
     },
     OutputExists(PathBuf),
     InvalidProfile(InvalidRenderProfile),
+    InvalidFfmpeg(InvalidFfmpeg),
     Assets(AssetError),
     Solve(SolveError),
     Subtitle(SubtitleLoadError),
@@ -135,6 +138,7 @@ impl fmt::Display for CliError {
                 write!(formatter, "output {} already exists", path.display())
             }
             Self::InvalidProfile(source) => source.fmt(formatter),
+            Self::InvalidFfmpeg(source) => source.fmt(formatter),
             Self::Assets(source) => source.fmt(formatter),
             Self::Solve(source) => source.fmt(formatter),
             Self::Subtitle(source) => source.fmt(formatter),
@@ -159,6 +163,7 @@ impl Error for CliError {
             Self::WorkerTask(source) => Some(source),
             Self::InvalidPresentation(_) | Self::OutputExists(_) => None,
             Self::InvalidProfile(source) => Some(source),
+            Self::InvalidFfmpeg(source) => Some(source),
             Self::Assets(source) => Some(source),
             Self::Solve(source) => Some(source),
             Self::Subtitle(source) => Some(source),
@@ -180,6 +185,12 @@ impl From<EnvironmentError> for CliError {
 impl From<InvalidRenderProfile> for CliError {
     fn from(source: InvalidRenderProfile) -> Self {
         Self::InvalidProfile(source)
+    }
+}
+
+impl From<InvalidFfmpeg> for CliError {
+    fn from(source: InvalidFfmpeg) -> Self {
+        Self::InvalidFfmpeg(source)
     }
 }
 

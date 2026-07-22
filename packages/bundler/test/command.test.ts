@@ -39,6 +39,8 @@ test("publishes a bundle through the executable boundary", async () => {
       "1000000",
       "--temporal-capability",
       "sequential",
+      "--visual-capability",
+      "browserComposite",
     ]);
 
     assert.equal(result.code, 0, result.stderr);

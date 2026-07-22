@@ -11,12 +11,13 @@ use std::path::{Path, PathBuf};
 
 use onmark_core::model::{
     AudioChannelLayout, AudioGain, AudioSampleConversionOverflow, AudioSampleCount, FrameInterval,
-    FrameRate, FrozenAsset, FrozenAssetId, Rounding,
+    FrameRate, FrozenAsset, FrozenAssetId, Rounding, VideoColorProfile, VideoDimensions,
 };
 use onmark_core::protocol::{BrowserPlan, BundleManifest, InvalidBrowserPlan};
 use onmark_core::render_graph::RenderPartition;
 use onmark_core::timeline::{TimelineAudio, TimelineIr};
 
+use crate::VisualExecutionPlan;
 use crate::{
     AdmittedVideo, CaptureEnvironmentId, RenderProfile, UnsupportedVideo, WorkerCaptureRequest,
 };
@@ -97,6 +98,7 @@ pub struct RenderUnit {
     bundle_manifest: BundleManifest,
     profile: RenderProfile,
     videos: BTreeMap<FrozenAssetId, RenderVideo>,
+    visual_execution: VisualExecutionPlan,
     audio: AudioPlan,
 }
 
@@ -105,6 +107,8 @@ pub struct RenderUnit {
 pub struct RenderVideo {
     asset: MaterializedAsset,
     source_frame_rate: FrameRate,
+    dimensions: VideoDimensions,
+    color_profile: Option<VideoColorProfile>,
 }
 
 impl RenderVideo {
@@ -118,6 +122,18 @@ impl RenderVideo {
     #[must_use]
     pub const fn source_frame_rate(&self) -> FrameRate {
         self.source_frame_rate
+    }
+
+    /// Returns the frozen source-pixel dimensions.
+    #[must_use]
+    pub const fn dimensions(&self) -> VideoDimensions {
+        self.dimensions
+    }
+
+    /// Returns the complete admitted source-color tuple, when known.
+    #[must_use]
+    pub const fn color_profile(&self) -> Option<VideoColorProfile> {
+        self.color_profile
     }
 }
 
@@ -261,12 +277,20 @@ impl RenderUnit {
             BrowserPlan::from_timeline_for_unit(timeline, &source_frame_rates, evaluation, output)
                 .map_err(InvalidRenderUnit::BrowserPlan)?;
         let audio = audio_plan(timeline, output, &available)?;
+        let visual_execution = VisualExecutionPlan::admit(
+            bundle_manifest.visual_capability(),
+            &browser_plan,
+            profile,
+            videos.values(),
+        )
+        .map_err(InvalidRenderUnit::VisualComposition)?;
 
         Ok(Self {
             browser_plan,
             bundle_manifest,
             profile,
             videos,
+            visual_execution,
             audio,
         })
     }
@@ -299,6 +323,7 @@ impl RenderUnit {
             self.bundle_manifest.clone(),
             self.browser_plan.clone(),
             self.profile,
+            self.visual_execution.clone(),
         )
     }
 
@@ -312,6 +337,12 @@ impl RenderUnit {
     #[must_use]
     pub fn audio_tracks(&self) -> impl ExactSizeIterator<Item = &RenderAudio> {
         self.audio.tracks()
+    }
+
+    /// Returns the admitted browser/native visual path.
+    #[must_use]
+    pub const fn visual_execution(&self) -> &VisualExecutionPlan {
+        &self.visual_execution
     }
 
     pub(crate) const fn bundle_manifest(&self) -> &BundleManifest {
@@ -329,8 +360,8 @@ impl RenderUnit {
         assets.into_values()
     }
 
-    pub(crate) fn into_execution_plans(self) -> (BrowserPlan, AudioPlan) {
-        (self.browser_plan, self.audio)
+    pub(crate) fn into_execution_plans(self) -> (BrowserPlan, VisualExecutionPlan, AudioPlan) {
+        (self.browser_plan, self.visual_execution, self.audio)
     }
 }
 
@@ -349,6 +380,8 @@ pub enum InvalidRenderUnit {
         /// Exact profile rule that rejected it.
         source: UnsupportedVideo,
     },
+    /// The declared browser/media relationship cannot be executed faithfully.
+    VisualComposition(crate::UnsupportedVisualComposition),
     /// The audio plan would exceed the bounded process envelope.
     AudioTrackLimit,
     /// An audio placement escapes the solved film interval.
@@ -377,6 +410,7 @@ impl fmt::Display for InvalidRenderUnit {
                     "materialized video {id} is unsupported: {source}"
                 )
             }
+            Self::VisualComposition(source) => source.fmt(formatter),
             Self::AudioTrackLimit => {
                 write!(
                     formatter,
@@ -407,6 +441,7 @@ impl Error for InvalidRenderUnit {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::UnsupportedVideo { source, .. } => Some(source),
+            Self::VisualComposition(source) => Some(source),
             Self::AudioSampleConversion { source, .. } => Some(source),
             Self::BrowserPlan(source) => Some(source),
             _ => None,
@@ -447,14 +482,18 @@ fn render_videos(
             .get(&id)
             .cloned()
             .ok_or(InvalidRenderUnit::MissingAsset(id))?;
-        let source_frame_rate = AdmittedVideo::admit(asset.frozen().metadata())
-            .map_err(|source| InvalidRenderUnit::UnsupportedVideo { id, source })?
-            .frame_rate();
+        let admitted = AdmittedVideo::admit(asset.frozen().metadata())
+            .map_err(|source| InvalidRenderUnit::UnsupportedVideo { id, source })?;
+        let source_frame_rate = admitted.frame_rate();
+        let dimensions = admitted.metadata().dimensions();
+        let color_profile = admitted.metadata().color_profile();
         videos.insert(
             id,
             RenderVideo {
                 asset,
                 source_frame_rate,
+                dimensions,
+                color_profile,
             },
         );
     }
@@ -536,7 +575,8 @@ mod tests {
     use onmark_core::compiler;
     use onmark_core::model::{
         AssetMetadata, AssetRef, AudioChannelLayout, AudioGain, AudioSampleRate, Duration,
-        FrameRate, FrozenAsset, FrozenAssetId, PresentationTemporalCapability, SourceId, Timebase,
+        FrameRate, FrozenAsset, FrozenAssetId, PresentationTemporalCapability,
+        PresentationVisualCapability, SourceId, Timebase, VideoColorProfile, VideoDimensions,
         VideoMetadata, VideoTiming,
     };
     use onmark_core::protocol::BundleFile;
@@ -547,6 +587,7 @@ mod tests {
         BundleManifest, CaptureEnvironmentId, InvalidRenderUnit, MAX_AUDIO_TRACKS,
         MaterializedAsset, RenderProfile, RenderUnit, WorkerCaptureRequest,
     };
+    use crate::UnsupportedVisualComposition;
 
     #[test]
     fn composes_only_required_admitted_video_assets() {
@@ -694,6 +735,104 @@ mod tests {
     }
 
     #[test]
+    fn admits_only_a_complete_pixel_aligned_separable_overlay() {
+        let frozen = layered_video_asset(video_dimensions(), true);
+        let timeline = video_timeline(frozen.clone());
+        let materialized = MaterializedAsset::new(frozen, "/tmp/opening.mp4")
+            .expect("the fixture path is present");
+
+        let unit = RenderUnit::whole_film(
+            &timeline,
+            bundle_manifest_with(PresentationVisualCapability::SeparableOverlay),
+            render_profile(),
+            [materialized],
+        )
+        .expect("the frozen facts prove the narrow layered profile");
+
+        let environment = CaptureEnvironmentId::from_sha256([7; CaptureEnvironmentId::BYTE_LENGTH]);
+        let request = unit.worker_capture_request(environment);
+        let encoded = serde_json::to_string(&request).expect("the layered request serializes");
+        let wire: serde_json::Value =
+            serde_json::from_str(&encoded).expect("the layered request is JSON");
+        let decoded: WorkerCaptureRequest =
+            serde_json::from_str(&encoded).expect("the layered request validates once");
+
+        assert_eq!(wire["visualExecution"]["mode"], "separableOverlay");
+        assert_eq!(wire["visualExecution"]["width"], 320);
+        assert_eq!(decoded, request);
+        assert_eq!(
+            decoded.visual_execution().capability(),
+            PresentationVisualCapability::SeparableOverlay,
+        );
+        let mut invalid = wire;
+        invalid["visualExecution"]["width"] = serde_json::Value::from(322);
+        assert!(serde_json::from_value::<WorkerCaptureRequest>(invalid).is_err());
+    }
+
+    #[test]
+    fn rejects_separable_overlay_without_one_complete_primary_video() {
+        let frozen = layered_video_asset(video_dimensions(), true);
+        let timeline = solve(
+            r#"<film><scene><shot><video src="opening.mp4" /></shot><shot duration="1s" /></scene></film>"#,
+            "opening.mp4",
+            frozen.clone(),
+        );
+        let materialized = MaterializedAsset::new(frozen, "/tmp/opening.mp4")
+            .expect("the fixture path is present");
+        let result = RenderUnit::whole_film(
+            &timeline,
+            bundle_manifest_with(PresentationVisualCapability::SeparableOverlay),
+            render_profile(),
+            [materialized],
+        );
+
+        assert_eq!(
+            result,
+            Err(InvalidRenderUnit::VisualComposition(
+                UnsupportedVisualComposition::IncompleteCoverage,
+            )),
+        );
+    }
+
+    #[test]
+    fn rejects_separable_overlay_without_a_primary_video() {
+        let frozen = layered_video_asset(video_dimensions(), true);
+        let timeline = solve(
+            r#"<film><scene><shot duration="1s"><title>Static</title></shot></scene></film>"#,
+            "unused.mp4",
+            frozen,
+        );
+        let result = RenderUnit::whole_film(
+            &timeline,
+            bundle_manifest_with(PresentationVisualCapability::SeparableOverlay),
+            render_profile(),
+            [],
+        );
+
+        assert_eq!(
+            result,
+            Err(InvalidRenderUnit::VisualComposition(
+                UnsupportedVisualComposition::PrimaryVideoCount,
+            )),
+        );
+    }
+
+    #[test]
+    fn rejects_separable_overlay_without_native_pixel_facts() {
+        let mismatched = layered_video_asset(
+            VideoDimensions::new(1_920, 1_080).expect("fixture dimensions are positive"),
+            true,
+        );
+        let missing_color = layered_video_asset(video_dimensions(), false);
+
+        assert_separable_rejection(mismatched, UnsupportedVisualComposition::DimensionMismatch);
+        assert_separable_rejection(
+            missing_color,
+            UnsupportedVisualComposition::UnsupportedColorProfile,
+        );
+    }
+
+    #[test]
     fn composes_voice_over_into_the_audio_plan() {
         let id = FrozenAssetId::from_sha256([1; 32]);
         let voice = FrozenAsset::new(
@@ -816,9 +955,34 @@ mod tests {
     }
 
     fn video_asset(timing: VideoTiming) -> FrozenAsset {
+        video_asset_with(
+            timing,
+            VideoDimensions::new(1_920, 1_080).expect("fixture dimensions are positive"),
+            None,
+        )
+    }
+
+    fn layered_video_asset(dimensions: VideoDimensions, color: bool) -> FrozenAsset {
+        let color_profile = color.then_some(VideoColorProfile::Bt709Limited);
+        video_asset_with(
+            VideoTiming::Constant(frame_rate()),
+            dimensions,
+            color_profile,
+        )
+    }
+
+    fn video_asset_with(
+        timing: VideoTiming,
+        dimensions: VideoDimensions,
+        color_profile: Option<VideoColorProfile>,
+    ) -> FrozenAsset {
         let duration = Duration::from_nanos(1_000_000_000);
-        let metadata = VideoMetadata::new(duration, "h264", "yuv420p", timing)
+        let metadata = VideoMetadata::new(duration, dimensions, "h264", "yuv420p", timing)
             .expect("the fixture metadata is normalized");
+        let metadata = match color_profile {
+            Some(profile) => metadata.with_color_profile(profile),
+            None => metadata,
+        };
         FrozenAsset::new(
             FrozenAssetId::from_sha256([1; 32]),
             AssetMetadata::video(duration, metadata),
@@ -853,16 +1017,39 @@ mod tests {
         RenderProfile::new(320, 180).expect("the fixture dimensions are valid")
     }
 
+    fn video_dimensions() -> VideoDimensions {
+        VideoDimensions::new(320, 180).expect("fixture dimensions are positive")
+    }
+
     fn bundle_manifest() -> BundleManifest {
+        bundle_manifest_with(PresentationVisualCapability::BrowserComposite)
+    }
+
+    fn bundle_manifest_with(visual_capability: PresentationVisualCapability) -> BundleManifest {
         const DIGEST: &str =
             "sha256:0101010101010101010101010101010101010101010101010101010101010101";
         let entry = BundleFile::new(BundleManifest::ENTRY_POINT, 1, DIGEST)
             .expect("the fixture entry is valid");
         BundleManifest::new(
             PresentationTemporalCapability::Sequential,
+            visual_capability,
             DIGEST,
             vec![entry],
         )
         .expect("the fixture manifest is valid")
+    }
+
+    fn assert_separable_rejection(frozen: FrozenAsset, expected: UnsupportedVisualComposition) {
+        let timeline = video_timeline(frozen.clone());
+        let materialized = MaterializedAsset::new(frozen, "/tmp/opening.mp4")
+            .expect("the fixture path is present");
+        let result = RenderUnit::whole_film(
+            &timeline,
+            bundle_manifest_with(PresentationVisualCapability::SeparableOverlay),
+            render_profile(),
+            [materialized],
+        );
+
+        assert_eq!(result, Err(InvalidRenderUnit::VisualComposition(expected)));
     }
 }

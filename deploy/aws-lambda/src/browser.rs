@@ -13,7 +13,7 @@ use std::fs::{self, File};
 use std::io::{self, Read};
 use std::path::{Component, Path, PathBuf};
 
-use onmark_render::{BrowserLaunchPolicy, BrowserLimits, FrameCaptureExecutor};
+use onmark_render::{BrowserLaunchPolicy, BrowserLimits, Ffmpeg, FrameCaptureExecutor};
 use sha2::{Digest as _, Sha256};
 use tempfile::TempDir;
 use tokio::sync::OnceCell;
@@ -92,14 +92,20 @@ pub(crate) struct BrowserRuntime {
     package: BrowserPackage,
     limits: BrowserLimits,
     installation: OnceCell<BrowserInstallation>,
+    ffmpeg: Ffmpeg,
 }
 
 impl BrowserRuntime {
-    pub(crate) const fn new(package: BrowserPackage, limits: BrowserLimits) -> Self {
+    pub(crate) const fn new(
+        package: BrowserPackage,
+        limits: BrowserLimits,
+        ffmpeg: Ffmpeg,
+    ) -> Self {
         Self {
             package,
             limits,
             installation: OnceCell::const_new(),
+            ffmpeg,
         }
     }
 
@@ -112,6 +118,7 @@ impl BrowserRuntime {
             installation.executable().to_owned(),
             BrowserLaunchPolicy::isolated_worker(),
             self.limits,
+            self.ffmpeg.clone(),
         ))
     }
 
@@ -480,7 +487,7 @@ mod tests {
     use std::path::Path;
     use std::time::Duration;
 
-    use onmark_render::BrowserLimits;
+    use onmark_render::{BrowserLimits, EncodeLimits, Ffmpeg};
     use sha2::{Digest as _, Sha256};
     use tar::{Builder, Header};
     use tempfile::TempDir;
@@ -498,7 +505,8 @@ mod tests {
         let limits = BrowserLimits::new(Duration::from_secs(1), 1024)
             .expect("the fixture browser limits are bounded");
 
-        let runtime = BrowserRuntime::new(BrowserPackage::expanded(missing), limits);
+        let runtime =
+            BrowserRuntime::new(BrowserPackage::expanded(missing), limits, fixture_ffmpeg());
 
         assert!(!runtime.is_ready());
         assert!(matches!(
@@ -518,7 +526,11 @@ mod tests {
             .expect("the fixture digest is valid");
         let limits = BrowserLimits::new(Duration::from_secs(1), 1024)
             .expect("the fixture browser limits are bounded");
-        let runtime = BrowserRuntime::new(BrowserPackage::archive(archive.clone(), digest), limits);
+        let runtime = BrowserRuntime::new(
+            BrowserPackage::archive(archive.clone(), digest),
+            limits,
+            fixture_ffmpeg(),
+        );
 
         runtime
             .executor()
@@ -563,6 +575,12 @@ mod tests {
             "<dir>{}</dir>",
             installation_root.join("fonts").display(),
         )));
+    }
+
+    fn fixture_ffmpeg() -> Ffmpeg {
+        let limits = EncodeLimits::new(Duration::from_secs(1), 1, 1, 1)
+            .expect("the fixture encoder limits are bounded");
+        Ffmpeg::new("ffmpeg", limits).expect("the fixture executable path is present")
     }
 
     #[test]

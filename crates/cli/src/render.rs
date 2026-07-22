@@ -131,7 +131,11 @@ pub(super) async fn run(args: RenderArgs) -> Result<RenderOutcome, CliError> {
     let timeline = compiler::import_captions(timeline, caption_track)?;
 
     let bundle = PresentationBundler::new(executables.bundler)
-        .bundle(&presentation, args.temporal_capability)
+        .bundle(
+            &presentation,
+            args.temporal_capability,
+            args.visual_capability,
+        )
         .await?;
     let (partitions, units) = materialize_units(&timeline, profile, &bundle, frozen)?;
 

@@ -14,6 +14,7 @@ use onmark_core::protocol::{
 };
 
 use super::{FrameCaptureMetrics, RenderError, RenderErrorKind, invalid_plan};
+use crate::encoder::{CanonicalFrame, LayeredSession};
 use crate::frame_artifact::FrameArtifactWriter;
 use crate::{
     BrowserError, BrowserSession, CapturedFrame, EncodedPng, FfmpegSession, RenderProfile,
@@ -88,16 +89,34 @@ pub(super) fn validate_plan(
     RequestSequence::new(frame_count, output)
 }
 
+pub(super) struct CaptureTask<'a> {
+    pub(super) plan: &'a BrowserPlan,
+    pub(super) requests: RequestSequence,
+    pub(super) entry_url: &'a str,
+    pub(super) surface: CaptureSurface,
+    pub(super) output: &'a Path,
+}
+
 pub(super) async fn render_session(
     browser: &mut BrowserSession,
-    plan: &BrowserPlan,
-    requests: RequestSequence,
-    entry_url: &str,
     frames: &mut FrameSink<'_>,
     metrics: &mut FrameCaptureMetrics,
-    output: &Path,
+    task: CaptureTask<'_>,
 ) -> Result<(), RenderError> {
+    let CaptureTask {
+        plan,
+        requests,
+        entry_url,
+        surface,
+        output,
+    } = task;
     let setup_started = Instant::now();
+    if surface == CaptureSurface::Transparent {
+        browser
+            .use_transparent_capture_surface()
+            .await
+            .map_err(|source| RenderError::browser(output, source))?;
+    }
     browser
         .navigate(entry_url)
         .await
@@ -112,6 +131,13 @@ pub(super) async fn render_session(
 
     render_frames(browser, frames, plan, requests, metrics, output).await?;
     dispose_runtime(browser, requests.disposal(), output).await
+}
+
+/// Root-surface ownership established by visual admission before navigation.
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(super) enum CaptureSurface {
+    Opaque,
+    Transparent,
 }
 
 async fn load_runtime(
@@ -202,6 +228,11 @@ async fn render_frames(
 pub(super) enum FrameSink<'a> {
     Encoder(&'a mut FfmpegSession),
     Artifact(&'a mut FrameArtifactWriter),
+    LayeredVideo(&'a mut LayeredSession),
+    LayeredArtifact {
+        compositor: &'a mut LayeredSession,
+        artifact: &'a mut FrameArtifactWriter,
+    },
 }
 
 impl FrameSink<'_> {
@@ -222,10 +253,55 @@ impl FrameSink<'_> {
                 metrics.write += started.elapsed();
             }
             Self::Artifact(writer) => write_artifact(writer, profile, png, metrics, output).await?,
+            Self::LayeredVideo(compositor) => {
+                let started = Instant::now();
+                compositor
+                    .write_video_frame(&png)
+                    .await
+                    .map_err(|source| RenderError::encoder(output, source))?;
+                metrics.write += started.elapsed();
+            }
+            Self::LayeredArtifact {
+                compositor,
+                artifact,
+            } => {
+                write_layered_artifact(compositor, artifact, profile, png, metrics, output).await?;
+            }
         }
         metrics.frames += 1;
         Ok(())
     }
+}
+
+async fn write_layered_artifact(
+    compositor: &mut LayeredSession,
+    artifact: &mut FrameArtifactWriter,
+    profile: RenderProfile,
+    foreground: EncodedPng,
+    metrics: &mut FrameCaptureMetrics,
+    output: &Path,
+) -> Result<(), RenderError> {
+    let started = Instant::now();
+    let frame = compositor
+        .write_frame(&foreground)
+        .await
+        .map_err(|source| RenderError::encoder(output, source))?;
+    let CanonicalFrame::Pixels {
+        bytes: pixels,
+        fingerprint,
+    } = frame
+    else {
+        return Err(invalid_plan(
+            output,
+            "layered worker composition did not retain canonical pixels",
+        ));
+    };
+    artifact
+        .write_rgba_frame(&pixels, fingerprint, profile)
+        .await
+        .map_err(|source| RenderError::artifact(output, source))?;
+    metrics.write += started.elapsed();
+    Ok(())
 }
 
 async fn write_artifact(

@@ -10,8 +10,8 @@ use onmark_core::compiler;
 use onmark_core::diagnostics::DiagnosticCode;
 use onmark_core::model::{
     AssetMetadata, AssetRef, AudioChannelLayout, AudioSampleRate, Duration, EventRef,
-    FrameInterval, FrameRate, FrozenAsset, FrozenAssetId, SourceId, Timebase, VideoMetadata,
-    VideoTiming,
+    FrameInterval, FrameRate, FrozenAsset, FrozenAssetId, SourceId, Timebase, VideoDimensions,
+    VideoMetadata, VideoTiming,
 };
 use onmark_core::timeline::{
     TimelineAudio, TimelineAudioKind, TimelineContent, TimelineElement, TimelineIr, TimelineScene,
@@ -243,8 +243,15 @@ fn frozen_assets<const N: usize>(entries: [(&str, &str); N]) -> BTreeMap<AssetRe
 
 fn fixture_video_metadata(duration: Duration) -> AssetMetadata {
     let rate = FrameRate::new(30, 1).expect("the fixture frame rate is valid");
-    let video = VideoMetadata::new(duration, "h264", "yuv420p", VideoTiming::Constant(rate))
-        .expect("the fixture video metadata is normalized");
+    let dimensions = VideoDimensions::new(1_920, 1_080).expect("fixture dimensions are positive");
+    let video = VideoMetadata::new(
+        duration,
+        dimensions,
+        "h264",
+        "yuv420p",
+        VideoTiming::Constant(rate),
+    )
+    .expect("the fixture video metadata is normalized");
     AssetMetadata::video(duration, video)
 }
 

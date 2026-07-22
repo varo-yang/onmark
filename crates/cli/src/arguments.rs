@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use clap::{Args, Parser, Subcommand};
 use onmark_core::model::FrameRate;
-use onmark_core::model::PresentationTemporalCapability;
+use onmark_core::model::{PresentationTemporalCapability, PresentationVisualCapability};
 
 const DEFAULT_PRESENTATION: &str = "presentation.ts";
 
@@ -49,6 +49,10 @@ pub(super) struct WorkerCaptureArgs {
     /// Chrome for Testing headless-shell executable pinned by the worker environment.
     #[arg(long)]
     pub(super) browser: PathBuf,
+
+    /// `FFmpeg` executable pinned by the worker environment.
+    #[arg(long, default_value = "ffmpeg")]
+    pub(super) ffmpeg: PathBuf,
 }
 
 #[derive(Debug, Args)]
@@ -103,6 +107,10 @@ pub(super) struct RenderArgs {
     /// Proven presentation-time behavior used by render partitioning.
     #[arg(long, default_value_t = PresentationTemporalCapability::Sequential)]
     pub(super) temporal_capability: PresentationTemporalCapability,
+
+    /// Proven relationship between browser pixels and primary media.
+    #[arg(long, default_value_t = PresentationVisualCapability::BrowserComposite)]
+    pub(super) visual_capability: PresentationVisualCapability,
 }
 
 impl RenderArgs {
@@ -152,7 +160,7 @@ mod tests {
     use std::path::Path;
 
     use clap::Parser;
-    use onmark_core::model::PresentationTemporalCapability;
+    use onmark_core::model::{PresentationTemporalCapability, PresentationVisualCapability};
 
     use super::{Cli, Command, WorkerCommand};
 
@@ -172,6 +180,10 @@ mod tests {
             args.temporal_capability,
             PresentationTemporalCapability::Sequential,
         );
+        assert_eq!(
+            args.visual_capability,
+            PresentationVisualCapability::BrowserComposite,
+        );
     }
 
     #[test]
@@ -186,6 +198,32 @@ mod tests {
 
         assert!(
             Cli::try_parse_from(["onmark", "render", "film.onmark", "--fps", "29.97",]).is_err()
+        );
+    }
+
+    #[test]
+    fn accepts_explicit_presentation_capabilities() {
+        let cli = Cli::try_parse_from([
+            "onmark",
+            "render",
+            "film.onmark",
+            "--temporal-capability",
+            "randomAccess",
+            "--visual-capability",
+            "separableOverlay",
+        ])
+        .expect("the closed capability spellings are valid");
+        let Command::Render(args) = cli.command else {
+            panic!("the fixture must parse as a render command");
+        };
+
+        assert_eq!(
+            args.temporal_capability,
+            PresentationTemporalCapability::RandomAccess,
+        );
+        assert_eq!(
+            args.visual_capability,
+            PresentationVisualCapability::SeparableOverlay,
         );
     }
 

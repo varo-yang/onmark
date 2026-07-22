@@ -1,6 +1,6 @@
 #!/bin/sh
 
-entries='format=duration:stream=index,codec_type,codec_name,pix_fmt,color_range,color_space,color_transfer,color_primaries,duration,avg_frame_rate,r_frame_rate,nb_frames,sample_rate,channels:stream_disposition=default,attached_pic'
+entries='format=duration:stream=index,codec_type,codec_name,pix_fmt,width,height,color_range,color_space,color_transfer,color_primaries,duration,avg_frame_rate,r_frame_rate,nb_frames,sample_rate,channels:stream_disposition=default,attached_pic'
 
 if [ "$#" -ne 8 ] || \
    [ "$1" != "-v" ] || [ "$2" != "error" ] || \
@@ -16,40 +16,46 @@ done
 
 case "${input##*/}" in
   valid.mp4)
-    printf '{"streams":[{"codec_type":"video","codec_name":"h264","pix_fmt":"yuv420p","color_range":"tv","color_space":"bt709","color_transfer":"bt709","color_primaries":"bt709","duration":"2.000000","avg_frame_rate":"30/1","r_frame_rate":"30/1","nb_frames":"60"}],"format":{"duration":"2.500000"}}'
+    printf '{"streams":[{"codec_type":"video","codec_name":"h264","pix_fmt":"yuv420p","width":1920,"height":1080,"color_range":"tv","color_space":"bt709","color_transfer":"bt709","color_primaries":"bt709","duration":"2.000000","avg_frame_rate":"30/1","r_frame_rate":"30/1","nb_frames":"60"}],"format":{"duration":"2.500000"}}'
     ;;
   partial-color.mp4)
-    printf '{"streams":[{"codec_type":"video","codec_name":"h264","pix_fmt":"yuv420p","color_space":"bt709","duration":"2.000000","avg_frame_rate":"30/1","r_frame_rate":"30/1","nb_frames":"60"}],"format":{"duration":"2.500000"}}'
+    printf '{"streams":[{"codec_type":"video","codec_name":"h264","pix_fmt":"yuv420p","width":1920,"height":1080,"color_space":"bt709","duration":"2.000000","avg_frame_rate":"30/1","r_frame_rate":"30/1","nb_frames":"60"}],"format":{"duration":"2.500000"}}'
     ;;
   audio.mp3)
     printf '{"streams":[{"codec_type":"audio","sample_rate":"48000","channels":1}],"format":{"duration":"2.500000"}}'
     ;;
   audiovisual.mp4)
-    printf '{"streams":[{"codec_type":"video","codec_name":"h264","pix_fmt":"yuv420p","duration":"2.000000","avg_frame_rate":"30/1","r_frame_rate":"30/1","nb_frames":"60"},{"codec_type":"audio","duration":"1.500000","sample_rate":"44100","channels":2}],"format":{"duration":"2.500000"}}'
+    printf '{"streams":[{"codec_type":"video","codec_name":"h264","pix_fmt":"yuv420p","width":1920,"height":1080,"duration":"2.000000","avg_frame_rate":"30/1","r_frame_rate":"30/1","nb_frames":"60"},{"codec_type":"audio","duration":"1.500000","sample_rate":"44100","channels":2}],"format":{"duration":"2.500000"}}'
     ;;
   stream-selection.mp4)
-    printf '{"streams":[{"index":0,"codec_type":"video","disposition":{"default":1,"attached_pic":1}},{"index":5,"codec_type":"video","codec_name":"h264","pix_fmt":"yuv420p","duration":"1.000000","avg_frame_rate":"24/1","r_frame_rate":"24/1","nb_frames":"24","disposition":{"default":1,"attached_pic":0}},{"index":2,"codec_type":"audio","duration":"1.000000","sample_rate":"32000","channels":1,"disposition":{"default":0,"attached_pic":0}},{"index":7,"codec_type":"audio","duration":"1.000000","sample_rate":"44100","channels":1,"disposition":{"default":1,"attached_pic":0}},{"index":3,"codec_type":"video","codec_name":"h264","pix_fmt":"yuv420p","duration":"2.000000","avg_frame_rate":"30/1","r_frame_rate":"30/1","nb_frames":"60","disposition":{"default":1,"attached_pic":0}},{"index":4,"codec_type":"audio","duration":"2.000000","sample_rate":"48000","channels":2,"disposition":{"default":1,"attached_pic":0}}],"format":{"duration":"2.500000"}}'
+    printf '{"streams":[{"index":0,"codec_type":"video","disposition":{"default":1,"attached_pic":1}},{"index":5,"codec_type":"video","codec_name":"h264","pix_fmt":"yuv420p","width":1920,"height":1080,"duration":"1.000000","avg_frame_rate":"24/1","r_frame_rate":"24/1","nb_frames":"24","disposition":{"default":1,"attached_pic":0}},{"index":2,"codec_type":"audio","duration":"1.000000","sample_rate":"32000","channels":1,"disposition":{"default":0,"attached_pic":0}},{"index":7,"codec_type":"audio","duration":"1.000000","sample_rate":"44100","channels":1,"disposition":{"default":1,"attached_pic":0}},{"index":3,"codec_type":"video","codec_name":"h264","pix_fmt":"yuv420p","width":1920,"height":1080,"duration":"2.000000","avg_frame_rate":"30/1","r_frame_rate":"30/1","nb_frames":"60","disposition":{"default":1,"attached_pic":0}},{"index":4,"codec_type":"audio","duration":"2.000000","sample_rate":"48000","channels":2,"disposition":{"default":1,"attached_pic":0}}],"format":{"duration":"2.500000"}}'
     ;;
   stream-duration-only.mp4)
-    printf '{"streams":[{"codec_type":"video","codec_name":"h264","pix_fmt":"yuv420p","duration":"2.000000","avg_frame_rate":"30/1","r_frame_rate":"30/1","nb_frames":"60"},{"codec_type":"audio","duration":"1.500000","sample_rate":"48000","channels":2}],"format":{}}'
+    printf '{"streams":[{"codec_type":"video","codec_name":"h264","pix_fmt":"yuv420p","width":1920,"height":1080,"duration":"2.000000","avg_frame_rate":"30/1","r_frame_rate":"30/1","nb_frames":"60"},{"codec_type":"audio","duration":"1.500000","sample_rate":"48000","channels":2}],"format":{}}'
     ;;
   format-duration-only.mp4)
-    printf '{"streams":[{"codec_type":"video","codec_name":"h264","pix_fmt":"yuv420p","avg_frame_rate":"30/1","r_frame_rate":"30/1","nb_frames":"60"}],"format":{"duration":"2.500000"}}'
+    printf '{"streams":[{"codec_type":"video","codec_name":"h264","pix_fmt":"yuv420p","width":1920,"height":1080,"avg_frame_rate":"30/1","r_frame_rate":"30/1","nb_frames":"60"}],"format":{"duration":"2.500000"}}'
     ;;
   metadata-only.bin)
     printf '{"streams":[{"codec_type":"subtitle"}],"format":{"duration":"2.500000"}}'
     ;;
   variable.mp4)
-    printf '{"streams":[{"codec_type":"video","codec_name":"h264","pix_fmt":"yuv420p","duration":"2.000000","avg_frame_rate":"30/1","r_frame_rate":"60/1","nb_frames":"60"}],"format":{"duration":"2.500000"}}'
+    printf '{"streams":[{"codec_type":"video","codec_name":"h264","pix_fmt":"yuv420p","width":1920,"height":1080,"duration":"2.000000","avg_frame_rate":"30/1","r_frame_rate":"60/1","nb_frames":"60"}],"format":{"duration":"2.500000"}}'
     ;;
   still.mp4)
-    printf '{"streams":[{"codec_type":"video","codec_name":"h264","pix_fmt":"yuv420p","duration":"2.000000","avg_frame_rate":"0/0","r_frame_rate":"0/0","nb_frames":"1"}],"format":{"duration":"2.500000"}}'
+    printf '{"streams":[{"codec_type":"video","codec_name":"h264","pix_fmt":"yuv420p","width":1920,"height":1080,"duration":"2.000000","avg_frame_rate":"0/0","r_frame_rate":"0/0","nb_frames":"1"}],"format":{"duration":"2.500000"}}'
     ;;
   empty-video.mp4)
-    printf '{"streams":[{"codec_type":"video","codec_name":"h264","pix_fmt":"yuv420p","duration":"2.000000","avg_frame_rate":"30/1","r_frame_rate":"30/1","nb_frames":"0"}],"format":{"duration":"2.500000"}}'
+    printf '{"streams":[{"codec_type":"video","codec_name":"h264","pix_fmt":"yuv420p","width":1920,"height":1080,"duration":"2.000000","avg_frame_rate":"30/1","r_frame_rate":"30/1","nb_frames":"0"}],"format":{"duration":"2.500000"}}'
     ;;
   invalid-video-duration.mp4)
-    printf '{"streams":[{"codec_type":"video","codec_name":"h264","pix_fmt":"yuv420p","duration":"invalid","avg_frame_rate":"30/1","r_frame_rate":"30/1","nb_frames":"60"}],"format":{"duration":"2.500000"}}'
+    printf '{"streams":[{"codec_type":"video","codec_name":"h264","pix_fmt":"yuv420p","width":1920,"height":1080,"duration":"invalid","avg_frame_rate":"30/1","r_frame_rate":"30/1","nb_frames":"60"}],"format":{"duration":"2.500000"}}'
+    ;;
+  missing-video-width.mp4)
+    printf '{"streams":[{"codec_type":"video","codec_name":"h264","pix_fmt":"yuv420p","height":1080,"duration":"2.000000","avg_frame_rate":"30/1","r_frame_rate":"30/1","nb_frames":"60"}],"format":{"duration":"2.500000"}}'
+    ;;
+  zero-video-height.mp4)
+    printf '{"streams":[{"codec_type":"video","codec_name":"h264","pix_fmt":"yuv420p","width":1920,"height":0,"duration":"2.000000","avg_frame_rate":"30/1","r_frame_rate":"30/1","nb_frames":"60"}],"format":{"duration":"2.500000"}}'
     ;;
   missing-audio-sample-rate.mp3)
     printf '{"streams":[{"codec_type":"audio"}],"format":{"duration":"2.500000"}}'
@@ -104,7 +110,7 @@ case "${input##*/}" in
       printf '0123456789abcdef' >&2
       index=$((index + 1))
     done
-    printf '{"streams":[{"codec_type":"video","codec_name":"h264","pix_fmt":"yuv420p","duration":"1.000000","avg_frame_rate":"30/1","r_frame_rate":"30/1","nb_frames":"30"}],"format":{"duration":"1.000000"}}'
+    printf '{"streams":[{"codec_type":"video","codec_name":"h264","pix_fmt":"yuv420p","width":1920,"height":1080,"duration":"1.000000","avg_frame_rate":"30/1","r_frame_rate":"30/1","nb_frames":"30"}],"format":{"duration":"1.000000"}}'
     ;;
   *)
     printf 'unexpected fixture input: %s\n' "$input" >&2

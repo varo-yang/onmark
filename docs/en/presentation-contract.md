@@ -231,9 +231,42 @@ This lifecycle is not itself a random-access declaration. A presentation may
 be bundled with `randomAccess` only after conformance proves that every requested
 frame depends solely on immutable inputs and that exact frame. The declaration
 is explicit build metadata, never inferred from source or screenplay spelling.
-Bundle V2 includes it in canonical identity, and Rust consumes it before Render
-Graph partitioning. Legacy V1 bundles and omitted CLI declarations remain
-`sequential`.
+The current bundle manifest includes it in canonical identity, and Rust consumes
+it before Render Graph partitioning. Omitted CLI declarations remain
+`sequential`; the low-level bundler requires an explicit value.
+
+## Visual capabilities
+
+`PresentationVisualCapability` states which pixels Chromium owns. It is build
+metadata, not screenplay spelling, and is never inferred from presentation
+source. The CLI defaults to `browserComposite`; the low-level bundler requires
+an explicit value.
+
+- `browserComposite` means Chromium owns the complete frame, including primary
+  video. It is the conservative capability for unknown presentation code.
+- `separableOverlay` means Chromium produces only a transparent foreground that
+  is independent of primary-video pixels. Native execution may decode and place
+  primary video before source-over compositing that foreground.
+
+A `separableOverlay` presentation must remain correct when browser video
+placements are omitted. It may use solved intervals, overlay facts, exact frame
+identity, and immutable visual resources. It must not sample a video into
+Canvas or WebGL, inspect media pixels, use backdrop-dependent filters or blend
+modes, or otherwise make foreground pixels depend on the primary image beneath
+them. The declaration is admitted by conformance, not trusted because a source
+scan happened to find no forbidden token.
+
+The current native path is deliberately narrower than the presentation promise:
+one primary video must cover the complete published interval, its frozen source
+dimensions must equal the output profile, and its complete color tuple must be
+the admitted BT.709 limited-range profile. These checks avoid reconstructing
+CSS layout in Rust. A declared capability outside this native profile fails
+before process launch; it never silently falls back to browser composition.
+
+The current bundle manifest places temporal and visual capabilities in canonical
+bundle identity. Bundles are reproducible build products rather than authored
+data; only the current manifest version is accepted, and older bundles are
+rebuilt.
 
 ## Assets
 

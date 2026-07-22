@@ -50,8 +50,8 @@ fn generate_schemas(repository: &Path, mode: GenerationMode) -> Result<(), Box<d
             "browser-response-v1.schema.json",
         )?,
         SchemaArtifact::new::<BundleManifest>(
-            "https://onmark.dev/schemas/bundle-manifest-v2.schema.json",
-            "bundle-manifest-v2.schema.json",
+            "https://onmark.dev/schemas/bundle-manifest-v3.schema.json",
+            "bundle-manifest-v3.schema.json",
         )?,
         SchemaArtifact::new::<CaptureInvocation>(
             "https://onmark.dev/schemas/aws-capture-invocation-v1.schema.json",
