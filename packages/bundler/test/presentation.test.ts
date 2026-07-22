@@ -223,7 +223,7 @@ test("keeps the checked-in video presentation bundle current", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "onmark-bundler-test-"));
   try {
     const repository = fileURLToPath(new URL("../../../..", import.meta.url));
-    const expected = join(repository, "conformance/protocol/bundle-v3");
+    const expected = join(repository, "conformance/protocol/bundle-v1");
     const outputDirectory = join(workspace, "bundle");
     await bundlePresentation({
       entryPoint: join(repository, "conformance/browser/video-presentation.ts"),

@@ -491,11 +491,11 @@ async fn dispose(session: &BrowserSession, frames: usize) -> Result<(), Box<dyn 
 }
 
 async fn load_and_prepare(
-    session: &BrowserSession,
+    session: &mut BrowserSession,
     fixture: &Url,
     plan: &BrowserPlan,
 ) -> Result<(), Box<dyn Error>> {
-    session.navigate(fixture.as_str()).await?;
+    session.navigate(fixture, &fixture_root(fixture)).await?;
     let loaded = session
         .dispatch(&BrowserRequest::new(
             RequestId::new(1),
@@ -986,6 +986,15 @@ fn transparent_overlay_fixture() -> Url {
     let fixture =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/transparent-overlay.html");
     Url::from_file_path(fixture).expect("the fixture path is absolute")
+}
+
+fn fixture_root(fixture: &Url) -> PathBuf {
+    fixture
+        .to_file_path()
+        .expect("the browser fixture must be a file URL")
+        .parent()
+        .expect("the browser fixture must have a parent directory")
+        .to_owned()
 }
 
 fn write_overlay_sequence(frames: &[EncodedPng], output: &Path) -> u64 {

@@ -6,7 +6,8 @@
 use std::collections::BTreeMap;
 
 use crate::model::{
-    AssetRef, AudioGain, CueId, Duration, ElementKind, EventRef, NodeId, SourceSpan,
+    AssetRef, AudioGain, CueId, Duration, ElementKind, EventRef, GeneralAudioKind, NodeId,
+    SourceSpan,
 };
 
 /// One typed value together with the authored bytes that produced it.
@@ -340,6 +341,7 @@ impl ResolvedShot {
 /// Typed music or sound-effect intent before frame placement.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ResolvedAudio {
+    kind: GeneralAudioKind,
     element: ResolvedElement,
     src: Authored<AssetRef>,
     delay: Option<Authored<Duration>>,
@@ -348,12 +350,14 @@ pub struct ResolvedAudio {
 
 impl ResolvedAudio {
     pub(super) const fn new(
+        kind: GeneralAudioKind,
         element: ResolvedElement,
         src: Authored<AssetRef>,
         delay: Option<Authored<Duration>>,
         gain: AudioGain,
     ) -> Self {
         Self {
+            kind,
             element,
             src,
             delay,
@@ -388,12 +392,13 @@ impl ResolvedAudio {
     pub(super) fn into_parts(
         self,
     ) -> (
+        GeneralAudioKind,
         ResolvedElement,
         Authored<AssetRef>,
         Option<Authored<Duration>>,
         AudioGain,
     ) {
-        (self.element, self.src, self.delay, self.gain)
+        (self.kind, self.element, self.src, self.delay, self.gain)
     }
 }
 

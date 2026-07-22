@@ -57,6 +57,12 @@ test("names every presentation resource that misses readiness", async () => {
       JSON.stringify(error.pendingResources) ===
         JSON.stringify(["image:poster:prepare", "font:Inter:prepare"]),
   );
+  await assert.rejects(
+    adapter.prepare(runtimeFrameAt(0, PLAN.frameRate)),
+    (error: unknown) =>
+      error instanceof RuntimeAdapterError &&
+      error.message === "presentation prepare requires the loaded state",
+  );
 
   await adapter.dispose();
   assert.equal(image.disposed, true);

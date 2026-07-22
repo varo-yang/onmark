@@ -68,7 +68,7 @@ async fn rejects_units_that_do_not_match_the_partition_plan_before_launching_bro
 #[tokio::test]
 #[ignore = "requires ONMARK_HEADLESS_SHELL"]
 async fn rejects_a_page_that_never_installs_the_runtime_host() {
-    let session = BrowserSession::launch(
+    let mut session = BrowserSession::launch(
         headless_shell(),
         BrowserLaunchPolicy::local(),
         render_profile(),
@@ -79,7 +79,7 @@ async fn rejects_a_page_that_never_installs_the_runtime_host() {
     let fixture = render_fixture("missing-runtime.html");
 
     let error = session
-        .navigate(fixture.as_str())
+        .navigate(&fixture, &fixture_root(&fixture))
         .await
         .expect_err("the missing host must miss its readiness deadline");
     let shutdown = session.shutdown().await;
@@ -89,9 +89,33 @@ async fn rejects_a_page_that_never_installs_the_runtime_host() {
 }
 
 #[tokio::test]
+#[ignore = "requires ONMARK_HEADLESS_SHELL"]
+async fn blocks_navigation_outside_the_private_resource_root() {
+    let mut session = BrowserSession::launch(
+        headless_shell(),
+        BrowserLaunchPolicy::local(),
+        render_profile(),
+        browser_limits(Duration::from_secs(5)),
+    )
+    .await
+    .expect("headless shell must launch");
+    let fixture = render_fixture("missing-runtime.html");
+    let unrelated_root = tempdir().expect("the unrelated private root must be available");
+
+    let error = session
+        .navigate(&fixture, unrelated_root.path())
+        .await
+        .expect_err("Chromium must not read a file outside the declared private root");
+    let shutdown = session.shutdown().await;
+
+    assert_eq!(error.kind(), BrowserErrorKind::Navigation);
+    shutdown.expect("headless shell must shut down after a blocked navigation");
+}
+
+#[tokio::test]
 #[ignore = "requires ONMARK_HEADLESS_SHELL and a built @onmark/runtime package"]
 async fn bounds_a_runtime_adapter_that_never_finishes_loading() {
-    let session = BrowserSession::launch(
+    let mut session = BrowserSession::launch(
         headless_shell(),
         BrowserLaunchPolicy::local(),
         render_profile(),
@@ -101,7 +125,7 @@ async fn bounds_a_runtime_adapter_that_never_finishes_loading() {
     .expect("headless shell must launch");
     let fixture = render_fixture("stalled-runtime.html");
     session
-        .navigate(fixture.as_str())
+        .navigate(&fixture, &fixture_root(&fixture))
         .await
         .expect("the stalled fixture must install its runtime host");
 
@@ -528,8 +552,11 @@ async fn exercise_protocol(
     Ok(captured.raw_rgba_hash())
 }
 
-async fn load_and_prepare(session: &BrowserSession, fixture: &Url) -> Result<(), Box<dyn Error>> {
-    session.navigate(fixture.as_str()).await?;
+async fn load_and_prepare(
+    session: &mut BrowserSession,
+    fixture: &Url,
+) -> Result<(), Box<dyn Error>> {
+    session.navigate(fixture, &fixture_root(fixture)).await?;
     let plan = gate_one_plan();
     let frame_rate = plan.frame_rate();
     let loaded = session
@@ -838,6 +865,15 @@ fn render_fixture(name: &str) -> Url {
     Url::from_file_path(fixture).expect("the fixture path is absolute")
 }
 
+fn fixture_root(fixture: &Url) -> PathBuf {
+    fixture
+        .to_file_path()
+        .expect("the browser fixture must be a file URL")
+        .parent()
+        .expect("the browser fixture must have a parent directory")
+        .to_owned()
+}
+
 fn repository() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -1030,7 +1066,7 @@ struct FixtureBundle {
 
 impl FixtureBundle {
     fn checked_in() -> Self {
-        let directory = repository().join("conformance/protocol/bundle-v3");
+        let directory = repository().join("conformance/protocol/bundle-v1");
         Self::from_directory(directory)
     }
 

@@ -10,9 +10,9 @@ use std::fmt;
 
 use crate::diagnostics::{Diagnostic, DiagnosticCode, Diagnostics};
 use crate::model::{
-    AssetMetadata, AssetRef, AudioGain, AudioMetadata, CueId, Duration, ElementKind, EventRef,
-    FrameCount, FrameIndex, FrameInterval, FrozenAsset, FrozenAssetId, Rounding, SourceSpan,
-    Timebase, VideoMetadata,
+    AssetMetadata, AssetRef, AudioGain, AudioMetadata, CueId, Duration, EventRef, FrameCount,
+    FrameIndex, FrameInterval, FrozenAsset, FrozenAssetId, Rounding, SourceSpan, Timebase,
+    VideoMetadata,
 };
 use crate::timeline::{
     TimelineAudio, TimelineAudioKind, TimelineContent, TimelineElement, TimelineEvent, TimelineIr,
@@ -20,6 +20,7 @@ use crate::timeline::{
     TimelineVoiceOver, TimingReason,
 };
 
+use super::diagnostic::author_diagnostic;
 use super::resolved_film::{
     Authored, ResolvedAudio, ResolvedCues, ResolvedElement, ResolvedFilm, ResolvedFilmParts,
     ResolvedMedia, ResolvedOverlay, ResolvedScene, ResolvedShot, ResolvedShotContent,
@@ -320,14 +321,13 @@ impl<'a> Solver<'a> {
     }
 
     fn prepare_audio(&mut self, audio: ResolvedAudio) -> Result<Option<PreparedAudio>, SolveError> {
-        let (element, source, delay, gain) = audio.into_parts();
-        let kind = match element.kind() {
-            ElementKind::Music => TimelineAudioKind::Music,
-            ElementKind::SoundEffect => TimelineAudioKind::SoundEffect,
-            kind => unreachable!("a resolved audio element cannot have kind {kind}"),
-        };
+        let (kind, element, source, delay, gain) = audio.into_parts();
         let media = self.prepare_resolved_media(element, source, delay, MediaTrack::Audio)?;
-        Ok(media.map(|media| PreparedAudio { media, gain, kind }))
+        Ok(media.map(|media| PreparedAudio {
+            media,
+            gain,
+            kind: kind.into(),
+        }))
     }
 
     fn prepare_media(
@@ -873,17 +873,15 @@ fn interval(start: FrameIndex, end: FrameIndex) -> FrameInterval {
 }
 
 fn missing_media_source(element: &ResolvedElement) -> Diagnostic {
-    Diagnostic::new(
+    author_diagnostic(
         DiagnosticCode::MissingMediaSource,
         element.span(),
         format!(
             "element <{}> needs a frozen media source for timeline solving",
             element.kind()
         ),
+        format!("add src=\"...\" to <{}>", element.kind()),
     )
-    .expect("a formatted media-source message is non-blank")
-    .with_help(format!("add src=\"...\" to <{}>", element.kind()))
-    .expect("a formatted media-source help is non-blank")
 }
 
 fn incompatible_media_source(
@@ -896,48 +894,39 @@ fn incompatible_media_source(
         MediaTrack::Audio => ("audio", "an audio"),
         MediaTrack::Video => ("visual", "a video"),
     };
-    Diagnostic::new(
+    author_diagnostic(
         DiagnosticCode::IncompatibleMediaSource,
         primary,
         format!(
             "<{}> source \"{asset}\" has no {stream} stream",
             element.kind()
         ),
+        format!("choose {asset_kind} asset for <{}>", element.kind()),
     )
-    .expect("a formatted media-track message is non-blank")
-    .with_help(format!(
-        "choose {asset_kind} asset for <{}>",
-        element.kind()
-    ))
-    .expect("a formatted media-track help is non-blank")
 }
 
 fn missing_duration_source(primary: SourceSpan) -> Diagnostic {
-    Diagnostic::new(
+    author_diagnostic(
         DiagnosticCode::MissingDurationSource,
         primary,
         "shot has no media or explicit duration",
+        "add timed media content or an explicit shot duration",
     )
-    .expect("the static duration-source message is non-blank")
-    .with_help("add timed media content or an explicit shot duration")
-    .expect("the static duration-source help is non-blank")
 }
 
 fn conflicting_duration_sources(primary: SourceSpan, media: SourceSpan) -> Diagnostic {
-    Diagnostic::new(
+    author_diagnostic(
         DiagnosticCode::ConflictingDurationSources,
         primary,
         "explicit shot duration conflicts with media-derived duration",
+        "remove the explicit duration or the timed media content",
     )
-    .expect("the static duration-conflict message is non-blank")
-    .with_help("remove the explicit duration or the timed media content")
-    .expect("the static duration-conflict help is non-blank")
     .with_related(media, "media-derived duration is available here")
     .expect("the static duration-conflict relation is non-blank")
 }
 
 fn timing_outside_shot(primary: SourceSpan, start: FrameIndex, shot: FrameInterval) -> Diagnostic {
-    Diagnostic::new(
+    author_diagnostic(
         DiagnosticCode::TimingOutsideShot,
         primary,
         format!(
@@ -946,10 +935,8 @@ fn timing_outside_shot(primary: SourceSpan, start: FrameIndex, shot: FrameInterv
             shot.start().get(),
             shot.end().get(),
         ),
+        "use an earlier cue or delay, or extend the owning shot",
     )
-    .expect("a formatted timing message is non-blank")
-    .with_help("use an earlier cue or delay, or extend the owning shot")
-    .expect("the static timing help is non-blank")
 }
 
 fn audio_outside_shot(
@@ -958,7 +945,7 @@ fn audio_outside_shot(
     end: FrameIndex,
     shot: FrameInterval,
 ) -> Diagnostic {
-    Diagnostic::new(
+    author_diagnostic(
         DiagnosticCode::TimingOutsideShot,
         primary,
         format!(
@@ -968,30 +955,24 @@ fn audio_outside_shot(
             shot.start().get(),
             shot.end().get(),
         ),
+        "use an earlier delay, a shorter sound, or extend the owning shot",
     )
-    .expect("a formatted sound-effect timing message is non-blank")
-    .with_help("use an earlier delay, a shorter sound, or extend the owning shot")
-    .expect("the static sound-effect timing help is non-blank")
 }
 
 fn frame_overflow(primary: SourceSpan) -> Diagnostic {
-    Diagnostic::new(
+    author_diagnostic(
         DiagnosticCode::FrameConversionOverflow,
         primary,
         "time value exceeds the selected frame domain",
+        "use a shorter duration or a lower compile frame rate",
     )
-    .expect("the static frame-domain message is non-blank")
-    .with_help("use a shorter duration or a lower compile frame rate")
-    .expect("the static frame-domain help is non-blank")
 }
 
 fn empty_film(primary: SourceSpan) -> Diagnostic {
-    Diagnostic::new(
+    author_diagnostic(
         DiagnosticCode::EmptyFilm,
         primary,
         "film has no positive-duration shot",
+        "add a shot with timed media or an explicit positive duration",
     )
-    .expect("the static empty-film message is non-blank")
-    .with_help("add a shot with timed media or an explicit positive duration")
-    .expect("the static empty-film help is non-blank")
 }

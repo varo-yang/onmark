@@ -1146,6 +1146,11 @@ resource 进入既有管线。browser runtime 为 video、image decode、font lo
 custom resource 提供一条 typed、bounded readiness boundary；超时必须指出仍未就绪的 resource 与 phase，
 不能退化为匿名 presentation promise。
 
+native browser adapter 会通过 CDP request interception 执行这条约束，而不是依赖 presentation
+自觉。Chromium 只允许读取 materialized private Unit Root 下 canonical file，以及内存中的 `data:`、
+`blob:` URL；ambient network scheme 和逃出该 root 的 file path 都会在解析前被拒绝。本地与 worker
+执行共用同一条策略。
+
 Presentation binding 同时获得由 Rust 分配、跨 unit projection 稳定的 component identity，通过 protocol
 校验的封闭 properties、solved interval 与 frozen asset reference。Rust 继续独占 timing 与 resource fact；TypeScript 只决定这些
 fact 如何成为 DOM、CSS、Canvas 或 WebGL。本关不引入自由 `start`/`end`、第二个 scheduler、任意网络访问，

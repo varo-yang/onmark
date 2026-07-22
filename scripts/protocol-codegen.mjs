@@ -26,7 +26,7 @@ async function main(arguments_) {
   const responseSchema = await readJson(
     "schemas/browser-response-v1.schema.json",
   );
-  const bundleSchema = await readJson("schemas/bundle-manifest-v3.schema.json");
+  const bundleSchema = await readJson("schemas/bundle-manifest-v1.schema.json");
 
   const requestTypes = await compile(
     requestSchema,

@@ -29,6 +29,26 @@ pub enum ElementKind {
     CallToAction,
 }
 
+/// Closed authored roles for general audio outside voice-over content.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum GeneralAudioKind {
+    /// Film-wide musical content.
+    Music,
+    /// Shot-local sound effect.
+    SoundEffect,
+}
+
+impl GeneralAudioKind {
+    /// Returns the screenplay element represented by this audio role.
+    #[must_use]
+    pub const fn element_kind(self) -> ElementKind {
+        match self {
+            Self::Music => ElementKind::Music,
+            Self::SoundEffect => ElementKind::SoundEffect,
+        }
+    }
+}
+
 impl ElementKind {
     /// Recognizes an unqualified, case-sensitive screenplay element name.
     #[must_use]

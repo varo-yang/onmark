@@ -304,6 +304,9 @@ bounded outcome, and reports all timed-out identities as
 `<kind>:<id>:prepare`. Untyped preparation failures are contained behind the
 same identity. Terminal disposal awaits every resource in declaration order
 and retains the first cleanup failure without skipping later resources.
+Any failed `Prepare` makes both the runtime session and presentation adapter
+terminal: only `Dispose` remains valid. This prevents an uncancellable, late
+resource preparation from overlapping a second preparation attempt.
 The factory retains ownership of effects created before it returns; if it
 throws partway through construction, it must release those partial effects.
 The runtime takes ownership only of the returned collection.
@@ -342,6 +345,10 @@ Not allowed:
 - network fetches or mutable external state participating in output;
 - cue, delay, duration, or partition logic reimplemented in TypeScript;
 - unbounded waits, queues, or retained buffers.
+
+The native browser boundary also enforces the network rule. It admits only
+canonical files beneath the private Unit Root and in-memory `data:` or `blob:`
+URLs; HTTP, WebSocket, and file paths outside that root are blocked by CDP.
 
 Gate five admits animation only through measured, paused playheads driven by an
 exact `RuntimeFrame`. Its initial conformance matrix covers WAAPI, GSAP, and

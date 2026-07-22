@@ -168,6 +168,10 @@ export class RuntimeSession {
         runtimeFrameAt(evaluationStart, this.#state.frameRate),
       );
     } catch (error) {
+      // Preparation may have started author-owned asynchronous work that the
+      // generic adapter cannot cancel. Make the session terminal so a retry
+      // cannot overlap that work with a second preparation phase.
+      this.#state = { kind: "failed" };
       return readinessFailure(requestId, "prepareFailed", error);
     }
 
@@ -247,6 +251,7 @@ type SessionState =
   | LoadedState
   | ReadyState
   | StagedState
+  | { readonly kind: "failed" }
   | { readonly kind: "disposed" };
 
 interface LoadedState {

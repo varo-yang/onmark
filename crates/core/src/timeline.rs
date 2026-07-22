@@ -6,8 +6,8 @@
 use std::collections::BTreeMap;
 
 use crate::model::{
-    AudioGain, CueId, ElementKind, EventRef, FrameIndex, FrameInterval, FrozenAssetId, NodeId,
-    SourceSpan, Timebase,
+    AudioGain, CueId, ElementKind, EventRef, FrameIndex, FrameInterval, FrozenAssetId,
+    GeneralAudioKind, NodeId, SourceSpan, Timebase,
 };
 
 /// Version of the Timeline IR contract.
@@ -481,6 +481,15 @@ pub enum TimelineAudioKind {
     Music,
     /// General authored sound effect.
     SoundEffect,
+}
+
+impl From<GeneralAudioKind> for TimelineAudioKind {
+    fn from(kind: GeneralAudioKind) -> Self {
+        match kind {
+            GeneralAudioKind::Music => Self::Music,
+            GeneralAudioKind::SoundEffect => Self::SoundEffect,
+        }
+    }
 }
 
 /// Exact executable facts shared by narrative and general audio.

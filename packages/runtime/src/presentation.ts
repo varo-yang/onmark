@@ -77,6 +77,10 @@ interface LoadedPresentation {
   readonly overlays: readonly BoundOverlay[];
 }
 
+type FailedPresentation = Omit<LoadedPresentation, "kind"> & {
+  readonly kind: "failed";
+};
+
 interface StagedVideo {
   readonly video: BoundVideo;
   readonly selection: VideoFrameSelection;
@@ -90,6 +94,7 @@ interface StagedPresentation {
 type PresentationState =
   | { readonly kind: "empty" }
   | LoadedPresentation
+  | FailedPresentation
   | { readonly kind: "disposed" };
 
 /** Runtime adapter for presentation-owned browser effects. */
@@ -155,10 +160,15 @@ export class PresentationRuntimeAdapter implements RuntimeAdapter {
 
   async prepare(_frame: RuntimeFrame): Promise<void> {
     const state = this.#loadedState("prepare");
-    await preparePresentationResources(
-      state.resources,
-      this.#readinessTimeoutMilliseconds,
-    );
+    try {
+      await preparePresentationResources(
+        state.resources,
+        this.#readinessTimeoutMilliseconds,
+      );
+    } catch (error) {
+      this.#state = { ...state, kind: "failed" };
+      throw error;
+    }
   }
 
   async seek(frame: RuntimeFrame): Promise<void> {
@@ -204,7 +214,10 @@ export class PresentationRuntimeAdapter implements RuntimeAdapter {
     if (this.#state.kind === "disposed") {
       return;
     }
-    const loaded = this.#state.kind === "loaded" ? this.#state : undefined;
+    const loaded =
+      this.#state.kind === "loaded" || this.#state.kind === "failed"
+        ? this.#state
+        : undefined;
     this.#state = { kind: "disposed" };
     this.#staged = undefined;
 
@@ -259,7 +272,14 @@ export class PresentationRuntimeAdapter implements RuntimeAdapter {
 function ownFrameEffects(
   effects: readonly FrameEffect[],
 ): readonly FrameEffect[] {
-  return Object.freeze([...effects]);
+  return Object.freeze(
+    effects.map((effect) =>
+      Object.freeze({
+        apply: effect.apply.bind(effect),
+        dispose: effect.dispose.bind(effect),
+      }),
+    ),
+  );
 }
 
 async function loadVideos(videos: readonly BoundVideo[]): Promise<void> {

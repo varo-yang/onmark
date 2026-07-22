@@ -33,7 +33,7 @@ impl PackageManifest {
     ) -> Self {
         let capture_environment = capture_environment(&bootstrap, &browser, &ffmpeg);
         Self {
-            version: 2,
+            version: 1,
             target: PACKAGE_TARGET,
             browser_launch_policy: CAPTURE_POLICY,
             capture_environment,
@@ -87,7 +87,7 @@ struct CaptureEnvironment<'a> {
 
 fn capture_environment(bootstrap: &Artifact, browser: &Artifact, ffmpeg: &Artifact) -> String {
     let facts = CaptureEnvironment {
-        version: 2,
+        version: 1,
         target: PACKAGE_TARGET,
         browser_launch_policy: CAPTURE_POLICY,
         bootstrap_sha256: &bootstrap.sha256,

@@ -22,10 +22,7 @@ pub(super) const RAW_RGBA_HASH_BYTES: u64 = RawRgbaHash::BYTE_LENGTH as u64;
 pub(super) const MIN_FRAME_RECORD_BYTES: u64 = FRAME_LENGTH_BYTES + 1 + RAW_RGBA_HASH_BYTES;
 
 const MAGIC: [u8; 8] = *b"ONMARKF1";
-// The magic identifies the frame-artifact family. V3 adds a capture
-// environment identity to the fixed header, so artifacts cannot cross a
-// browser/font deployment merely because their visual plan matches.
-const VERSION: u16 = 3;
+const VERSION: u16 = 1;
 const ID_DOMAIN: &[u8] = b"onmark-frame-artifact-id\0";
 
 /// Deterministic identity of one frame-artifact capture contract.

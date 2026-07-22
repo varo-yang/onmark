@@ -248,6 +248,10 @@ impl ExecutableUnit {
     pub const fn entry_url(&self) -> &Url {
         self.root.entry_url()
     }
+
+    pub(crate) fn resource_root(&self) -> &Path {
+        self.root.path()
+    }
 }
 
 fn rebase_audio_start(start: FrameIndex, origin: FrameIndex) -> FrameIndex {

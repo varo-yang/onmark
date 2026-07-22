@@ -26,11 +26,13 @@ use onmark_core::protocol::{
 use tempfile::TempDir;
 use tokio::task::JoinHandle;
 use tokio::time::{Instant, sleep, timeout, timeout_at};
+use url::Url;
 
 use super::error::{BrowserError, BrowserErrorKind};
 use super::frame::{CapturedFrame, EncodedPng};
 use super::limits::BrowserLimits;
 use super::process::{BrowserDiagnostics, BrowserLaunchPolicy, ChromiumProcess};
+use super::resource::ResourceGuard;
 use crate::RenderProfile;
 
 const READINESS_POLL_INTERVAL: Duration = Duration::from_millis(10);
@@ -49,6 +51,7 @@ pub struct BrowserSession {
     handler: JoinHandle<Result<(), CdpError>>,
     process: ChromiumProcess,
     diagnostics: BrowserDiagnostics,
+    resources: Option<ResourceGuard>,
     // Headless shell omits screenshotData when a frame has no visual damage.
     // The capture phase owns this cache through `&mut self`; it is not shared
     // across requests or tasks.
@@ -131,6 +134,7 @@ impl BrowserSession {
             handler,
             process,
             diagnostics,
+            resources: None,
             last_capture: None,
             compositor: CompositorClock::new(),
             limits,
@@ -139,15 +143,23 @@ impl BrowserSession {
         })
     }
 
-    /// Navigates the owned page and waits for the runtime host to become ready.
+    /// Restricts the page to one private resource root, navigates it, and waits
+    /// for the runtime host to become ready.
     ///
     /// # Errors
     ///
-    /// Returns [`BrowserError`] when Chrome rejects navigation, the load event
-    /// misses its deadline, or the bundle never installs its runtime host.
-    pub async fn navigate(&self, url: &str) -> Result<(), BrowserError> {
+    /// Returns [`BrowserError`] when the resource policy cannot be installed,
+    /// Chrome rejects navigation, the load event misses its deadline, or the
+    /// bundle never installs its runtime host.
+    pub async fn navigate(&mut self, url: &Url, resource_root: &Path) -> Result<(), BrowserError> {
+        if self.resources.is_some() {
+            return Err(BrowserError::without_source(
+                BrowserErrorKind::ResourcePolicy,
+            ));
+        }
+        self.resources = Some(ResourceGuard::install(&self.page, resource_root).await?);
         self.page
-            .goto(url)
+            .goto(url.as_str())
             .await
             .map_err(|source| self.cdp_error(BrowserErrorKind::Navigation, source))?;
         let navigation_result = timeout(self.limits.deadline(), self.page.wait_for_navigation())
@@ -367,6 +379,10 @@ impl BrowserSession {
     /// have completed.
     pub async fn shutdown(mut self) -> Result<(), BrowserError> {
         let deadline = self.limits.deadline();
+        let resource_result = match self.resources.take() {
+            Some(resources) => resources.stop().await,
+            None => Ok(()),
+        };
         let browser_result = close_browser(&mut self.browser, deadline, &self.diagnostics).await;
         if browser_result.is_err() {
             self.process.request_stop();
@@ -375,6 +391,7 @@ impl BrowserSession {
         let handler_result = shutdown_handler(self.handler, deadline, &self.diagnostics).await;
 
         browser_result?;
+        resource_result?;
         process_result?;
         handler_result
     }

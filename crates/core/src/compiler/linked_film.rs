@@ -5,7 +5,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::model::{ElementKind, NodeId, SourceSpan};
+use crate::model::{ElementKind, GeneralAudioKind, NodeId, SourceSpan};
 use crate::syntax::{Attribute, TextNode};
 
 /// Shared authored facts retained by every structurally bound element.
@@ -340,12 +340,13 @@ pub struct LinkedVideo {
 /// General audio before source, gain, and optional delay are resolved.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LinkedAudio {
+    kind: GeneralAudioKind,
     element: LinkedElement,
 }
 
 impl LinkedAudio {
-    pub(super) const fn new(element: LinkedElement) -> Self {
-        Self { element }
+    pub(super) const fn new(kind: GeneralAudioKind, element: LinkedElement) -> Self {
+        Self { kind, element }
     }
 
     /// Returns the structurally bound music or sound-effect element.
@@ -354,8 +355,8 @@ impl LinkedAudio {
         &self.element
     }
 
-    pub(super) fn into_element(self) -> LinkedElement {
-        self.element
+    pub(super) fn into_parts(self) -> (GeneralAudioKind, LinkedElement) {
+        (self.kind, self.element)
     }
 }
 

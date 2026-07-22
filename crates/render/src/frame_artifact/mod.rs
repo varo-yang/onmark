@@ -729,7 +729,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rejects_the_previous_header_layout_version() {
+    async fn rejects_an_unknown_header_version() {
         let directory = tempdir().expect("the fixture directory is available");
         let path = directory.path().join("worker.onmark-frames");
         let mut header = Header {
@@ -746,7 +746,7 @@ mod tests {
 
         let error = FrameArtifact::open(&path, limits())
             .await
-            .expect_err("the previous frame artifact layout must not decode as V3");
+            .expect_err("an unknown frame artifact version must not decode");
 
         assert_eq!(error.kind(), FrameArtifactErrorKind::InvalidArtifact);
     }

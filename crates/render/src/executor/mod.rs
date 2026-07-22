@@ -322,7 +322,8 @@ impl FrameCaptureExecutor {
             CaptureTask {
                 plan,
                 requests,
-                entry_url: unit.entry_url().as_str(),
+                entry_url: unit.entry_url(),
+                resource_root: unit.resource_root(),
                 surface,
                 output,
             },

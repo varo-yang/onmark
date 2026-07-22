@@ -408,7 +408,7 @@ mod tests {
         let manifest: serde_json::Value =
             serde_json::from_slice(&read_artifact(&output, MANIFEST_NAME))
                 .expect("the manifest is JSON");
-        assert_eq!(manifest["version"], 2);
+        assert_eq!(manifest["version"], 1);
         assert_eq!(manifest["target"], "provided.al2023.arm64");
         assert!(
             manifest["captureEnvironment"]

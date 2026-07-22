@@ -26,14 +26,14 @@ const SHA256_HEX_BYTES: usize = 64;
 
 /// Version of the immutable presentation-bundle contract.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[cfg_attr(feature = "schema", schemars(extend("const" = 3)))]
+#[cfg_attr(feature = "schema", schemars(extend("const" = 1)))]
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(transparent)]
 pub struct BundleVersion(u16);
 
 impl BundleVersion {
-    /// Current bundle manifest carrying temporal and visual capabilities.
-    pub const CURRENT: Self = Self(3);
+    /// Only bundle-manifest version accepted by this build.
+    pub const CURRENT: Self = Self(1);
 
     /// Returns the stable integer representation.
     #[must_use]
@@ -617,19 +617,16 @@ mod tests {
     }
 
     #[test]
-    fn rejects_previous_versions_and_incomplete_current_capabilities() {
+    fn rejects_unknown_versions_and_incomplete_capabilities() {
         for source in [
             format!(
-                r#"{{"version":1,"bundleId":"{DIGEST}","entryPoint":"index.html","temporalCapability":"randomAccess","files":[{{"bytes":1,"path":"index.html","sha256":"{DIGEST}"}}]}}"#,
+                r#"{{"version":2,"bundleId":"{DIGEST}","entryPoint":"index.html","temporalCapability":"randomAccess","visualCapability":"browserComposite","files":[{{"bytes":1,"path":"index.html","sha256":"{DIGEST}"}}]}}"#,
             ),
             format!(
-                r#"{{"version":2,"bundleId":"{DIGEST}","entryPoint":"index.html","files":[{{"bytes":1,"path":"index.html","sha256":"{DIGEST}"}}]}}"#,
+                r#"{{"version":1,"bundleId":"{DIGEST}","entryPoint":"index.html","files":[{{"bytes":1,"path":"index.html","sha256":"{DIGEST}"}}]}}"#,
             ),
             format!(
-                r#"{{"version":2,"bundleId":"{DIGEST}","entryPoint":"index.html","temporalCapability":"sequential","visualCapability":"separableOverlay","files":[{{"bytes":1,"path":"index.html","sha256":"{DIGEST}"}}]}}"#,
-            ),
-            format!(
-                r#"{{"version":3,"bundleId":"{DIGEST}","entryPoint":"index.html","temporalCapability":"sequential","files":[{{"bytes":1,"path":"index.html","sha256":"{DIGEST}"}}]}}"#,
+                r#"{{"version":1,"bundleId":"{DIGEST}","entryPoint":"index.html","temporalCapability":"sequential","files":[{{"bytes":1,"path":"index.html","sha256":"{DIGEST}"}}]}}"#,
             ),
         ] {
             assert!(serde_json::from_str::<BundleManifest>(&source).is_err());
@@ -651,7 +648,7 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&manifest.identity()).expect("identity serializes"),
             format!(
-                r#"{{"version":3,"entryPoint":"index.html","temporalCapability":"randomAccess","visualCapability":"separableOverlay","files":[{{"bytes":1,"path":"index.html","sha256":"{DIGEST}"}}]}}"#,
+                r#"{{"version":1,"entryPoint":"index.html","temporalCapability":"randomAccess","visualCapability":"separableOverlay","files":[{{"bytes":1,"path":"index.html","sha256":"{DIGEST}"}}]}}"#,
             ),
         );
     }

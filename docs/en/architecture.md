@@ -974,6 +974,12 @@ for video, image decode, font load, texture upload, and explicitly registered
 custom resources. A timeout names the pending resource and phase instead of
 collapsing into an anonymous presentation promise.
 
+The native browser adapter enforces that promise with CDP request interception,
+not presentation convention. Chromium may read only canonical files beneath
+the materialized private Unit Root plus in-memory `data:` and `blob:` URLs;
+ambient network schemes and file paths outside that root are rejected before
+resolution. The same policy runs in local and worker execution.
+
 Presentation bindings also receive a Rust-assigned component identity that is
 stable across unit projections, protocol-validated closed properties, solved
 intervals, and frozen asset references.

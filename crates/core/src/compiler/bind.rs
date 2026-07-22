@@ -7,9 +7,10 @@
 use std::collections::BTreeMap;
 
 use crate::diagnostics::{Diagnostic, DiagnosticCode, Diagnostics};
-use crate::model::{ElementKind, InvalidNodeId, NodeId, SourceSpan};
+use crate::model::{ElementKind, GeneralAudioKind, InvalidNodeId, NodeId, SourceSpan};
 use crate::syntax::{Attribute, Element, Node, SourceDocument, TextNode};
 
+use super::diagnostic::author_diagnostic;
 use super::linked_film::{
     LinkedAudio, LinkedCue, LinkedCues, LinkedElement, LinkedFilm, LinkedId, LinkedNode,
     LinkedOverlay, LinkedScene, LinkedShot, LinkedShotContent, LinkedVideo, LinkedVoiceOver,
@@ -127,7 +128,9 @@ impl Binder {
 
             match self.recognize_or_report(&child) {
                 Some(ElementKind::Cues) => self.bind_cues_container(child, &mut cues),
-                Some(ElementKind::Music) => music.push(self.bind_audio(child, ElementKind::Music)),
+                Some(ElementKind::Music) => {
+                    music.push(self.bind_audio(child, GeneralAudioKind::Music));
+                }
                 Some(ElementKind::Scene) => scenes.push(self.bind_scene(child)),
                 Some(kind) => self.reject_misplaced(&child, kind, ElementKind::Film),
                 None => {}
@@ -216,7 +219,7 @@ impl Binder {
                     content.push(LinkedShotContent::VoiceOver(self.bind_voice_over(child)));
                 }
                 Some(ElementKind::SoundEffect) => {
-                    sound_effects.push(self.bind_audio(child, ElementKind::SoundEffect));
+                    sound_effects.push(self.bind_audio(child, GeneralAudioKind::SoundEffect));
                 }
                 Some(kind @ (ElementKind::Title | ElementKind::CallToAction)) => {
                     content.push(LinkedShotContent::Overlay(self.bind_overlay(child, kind)));
@@ -236,11 +239,12 @@ impl Binder {
         LinkedVideo::new(linked)
     }
 
-    fn bind_audio(&mut self, element: Element, kind: ElementKind) -> LinkedAudio {
+    fn bind_audio(&mut self, element: Element, kind: GeneralAudioKind) -> LinkedAudio {
         let (_, attributes, children, span) = element.into_parts();
-        let linked = self.bind_element(attributes, kind, span);
-        self.reject_child_elements_and_text(children, kind);
-        LinkedAudio::new(linked)
+        let element_kind = kind.element_kind();
+        let linked = self.bind_element(attributes, element_kind, span);
+        self.reject_child_elements_and_text(children, element_kind);
+        LinkedAudio::new(kind, linked)
     }
 
     fn bind_voice_over(&mut self, element: Element) -> LinkedVoiceOver {
@@ -369,41 +373,35 @@ fn is_id_attribute(attribute: &Attribute) -> bool {
 }
 
 fn unknown_element(element: &Element) -> Diagnostic {
-    Diagnostic::new(
+    author_diagnostic(
         DiagnosticCode::UnknownElement,
         element.name().span(),
         format!(
             "element <{}> is not part of the screenplay language",
             element.name()
         ),
+        "use a Gate-one screenplay element or remove this element",
     )
-    .expect("a formatted unknown-element message is non-blank")
-    .with_help("use a Gate-one screenplay element or remove this element")
-    .expect("the static unknown-element help is non-blank")
 }
 
 fn missing_film_root(document: SourceSpan) -> Diagnostic {
     let primary = SourceSpan::new(document.source(), document.start(), document.start())
         .expect("a point at the document start has ordered bounds");
-    Diagnostic::new(
+    author_diagnostic(
         DiagnosticCode::MissingFilmRoot,
         primary,
         "screenplay must contain one top-level <film> element",
+        "wrap the screenplay in one <film> element",
     )
-    .expect("the static missing-film message is non-blank")
-    .with_help("wrap the screenplay in one <film> element")
-    .expect("the static missing-film help is non-blank")
 }
 
 fn multiple_film_roots(first: &Element, duplicate: &Element) -> Diagnostic {
-    Diagnostic::new(
+    author_diagnostic(
         DiagnosticCode::MultipleFilmRoots,
         duplicate.name().span(),
         "screenplay contains more than one top-level <film> element",
+        "keep exactly one top-level <film> element",
     )
-    .expect("the static multiple-film message is non-blank")
-    .with_help("keep exactly one top-level <film> element")
-    .expect("the static multiple-film help is non-blank")
     .with_related(first.name().span(), "the first <film> element is here")
     .expect("the static related message is non-blank")
 }
@@ -418,43 +416,37 @@ fn misplaced_element(
         None => format!("element <{kind}> is not allowed at the top level"),
     };
 
-    Diagnostic::new(
+    author_diagnostic(
         DiagnosticCode::MisplacedElement,
         element.name().span(),
         message,
+        format!("move <{kind}> to a valid screenplay container"),
     )
-    .expect("a formatted misplaced-element message is non-blank")
-    .with_help(format!("move <{kind}> to a valid screenplay container"))
-    .expect("a formatted misplaced-element help is non-blank")
 }
 
 fn duplicate_cues(element: &Element, first: SourceSpan) -> Diagnostic {
-    Diagnostic::new(
+    author_diagnostic(
         DiagnosticCode::DuplicateCues,
         element.name().span(),
         "film contains more than one <cues> container",
+        "merge all cue declarations into one <cues> container",
     )
-    .expect("the static duplicate-cues message is non-blank")
-    .with_help("merge all cue declarations into one <cues> container")
-    .expect("the static duplicate-cues help is non-blank")
     .with_related(first, "the first <cues> container is here")
     .expect("the static related message is non-blank")
 }
 
 fn invalid_node_id(attribute: &Attribute, kind: ElementKind, reason: InvalidNodeId) -> Diagnostic {
-    Diagnostic::new(
+    author_diagnostic(
         DiagnosticCode::InvalidNodeId,
         attribute.value_span(),
         format!("{kind} ID is invalid: {reason}"),
+        match reason {
+            InvalidNodeId::Empty => "provide a non-empty id value",
+            InvalidNodeId::ContainsAsciiWhitespace => {
+                "remove ASCII whitespace or replace it with a visible separator"
+            }
+        },
     )
-    .expect("a formatted invalid-ID message is non-blank")
-    .with_help(match reason {
-        InvalidNodeId::Empty => "provide a non-empty id value",
-        InvalidNodeId::ContainsAsciiWhitespace => {
-            "remove ASCII whitespace or replace it with a visible separator"
-        }
-    })
-    .expect("the static invalid-ID help is non-blank")
 }
 
 fn duplicate_node_id(
@@ -463,38 +455,32 @@ fn duplicate_node_id(
     id: &NodeId,
     first: SourceSpan,
 ) -> Diagnostic {
-    Diagnostic::new(
+    author_diagnostic(
         DiagnosticCode::DuplicateNodeId,
         attribute.value_span(),
         format!("{kind} ID \"{id}\" is already used in this film"),
+        format!("choose a unique id for this {kind}"),
     )
-    .expect("a formatted duplicate-ID message is non-blank")
-    .with_help(format!("choose a unique id for this {kind}"))
-    .expect("a formatted duplicate-ID help is non-blank")
     .with_related(first, format!("ID \"{id}\" is first declared here"))
     .expect("a formatted related message is non-blank")
 }
 
 fn unexpected_top_level_text(text: &TextNode) -> Diagnostic {
-    Diagnostic::new(
+    author_diagnostic(
         DiagnosticCode::UnexpectedText,
         text.span(),
         "text is not allowed outside the top-level <film> element",
+        "move this text into a text-bearing screenplay element or remove it",
     )
-    .expect("the static top-level-text message is non-blank")
-    .with_help("move this text into a text-bearing screenplay element or remove it")
-    .expect("the static top-level-text help is non-blank")
 }
 
 fn unexpected_text(text: &TextNode, parent: ElementKind) -> Diagnostic {
-    Diagnostic::new(
+    author_diagnostic(
         DiagnosticCode::UnexpectedText,
         text.span(),
         format!("text is not allowed directly inside <{parent}>"),
+        "move this text into a text-bearing element or remove it",
     )
-    .expect("a formatted unexpected-text message is non-blank")
-    .with_help("move this text into a text-bearing element or remove it")
-    .expect("the static unexpected-text help is non-blank")
 }
 
 #[cfg(test)]

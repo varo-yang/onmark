@@ -22,6 +22,8 @@ pub enum BrowserErrorKind {
     PageCreation,
     /// The page could not navigate to the render bundle.
     Navigation,
+    /// Chromium could not enforce the private resource boundary.
+    ResourcePolicy,
     /// The render bundle did not install its runtime host before the deadline.
     RuntimeHost,
     /// The browser runtime handshake failed.
@@ -172,6 +174,7 @@ impl fmt::Display for BrowserErrorKind {
             Self::Launch => "failed to launch Chromium",
             Self::PageCreation => "failed to create the render page",
             Self::Navigation => "failed to navigate the render page",
+            Self::ResourcePolicy => "failed to enforce the browser resource policy",
             Self::RuntimeHost => "browser runtime host missed its readiness deadline",
             Self::Protocol => "browser runtime protocol failed",
             Self::Capture => "failed to capture the browser frame",

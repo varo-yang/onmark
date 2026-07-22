@@ -28,7 +28,7 @@ pub use caption::{
     InvalidCaptionTrack,
 };
 pub use duration::{Duration, InvalidDuration};
-pub use element::ElementKind;
+pub use element::{ElementKind, GeneralAudioKind};
 pub use id::{InvalidNodeId, NodeId};
 pub use reference::{AssetRef, CueId, EventRef, InvalidAssetRef};
 pub use source::{ByteOffset, InvalidSourceSpan, SourceId, SourceSpan};

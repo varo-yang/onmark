@@ -122,7 +122,7 @@ async fn capture_encoded_browser_sequence(
     let output = fixture.root().join(output_name);
     let mut encoder = start_browser_encoder(fixture.frame_rate, &output);
     let mut session = launch_browser().await;
-    load_and_prepare(&session, presentation, &fixture.plan)
+    load_and_prepare(&mut session, presentation, &fixture.plan)
         .await
         .expect("the browser-media presentation must prepare");
 

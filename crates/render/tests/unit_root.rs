@@ -45,7 +45,7 @@ fn materializes_verified_bundle_and_asset_bytes() {
 
 #[test]
 fn materializes_the_checked_in_bundle_contract() {
-    materialize_conformance_bundle("bundle-v3");
+    materialize_conformance_bundle("bundle-v1");
 }
 
 fn materialize_conformance_bundle(version: &str) {
@@ -308,7 +308,7 @@ struct BundleIdentity<'a> {
 
 fn manifest(files: Vec<BundleFile>) -> BundleManifest {
     let identity = BundleIdentity {
-        version: 3,
+        version: 1,
         entry_point: "index.html",
         temporal_capability: PresentationTemporalCapability::Sequential.as_str(),
         visual_capability: PresentationVisualCapability::BrowserComposite.as_str(),

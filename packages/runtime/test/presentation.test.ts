@@ -8,6 +8,7 @@ import {
   RuntimeAdapterError,
   runtimeFrameAt,
   type BrowserPlan,
+  type FrameEffect,
   type PresentationBindings,
 } from "../src/index.js";
 import { FakeVideoElement } from "./fake-video-element.js";
@@ -83,6 +84,36 @@ test("applies frame effects at each exact authored frame", async () => {
   assert.deepEqual(recorder.effects[0]?.appliedFrames, [17, 12, 17]);
   await adapter.dispose();
   assert.equal(recorder.allDisposed(), true);
+});
+
+test("owns frame-effect behavior before author objects can mutate", async () => {
+  const applied: string[] = [];
+  const effect: FrameEffect = {
+    apply(): void {
+      applied.push("owned");
+    },
+    dispose(): void {
+      applied.push("disposed");
+    },
+  };
+  const bindings = emptyBindings([effect]);
+  const adapter = new PresentationRuntimeAdapter(bindings, 100);
+  const plan = { ...presentationPlan(), videos: [], overlays: [] };
+
+  await adapter.load(plan);
+  effect.apply = () => {
+    applied.push("mutated");
+  };
+  effect.dispose = () => {
+    applied.push("mutated-disposal");
+  };
+  await adapter.prepare(runtimeFrameAt(10, plan.frameRate));
+  const frame = runtimeFrameAt(10, plan.frameRate);
+  await adapter.seek(frame);
+  await adapter.confirm(frame);
+  await adapter.dispose();
+
+  assert.deepEqual(applied, ["owned", "disposed"]);
 });
 
 test("releases every bound effect after one cleanup failure", async () => {
@@ -310,6 +341,23 @@ function presentationPlan(): BrowserPlan {
         interval: { start: 20, end: 30 },
       },
     ],
+  };
+}
+
+function emptyBindings(effects: readonly FrameEffect[]): PresentationBindings {
+  return {
+    bindVideo(): never {
+      throw new Error("the empty fixture contains no video");
+    },
+    bindOverlay(): never {
+      throw new Error("the empty fixture contains no overlay");
+    },
+    bindResources() {
+      return [];
+    },
+    bindFrameEffects() {
+      return effects;
+    },
   };
 }
 

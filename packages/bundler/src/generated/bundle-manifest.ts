@@ -11,7 +11,7 @@ export type PresentationTemporalCapability = "sequential" | "randomAccess";
 /**
  * Version of the immutable presentation-bundle contract.
  */
-export type BundleVersion = 3;
+export type BundleVersion = 1;
 /**
  * Proven relationship between browser presentation pixels and primary media.
  *
@@ -46,7 +46,7 @@ export interface BundleFile {
   sha256: string;
 }
 
-export const BUNDLE_VERSION = 3 as const;
+export const BUNDLE_VERSION = 1 as const;
 export const BUNDLE_TEMPORAL_CAPABILITIES = Object.freeze([
   "sequential",
   "randomAccess",

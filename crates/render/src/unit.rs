@@ -649,7 +649,7 @@ mod tests {
         let decoded: WorkerCaptureRequest =
             serde_json::from_str(&encoded).expect("the portable worker request parses once");
 
-        assert_eq!(wire["version"], 2);
+        assert_eq!(wire["version"], 1);
         assert_eq!(wire["captureEnvironment"], environment.to_string());
         assert_eq!(encoded, repeated);
         assert_eq!(decoded, request);

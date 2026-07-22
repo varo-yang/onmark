@@ -103,7 +103,7 @@ fn browser_plan_retains_solved_overlay_facts() {
 
 #[test]
 fn current_bundle_manifest_matches_the_versioned_wire_contract() {
-    assert_bundle_manifest("bundle-v3/manifest.json");
+    assert_bundle_manifest("bundle-v1/manifest.json");
 }
 
 fn assert_bundle_manifest(name: &str) {

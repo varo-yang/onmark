@@ -62,7 +62,7 @@ pub(super) async fn capture_layered_observation(
     .with_probes(probes);
     let mut compositor = LayeredCompositor::start(job);
     let mut session = launch_transparent_browser().await;
-    load_and_prepare(&session, presentation, &fixture.plan)
+    load_and_prepare(&mut session, presentation, &fixture.plan)
         .await
         .expect("the transparent presentation must prepare");
 

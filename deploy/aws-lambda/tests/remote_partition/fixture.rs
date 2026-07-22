@@ -337,7 +337,7 @@ fn bundle_manifest(directory: &Path) -> BundleManifest {
 fn bundle_directory() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
-        .join("conformance/protocol/bundle-v3")
+        .join("conformance/protocol/bundle-v1")
 }
 
 fn unit_root_limits() -> UnitRootLimits {

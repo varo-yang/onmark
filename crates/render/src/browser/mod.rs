@@ -4,6 +4,7 @@ mod error;
 mod frame;
 mod limits;
 mod process;
+mod resource;
 mod session;
 
 pub use error::{BrowserError, BrowserErrorKind};

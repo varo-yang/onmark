@@ -15,7 +15,7 @@ directories also retain their payload bytes so native materialization verifies
 the declared size, digest, identity, and entry document together. Review all of
 these files as compatibility-sensitive data.
 
-`protocol/bundle-v3/` is the current self-contained random-access fixture used
+`protocol/bundle-v1/` is the current self-contained random-access fixture used
 by the native Chromium-to-FFmpeg smoke. It is generated from
 `browser/video-presentation.ts` by `@onmark/bundler`, embeds the production
 authoring bindings and runtime presentation adapter, and consumes materialized

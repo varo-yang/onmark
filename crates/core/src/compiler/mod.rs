@@ -31,6 +31,7 @@
 
 mod bind;
 mod captions;
+mod diagnostic;
 mod linked_film;
 mod parse;
 mod resolve;

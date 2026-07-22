@@ -12,6 +12,7 @@ use onmark_core::protocol::{
     BrowserCommand, BrowserEvent, BrowserPlan, BrowserRequest, BrowserResponse, RequestId,
     WireFrame, WireFrameRate,
 };
+use url::Url;
 
 use super::{FrameCaptureMetrics, RenderError, RenderErrorKind, invalid_plan};
 use crate::encoder::{CanonicalFrame, LayeredSession};
@@ -92,7 +93,8 @@ pub(super) fn validate_plan(
 pub(super) struct CaptureTask<'a> {
     pub(super) plan: &'a BrowserPlan,
     pub(super) requests: RequestSequence,
-    pub(super) entry_url: &'a str,
+    pub(super) entry_url: &'a Url,
+    pub(super) resource_root: &'a Path,
     pub(super) surface: CaptureSurface,
     pub(super) output: &'a Path,
 }
@@ -107,6 +109,7 @@ pub(super) async fn render_session(
         plan,
         requests,
         entry_url,
+        resource_root,
         surface,
         output,
     } = task;
@@ -118,19 +121,34 @@ pub(super) async fn render_session(
             .map_err(|source| RenderError::browser(output, source))?;
     }
     browser
-        .navigate(entry_url)
+        .navigate(entry_url, resource_root)
         .await
         .map_err(|source| RenderError::browser(output, source))?;
-    load_runtime(browser, plan, output).await?;
-    prepare_runtime(browser, plan, output).await?;
-    browser
-        .initialize_capture_surface(plan.frame_rate())
-        .await
-        .map_err(|source| RenderError::browser(output, source))?;
-    metrics.runtime_setup = setup_started.elapsed();
+    let execution = async {
+        load_runtime(browser, plan, output).await?;
+        prepare_runtime(browser, plan, output).await?;
+        browser
+            .initialize_capture_surface(plan.frame_rate())
+            .await
+            .map_err(|source| RenderError::browser(output, source))?;
+        metrics.runtime_setup = setup_started.elapsed();
+        render_frames(browser, frames, plan, requests, metrics, output).await
+    }
+    .await;
+    let disposal = dispose_runtime(browser, requests.disposal(), output).await;
 
-    render_frames(browser, frames, plan, requests, metrics, output).await?;
-    dispose_runtime(browser, requests.disposal(), output).await
+    finish_runtime_session(execution, disposal)
+}
+
+fn finish_runtime_session(
+    execution: Result<(), RenderError>,
+    disposal: Result<(), RenderError>,
+) -> Result<(), RenderError> {
+    match (execution, disposal) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
+        (Err(execution), Err(disposal)) => Err(execution.with_disposal_failure(disposal)),
+    }
 }
 
 /// Root-surface ownership established by visual admission before navigation.
@@ -421,4 +439,34 @@ fn request_identity_overflow(output: &Path) -> RenderError {
         output,
         "frame request identity exceeds the protocol domain",
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::finish_runtime_session;
+    use crate::executor::{RenderError, RenderErrorKind};
+
+    #[test]
+    fn retains_the_primary_failure_when_disposal_also_fails() {
+        let output = Path::new("render.mp4");
+        let execution = RenderError::new(RenderErrorKind::Encoder, output, "frame write failed");
+        let disposal = RenderError::new(RenderErrorKind::Protocol, output, "dispose failed");
+
+        let error = finish_runtime_session(Err(execution), Err(disposal))
+            .expect_err("both runtime failures must remain observable");
+
+        assert_eq!(error.kind(), RenderErrorKind::Encoder);
+        assert_eq!(
+            error.to_string(),
+            "render.mp4: frame write failed; browser runtime disposal also failed",
+        );
+        assert!(
+            std::error::Error::source(&error)
+                .expect("the disposal failure must be retained")
+                .to_string()
+                .contains("dispose failed"),
+        );
+    }
 }

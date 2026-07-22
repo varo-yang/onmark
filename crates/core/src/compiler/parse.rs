@@ -7,6 +7,8 @@ use crate::diagnostics::{Diagnostic, DiagnosticCode, Diagnostics};
 use crate::model::{SourceId, SourceSpan};
 use crate::syntax::{self, SourceDocument, SyntaxError, SyntaxErrorKind, UnsupportedDirective};
 
+use super::diagnostic::author_diagnostic;
+
 /// Recovered source syntax and stable authored diagnostics.
 ///
 /// The document remains available when diagnostics are present so later
@@ -84,14 +86,12 @@ fn translate_error(error: &SyntaxError) -> Diagnostic {
 }
 
 fn malformed_markup(primary: SourceSpan) -> Diagnostic {
-    Diagnostic::new(
+    author_diagnostic(
         DiagnosticCode::MalformedSyntax,
         primary,
         "screenplay markup is malformed",
+        "check tag delimiters, quotes, and other markup punctuation",
     )
-    .expect("the static malformed-markup message is non-blank")
-    .with_help("check tag delimiters, quotes, and other markup punctuation")
-    .expect("the static malformed-markup help is non-blank")
 }
 
 fn mismatched_closing_tag(
@@ -100,14 +100,12 @@ fn mismatched_closing_tag(
     found: &str,
     opened_at: SourceSpan,
 ) -> Diagnostic {
-    Diagnostic::new(
+    author_diagnostic(
         DiagnosticCode::MismatchedClosingTag,
         primary,
         format!("closing tag </{found}> does not match open element <{expected}>"),
+        format!("replace </{found}> with </{expected}>"),
     )
-    .expect("a formatted closing-tag message is non-blank")
-    .with_help(format!("replace </{found}> with </{expected}>"))
-    .expect("a formatted closing-tag help is non-blank")
     .with_related(opened_at, format!("<{expected}> is opened here"))
     .expect("a formatted related message is non-blank")
 }
@@ -117,38 +115,32 @@ fn duplicate_attribute(
     name: &str,
     first_declared_at: SourceSpan,
 ) -> Diagnostic {
-    Diagnostic::new(
+    author_diagnostic(
         DiagnosticCode::DuplicateAttribute,
         primary,
         format!("attribute \"{name}\" is repeated on the same element"),
+        format!("remove one \"{name}\" attribute"),
     )
-    .expect("a formatted duplicate-attribute message is non-blank")
-    .with_help(format!("remove one \"{name}\" attribute"))
-    .expect("a formatted duplicate-attribute help is non-blank")
     .with_related(first_declared_at, "the attribute is first declared here")
     .expect("the static related message is non-blank")
 }
 
 fn invalid_character_reference(primary: SourceSpan, reference: &str) -> Diagnostic {
-    Diagnostic::new(
+    author_diagnostic(
         DiagnosticCode::InvalidCharacterReference,
         primary,
         format!("character reference \"{reference}\" is malformed or unsupported"),
+        "use a valid numeric reference or amp, lt, gt, quot, or apos",
     )
-    .expect("a formatted character-reference message is non-blank")
-    .with_help("use a valid numeric reference or amp, lt, gt, quot, or apos")
-    .expect("the static character-reference help is non-blank")
 }
 
 fn unclosed_element(primary: SourceSpan, name: &str, ended_at: SourceSpan) -> Diagnostic {
-    Diagnostic::new(
+    author_diagnostic(
         DiagnosticCode::UnclosedElement,
         primary,
         format!("element <{name}> is not closed before the screenplay ends"),
+        format!("add a closing </{name}> tag"),
     )
-    .expect("a formatted unclosed-element message is non-blank")
-    .with_help(format!("add a closing </{name}> tag"))
-    .expect("a formatted unclosed-element help is non-blank")
     .with_related(
         ended_at,
         "the screenplay ends before this element is closed",
@@ -157,14 +149,12 @@ fn unclosed_element(primary: SourceSpan, name: &str, ended_at: SourceSpan) -> Di
 }
 
 fn unexpected_closing_tag(primary: SourceSpan, found: &str) -> Diagnostic {
-    Diagnostic::new(
+    author_diagnostic(
         DiagnosticCode::UnexpectedClosingTag,
         primary,
         format!("closing tag </{found}> has no open element"),
+        format!("remove </{found}> or add its opening tag"),
     )
-    .expect("a formatted unexpected-closing-tag message is non-blank")
-    .with_help(format!("remove </{found}> or add its opening tag"))
-    .expect("a formatted unexpected-closing-tag help is non-blank")
 }
 
 fn unsupported_directive(primary: SourceSpan, directive: UnsupportedDirective) -> Diagnostic {
@@ -174,14 +164,12 @@ fn unsupported_directive(primary: SourceSpan, directive: UnsupportedDirective) -
         UnsupportedDirective::DocumentTypeDeclaration => "document type declaration",
     };
 
-    Diagnostic::new(
+    author_diagnostic(
         DiagnosticCode::UnsupportedMarkupDirective,
         primary,
         format!("{name} is not supported in a screenplay"),
+        format!("remove the {name}"),
     )
-    .expect("a formatted unsupported-directive message is non-blank")
-    .with_help(format!("remove the {name}"))
-    .expect("a formatted unsupported-directive help is non-blank")
 }
 
 #[cfg(test)]

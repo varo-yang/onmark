@@ -99,6 +99,17 @@ impl RenderError {
         Self::protocol(output, runtime_failure_message(failure))
     }
 
+    pub(super) fn with_disposal_failure(mut self, disposal: Self) -> Self {
+        let primary = self.source.take();
+        self.message =
+            format!("{}; browser runtime disposal also failed", self.message).into_boxed_str();
+        self.source = Some(Box::new(RenderErrorSource::Disposal {
+            primary,
+            disposal: Box::new(disposal),
+        }));
+        self
+    }
+
     pub(super) fn output_io(
         output: &Path,
         message: impl Into<Box<str>>,
@@ -159,6 +170,10 @@ enum RenderErrorSource {
     Encoder(EncodeError),
     Artifact(FrameArtifactError),
     Io(io::Error),
+    Disposal {
+        primary: Option<Box<RenderErrorSource>>,
+        disposal: Box<RenderError>,
+    },
 }
 
 impl fmt::Display for RenderErrorSource {
@@ -168,6 +183,10 @@ impl fmt::Display for RenderErrorSource {
             Self::Encoder(source) => source.fmt(formatter),
             Self::Artifact(source) => source.fmt(formatter),
             Self::Io(source) => source.fmt(formatter),
+            Self::Disposal { primary, disposal } => match primary {
+                Some(primary) => write!(formatter, "{primary}; disposal failure: {disposal}"),
+                None => write!(formatter, "disposal failure: {disposal}"),
+            },
         }
     }
 }
@@ -179,6 +198,10 @@ impl Error for RenderErrorSource {
             Self::Encoder(source) => source.source(),
             Self::Artifact(source) => source.source(),
             Self::Io(source) => source.source(),
+            Self::Disposal { primary, disposal } => match primary {
+                Some(primary) => Some(primary.as_ref()),
+                None => Some(disposal.as_ref()),
+            },
         }
     }
 }

@@ -7,11 +7,12 @@ use std::collections::BTreeMap;
 
 use crate::diagnostics::{Diagnostic, DiagnosticCode, Diagnostics};
 use crate::model::{
-    AssetRef, AudioGain, CueId, Duration, ElementKind, EventRef, InvalidAssetRef, InvalidAudioGain,
-    InvalidDuration, InvalidNodeId, NodeId, SourceSpan,
+    AssetRef, AudioGain, CueId, Duration, ElementKind, EventRef, GeneralAudioKind, InvalidAssetRef,
+    InvalidAudioGain, InvalidDuration, InvalidNodeId, NodeId, SourceSpan,
 };
 use crate::syntax::{Attribute, TextNode};
 
+use super::diagnostic::author_diagnostic;
 use super::linked_film::{
     LinkedAudio, LinkedCue, LinkedCues, LinkedElement, LinkedFilm, LinkedFilmParts, LinkedId,
     LinkedNode, LinkedOverlay, LinkedScene, LinkedShot, LinkedShotContent, LinkedVideo,
@@ -246,13 +247,13 @@ impl Resolver {
     }
 
     fn resolve_audio(&mut self, audio: LinkedAudio) -> Option<ResolvedAudio> {
-        let input = ElementInput::new(audio.into_element());
+        let (kind, element) = audio.into_parts();
+        let input = ElementInput::new(element);
         let (element, mut attributes) = input.into_resolved_parts();
         let source_attribute = attributes.take("src");
-        let delay_attribute = match element.kind() {
-            ElementKind::Music => None,
-            ElementKind::SoundEffect => attributes.take("delay"),
-            kind => unreachable!("a resolved audio element cannot have kind {kind}"),
+        let delay_attribute = match kind {
+            GeneralAudioKind::Music => None,
+            GeneralAudioKind::SoundEffect => attributes.take("delay"),
         };
         let gain_attribute = attributes.take("gain");
         attributes.reject_unknown(element.kind(), &mut self.diagnostics);
@@ -270,7 +271,7 @@ impl Resolver {
             return None;
         };
 
-        Some(ResolvedAudio::new(element, source, delay, gain))
+        Some(ResolvedAudio::new(kind, element, source, delay, gain))
     }
 
     fn resolve_audio_gain(&mut self, attribute: &Attribute) -> Option<AudioGain> {
@@ -498,100 +499,84 @@ fn resolved_node(node: LinkedNode) -> ResolvedNode {
 }
 
 fn invalid_duration(attribute: &Attribute, reason: InvalidDuration) -> Diagnostic {
-    Diagnostic::new(
+    author_diagnostic(
         DiagnosticCode::InvalidDuration,
         attribute.value_span(),
         format!("duration \"{}\" is invalid: {reason}", attribute.value()),
+        "use an exact duration such as 3s, 500ms, or 1.5s",
     )
-    .expect("a formatted duration message is non-blank")
-    .with_help("use an exact duration such as 3s, 500ms, or 1.5s")
-    .expect("the static duration help is non-blank")
 }
 
 fn invalid_audio_gain(attribute: &Attribute, reason: InvalidAudioGain) -> Diagnostic {
-    Diagnostic::new(
+    author_diagnostic(
         DiagnosticCode::InvalidAttributeValue,
         attribute.value_span(),
         format!("audio gain \"{}\" is invalid: {reason}", attribute.value()),
+        "use an exact linear gain from 0% through 100%",
     )
-    .expect("a formatted audio-gain message is non-blank")
-    .with_help("use an exact linear gain from 0% through 100%")
-    .expect("the static audio-gain help is non-blank")
 }
 
 fn unknown_cue(attribute: &Attribute) -> Diagnostic {
-    Diagnostic::new(
+    author_diagnostic(
         DiagnosticCode::UnknownCueReference,
         attribute.value_span(),
         format!(
             "cue \"{}\" is not declared as a resolved event",
             attribute.value()
         ),
+        "declare this cue with a valid id and time, or use another cue",
     )
-    .expect("a formatted cue-reference message is non-blank")
-    .with_help("declare this cue with a valid id and time, or use another cue")
-    .expect("the static cue-reference help is non-blank")
 }
 
 fn unused_cue(id: &CueId, primary: SourceSpan) -> Diagnostic {
-    Diagnostic::new(
+    author_diagnostic(
         DiagnosticCode::UnusedCue,
         primary,
         format!("cue \"{id}\" is never referenced"),
+        "remove the cue or reference it from an overlay",
     )
-    .expect("a formatted unused-cue message is non-blank")
-    .with_help("remove the cue or reference it from an overlay")
-    .expect("the static unused-cue help is non-blank")
 }
 
 fn unknown_attribute(attribute: &Attribute, kind: ElementKind) -> Diagnostic {
-    Diagnostic::new(
+    author_diagnostic(
         DiagnosticCode::UnknownAttribute,
         attribute.name().span(),
         format!(
             "attribute \"{}\" is not allowed on <{kind}>",
             attribute.name()
         ),
+        format!("remove the \"{}\" attribute", attribute.name()),
     )
-    .expect("a formatted unknown-attribute message is non-blank")
-    .with_help(format!("remove the \"{}\" attribute", attribute.name()))
-    .expect("a formatted unknown-attribute help is non-blank")
 }
 
 fn missing_attribute(kind: ElementKind, name: &str, primary: SourceSpan) -> Diagnostic {
-    Diagnostic::new(
+    author_diagnostic(
         DiagnosticCode::MissingRequiredAttribute,
         primary,
         format!("element <{kind}> requires the \"{name}\" attribute"),
+        format!("add {name}=\"...\" to <{kind}>"),
     )
-    .expect("a formatted missing-attribute message is non-blank")
-    .with_help(format!("add {name}=\"...\" to <{kind}>"))
-    .expect("a formatted missing-attribute help is non-blank")
 }
 
 fn invalid_asset_reference(attribute: &Attribute, reason: InvalidAssetRef) -> Diagnostic {
-    Diagnostic::new(
+    author_diagnostic(
         DiagnosticCode::InvalidAttributeValue,
         attribute.value_span(),
         format!("attribute \"{}\" is invalid: {reason}", attribute.name()),
+        format!(
+            "provide a screenplay-relative path for \"{}\"",
+            attribute.name()
+        ),
     )
-    .expect("a formatted invalid-attribute message is non-blank")
-    .with_help(format!(
-        "provide a screenplay-relative path for \"{}\"",
-        attribute.name()
-    ))
-    .expect("a formatted invalid-attribute help is non-blank")
 }
 
 fn invalid_cue_reference(attribute: &Attribute, reason: InvalidNodeId) -> Diagnostic {
-    Diagnostic::new(
+    author_diagnostic(
         DiagnosticCode::InvalidAttributeValue,
         attribute.value_span(),
         format!("attribute \"cue\" is invalid: {reason}"),
+        "use a non-empty cue ID without ASCII whitespace",
     )
-    .expect("a formatted cue-reference message is non-blank")
-    .with_help("use a non-empty cue ID without ASCII whitespace")
-    .expect("the static cue-reference help is non-blank")
 }
 
 fn conflicting_attributes(first: &Attribute, second: &Attribute) -> Diagnostic {
@@ -600,7 +585,7 @@ fn conflicting_attributes(first: &Attribute, second: &Attribute) -> Diagnostic {
     } else {
         (second, first)
     };
-    Diagnostic::new(
+    author_diagnostic(
         DiagnosticCode::ConflictingAttributes,
         second.name().span(),
         format!(
@@ -608,14 +593,12 @@ fn conflicting_attributes(first: &Attribute, second: &Attribute) -> Diagnostic {
             first.name(),
             second.name(),
         ),
+        format!(
+            "keep either \"{}\" or \"{}\", not both",
+            first.name(),
+            second.name()
+        ),
     )
-    .expect("a formatted conflicting-attributes message is non-blank")
-    .with_help(format!(
-        "keep either \"{}\" or \"{}\", not both",
-        first.name(),
-        second.name()
-    ))
-    .expect("a formatted conflicting-attributes help is non-blank")
     .with_related(
         first.name().span(),
         format!("\"{}\" is first authored here", first.name()),

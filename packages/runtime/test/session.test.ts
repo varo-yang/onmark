@@ -151,7 +151,7 @@ test("rejects concurrent commands instead of growing a hidden queue", async () =
   assert.equal((await loading).event.type, "loaded");
 });
 
-test("translates typed adapter failures and contains untyped exceptions", async () => {
+test("makes a failed preparation terminal until disposal", async () => {
   const adapter = new RecordingAdapter();
   const session = new RuntimeSession(adapter);
 
@@ -171,11 +171,26 @@ test("translates typed adapter failures and contains untyped exceptions", async 
     pendingResources: ["font:Inter"],
   });
 
-  adapter.prepareError = undefined;
-  await session.dispatch(request(3, { type: "prepare", evaluationStart: 10 }));
+  const retry = await session.dispatch(
+    request(3, { type: "prepare", evaluationStart: 10 }),
+  );
+  assertFailure(retry, "invalidRequest");
+  assert.equal(
+    (await session.dispatch(request(4, { type: "dispose" }))).event.type,
+    "disposed",
+  );
+  assert.deepEqual(adapter.operations, ["load", "prepare:10", "dispose"]);
+});
+
+test("contains untyped adapter exceptions", async () => {
+  const adapter = new RecordingAdapter();
+  const session = new RuntimeSession(adapter);
+
+  await session.dispatch(request(1, { type: "load", plan }));
+  await session.dispatch(request(2, { type: "prepare", evaluationStart: 10 }));
   adapter.seekError = new Error("vendor-specific failure");
   const internal = await session.dispatch(
-    request(4, { type: "seek", frame: 10 }),
+    request(3, { type: "seek", frame: 10 }),
   );
   assertFailure(internal, "internal");
   if (internal.event.type === "failed") {
