@@ -1,6 +1,6 @@
 # Onmark Presentation Contract
 
-> 状态：已覆盖 Gate 一至 Gate 六。
+> 状态：已覆盖 Gate 一至 Gate 七。
 
 Gate 一使用两个作者文件：
 

@@ -1,6 +1,6 @@
 # Onmark Presentation Contract
 
-> Status: browser authoring contract through Gate six.
+> Status: browser authoring contract through Gate seven.
 
 Onmark uses two authored files at Gate one:
 
