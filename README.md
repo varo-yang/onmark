@@ -7,12 +7,11 @@ agents.
 screenplay → deterministic Timeline IR → browser frames + audio plan → MP4
 ```
 
-Delivery gates one through seven are complete. Gate eight is implementing an
-interactive preview that consumes the same compiled browser facts, immutable
-presentation bundle, and runtime lifecycle as native rendering. Gate one
-renders and independently verifies one real screenplay through the compiler,
-browser protocol, Chromium, and FFmpeg. Gate two partitions one media-bearing
-two-shot film into two local Render Units and proves that their assembled
+Delivery gates one through seven are complete. No later delivery gate is
+currently active. Gate one renders and independently verifies one real
+screenplay through the compiler, browser protocol, Chromium, and FFmpeg. Gate
+two partitions one media-bearing two-shot film into two local Render Units and
+proves that their assembled
 decoded video and audio match the whole-film baseline. Gate three sends those
 same portable units to two concurrent arm64 Lambda workers, verifies their
 immutable S3 frame artifacts against a remote whole-film capture by canonical
@@ -43,13 +42,6 @@ whole-film/partition equivalence, declared color conformance, and the existing
 Chromium-media path for presentations without the capability. The real-process
 exit fixture passes; this is neither new screenplay syntax nor a hidden
 fallback.
-
-Gate eight adds an exact-frame authoring loop without turning TypeScript into a
-second compiler or render planner. A framework-neutral browser player seeks
-the existing runtime host by integer frame identity; the CLI will own source
-compilation, bounded loopback serving, asset materialization, and one
-native-mixed preview audio asset. Studio editing, source mutation, transition
-syntax, and broader native layout reconstruction remain outside this gate.
 
 The completed foundation includes the pure compiler and versioned wire types in
 `onmark-core`; bounded ffprobe and strict SubRip/WebVTT/ASS normalization in

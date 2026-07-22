@@ -4,17 +4,17 @@
 > [English](../en/typescript-style-guide.md)
 
 漂亮的 TypeScript 应让所有权、protocol
-state、异步边界与浏览器副作用直接显现在类型和控制流中。Onmark 用 TypeScript 承担 authoring、bundling、
-interactive preview 与 browser runtime，但绝不在 TypeScript 里重做 Rust 已经求出的时间或规划事实。
+state、异步边界与浏览器副作用直接显现在类型和控制流中。Onmark 用 TypeScript 承担 authoring、bundling
+与 browser runtime，但绝不在 TypeScript 里重做 Rust 已经求出的时间或规划事实。
 
 ## 适用范围
 
-| 类型              | 例子                               | 首要风险                   |
-| ----------------- | ---------------------------------- | -------------------------- |
-| Browser runtime   | clock、session、player、DOM adapter | 确定性状态与有界 readiness |
-| Node toolchain    | authoring、bundler、generator      | 显式 IO 与可复现输出       |
-| Wire boundary     | 生成类型与 codec                   | 单一事实源与兼容性         |
-| Tests/conformance | fake、fixture、smoke               | 公开行为而非内部实现       |
+| 类型              | 例子                          | 首要风险                   |
+| ----------------- | ----------------------------- | -------------------------- |
+| Browser runtime   | clock、session、DOM adapter    | 确定性状态与有界 readiness |
+| Node toolchain    | authoring、bundler、generator | 显式 IO 与可复现输出       |
+| Wire boundary     | 生成类型与 codec              | 单一事实源与兼容性         |
+| Tests/conformance | fake、fixture、smoke          | 公开行为而非内部实现       |
 
 生成文件服从 generator，禁止手改。评审生成代码时，应检查 Rust wire
 type、schema、generator 与 drift gate，而不是逐行润色第三方机械输出。
@@ -41,8 +41,7 @@ solver、cue resolver 或 partition policy。
 ### 3. 依赖通过 package facade 单向流动
 
 package 只能从另一个 package 的公开 `exports` 导入，不能 reach into `src/`。
-`@onmark/runtime` 永不依赖 authoring、bundler 或 player；player 只依赖 runtime 公开面，不导入 authoring
-或 bundler internals。生产 browser 模块不得导入 Node built-in。runtime 内部可以消费生成代码，外部消费者
+`@onmark/runtime` 永不依赖 authoring 或 bundler。生产 browser 模块不得导入 Node built-in。runtime 内部可以消费生成代码，外部消费者
 只看 `src/index.ts` 的公开面。
 
 禁止

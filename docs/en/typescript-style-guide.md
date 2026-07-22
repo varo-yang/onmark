@@ -5,19 +5,19 @@
 
 Beautiful TypeScript makes ownership, protocol state, asynchronous boundaries,
 and browser effects visible. Onmark uses TypeScript for authoring, bundling,
-interactive preview, and the browser runtime; it does not use TypeScript to
+and the browser runtime; it does not use TypeScript to
 re-solve Rust-owned timing or planning facts.
 
 ## Scope
 
 Different code has different dominant risks:
 
-| Kind                  | Examples                            | Dominant concern                          |
-| --------------------- | ----------------------------------- | ----------------------------------------- |
-| Browser runtime       | clock, session, player, DOM adapters | deterministic state and bounded readiness |
-| Node toolchain        | authoring, bundler, generators      | explicit IO and reproducible output       |
-| Wire boundary         | generated types and codecs          | one source of truth and compatibility     |
-| Tests and conformance | fakes, fixtures, smoke tests        | public behavior rather than internals     |
+| Kind                  | Examples                       | Dominant concern                          |
+| --------------------- | ------------------------------ | ----------------------------------------- |
+| Browser runtime       | clock, session, DOM adapters   | deterministic state and bounded readiness |
+| Node toolchain        | authoring, bundler, generators | explicit IO and reproducible output       |
+| Wire boundary         | generated types and codecs     | one source of truth and compatibility     |
+| Tests and conformance | fakes, fixtures, smoke tests   | public behavior rather than internals     |
 
 Generated files follow their generator and are never hand-edited. Review the
 Rust wire type, schema, generator, and drift check instead of polishing
@@ -45,9 +45,8 @@ second timing solver, cue resolver, or partition policy.
 ### 3. Dependencies flow through package facades
 
 Packages import another package through its public `exports`, never through its
-`src/` tree. `@onmark/runtime` never imports authoring, bundler, or player.
-Player depends only on runtime's public facade; it does not import authoring or
-bundler internals. Production browser modules do not import Node built-ins.
+`src/` tree. `@onmark/runtime` never imports authoring or bundler. Production
+browser modules do not import Node built-ins.
 Generated internals may be consumed inside runtime, but external consumers use
 `src/index.ts` exports.
 
