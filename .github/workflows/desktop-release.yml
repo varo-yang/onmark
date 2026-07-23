@@ -74,6 +74,22 @@ jobs:
       - name: Install TypeScript dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Admit Linux browser sandbox
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          browser="$HOME/.cache/onmark/browser/**/chrome-headless-shell"
+          profile=/etc/apparmor.d/onmark-release-admission
+          cat <<EOF | sudo tee "$profile" >/dev/null
+          abi <abi/4.0>,
+          include <tunables/global>
+
+          profile onmark-release-admission $browser flags=(unconfined) {
+            userns,
+          }
+          EOF
+          sudo apparmor_parser --replace "$profile"
+
       - name: Fetch admitted media sources
         run: node scripts/release/fetch-media.mjs .release/sources
 

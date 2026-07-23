@@ -917,10 +917,12 @@ boundary 断言；独立编码的有损 MP4 帧不是 identity
 oracle。CI 显式拥有这些测试使用的 browser 与 media-tool 版本：Linux 锁定 canonical
 BeginFrame path，macOS 与 Windows 在成为 release target 前锁定 portable screenshot path。
 
-GitHub-hosted Ubuntu 无法向安装的 Chrome for Testing binary 提供可用的 Chromium
-sandbox。因此 real-process job 会提供一个 runner-local launcher 来追加
-`--no-sandbox`；这个例外只属于一次性的 CI worker。产品与本地 browser
-launch 默认仍然启用 Chromium sandbox。所有 capture
+GitHub-hosted Ubuntu 会把 AppArmor user-namespace 限制施加到下载的 Chrome for
+Testing binary。desktop release admission 会安装一份 runner-local AppArmor
+profile，只向 content-addressed Onmark browser cache 路径授予 `userns`，从而保留
+Chromium 自身的 sandbox。更底层的 real-process suite 仍使用一次性的 runner-local
+`--no-sandbox` wrapper；两种 CI 例外都不会改变产品 launch policy。产品与本地
+browser launch 默认仍然启用 Chromium sandbox。所有 capture
 policy 都显式锁定 ANGLE 的 SwiftShader backend：host
 GPU 的可用性不能改变像素，也不能使 whole-film 与 partition
 capture 产生分歧。本地 capture 保留 Chromium 的标准 multi-process
