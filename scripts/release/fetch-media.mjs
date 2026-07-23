@@ -7,7 +7,9 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 const MAX_SOURCE_BYTES = 16 * 1024 * 1024;
+const MAX_DOWNLOAD_REDIRECTS = 5;
 const DOWNLOAD_TIMEOUT_MILLISECONDS = 2 * 60_000;
+const REDIRECT_STATUSES = Object.freeze([301, 302, 303, 307, 308]);
 const MANIFEST_PATH = fileURLToPath(
   new URL("./media-sources.json", import.meta.url),
 );
@@ -28,6 +30,8 @@ async function main() {
   );
 }
 
+// ── Source contract
+
 function parseManifest(contents) {
   const value = JSON.parse(contents);
   if (!isObject(value) || value.schemaVersion !== 1) {
@@ -46,6 +50,7 @@ function parseSource(value, key) {
     typeof value.name !== "string" ||
     basename(value.name) !== value.name ||
     typeof value.url !== "string" ||
+    !value.url.startsWith("https://") ||
     !Number.isSafeInteger(value.bytes) ||
     value.bytes <= 0 ||
     value.bytes > MAX_SOURCE_BYTES ||
@@ -62,6 +67,8 @@ function parseSource(value, key) {
   });
 }
 
+// ── Bounded download
+
 async function admitSource(directory, source) {
   const destination = join(directory, source.name);
   if (await matchesSource(destination, source)) {
@@ -70,10 +77,7 @@ async function admitSource(directory, source) {
 
   const staging = join(directory, `.${source.name}.${randomUUID()}`);
   try {
-    const response = await fetch(source.url, {
-      redirect: "follow",
-      signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MILLISECONDS),
-    });
+    const response = await fetchSource(source);
     if (!response.ok) {
       throw new Error(
         `cannot download ${source.name}: HTTP ${response.status}`,
@@ -92,6 +96,38 @@ async function admitSource(directory, source) {
   } finally {
     await rm(staging, { force: true });
   }
+}
+
+async function fetchSource(source) {
+  const signal = AbortSignal.timeout(DOWNLOAD_TIMEOUT_MILLISECONDS);
+  let url = new URL(source.url);
+
+  for (let redirects = 0; redirects <= MAX_DOWNLOAD_REDIRECTS; redirects += 1) {
+    // GitLab's archive API rejects CORS fetch metadata even for a direct
+    // server-side download. Each redirect becomes a new same-origin request.
+    const response = await fetch(url, {
+      mode: "same-origin",
+      redirect: "manual",
+      signal,
+    });
+    if (!REDIRECT_STATUSES.includes(response.status)) {
+      return response;
+    }
+
+    const location = response.headers.get("location");
+    await response.body?.cancel();
+    if (location === null) {
+      throw new Error(`${source.name} redirects without a location`);
+    }
+    url = new URL(location, url);
+    if (url.protocol !== "https:") {
+      throw new Error(`${source.name} redirects outside HTTPS`);
+    }
+  }
+
+  throw new Error(
+    `${source.name} exceeds its ${MAX_DOWNLOAD_REDIRECTS}-redirect limit`,
+  );
 }
 
 async function readBounded(response, source) {
