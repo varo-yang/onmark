@@ -129,8 +129,13 @@ jobs:
       - name: Admit installed product
         shell: bash
         run: |
-          npm_root="$(npm root --global)"
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            npm_root="$(node -p 'require("node:path").join(require("node:path").dirname(process.execPath), "node_modules")')"
+          else
+            npm_root="$(npm root --global)"
+          fi
           npm_cli="$(node -e 'process.stdout.write(require("node:path").join(process.argv[1], "npm/bin/npm-cli.js"))' "$npm_root")"
+          test -f "$npm_cli"
           node scripts/release/admit.mjs \
             "$npm_cli" \
             .release/product \
