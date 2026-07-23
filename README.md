@@ -81,18 +81,16 @@ rendering conservatively keeps complete frame composition in Chromium. Stronger
 capabilities belong to conformance-admitted adapters and immutable bundle
 metadata.
 
-The current source-checkout build requires `onmark-bundle` and its Node.js
-runtime, Chromium, `ffmpeg`, and `ffprobe`; a single installable release artifact
-has not been published yet. On Linux, local rendering uses Chrome for Testing's
-`chrome-headless-shell` and CDP BeginFrameControl. On macOS and Windows, it uses
-ordinary Chrome's portable screenshot backend with the same screenplay,
-browser plan, runtime protocol, and encoder. That desktop path remains an
-experimental local capability until pinned macOS and Windows conformance is in
-CI. Onmark discovers standard Chrome installations there; use the execution
-override flags shown by `onmark render --help` for custom locations. The
-selected capture mode is printed after a successful render and deterministic
-comparisons only apply within the same locked browser environment and capture
-mode.
+The desktop artifact is admitted on macOS arm64, Linux x64, and Windows x64,
+although it has not yet been published to npm. It exposes one `onmark` package
+and command, carries the native CLI, `ffmpeg`, and `ffprobe` in a platform
+sidecar, and installs the pinned browser into a verified private cache. Linux
+uses Chrome for Testing's `chrome-headless-shell` with CDP BeginFrameControl;
+macOS and Windows use ordinary Chrome's portable screenshot backend. Every
+target renders the same admitted screenplay twice in an empty consumer before
+release artifacts are retained. Use the execution override flags shown by
+`onmark render --help` only for explicit custom tool locations. Deterministic
+comparisons apply within the same locked browser environment and capture mode.
 
 ## Worker capture
 

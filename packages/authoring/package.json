@@ -9,8 +9,8 @@
       "default": "./dist/src/index.js"
     },
     "./types": {
-      "types": "./src/motion.ts",
-      "default": "./dist/src/motion.js"
+      "types": "./src/types.ts",
+      "default": "./dist/src/types.js"
     }
   },
   "scripts": {

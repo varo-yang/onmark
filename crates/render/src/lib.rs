@@ -1,4 +1,5 @@
 #![forbid(unsafe_code)]
+#![warn(missing_docs)]
 #![warn(clippy::pedantic)]
 #![deny(clippy::unwrap_used, clippy::print_stdout, clippy::print_stderr)]
 

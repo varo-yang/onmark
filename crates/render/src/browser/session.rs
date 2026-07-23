@@ -48,7 +48,7 @@ const COMPOSITOR_BASE_TIME_MILLIS: f64 = 1_000.0;
 const COMPOSITOR_TRANSACTION_STEP_MILLIS: f64 = 1.0;
 const MAX_COMPOSITOR_OFFSET_MILLIS: f64 = 0.001;
 
-/// One owned headless-shell process and its single render page.
+/// One owned headless browser process and its single render page.
 #[derive(Debug)]
 pub struct BrowserSession {
     browser: Browser,
@@ -65,7 +65,7 @@ pub struct BrowserSession {
     compositor: CompositorClock,
     limits: BrowserLimits,
     render_profile: RenderProfile,
-    // Retained so headless shell's private profile outlives the process.
+    // Retained so the browser's private profile outlives the process.
     _profile: TempDir,
 }
 
@@ -74,7 +74,7 @@ impl BrowserSession {
         self.render_profile
     }
 
-    /// Launches a bounded headless-shell session using an explicit executable.
+    /// Launches a bounded headless browser session using an explicit executable.
     ///
     /// # Errors
     ///
@@ -261,7 +261,7 @@ impl BrowserSession {
             return self.capture_screenshot().await;
         }
         let transaction = self.compositor.begin(frame, frame_rate);
-        self.capture_png_with_fallback(transaction, MissingScreenshot::ReusePrevious)
+        self.capture_begin_frame(transaction, MissingScreenshot::ReusePrevious)
             .await
     }
 
@@ -281,7 +281,7 @@ impl BrowserSession {
             .execute(transaction.placement_parameters())
             .await
             .map_err(|source| self.cdp_error(BrowserErrorKind::Capture, source))?;
-        self.capture_png_with_fallback(transaction, MissingScreenshot::RetryOnce)
+        self.capture_begin_frame(transaction, MissingScreenshot::RetryOnce)
             .await
     }
 
@@ -313,7 +313,7 @@ impl BrowserSession {
         })
     }
 
-    async fn capture_png_with_fallback(
+    async fn capture_begin_frame(
         &mut self,
         transaction: CompositorTransaction,
         missing: MissingScreenshot,
@@ -494,7 +494,7 @@ fn handler_exit_error(result: Result<(), CdpError>, diagnostics: Option<Box<str>
     match result {
         Ok(()) => BrowserError::process(
             BrowserErrorKind::Handler,
-            "headless-shell protocol handler exited unexpectedly",
+            "browser protocol handler exited unexpectedly",
             diagnostics,
         ),
         Err(source) => {

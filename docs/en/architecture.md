@@ -238,10 +238,10 @@ The sole clock derives from frame index and rational timebase. Wall time and
 free-running animation or media clocks may not determine output.
 
 The runtime protocol includes `Load`, `Prepare`, `Seek`, `FrameStaged`,
-`Confirm`, `FrameReady`, and `Dispose`. Native rendering selects a closed
-capture contract from the browser artifact: `chrome-headless-shell` owns CDP
-BeginFrameControl, while ordinary Chrome owns the portable screenshot path.
-The latter remains experimental until pinned desktop conformance exists.
+`Confirm`, `FrameReady`, and `Dispose`. Native rendering selects one of two
+closed capture contracts from the browser artifact and host: Linux
+`chrome-headless-shell` owns CDP BeginFrameControl, while macOS, Windows,
+ordinary Chrome, and Chromium use the portable screenshot path.
 `Load` creates every video and overlay binding for the plan.
 Inactive nodes retain stable binding identities but remain outside layout and
 compositing until their solved intervals make them visible. Placements omitted
@@ -591,10 +591,12 @@ dependency is linked into library consumers or runtime artifacts.
 
 `@onmark/runtime` remains vendor-free and owns exact frame-effect and resource
 lifecycles. `@onmark/authoring` owns the semantic DOM and the vendor-neutral
-`PresentationExtension` contract. The internal `@onmark/motion-gsap` package
-backs the workspace `onmark/motion/gsap` facade. It alone owns the pinned GSAP
-dependency, converts exact Rust-owned intervals to local browser seconds,
-suppresses callback dispatch while seeking, and kills every playhead on terminal disposal.
+`PresentationExtension` contract; its `/types` subpath exports declarations
+only, so optional adapters cannot acquire authoring runtime behavior through
+that dependency edge. The internal `@onmark/motion-gsap` package backs the
+workspace `onmark/motion/gsap` facade. It alone owns the pinned GSAP dependency,
+converts exact Rust-owned intervals to local browser seconds, suppresses
+callback dispatch while seeking, and kills every playhead on terminal disposal.
 It may depend only on `@onmark/authoring` and GSAP, and is consumed by authored
 motion modules or custom presentations. Other engines implement the same
 extension contract; neither bundler nor runtime selects vendors. Three.js
@@ -743,9 +745,8 @@ output's frame count, motion, stream facts, and audio placement, then checks
 no-clobber publication. Canonical raw-RGBA equality remains a native
 capture-boundary assertion; independently encoded lossy MP4 frames are not an
 identity oracle. CI owns explicit browser and media-tool versions for these
-tests. Linux locks the canonical BeginFrame path; macOS and Windows conformance
-lock the portable screenshot path before those platforms become release
-targets.
+tests. Linux locks the canonical BeginFrame path; desktop release admission
+locks the portable screenshot path on macOS and Windows.
 
 GitHub-hosted Ubuntu applies AppArmor user-namespace restrictions to downloaded
 Chrome for Testing binaries. Desktop release admission installs a runner-local
@@ -1237,10 +1238,11 @@ for application-controlled `FrameReady` followed by CDP
 identical raw RGBA hashes across independent Chrome processes on one locked
 machine. Gate three replaced that provisional transport for the canonical Linux
 path with `chrome-headless-shell` BeginFrameControl so compositor commit and
-screenshot share one explicit frame boundary. The portable desktop backend
-reuses the original mechanism only as an experimental local path; decoded
-media, WebGL, asynchronous components, cross-environment equality, and pinned
-platform lifecycle still require evidence before release-target status.
+screenshot share one explicit frame boundary. The portable screenshot backend
+is admitted on pinned macOS and Windows release targets through independent
+whole-film sessions, decoded output checks, and canonical raw-RGBA comparison.
+That admission does not claim pixel equality across different operating
+systems, browser products, or capture modes.
 
 The decoded-media experiment covers 30 fps CFR, `30000/1001` CFR, and an
 alternating-frame-interval VFR H.264 fixture, each with a 30-frame GOP and three
