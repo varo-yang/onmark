@@ -4,9 +4,6 @@ use std::path::{Path, PathBuf};
 
 use clap::{Args, Parser, Subcommand};
 use onmark_core::model::FrameRate;
-use onmark_core::model::{PresentationTemporalCapability, PresentationVisualCapability};
-
-const DEFAULT_PRESENTATION: &str = "presentation.ts";
 
 /// Native entry point for deterministic screenplay rendering.
 #[derive(Debug, Parser)]
@@ -60,7 +57,7 @@ pub(super) struct RenderArgs {
     /// Screenplay to compile.
     pub(super) screenplay: PathBuf,
 
-    /// Browser presentation entry. Defaults to presentation.ts beside the screenplay.
+    /// Custom browser entry. Omit to use semantic DOM and same-stem CSS.
     #[arg(short, long)]
     presentation: Option<PathBuf>,
 
@@ -80,7 +77,7 @@ pub(super) struct RenderArgs {
     #[arg(long, default_value_t = 1_080)]
     pub(super) height: u32,
 
-    /// Chrome for Testing headless-shell executable.
+    /// Browser executable. Defaults to headless shell on Linux and Chrome elsewhere.
     #[arg(long, help_heading = "Execution overrides")]
     pub(super) browser: Option<PathBuf>,
 
@@ -103,21 +100,19 @@ pub(super) struct RenderArgs {
     /// Standalone SRT, `WebVTT`, or ASS file.
     #[arg(long = "subtitle", value_name = "FILE")]
     pub(super) subtitle: Option<PathBuf>,
-
-    /// Proven presentation-time behavior used by render partitioning.
-    #[arg(long, default_value_t = PresentationTemporalCapability::Sequential)]
-    pub(super) temporal_capability: PresentationTemporalCapability,
-
-    /// Proven relationship between browser pixels and primary media.
-    #[arg(long, default_value_t = PresentationVisualCapability::BrowserComposite)]
-    pub(super) visual_capability: PresentationVisualCapability,
 }
 
 impl RenderArgs {
-    pub(super) fn presentation(&self) -> PathBuf {
-        self.presentation
-            .clone()
-            .unwrap_or_else(|| source_directory(&self.screenplay).join(DEFAULT_PRESENTATION))
+    pub(super) fn presentation(&self) -> Option<&Path> {
+        self.presentation.as_deref()
+    }
+
+    pub(super) fn stylesheet(&self) -> PathBuf {
+        self.screenplay.with_extension("css")
+    }
+
+    pub(super) fn motion(&self) -> PathBuf {
+        self.screenplay.with_extension("motion.ts")
     }
 
     pub(super) fn output(&self) -> PathBuf {
@@ -159,10 +154,8 @@ fn parse_rate_component(value: &str) -> Result<u32, String> {
 mod tests {
     use std::path::Path;
 
-    use clap::Parser;
-    use onmark_core::model::{PresentationTemporalCapability, PresentationVisualCapability};
-
     use super::{Cli, Command, WorkerCommand};
+    use clap::Parser;
 
     #[test]
     fn derives_stable_project_defaults_from_the_screenplay() {
@@ -172,18 +165,12 @@ mod tests {
             panic!("the fixture must parse as a render command");
         };
 
-        assert_eq!(args.presentation(), Path::new("project/presentation.ts"));
+        assert_eq!(args.presentation(), None);
+        assert_eq!(args.stylesheet(), Path::new("project/film.css"));
+        assert_eq!(args.motion(), Path::new("project/film.motion.ts"));
         assert_eq!(args.output(), Path::new("renders/film.mp4"));
         assert_eq!(args.frame_rate.numerator(), 30);
         assert_eq!(args.frame_rate.denominator(), 1);
-        assert_eq!(
-            args.temporal_capability,
-            PresentationTemporalCapability::Sequential,
-        );
-        assert_eq!(
-            args.visual_capability,
-            PresentationVisualCapability::BrowserComposite,
-        );
     }
 
     #[test]
@@ -202,28 +189,26 @@ mod tests {
     }
 
     #[test]
-    fn accepts_explicit_presentation_capabilities() {
-        let cli = Cli::try_parse_from([
-            "onmark",
-            "render",
-            "film.onmark",
-            "--temporal-capability",
-            "randomAccess",
-            "--visual-capability",
-            "separableOverlay",
-        ])
-        .expect("the closed capability spellings are valid");
-        let Command::Render(args) = cli.command else {
-            panic!("the fixture must parse as a render command");
-        };
-
-        assert_eq!(
-            args.temporal_capability,
-            PresentationTemporalCapability::RandomAccess,
+    fn rejects_unproven_presentation_capabilities() {
+        assert!(
+            Cli::try_parse_from([
+                "onmark",
+                "render",
+                "film.onmark",
+                "--temporal-capability",
+                "randomAccess",
+            ])
+            .is_err()
         );
-        assert_eq!(
-            args.visual_capability,
-            PresentationVisualCapability::SeparableOverlay,
+        assert!(
+            Cli::try_parse_from([
+                "onmark",
+                "render",
+                "film.onmark",
+                "--visual-capability",
+                "separableOverlay",
+            ])
+            .is_err()
         );
     }
 

@@ -8,7 +8,7 @@ use std::fmt;
 
 use onmark_core::model::{AssetMetadata, FrameRate, VideoMetadata, VideoTiming};
 
-/// A visual stream proven admissible by the Gate-one browser profile.
+/// A visual stream proven admissible by the browser media profile.
 ///
 /// Admission borrows normalized probe facts rather than copying them into a
 /// second render-owned media model. Render Unit composition retains the proved
@@ -20,7 +20,7 @@ pub struct AdmittedVideo<'a> {
 }
 
 impl<'a> AdmittedVideo<'a> {
-    /// Applies the complete Gate-one visual-asset policy.
+    /// Applies the complete browser visual-asset policy.
     ///
     /// # Errors
     ///
@@ -58,13 +58,13 @@ impl<'a> AdmittedVideo<'a> {
     }
 }
 
-/// Reason an asset cannot enter the Gate-one browser media path.
+/// Reason an asset cannot enter the browser media path.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum UnsupportedVideo {
     /// The artifact has no selected visual stream.
     MissingVideoStream,
-    /// The selected codec is outside the locked Gate-one profile.
+    /// The selected codec is outside the locked browser profile.
     Codec(Box<str>),
     /// Source-frame presentation intervals are not constant.
     VariableFrameRate,

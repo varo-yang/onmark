@@ -24,8 +24,14 @@ const FRAME_ACCENT_PROPERTY = "--onmark-frame-accent";
 const adapter = new PresentationRuntimeAdapter(
   createDomPresentationBindings({
     document,
-    frameEffects: bindFrameEffects,
-    resources: bindResources,
+    motion: {
+      bind() {
+        return {
+          effects: bindFrameEffects(),
+          resources: bindResources(),
+        };
+      },
+    },
     videoSource: materializedVideoSource,
   }),
   READINESS_TIMEOUT_MILLISECONDS,

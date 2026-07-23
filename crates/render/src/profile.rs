@@ -34,7 +34,7 @@ struct RenderProfileWire {
 }
 
 impl RenderProfile {
-    /// Creates the fixed Gate-one H.264 output profile.
+    /// Creates the fixed H.264 output profile.
     ///
     /// # Errors
     ///
@@ -66,7 +66,7 @@ impl RenderProfile {
     }
 }
 
-/// Reason pixel-affecting output facts cannot enter Gate one.
+/// Reason pixel-affecting output facts cannot enter the render profile.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum InvalidRenderProfile {
     /// At least one output dimension is zero.

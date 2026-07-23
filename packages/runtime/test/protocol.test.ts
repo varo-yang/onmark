@@ -24,6 +24,8 @@ const PROTOCOL_FIXTURES = new URL(
   import.meta.url,
 );
 
+// ── Decoding boundaries ──
+
 test("decodes every checked-in Gate-one protocol example", async () => {
   for (const request of await fixture("browser-requests-v1.jsonl")) {
     assert.deepEqual(decodeBrowserRequest(request), request);
@@ -91,6 +93,8 @@ test("rejects values outside the versioned browser contract", () => {
 
 test("rejects protocol payloads outside generated resource budgets", () => {
   const video = {
+    node: { nodeId: 3, authoredId: null },
+    shotId: 2,
     assetId:
       "sha256:0101010101010101010101010101010101010101010101010101010101010101",
     interval: { start: 0, end: 1 },
@@ -106,6 +110,20 @@ test("rejects protocol payloads outside generated resource budgets", () => {
         frameRate: { numerator: 30, denominator: 1 },
         evaluation: { start: 0, end: 1 },
         output: { start: 0, end: 1 },
+        film: { nodeId: 0, authoredId: null },
+        scenes: [
+          {
+            node: { nodeId: 1, authoredId: null },
+            interval: { start: 0, end: 1 },
+          },
+        ],
+        shots: [
+          {
+            node: { nodeId: 2, authoredId: null },
+            sceneId: 1,
+            interval: { start: 0, end: 1 },
+          },
+        ],
         overlays: [],
         videos: Array.from({ length: MAX_BROWSER_VIDEOS + 1 }, () => video),
       },
@@ -114,7 +132,8 @@ test("rejects protocol payloads outside generated resource budgets", () => {
   assert.throws(() => decodeBrowserRequest(request), ProtocolDecodeError);
 
   const overlay = {
-    componentId: 0,
+    node: { nodeId: 4, authoredId: null },
+    shotId: 2,
     kind: "title",
     text: "Opening",
     interval: { start: 0, end: 1 },
@@ -173,6 +192,8 @@ test("rejects protocol payloads outside generated resource budgets", () => {
     assert.throws(() => decodeBrowserResponse(response), ProtocolDecodeError);
   }
 });
+
+// ── Fixtures ──
 
 async function fixture(filename: string): Promise<unknown[]> {
   const lines = (await readFile(new URL(filename, PROTOCOL_FIXTURES), "utf8"))

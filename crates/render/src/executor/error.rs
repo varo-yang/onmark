@@ -99,13 +99,15 @@ impl RenderError {
         Self::protocol(output, runtime_failure_message(failure))
     }
 
-    pub(super) fn with_disposal_failure(mut self, disposal: Self) -> Self {
+    pub(super) fn with_cleanup_failure(mut self, phase: &'static str, cleanup: Self) -> Self {
         let primary = self.source.take();
-        self.message =
-            format!("{}; browser runtime disposal also failed", self.message).into_boxed_str();
-        self.source = Some(Box::new(RenderErrorSource::Disposal {
+        let primary_message = self.message.clone();
+        self.message = format!("{}; {phase} also failed", self.message).into_boxed_str();
+        self.source = Some(Box::new(RenderErrorSource::Cleanup {
+            phase,
             primary,
-            disposal: Box::new(disposal),
+            primary_message,
+            cleanup: Box::new(cleanup),
         }));
         self
     }
@@ -170,9 +172,11 @@ enum RenderErrorSource {
     Encoder(EncodeError),
     Artifact(FrameArtifactError),
     Io(io::Error),
-    Disposal {
+    Cleanup {
+        phase: &'static str,
         primary: Option<Box<RenderErrorSource>>,
-        disposal: Box<RenderError>,
+        primary_message: Box<str>,
+        cleanup: Box<RenderError>,
     },
 }
 
@@ -183,9 +187,19 @@ impl fmt::Display for RenderErrorSource {
             Self::Encoder(source) => source.fmt(formatter),
             Self::Artifact(source) => source.fmt(formatter),
             Self::Io(source) => source.fmt(formatter),
-            Self::Disposal { primary, disposal } => match primary {
-                Some(primary) => write!(formatter, "{primary}; disposal failure: {disposal}"),
-                None => write!(formatter, "disposal failure: {disposal}"),
+            Self::Cleanup {
+                phase,
+                primary,
+                primary_message,
+                cleanup,
+            } => match primary {
+                Some(primary) => {
+                    write!(
+                        formatter,
+                        "{primary_message}: {primary}; {phase} failed: {cleanup}"
+                    )
+                }
+                None => write!(formatter, "{phase} after {primary_message}: {cleanup}"),
             },
         }
     }
@@ -198,9 +212,11 @@ impl Error for RenderErrorSource {
             Self::Encoder(source) => source.source(),
             Self::Artifact(source) => source.source(),
             Self::Io(source) => source.source(),
-            Self::Disposal { primary, disposal } => match primary {
+            Self::Cleanup {
+                primary, cleanup, ..
+            } => match primary {
                 Some(primary) => Some(primary.as_ref()),
-                None => Some(disposal.as_ref()),
+                None => Some(cleanup.as_ref()),
             },
         }
     }
@@ -208,6 +224,7 @@ impl Error for RenderErrorSource {
 
 #[cfg(test)]
 mod tests {
+    use std::error::Error as _;
     use std::path::Path;
 
     use onmark_core::protocol::{ProtocolFailure, ProtocolFailureCode};
@@ -247,5 +264,25 @@ mod tests {
         let error = RenderError::runtime_failure(Path::new("output.mp4"), &failure);
 
         assert!(error.to_string().ends_with("resource:7; and 1 more"));
+    }
+
+    #[test]
+    fn retains_primary_and_cleanup_failures() {
+        let primary = RenderError::protocol(Path::new("output.mp4"), "capture failed");
+        let cleanup = RenderError::protocol(Path::new("output.mp4"), "shutdown failed");
+
+        let error = primary.with_cleanup_failure("browser shutdown", cleanup);
+
+        assert_eq!(
+            error.to_string(),
+            "output.mp4: capture failed; browser shutdown also failed",
+        );
+        assert_eq!(
+            error
+                .source()
+                .expect("both failures retain a source")
+                .to_string(),
+            "browser shutdown after capture failed: output.mp4: shutdown failed",
+        );
     }
 }

@@ -39,7 +39,7 @@ impl FrameArtifactLimits {
     /// # Errors
     ///
     /// Returns [`InvalidFrameArtifactLimits`] when a bound is zero or exceeds
-    /// the fixed Gate-three safety envelope.
+    /// the fixed worker-artifact safety envelope.
     pub fn new(
         max_frames: u64,
         max_bytes: u64,

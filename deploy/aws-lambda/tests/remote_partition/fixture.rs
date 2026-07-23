@@ -55,6 +55,7 @@ impl ConformanceFilm {
         let timeline = solve(&catalog.facts);
         let partitions =
             RenderGraph::from_timeline(&timeline, PresentationTemporalCapability::RandomAccess)
+                .expect("the solved fixture has complete render ownership")
                 .into_partition();
         assert_eq!(partitions.units().len(), 2);
 

@@ -175,6 +175,8 @@ test("rejects readiness deadlines outside the browser timer budget", () => {
 
 test("derives the materialized source from the Rust-owned bundle layout", () => {
   const placement: RuntimeVideo = {
+    node: { nodeId: 3, authoredId: "video" },
+    shotId: 2,
     assetId:
       "sha256:0101010101010101010101010101010101010101010101010101010101010101",
     interval: { start: 10, end: 20 },

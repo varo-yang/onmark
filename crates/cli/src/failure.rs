@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use onmark_core::compiler::{CaptionProjectionError, SolveError};
+use onmark_core::render_graph::InvalidRenderGraph;
 use onmark_render::{
     InvalidFfmpeg, InvalidRenderProfile, InvalidRenderUnit, RenderError, UnitRootError,
 };
@@ -37,11 +38,11 @@ pub(super) enum CliError {
         source: serde_json::Error,
     },
     WorkerTask(JoinError),
-    InspectPresentation {
+    InspectPresentationSource {
         path: PathBuf,
         source: io::Error,
     },
-    InvalidPresentation(PathBuf),
+    InvalidPresentationSource(PathBuf),
     CreateOutputDirectory {
         path: PathBuf,
         source: io::Error,
@@ -54,6 +55,7 @@ pub(super) enum CliError {
     Subtitle(SubtitleLoadError),
     CaptionProjection(CaptionProjectionError),
     Bundle(BundleError),
+    RenderGraph(InvalidRenderGraph),
     RenderUnit(InvalidRenderUnit),
     UnitRoot(UnitRootError),
     Render(RenderError),
@@ -88,8 +90,8 @@ impl CliError {
         }
     }
 
-    pub(super) fn inspect_presentation(path: &Path, source: io::Error) -> Self {
-        Self::InspectPresentation {
+    pub(super) fn inspect_presentation_source(path: &Path, source: io::Error) -> Self {
+        Self::InspectPresentationSource {
             path: path.to_owned(),
             source,
         }
@@ -118,15 +120,19 @@ impl fmt::Display for CliError {
                 )
             }
             Self::WorkerTask(_) => formatter.write_str("worker materialization did not finish"),
-            Self::InspectPresentation { path, .. } => {
+            Self::InspectPresentationSource { path, .. } => {
                 write!(
                     formatter,
-                    "failed to inspect presentation {}",
+                    "failed to inspect presentation source {}",
                     path.display()
                 )
             }
-            Self::InvalidPresentation(path) => {
-                write!(formatter, "presentation {} is not a file", path.display())
+            Self::InvalidPresentationSource(path) => {
+                write!(
+                    formatter,
+                    "presentation source {} is not a file",
+                    path.display()
+                )
             }
             Self::CreateOutputDirectory { path, .. } => {
                 write!(
@@ -145,6 +151,7 @@ impl fmt::Display for CliError {
             Self::Subtitle(source) => source.fmt(formatter),
             Self::CaptionProjection(source) => source.fmt(formatter),
             Self::Bundle(source) => source.fmt(formatter),
+            Self::RenderGraph(source) => source.fmt(formatter),
             Self::RenderUnit(source) => source.fmt(formatter),
             Self::UnitRoot(source) => source.fmt(formatter),
             Self::Render(source) => source.fmt(formatter),
@@ -159,11 +166,11 @@ impl Error for CliError {
             Self::ReadScreenplay { source, .. } | Self::ReadWorkerRequest { source, .. } => {
                 Some(source)
             }
-            Self::InspectPresentation { source, .. }
+            Self::InspectPresentationSource { source, .. }
             | Self::CreateOutputDirectory { source, .. } => Some(source),
             Self::ParseWorkerRequest { source, .. } => Some(source),
             Self::WorkerTask(source) => Some(source),
-            Self::InvalidPresentation(_) | Self::OutputExists(_) => None,
+            Self::InvalidPresentationSource(_) | Self::OutputExists(_) => None,
             Self::InvalidProfile(source) => Some(source),
             Self::InvalidFfmpeg(source) => Some(source),
             Self::Assets(source) => Some(source),
@@ -171,6 +178,7 @@ impl Error for CliError {
             Self::Subtitle(source) => Some(source),
             Self::CaptionProjection(source) => Some(source),
             Self::Bundle(source) => Some(source),
+            Self::RenderGraph(source) => Some(source),
             Self::RenderUnit(source) => Some(source),
             Self::UnitRoot(source) => Some(source),
             Self::Render(source) => Some(source),
@@ -223,6 +231,12 @@ impl From<CaptionProjectionError> for CliError {
 impl From<BundleError> for CliError {
     fn from(source: BundleError) -> Self {
         Self::Bundle(source)
+    }
+}
+
+impl From<InvalidRenderGraph> for CliError {
+    fn from(source: InvalidRenderGraph) -> Self {
+        Self::RenderGraph(source)
     }
 }
 

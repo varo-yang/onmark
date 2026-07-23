@@ -5,7 +5,7 @@ use std::fmt;
 
 use super::{FrameCount, FrameRate, Rounding};
 
-/// Normalized channel layouts accepted by the Gate-four audio renderer.
+/// Normalized channel layouts accepted by the audio renderer.
 ///
 /// The closed set is intentional. It keeps channel mapping deterministic and
 /// rejects surround material before an external media tool can choose an

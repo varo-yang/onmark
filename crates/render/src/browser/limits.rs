@@ -20,7 +20,7 @@ impl BrowserLimits {
     /// # Errors
     ///
     /// Returns [`InvalidBrowserLimits`] when a bound is zero or the retained
-    /// capture ceiling exceeds the Gate-one safety envelope.
+    /// capture ceiling exceeds the browser safety envelope.
     pub const fn new(
         deadline: Duration,
         max_capture_bytes: usize,

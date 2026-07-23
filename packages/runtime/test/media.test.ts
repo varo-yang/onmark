@@ -7,6 +7,8 @@ import { videoFrameSelection, type RuntimeFrame } from "../src/index.js";
 
 const outputRate = { numerator: 30, denominator: 1 };
 const video = {
+  node: { nodeId: 3, authoredId: "video" },
+  shotId: 2,
   assetId:
     "sha256:0101010101010101010101010101010101010101010101010101010101010101",
   interval: { start: 10, end: 20 },

@@ -7,13 +7,16 @@
     "skipLibCheck": true,
     "paths": {
       "@onmark/authoring": ["../../packages/authoring/src/index.ts"],
-      "@onmark/runtime": ["../../packages/runtime/src/index.ts"]
+      "@onmark/runtime": ["../../packages/runtime/src/index.ts"],
+      "onmark/authoring": ["../../packages/authoring/src/index.ts"],
+      "onmark/motion/gsap": ["../../packages/motion-gsap/src/index.ts"]
     },
     "types": []
   },
   "include": [
     "environment.d.ts",
     "layered-presentation.ts",
+    "semantic-presentation.motion.ts",
     "temporal-experiment.ts",
     "video-presentation.ts"
   ]

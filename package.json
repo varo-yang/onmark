@@ -1,6 +1,16 @@
 {
   "name": "onmark",
   "private": true,
+  "exports": {
+    "./authoring": {
+      "types": "./packages/authoring/src/index.ts",
+      "default": "./packages/authoring/src/index.ts"
+    },
+    "./motion/gsap": {
+      "types": "./packages/motion-gsap/src/index.ts",
+      "default": "./packages/motion-gsap/src/index.ts"
+    }
+  },
   "packageManager": "pnpm@11.9.0",
   "scripts": {
     "generate": "cargo xtask schema",

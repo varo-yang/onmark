@@ -19,6 +19,9 @@ const PLAN: BrowserPlan = {
   frameRate: { numerator: 30, denominator: 1 },
   evaluation: { start: 0, end: 1 },
   output: { start: 0, end: 1 },
+  film: { nodeId: 0, authoredId: null },
+  scenes: [],
+  shots: [],
   videos: [],
   overlays: [],
 };
@@ -199,18 +202,32 @@ function resourceAdapter(
   timeoutMilliseconds: number,
 ): PresentationRuntimeAdapter {
   const bindings: PresentationBindings = {
+    bindFilm() {
+      return emptyContainer();
+    },
+    bindScene(): never {
+      throw new Error("the resource fixture contains no scene");
+    },
+    bindShot(): never {
+      throw new Error("the resource fixture contains no shot");
+    },
     bindVideo(): never {
       throw new Error("the resource fixture contains no video");
     },
     bindOverlay(): never {
       throw new Error("the resource fixture contains no overlay");
     },
-    bindFrameEffects() {
-      return [];
-    },
-    bindResources() {
-      return resources;
+    async bindExtensions() {
+      return { effects: [], resources };
     },
   };
   return new PresentationRuntimeAdapter(bindings, timeoutMilliseconds);
+}
+
+function emptyContainer() {
+  return {
+    element: {} as HTMLElement,
+    setVisible(): void {},
+    dispose(): void {},
+  };
 }

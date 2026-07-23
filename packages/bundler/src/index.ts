@@ -2,12 +2,14 @@
 
 export {
   BundleError,
+  bundleDomPresentation,
   bundlePresentation,
   type BundleArtifact,
   type BundleErrorKind,
   type BundleFile,
   type BundleManifest,
   type BundleOptions,
+  type DomBundleOptions,
 } from "./presentation.js";
 
 export {

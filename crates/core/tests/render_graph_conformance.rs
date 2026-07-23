@@ -27,7 +27,8 @@ fn independent_shots_form_separate_scoped_units() {
         ("voice.mp3", "1s"),
     ]);
     let timeline = solve_fixture(&source_path, &assets);
-    let graph = RenderGraph::from_timeline(&timeline, PresentationTemporalCapability::RandomAccess);
+    let graph = RenderGraph::from_timeline(&timeline, PresentationTemporalCapability::RandomAccess)
+        .expect("the solved fixture has complete render ownership");
     let mut renderer = PlanRenderer::new();
     renderer
         .render_graph(&graph)

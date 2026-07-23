@@ -82,7 +82,7 @@ impl BrowserError {
     pub(super) fn base64(source: DecodeError) -> Self {
         Self {
             kind: BrowserErrorKind::Capture,
-            message: Some("headless shell returned invalid screenshot data".into()),
+            message: Some("Chromium returned invalid screenshot data".into()),
             source: Some(BrowserErrorSource::Base64(source)),
         }
     }
@@ -103,7 +103,7 @@ impl BrowserError {
         Self {
             kind,
             message: diagnostics.map(|diagnostics| {
-                format!("headless-shell stderr tail:\n{diagnostics}").into_boxed_str()
+                format!("Chromium stderr tail:\n{diagnostics}").into_boxed_str()
             }),
             source: Some(BrowserErrorSource::Cdp(source)),
         }
@@ -116,7 +116,7 @@ impl BrowserError {
     ) -> Self {
         let message = message.into();
         let message = match diagnostics {
-            Some(diagnostics) => format!("{message}; headless-shell stderr tail:\n{diagnostics}"),
+            Some(diagnostics) => format!("{message}; Chromium stderr tail:\n{diagnostics}"),
             None => message,
         };
         Self {

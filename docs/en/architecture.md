@@ -214,11 +214,12 @@ presentation entry. The browser derives that relative location from the frozen
 identity already present in `BrowserPlan`; native paths and browser URLs
 therefore need no second wire protocol. The unit retains worker-local source
 paths only until assembly has verified or linked the exact bytes into that root.
-The presentation entry owns layout and installs the runtime adapter; the runtime
-supplies deterministic clock, readiness, and media primitives. Onmark does not
-synthesize an implicit full-screen DOM from Timeline IR. The public rules for
-author-owned browser code live in the
-[presentation contract](presentation-contract.md).
+The normal bundle installs a neutral semantic DOM projection for solved video
+and overlay facts; it contributes no layout, style, animation, or full-screen
+assumption. An explicitly selected custom presentation instead owns DOM shape
+and runtime installation. Both paths consume the same deterministic clock,
+readiness, and media primitives. The public rules for author-owned browser code
+live in the [presentation contract](presentation-contract.md).
 
 Each Gate-three capture worker executes one state machine:
 
@@ -237,9 +238,11 @@ The sole clock derives from frame index and rational timebase. Wall time and
 free-running animation or media clocks may not determine output.
 
 The runtime protocol includes `Load`, `Prepare`, `Seek`, `FrameStaged`,
-`Confirm`, `FrameReady`, and `Dispose`. Native rendering uses the separately
-distributed `chrome-headless-shell` and creates every render target with CDP
-BeginFrameControl. `Load` creates every video and overlay binding for the plan.
+`Confirm`, `FrameReady`, and `Dispose`. Native rendering selects a closed
+capture contract from the browser artifact: `chrome-headless-shell` owns CDP
+BeginFrameControl, while ordinary Chrome owns the portable screenshot path.
+The latter remains experimental until pinned desktop conformance exists.
+`Load` creates every video and overlay binding for the plan.
 Inactive nodes retain stable binding identities but remain outside layout and
 compositing until their solved intervals make them visible. Placements omitted
 from one Render Unit therefore cannot perturb its pixels.
@@ -421,7 +424,7 @@ onmark/
 │   ├── render/     # browser, FFmpeg encoding, local executor
 │   └── cli/        # native tool face and composition root
 ├── packages/
-│   ├── runtime/ authoring/ bundler/
+│   ├── runtime/ authoring/ motion-gsap/ bundler/
 ├── scripts/     # repository-only generation and quality checks
 ├── deploy/aws-lambda/  # Rust Lambda/S3 adapter after artifact conformance
 ├── schemas/ conformance/ evals/ examples/ docs/
@@ -443,7 +446,15 @@ filesystem dependency budget, and produces a presentation directory consumed
 independently by native rendering. The CLI is a distinct release artifact that
 combines core compilation, media probing, the
 bundler process, and native rendering without moving their implementation
-details into one crate. `onmark-aws-lambda` is a distinct Rust release artifact
+details into one crate. The optional GSAP adapter is an internal package because
+its vendor dependency budget is independent of the vendor-free authoring
+facade. Inside the source workspace, authors consume the candidate
+`onmark/motion/gsap` facade. The root package export map owns that mapping, and
+the bundler resolves every public `onmark/*` import through the map instead of
+selecting individual vendors.
+It is not a published product contract until an installable release artifact
+and external-consumer check exist.
+`onmark-aws-lambda` is a distinct Rust release artifact
 because Lambda is a different runtime and its handler owns the
 `aws-config`, `aws-sdk-s3`, and `lambda_runtime` dependency budget. Its
 deployment-only browser boundary additionally uses `sha2`, `tar`, and `zstd`
@@ -462,8 +473,11 @@ short-lived composition concern unless a later product proves that durable
 coordination is necessary.
 
 Gate one's native command is deliberately narrow: `onmark render <screenplay>`.
-It discovers `presentation.ts` beside the screenplay unless `--presentation` is
-supplied, derives the stable no-clobber output `renders/<screenplay-stem>.mp4`
+It bundles a neutral semantic DOM presentation plus optional same-stem
+`film.css` and `film.motion.ts` files unless `--presentation` explicitly selects
+custom browser code. The motion module exports one declarative `motion` value;
+the generated entry owns runtime installation. It
+derives the stable no-clobber output `renders/<screenplay-stem>.mp4`
 unless `--output` is supplied, and exposes only exact frame rate and viewport
 dimensions as ordinary render controls. Process paths are execution overrides,
 not screenplay facts. Authored diagnostics are emitted before executable
@@ -527,15 +541,26 @@ dependency performs no IO. Test targets may use `proptest` for time algebra and
 `syn` for the cooperative module dependency-law check; neither development
 dependency is linked into library consumers or runtime artifacts.
 
-The Gate-five browser experiment pins GSAP, Three.js, and Three.js declarations
-as repository development dependencies. They are bundled only into the checked
-conformance presentation. They are not dependencies of `@onmark/runtime`,
-`@onmark/authoring`, or a Rust product crate; this preserves the vendor-free
-clock while measuring real vendor playheads rather than local imitations.
-The measured presentation now runs those playheads through the production
-`FrameEffect` lifecycle. `@onmark/runtime` owns that vendor-free interface and
-awaits it inside `Seek(frame)`; `@onmark/authoring` only carries an author-owned
-factory into the standard presentation bindings.
+`@onmark/runtime` remains vendor-free and owns exact frame-effect and resource
+lifecycles. `@onmark/authoring` owns the semantic DOM and the vendor-neutral
+`PresentationExtension` contract. The internal `@onmark/motion-gsap` package
+backs the workspace `onmark/motion/gsap` facade. It alone owns the pinned GSAP
+dependency, converts exact Rust-owned intervals to local browser seconds,
+suppresses callback dispatch while seeking, and kills every playhead on terminal disposal.
+It may depend only on `@onmark/authoring` and GSAP, and is consumed by authored
+motion modules or custom presentations. Other engines implement the same
+extension contract; neither bundler nor runtime selects vendors. Three.js
+remains a repository development dependency until an equally narrow production
+adapter is admitted.
+
+The browser projection preserves film, scene, shot, and content ownership from
+Timeline IR. Every projected node has a compiler-owned identity stable across
+whole-film and Render Unit projections, an optional authored ID, and a solved
+interval where applicable. Videos and authored overlays name their owning shot;
+imported captions remain film-level. The wire remains a flat relational plan so
+native validation and partition projection stay bounded, while the default
+authoring adapter builds one nested semantic DOM tree. TypeScript never
+reconstructs source structure or resolves timing from array order.
 
 The `protocol` module uses `serde` for stable browser and bundle-manifest JSON
 boundaries. Its optional `schema` feature exposes `schemars` only to repository
@@ -643,8 +668,19 @@ that lifecycle barrier.
 Gate one captures one PNG at a time and writes it directly to `FFmpeg`'s
 `image2pipe`; there is no frame queue or whole-video buffer. The fixed H.264
 `yuv420p` profile rejects odd viewport dimensions before either process starts.
-Conformance launches a pinned Chrome for Testing `chrome-headless-shell` and
-`FFmpeg` against the production presentation adapter, crosses the typed
+Browser capture has one closed backend choice beneath the shared runtime
+protocol. `BeginFrame` atomically commits and reads a compositor transaction on
+Linux `chrome-headless-shell`; `Screenshot` reads the surface with
+`Page.captureScreenshot` after the same typed `Seek` readiness barrier and uses
+the same post-capture `Confirm` and placement-boundary reconciliation. The
+portable backend exists for macOS and Windows, where BeginFrame control is not
+available. It does not introduce a second clock, timing solver, plan, encoder,
+or media-selection path. The selected backend is reported and belongs to the
+capture-environment identity; equality is asserted only within an equivalent
+locked environment and backend.
+
+Conformance launches a pinned Chrome for Testing browser and `FFmpeg` against
+the production presentation adapter, crosses the typed
 `Load`/`Prepare`/`Seek`/`Confirm` handshake, probes the resulting H.264 MP4, and
 verifies decoded motion. The checked-in bundle fixture carries real payload
 bytes, is rebuilt byte-for-byte in the bundler test, and crosses the generated
@@ -654,8 +690,9 @@ output's frame count, motion, stream facts, and audio placement, then checks
 no-clobber publication. Canonical raw-RGBA equality remains a native
 capture-boundary assertion; independently encoded lossy MP4 frames are not an
 identity oracle. CI owns explicit browser and media-tool versions for these
-tests; local execution remains opt-in because it requires those external
-processes.
+tests. Linux locks the canonical BeginFrame path; macOS and Windows conformance
+lock the portable screenshot path before those platforms become release
+targets.
 
 GitHub-hosted Ubuntu does not expose a usable Chromium sandbox to the installed
 Chrome for Testing headless-shell binary. The real-process job therefore
@@ -685,11 +722,12 @@ phase-specific messages and help. `diagnostics` owns only the generic diagnostic
 representation and stable codes. Neither `model` nor `syntax` depends on
 diagnostics, and the translation must not be duplicated by callers.
 
-On the TypeScript side, runtime is the foundation. Authoring consumes runtime's
-types-only public hook and adapter contract, creates semantic video and overlay
-DOM, and leaves CSS and layout with the presentation entry. Bundler injects the
-pinned authoring and runtime artifacts. Runtime never depends on authoring or
-bundler. `stateless`, `warmup`, and `sequential` are architectural categories
+On the TypeScript side, runtime is the foundation. Authoring's root entry
+consumes runtime's types-only contract and creates semantic video and overlay
+DOM. The bundler-generated neutral entry composes runtime values around those
+bindings. CSS and custom entries still own every visual decision. Bundler
+injects the pinned authoring and runtime artifacts. Runtime never depends on
+authoring or bundler. `stateless`, `warmup`, and `sequential` are architectural categories
 today, not a public capability-declaration API; when that extension point
 becomes real, runtime will own it. The Gate-one `RuntimeSession` owns protocol
 ordering, interval-relationship checks, exact-frame projection, and terminal
@@ -709,7 +747,7 @@ directory used by that adapter and by the bundler is generated from the Rust
 bundle schema.
 
 `@onmark/bundler` is the Node-only product build boundary, not repository
-automation. It may depend on Node built-ins, the public `@onmark/authoring` and
+automation. It may depend on Node built-ins, the product `@onmark/authoring` and
 `@onmark/runtime` entry points, and the pinned `esbuild` production dependency;
 browser packages never depend back on it. Gate one compiles one ESM
 presentation, substitutes the pinned authoring and runtime entries, emits a
@@ -751,13 +789,13 @@ own schema. Before the first external Gate-one release, v1 is refined in place
 so the initial public contract does not preserve experimental fields; after
 publication, an incompatible wire change requires a new protocol version and
 migration fixture. The `BrowserPlan` carries the output frame rate,
-evaluation/output intervals, primary-video placements, and title,
-call-to-action, or imported-caption overlays consumed by the production
-presentation adapter. Video placements identify immutable bytes, an absolute
-visible interval, and the admitted CFR source rate needed to verify decoded
-frame selection. Overlay placements carry a compiler-owned component identity
-that is stable across unit projections, their closed semantic role and decoded
-text properties, and the compiler-solved absolute interval.
+evaluation/output intervals, film, scene, and shot structure, primary-video
+placements, and title, call-to-action, or imported-caption overlays consumed by
+the production presentation adapter. Every projected node has a compiler-owned
+identity stable across unit projections and an optional authored identity;
+content names its structural parent. Video placements additionally identify
+immutable bytes and the admitted CFR source rate needed to verify decoded frame
+selection, while overlays carry their closed semantic role and decoded text.
 Materialized URLs remain render-owned facts, while DOM structure and CSS remain
 presentation-owned effects. This is the browser-facing projection of one Render
 Unit, not the Render Graph or partition plan itself. It may contain only facts
@@ -766,8 +804,9 @@ spans, and materialization policy remain outside it. VFR timestamp maps and
 further component facts are added only when the production adapter consumes
 them.
 
-Protocol V1 carries at most 10,000 video placements and 10,000 overlay
-placements; one overlay inscription carries at most 65,536 Unicode characters.
+Protocol V1 carries at most 10,000 scene containers, shot containers, video
+placements, and overlays of each kind; one overlay inscription carries at most
+65,536 Unicode characters.
 Native projection and Rust wire decoding additionally cap their combined UTF-8
 text at one MiB before CDP serialization. That aggregate process budget is not
 misrepresented as a JSON Schema structural constraint.
@@ -969,10 +1008,13 @@ evidence after this gate.
 The checked WAAPI, GSAP, and Three.js playheads all use the standard
 `PresentationRuntimeAdapter`: effects bind once during `Load`, apply in declared
 order during `Seek(frame)`, and finish before `FrameStaged(frame)`. Disposal is
-terminal and attempts every owned effect even after one cleanup failure. The
+terminal, releases effects in reverse ownership order, and attempts every owned
+effect even after one cleanup failure. The
 current bundle manifest binds the closed capability into content identity.
-Unspecified CLI input remains sequential; explicit `randomAccess` lets the
-Render Graph produce shot-scoped units. The pinned Linux exit conformance
+The CLI derives capability from the presentation surface it owns: semantic DOM
+without authored CSS or motion is admitted for random access. Any stylesheet,
+motion, or custom presentation remains sequential. Explicit capability input exists only at the
+low-level conformance bundler boundary. The pinned Linux exit conformance
 bundles that effect-bearing presentation, renders the same media, audio, and
 caption facts as one whole-film
 unit and two independent units, and compares their canonical raw-RGBA frame
@@ -993,9 +1035,10 @@ the materialized private Unit Root plus in-memory `data:` and `blob:` URLs;
 ambient network schemes and file paths outside that root are rejected before
 resolution. The same policy runs in local and worker execution.
 
-Presentation bindings also receive a Rust-assigned component identity that is
-stable across unit projections, protocol-validated closed properties, solved
-intervals, and frozen asset references.
+Presentation bindings also receive Rust-assigned semantic node identities and
+parent relationships that remain stable across unit projections, alongside
+protocol-validated closed properties, solved intervals, and frozen asset
+references.
 Rust continues to own timing and resource facts; TypeScript decides only how
 those facts become DOM, CSS, Canvas, or WebGL. Gate six does not introduce free
 `start`/`end`, a second scheduler, arbitrary network access, or source-code
@@ -1129,11 +1172,12 @@ The first Gate-one capture spike gave positive but deliberately narrow evidence
 for application-controlled `FrameReady` followed by CDP
 `Page.captureScreenshot`: repeated DOM, CSS, and Canvas frames produced
 identical raw RGBA hashes across independent Chrome processes on one locked
-machine. Gate three replaces that provisional transport with
-`chrome-headless-shell` BeginFrameControl so compositor commit and screenshot
-share one explicit frame boundary. Decoded media, WebGL, asynchronous
-components, cross-environment equality, and production lifecycle still require
-their own evidence.
+machine. Gate three replaced that provisional transport for the canonical Linux
+path with `chrome-headless-shell` BeginFrameControl so compositor commit and
+screenshot share one explicit frame boundary. The portable desktop backend
+reuses the original mechanism only as an experimental local path; decoded
+media, WebGL, asynchronous components, cross-environment equality, and pinned
+platform lifecycle still require evidence before release-target status.
 
 The decoded-media experiment covers 30 fps CFR, `30000/1001` CFR, and an
 alternating-frame-interval VFR H.264 fixture, each with a 30-frame GOP and three

@@ -147,7 +147,9 @@ fn finish_runtime_session(
     match (execution, disposal) {
         (Ok(()), Ok(())) => Ok(()),
         (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
-        (Err(execution), Err(disposal)) => Err(execution.with_disposal_failure(disposal)),
+        (Err(execution), Err(disposal)) => {
+            Err(execution.with_cleanup_failure("browser runtime disposal", disposal))
+        }
     }
 }
 

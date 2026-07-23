@@ -14,6 +14,9 @@ use chromiumoxide::cdp::browser_protocol::emulation::SetDefaultBackgroundColorOv
 use chromiumoxide::cdp::browser_protocol::headless_experimental::{
     BeginFrameParams, BeginFrameReturns, ScreenshotParams, ScreenshotParamsFormat,
 };
+use chromiumoxide::cdp::browser_protocol::page::{
+    BringToFrontParams, CaptureScreenshotFormat, CaptureScreenshotParams,
+};
 use chromiumoxide::cdp::browser_protocol::target::CreateTargetParams;
 use chromiumoxide::error::CdpError;
 use chromiumoxide::handler::viewport::Viewport;
@@ -31,7 +34,9 @@ use url::Url;
 use super::error::{BrowserError, BrowserErrorKind};
 use super::frame::{CapturedFrame, EncodedPng};
 use super::limits::BrowserLimits;
-use super::process::{BrowserDiagnostics, BrowserLaunchPolicy, ChromiumProcess};
+use super::process::{
+    BrowserCaptureMode, BrowserDiagnostics, BrowserLaunchPolicy, ChromiumProcess,
+};
 use super::resource::ResourceGuard;
 use crate::RenderProfile;
 
@@ -56,6 +61,7 @@ pub struct BrowserSession {
     // The capture phase owns this cache through `&mut self`; it is not shared
     // across requests or tasks.
     last_capture: Option<EncodedPng>,
+    capture_mode: BrowserCaptureMode,
     compositor: CompositorClock,
     limits: BrowserLimits,
     render_profile: RenderProfile,
@@ -77,14 +83,16 @@ impl BrowserSession {
     pub async fn launch(
         executable: impl AsRef<Path>,
         launch_policy: BrowserLaunchPolicy,
+        capture_mode: BrowserCaptureMode,
         render_profile: RenderProfile,
         limits: BrowserLimits,
     ) -> Result<Self, BrowserError> {
-        let target = render_target().map_err(BrowserError::configuration)?;
+        let target = render_target(capture_mode).map_err(BrowserError::configuration)?;
         let profile = browser_profile()?;
         let (mut process, endpoint) = ChromiumProcess::launch(
             executable.as_ref(),
             launch_policy,
+            capture_mode,
             profile.path(),
             render_profile,
             limits.deadline(),
@@ -136,6 +144,7 @@ impl BrowserSession {
             diagnostics,
             resources: None,
             last_capture: None,
+            capture_mode,
             compositor: CompositorClock::new(),
             limits,
             render_profile,
@@ -204,11 +213,10 @@ impl BrowserSession {
         &self,
         frame_rate: WireFrameRate,
     ) -> Result<(), BrowserError> {
-        self.page
-            .execute(surface_initialization_parameters(frame_rate))
-            .await
-            .map(|_| ())
-            .map_err(|source| self.cdp_error(BrowserErrorKind::Capture, source))
+        match self.capture_mode {
+            BrowserCaptureMode::BeginFrame => self.initialize_begin_frame_surface(frame_rate).await,
+            BrowserCaptureMode::Screenshot => self.activate_portable_surface().await,
+        }
     }
 
     /// Keeps the target's root surface transparent for layered capture.
@@ -249,6 +257,9 @@ impl BrowserSession {
         frame: WireFrame,
         frame_rate: WireFrameRate,
     ) -> Result<EncodedPng, BrowserError> {
+        if self.capture_mode == BrowserCaptureMode::Screenshot {
+            return self.capture_screenshot().await;
+        }
         let transaction = self.compositor.begin(frame, frame_rate);
         self.capture_png_with_fallback(transaction, MissingScreenshot::ReusePrevious)
             .await
@@ -259,6 +270,9 @@ impl BrowserSession {
         frame: WireFrame,
         frame_rate: WireFrameRate,
     ) -> Result<EncodedPng, BrowserError> {
+        if self.capture_mode == BrowserCaptureMode::Screenshot {
+            return self.capture_screenshot().await;
+        }
         let transaction = self.compositor.begin(frame, frame_rate);
         // Runtime staging may introduce a layer that was absent from the
         // compositor. Commit it immediately before this capture transaction so
@@ -280,6 +294,9 @@ impl BrowserSession {
         &mut self,
         frame: WireFrame,
     ) -> Result<EncodedPng, BrowserError> {
+        if self.capture_mode == BrowserCaptureMode::Screenshot {
+            return self.capture_screenshot().await;
+        }
         let transaction = self.compositor.active_for(frame).ok_or_else(|| {
             BrowserError::capture_pixels(
                 "confirmed frame does not match the active compositor transaction",
@@ -329,6 +346,34 @@ impl BrowserSession {
             .await
             .map(|response| response.result)
             .map_err(|source| self.cdp_error(BrowserErrorKind::Capture, source))
+    }
+
+    async fn initialize_begin_frame_surface(
+        &self,
+        frame_rate: WireFrameRate,
+    ) -> Result<(), BrowserError> {
+        self.page
+            .execute(surface_initialization_parameters(frame_rate))
+            .await
+            .map(|_| ())
+            .map_err(|source| self.cdp_error(BrowserErrorKind::Capture, source))
+    }
+
+    async fn activate_portable_surface(&self) -> Result<(), BrowserError> {
+        self.page
+            .execute(BringToFrontParams::default())
+            .await
+            .map(|_| ())
+            .map_err(|source| self.cdp_error(BrowserErrorKind::Capture, source))
+    }
+
+    async fn capture_screenshot(&mut self) -> Result<EncodedPng, BrowserError> {
+        let response = self
+            .page
+            .execute(portable_screenshot_parameters())
+            .await
+            .map_err(|source| self.cdp_error(BrowserErrorKind::Capture, source))?;
+        self.decode_and_remember(response.result.data)
     }
 
     fn decode_and_remember(
@@ -490,10 +535,20 @@ fn handler_config(render_profile: RenderProfile, limits: BrowserLimits) -> Handl
     }
 }
 
-fn render_target() -> Result<CreateTargetParams, String> {
-    CreateTargetParams::builder()
-        .url("about:blank")
-        .enable_begin_frame_control(true)
+fn render_target(capture_mode: BrowserCaptureMode) -> Result<CreateTargetParams, String> {
+    let mut target = CreateTargetParams::builder().url("about:blank");
+    if capture_mode.uses_begin_frame() {
+        target = target.enable_begin_frame_control(true);
+    }
+    target.build()
+}
+
+fn portable_screenshot_parameters() -> CaptureScreenshotParams {
+    CaptureScreenshotParams::builder()
+        .format(CaptureScreenshotFormat::Png)
+        .from_surface(true)
+        .capture_beyond_viewport(false)
+        .optimize_for_speed(true)
         .build()
 }
 
@@ -682,16 +737,32 @@ mod tests {
 
     use super::{
         COMPOSITOR_TRANSACTION_STEP_MILLIS, CompositorClock, handler_exit_error,
-        maximum_base64_length, render_target, surface_initialization_parameters,
+        maximum_base64_length, portable_screenshot_parameters, render_target,
+        surface_initialization_parameters,
     };
-    use crate::BrowserErrorKind;
+    use crate::{BrowserCaptureMode, BrowserErrorKind};
 
     #[test]
     fn render_target_enables_headless_shell_frame_control() {
-        let target = render_target().expect("the fixed render target must be valid");
+        let target = render_target(BrowserCaptureMode::BeginFrame)
+            .expect("the fixed render target must be valid");
 
         assert_eq!(target.url, "about:blank");
         assert_eq!(target.enable_begin_frame_control, Some(true));
+    }
+
+    #[test]
+    fn portable_target_uses_page_screenshot_without_begin_frame_control() {
+        let target = render_target(BrowserCaptureMode::Screenshot)
+            .expect("the portable render target must be valid");
+        let screenshot = portable_screenshot_parameters();
+
+        assert_eq!(target.url, "about:blank");
+        assert_eq!(target.enable_begin_frame_control, None);
+        assert_eq!(screenshot.format, Some(super::CaptureScreenshotFormat::Png));
+        assert_eq!(screenshot.from_surface, Some(true));
+        assert_eq!(screenshot.capture_beyond_viewport, Some(false));
+        assert_eq!(screenshot.optimize_for_speed, Some(true));
     }
 
     #[test]

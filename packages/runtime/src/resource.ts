@@ -46,18 +46,18 @@ type ReadinessOutcome =
 export function ownPresentationResources(
   resources: readonly PresentationResource[],
 ): readonly PresentationResource[] {
-  return Object.freeze(
-    resources.map((resource) => {
-      const dispose = resource.dispose.bind(resource);
-      const prepare = resource.prepare.bind(resource);
-      return Object.freeze({
-        id: resource.id,
-        kind: resource.kind,
-        dispose,
-        prepare,
-      });
-    }),
-  );
+  return Object.freeze(resources.map(ownPresentationResource));
+}
+
+function ownPresentationResource(
+  resource: PresentationResource,
+): PresentationResource {
+  return Object.freeze({
+    id: resource.id,
+    kind: resource.kind,
+    dispose: resource.dispose.bind(resource),
+    prepare: resource.prepare.bind(resource),
+  });
 }
 
 /** Rejects resource collections that cannot fit the runtime failure contract. */

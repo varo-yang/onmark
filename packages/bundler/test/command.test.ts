@@ -54,6 +54,38 @@ test("publishes a bundle through the executable boundary", async () => {
   }
 });
 
+test("publishes the semantic DOM presentation without an entry module", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "onmark-bundle-command-"));
+  try {
+    const stylesheet = join(workspace, "film.css");
+    const outputDirectory = join(workspace, "bundle");
+    await writeFile(stylesheet, "body { background: black; }\n", "utf8");
+
+    const result = await invoke([
+      "--semantic-dom",
+      "--stylesheet",
+      stylesheet,
+      "--output",
+      outputDirectory,
+      "--max-output-bytes",
+      "1000000",
+      "--temporal-capability",
+      "sequential",
+      "--visual-capability",
+      "browserComposite",
+    ]);
+
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(result.stdout, "");
+    const manifest = JSON.parse(
+      await readFile(join(outputDirectory, "manifest.json"), "utf8"),
+    ) as unknown;
+    assert.equal(typeof manifest, "object");
+  } finally {
+    await rm(workspace, { force: true, recursive: true });
+  }
+});
+
 test("reports typed configuration failures on stderr", async () => {
   const result = await invoke([]);
 

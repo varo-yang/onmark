@@ -79,6 +79,7 @@ async fn assembles_two_independent_worker_processes_equivalently_to_one_local_fi
     let timeline = two_shot_timeline();
     let partitions =
         RenderGraph::from_timeline(&timeline, PresentationTemporalCapability::RandomAccess)
+            .expect("the solved fixture has complete render ownership")
             .into_partition();
     assert_eq!(
         partitions.units().len(),
@@ -129,6 +130,7 @@ async fn partition_workers_match_the_whole_film_raw_rgba_sequence() {
     let timeline = two_shot_timeline();
     let partition_plan =
         RenderGraph::from_timeline(&timeline, PresentationTemporalCapability::RandomAccess)
+            .expect("the solved fixture has complete render ownership")
             .into_partition();
     let profile = render_profile();
     let manifest = bundle_manifest();

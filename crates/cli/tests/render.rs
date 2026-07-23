@@ -28,8 +28,12 @@ const PROCESS_DEADLINE: Duration = Duration::from_mins(3);
 #[ignore = "requires ONMARK_CLI, ONMARK_FFMPEG, ONMARK_FFPROBE, and Gate-one tools on PATH"]
 async fn renders_one_screenplay_reliably_across_real_processes() {
     let directory = tempdir().expect("the conformance workspace is available");
-    let fixture = Fixture::materialize(directory.path(), "cli/gate-one.onmark");
+    let fixture = Fixture::with_semantic_motion(directory.path(), "cli/gate-one.onmark");
     let first = render_fixture_twice(&fixture, GATE_ONE_FRAME_COUNT, 15).await;
+    assert!(
+        first.inspection.has_motion_before(10),
+        "the static source must expose exact-frame GSAP motion before the CTA boundary",
+    );
 
     let original_digest = file_digest(&first.path);
     let rejected = fixture.render_to(&first.path).await;
@@ -53,7 +57,7 @@ async fn render_fixture_twice(
     fixture: &Fixture,
     expected_frames: usize,
     audio_start_frame: u64,
-) -> RenderedOutput {
+) -> VerifiedOutput {
     fixture.generate_source_video().await;
     fixture.generate_voice_over().await;
 
@@ -69,7 +73,10 @@ async fn render_fixture_twice(
     assert_audio_begins_at_frame(&first.path, audio_start_frame).await;
     assert_audio_begins_at_frame(&second.path, audio_start_frame).await;
 
-    first
+    VerifiedOutput {
+        path: first.path,
+        inspection: first_output,
+    }
 }
 
 fn assert_media_contract(output: &InspectedOutput, expected_frames: usize) {
@@ -88,7 +95,6 @@ impl Fixture {
         let repository = repository();
         let screenplay = root.join("film.onmark");
         copy_fixture(&repository, screenplay_fixture, &screenplay);
-        copy_presentation(&repository, root);
 
         Self {
             root: root.to_owned(),
@@ -96,8 +102,24 @@ impl Fixture {
         }
     }
 
+    fn with_semantic_motion(root: &Path, screenplay_fixture: &str) -> Self {
+        let fixture = Self::materialize(root, screenplay_fixture);
+        let repository = repository();
+        copy_fixture(
+            &repository,
+            "browser/semantic-presentation.css",
+            &root.join("film.css"),
+        );
+        copy_fixture(
+            &repository,
+            "browser/semantic-presentation.motion.ts",
+            &root.join("film.motion.ts"),
+        );
+        fixture
+    }
+
     async fn generate_source_video(&self) {
-        let source = format!("testsrc2=size={WIDTH}x{HEIGHT}:rate=30:duration=1");
+        let source = format!("color=c=0x17406d:size={WIDTH}x{HEIGHT}:rate=30:duration=1");
         let output = run_process(
             Command::new(required_path("ONMARK_FFMPEG"))
                 .args(["-nostdin", "-v", "error", "-f", "lavfi", "-i", &source])
@@ -161,10 +183,10 @@ impl Fixture {
         assert_process_success("general-audio generation", &output);
     }
 
-    async fn render(&self, name: &str) -> RenderedOutput {
+    async fn render(&self, name: &str) -> RenderAttempt {
         let path = self.root.join(name);
         let output = self.render_to(&path).await;
-        RenderedOutput { path, output }
+        RenderAttempt { path, output }
     }
 
     async fn render_to(&self, output: &Path) -> Output {
@@ -177,8 +199,7 @@ impl Fixture {
             .arg("--width")
             .arg(WIDTH.to_string())
             .arg("--height")
-            .arg(HEIGHT.to_string())
-            .args(["--temporal-capability", "randomAccess"]);
+            .arg(HEIGHT.to_string());
         for (flag, variable) in [
             ("--browser", "ONMARK_HEADLESS_SHELL"),
             ("--bundler", "ONMARK_BUNDLER"),
@@ -193,9 +214,14 @@ impl Fixture {
     }
 }
 
-struct RenderedOutput {
+struct RenderAttempt {
     path: PathBuf,
     output: Output,
+}
+
+struct VerifiedOutput {
+    path: PathBuf,
+    inspection: InspectedOutput,
 }
 
 struct InspectedOutput {
@@ -209,6 +235,16 @@ impl InspectedOutput {
             return false;
         };
         self.video_frame_hashes.iter().any(|hash| hash != first)
+    }
+
+    fn has_motion_before(&self, end: usize) -> bool {
+        let Some(first) = self.video_frame_hashes.first() else {
+            return false;
+        };
+        self.video_frame_hashes
+            .iter()
+            .take(end)
+            .any(|hash| hash != first)
     }
 }
 
@@ -395,6 +431,12 @@ fn assert_success(output: &Output, expected_frames: usize) {
     assert_process_success("CLI rendering", output);
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains(&format!("Rendered {expected_frames} frames")));
+    let capture_mode = if cfg!(target_os = "linux") {
+        "beginFrame"
+    } else {
+        "screenshot"
+    };
+    assert!(stdout.contains(&format!("with {capture_mode} capture")));
 }
 
 fn assert_process_success(operation: &str, output: &Output) {
@@ -413,29 +455,6 @@ fn file_digest(path: &Path) -> [u8; 32] {
 fn copy_fixture(repository: &Path, source: &str, destination: &Path) {
     fs::copy(repository.join("conformance").join(source), destination)
         .expect("the conformance fixture is copied");
-}
-
-fn copy_presentation(repository: &Path, root: &Path) {
-    copy_fixture(
-        repository,
-        "browser/video-presentation.ts",
-        &root.join("presentation.ts"),
-    );
-    copy_fixture(
-        repository,
-        "browser/video-presentation.css",
-        &root.join("video-presentation.css"),
-    );
-
-    let resources = root.join("resources");
-    fs::create_dir(&resources).expect("the presentation resource directory is created");
-    for name in ["basic-regular.ttf", "poster.svg"] {
-        copy_fixture(
-            repository,
-            &format!("browser/resources/{name}"),
-            &resources.join(name),
-        );
-    }
 }
 
 fn required_path(variable: &str) -> PathBuf {

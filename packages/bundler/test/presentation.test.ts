@@ -12,6 +12,7 @@ import {
   BUNDLE_ENTRY_POINT,
   BUNDLE_MANIFEST_FILE,
   BundleError,
+  bundleDomPresentation,
   bundlePresentation,
   type BundleManifest,
 } from "../src/index.js";
@@ -29,6 +30,126 @@ const ENTRY_SOURCE = `
 `;
 
 // ── Artifact construction ──
+
+test("builds the semantic DOM presentation without an authored entry", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "onmark-bundler-test-"));
+  try {
+    const stylesheet = join(workspace, "film.css");
+    await writeFile(stylesheet, ".onmark-title { color: #baff29; }\n", "utf8");
+
+    const artifact = await bundleDomPresentation({
+      stylesheet,
+      outputDirectory: join(workspace, "bundle"),
+      maxOutputBytes: 1_000_000,
+      temporalCapability: "sequential",
+      visualCapability: "browserComposite",
+    });
+
+    assert.deepEqual(
+      artifact.manifest.files.map((file) => file.path),
+      [BUNDLE_ENTRY_POINT, "presentation.css", "presentation.js"],
+    );
+    assert.equal(
+      await readFile(join(artifact.directory, "presentation.css"), "utf8"),
+      ".onmark-title{color:#baff29}\n",
+    );
+  } finally {
+    await rm(workspace, { force: true, recursive: true });
+  }
+});
+
+test("rejects semantic stylesheet resources even when motion is present", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "onmark-bundler-test-"));
+  try {
+    const stylesheet = join(workspace, "film.css");
+    const motion = join(workspace, "film.motion.ts");
+    await writeFile(join(workspace, "hero.png"), new Uint8Array([1, 2, 3]));
+    await writeFile(
+      stylesheet,
+      '.onmark-film { background: url("./hero.png"); }\n',
+      "utf8",
+    );
+    await writeFile(
+      motion,
+      `
+        export const motion = {
+          bind() {
+            return { effects: [], resources: [] };
+          },
+        };
+      `,
+      "utf8",
+    );
+
+    for (const [index, motionEntry] of [undefined, motion].entries()) {
+      await assert.rejects(
+        bundleDomPresentation({
+          stylesheet,
+          ...(motionEntry === undefined ? {} : { motion: motionEntry }),
+          outputDirectory: join(workspace, `bundle-${index}`),
+          maxOutputBytes: 1_000_000,
+          temporalCapability: "sequential",
+          visualCapability: "browserComposite",
+        }),
+        (error: unknown) =>
+          error instanceof BundleError &&
+          error.message ===
+            "semantic stylesheet resources have no explicit readiness owner",
+      );
+    }
+  } finally {
+    await rm(workspace, { force: true, recursive: true });
+  }
+});
+
+test("adds no visual defaults when the semantic DOM has no stylesheet", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "onmark-bundler-test-"));
+  try {
+    const artifact = await bundleDomPresentation({
+      outputDirectory: join(workspace, "bundle"),
+      maxOutputBytes: 1_000_000,
+      temporalCapability: "sequential",
+      visualCapability: "browserComposite",
+    });
+
+    assert.deepEqual(
+      artifact.manifest.files.map((file) => file.path),
+      [BUNDLE_ENTRY_POINT, "presentation.js"],
+    );
+  } finally {
+    await rm(workspace, { force: true, recursive: true });
+  }
+});
+
+test("bundles same-stem vendor-neutral motion through the semantic entry", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "onmark-bundler-test-"));
+  try {
+    const motion = join(workspace, "film.motion.ts");
+    await writeFile(
+      motion,
+      `
+        import { gsapMotion } from "onmark/motion/gsap";
+        export const motion = gsapMotion({
+          title({ element, timeline }) {
+            timeline.from(element, { opacity: 0, duration: 0.25 });
+          },
+        });
+      `,
+      "utf8",
+    );
+
+    const artifact = await bundleDomPresentation({
+      motion,
+      outputDirectory: join(workspace, "bundle"),
+      maxOutputBytes: 1_000_000,
+      temporalCapability: "randomAccess",
+      visualCapability: "browserComposite",
+    });
+    assert.equal(artifact.manifest.temporalCapability, "randomAccess");
+  } finally {
+    await rm(workspace, { force: true, recursive: true });
+  }
+});
 
 test("builds a deterministic immutable presentation artifact", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "onmark-bundler-test-"));

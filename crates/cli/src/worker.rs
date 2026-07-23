@@ -9,7 +9,8 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use onmark_render::{
-    BrowserLaunchPolicy, Ffmpeg, FrameArtifact, FrameCaptureExecutor, WorkerCaptureRequest,
+    BrowserCaptureMode, BrowserLaunchPolicy, Ffmpeg, FrameArtifact, FrameCaptureExecutor,
+    WorkerCaptureRequest,
 };
 
 use crate::arguments::{WorkerArgs, WorkerCaptureArgs, WorkerCommand};
@@ -55,6 +56,7 @@ async fn capture(args: WorkerCaptureArgs) -> Result<WorkerOutcome, CliError> {
     let capture = FrameCaptureExecutor::new(
         browser,
         BrowserLaunchPolicy::local(),
+        BrowserCaptureMode::BeginFrame,
         execution::browser_limits(),
         Ffmpeg::new(args.ffmpeg, execution::encode_limits())?,
     );

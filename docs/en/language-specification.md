@@ -265,24 +265,29 @@ constraint graph node 17 is unsatisfied
 
 ## Presentation selection and props
 
-`presentation.ts` is selected by the render command, either through
-`--presentation` or same-directory discovery. The screenplay has no `presents`
-attribute, `definePresentation` declaration, or typed props channel in the
-current language. Its solved facts reach the browser only as the Rust-owned
-`BrowserPlan` delivered through the runtime `Load(plan)` command.
+The render command projects solved video, title, CTA, and caption facts into a
+neutral semantic DOM by default. Same-stem `film.css` and `film.motion.ts` files
+may style those nodes and bind element-local motion; neither adds screenplay
+spelling or visual defaults when absent.
+`--presentation` explicitly selects unrestricted custom browser code instead.
+The screenplay has no `presents` attribute, `definePresentation` declaration,
+or typed props channel in the current language. Its solved facts reach either
+path only as the Rust-owned `BrowserPlan` delivered through the runtime
+`Load(plan)` command.
 
-The existing title, CTA, and imported-caption facts form a closed built-in
-component contract: the compiler assigns stable component identity and carries
-only the admitted semantic role, text, and solved interval. This is not a
-general screenplay props channel.
+The Browser Plan also retains film, scene, shot, and content ownership. The
+compiler assigns every projected node a stable identity and carries only the
+admitted authored ID, semantic role, text, ownership, and solved interval. This
+is not a general screenplay props channel or a second presentation timeline.
 
 This is a language boundary, not an undocumented implementation detail. A future
 screenplay-selected presentation or props feature must define its spelling,
 typed schema and defaults, canonical encoding, source-located diagnostics,
 bundle/cache identity, and temporal-capability effect together; it must also
-meet the admission rule below. Until then, static TypeScript imports are
-presentation code, not screenplay props. The browser authoring contract is
-specified separately in [the presentation contract](presentation-contract.md).
+meet the admission rule below. Until then, stylesheet rules and static
+TypeScript imports are presentation code, not screenplay props. The browser
+authoring contract is specified separately in
+[the presentation contract](presentation-contract.md).
 
 ## Deferred capabilities
 

@@ -34,8 +34,8 @@ use onmark_core::protocol::{
 };
 use onmark_media::Ffprobe;
 use onmark_render::{
-    AdmittedVideo, BrowserLaunchPolicy, BrowserLimits, BrowserSession, EncodedPng, RenderProfile,
-    UnsupportedVideo,
+    AdmittedVideo, BrowserCaptureMode, BrowserLaunchPolicy, BrowserLimits, BrowserSession,
+    EncodedPng, RenderProfile, UnsupportedVideo,
 };
 use serde::Deserialize;
 use tempfile::{Builder as TempDirBuilder, TempDir};
@@ -426,6 +426,7 @@ async fn launch_browser() -> BrowserSession {
     BrowserSession::launch(
         headless_shell(),
         browser_launch_policy(),
+        BrowserCaptureMode::BeginFrame,
         render_profile(),
         browser_limits(),
     )

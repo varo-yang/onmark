@@ -21,11 +21,17 @@ export {
   type BrowserVideoElement,
 } from "./video.js";
 export {
+  MAX_PRESENTATION_EFFECTS,
   PresentationRuntimeAdapter,
+  type ContainerPresentation,
   type FrameEffect,
   type OverlayPresentation,
   type PresentationBindings,
+  type PresentationExtensions,
   type RuntimeOverlay,
+  type RuntimeNode,
+  type RuntimeScene,
+  type RuntimeShot,
   type VideoPresentation,
 } from "./presentation.js";
 export {

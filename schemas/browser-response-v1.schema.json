@@ -1,7 +1,7 @@
 {
   "$defs": {
     "BrowserEvent": {
-      "description": "Closed Gate-one events emitted by the browser runtime.",
+      "description": "Closed events emitted by the browser runtime.",
       "oneOf": [
         {
           "additionalProperties": false,

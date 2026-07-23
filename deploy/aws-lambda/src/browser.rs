@@ -13,7 +13,9 @@ use std::fs::{self, File};
 use std::io::{self, Read};
 use std::path::{Component, Path, PathBuf};
 
-use onmark_render::{BrowserLaunchPolicy, BrowserLimits, Ffmpeg, FrameCaptureExecutor};
+use onmark_render::{
+    BrowserCaptureMode, BrowserLaunchPolicy, BrowserLimits, Ffmpeg, FrameCaptureExecutor,
+};
 use sha2::{Digest as _, Sha256};
 use tempfile::TempDir;
 use tokio::sync::OnceCell;
@@ -117,6 +119,7 @@ impl BrowserRuntime {
         Ok(FrameCaptureExecutor::new(
             installation.executable().to_owned(),
             BrowserLaunchPolicy::isolated_worker(),
+            BrowserCaptureMode::BeginFrame,
             self.limits,
             self.ffmpeg.clone(),
         ))

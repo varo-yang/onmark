@@ -15,7 +15,7 @@ pub enum ElementKind {
     Scene,
     /// Sequential unit with one local time origin.
     Shot,
-    /// Gate-one primary video content.
+    /// Primary video content.
     Video,
     /// Authored voice-over inscription and media reference.
     VoiceOver,

@@ -85,7 +85,7 @@ pub struct BrowserRequest {
 }
 
 impl BrowserRequest {
-    /// Wraps one Gate-one command in the current protocol envelope.
+    /// Wraps one browser command in the current protocol envelope.
     #[must_use]
     pub const fn new(request_id: RequestId, command: BrowserCommand) -> Self {
         Self {
@@ -114,7 +114,7 @@ impl BrowserRequest {
     }
 }
 
-/// Closed Gate-one commands understood by the browser runtime.
+/// Closed commands understood by the browser runtime.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(
@@ -169,7 +169,7 @@ pub struct BrowserResponse {
 }
 
 impl BrowserResponse {
-    /// Wraps one Gate-one event in the current protocol envelope.
+    /// Wraps one browser event in the current protocol envelope.
     #[must_use]
     pub const fn new(request_id: RequestId, event: BrowserEvent) -> Self {
         Self {
@@ -198,7 +198,7 @@ impl BrowserResponse {
     }
 }
 
-/// Closed Gate-one events emitted by the browser runtime.
+/// Closed events emitted by the browser runtime.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(

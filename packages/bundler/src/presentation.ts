@@ -3,10 +3,18 @@
 
 import { createHash } from "node:crypto";
 import { lstat, mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { build, type OutputFile } from "esbuild";
+import {
+  build,
+  type BuildOptions,
+  type OnResolveArgs,
+  type OnResolveResult,
+  type OutputFile,
+  type Plugin,
+} from "esbuild";
 import type {
   PresentationTemporalCapability,
   PresentationVisualCapability,
@@ -24,6 +32,11 @@ import {
 
 const AUTHORING_ENTRY = fileURLToPath(import.meta.resolve("@onmark/authoring"));
 const RUNTIME_ENTRY = fileURLToPath(import.meta.resolve("@onmark/runtime"));
+// Authored files live outside the package tree, so public facades resolve from
+// Onmark's own export map rather than from the temporary source directory.
+const resolveOnmarkExport = createRequire(
+  new URL("../../../../package.json", import.meta.url),
+).resolve;
 const VISUAL_RESOURCE_LOADERS = {
   ".avif": "file",
   ".gif": "file",
@@ -59,6 +72,16 @@ export interface BundleOptions {
   readonly visualCapability: PresentationVisualCapability;
 }
 
+/** Explicit inputs for the neutral semantic DOM presentation. */
+export interface DomBundleOptions {
+  readonly motion?: string;
+  readonly stylesheet?: string;
+  readonly outputDirectory: string;
+  readonly maxOutputBytes: number;
+  readonly temporalCapability: PresentationTemporalCapability;
+  readonly visualCapability: PresentationVisualCapability;
+}
+
 /** Published directory and its owned immutable manifest snapshot. */
 export interface BundleArtifact {
   readonly directory: string;
@@ -84,6 +107,22 @@ interface PendingFile {
   readonly path: string;
 }
 
+interface BundleInput {
+  readonly source: PresentationSource;
+  readonly outputDirectory: string;
+  readonly maxOutputBytes: number;
+  readonly temporalCapability: PresentationTemporalCapability;
+  readonly visualCapability: PresentationVisualCapability;
+}
+
+type PresentationSource =
+  | { readonly kind: "custom"; readonly path: string }
+  | {
+      readonly kind: "semanticDom";
+      readonly motion: string | undefined;
+      readonly stylesheet: string | undefined;
+    };
+
 type NonEmpty<T> = readonly [T, ...T[]];
 
 // ── Build pipeline
@@ -92,7 +131,34 @@ type NonEmpty<T> = readonly [T, ...T[]];
 export async function bundlePresentation(
   options: BundleOptions,
 ): Promise<BundleArtifact> {
-  const input = validateOptions(options);
+  return bundle({
+    maxOutputBytes: options.maxOutputBytes,
+    outputDirectory: options.outputDirectory,
+    source: { kind: "custom", path: options.entryPoint },
+    temporalCapability: options.temporalCapability,
+    visualCapability: options.visualCapability,
+  });
+}
+
+/** Builds the semantic DOM presentation without an authored entry module. */
+export async function bundleDomPresentation(
+  options: DomBundleOptions,
+): Promise<BundleArtifact> {
+  return bundle({
+    maxOutputBytes: options.maxOutputBytes,
+    outputDirectory: options.outputDirectory,
+    source: {
+      kind: "semanticDom",
+      motion: options.motion,
+      stylesheet: options.stylesheet,
+    },
+    temporalCapability: options.temporalCapability,
+    visualCapability: options.visualCapability,
+  });
+}
+
+async function bundle(options: BundleInput): Promise<BundleArtifact> {
+  const input = validateInput(options);
   await requireAbsent(input.outputDirectory);
   await mkdir(dirname(input.outputDirectory), { recursive: true });
   const staging = await mkdtemp(
@@ -109,10 +175,10 @@ export async function bundlePresentation(
 }
 
 async function buildArtifact(
-  input: BundleOptions,
+  input: BundleInput,
   staging: string,
 ): Promise<BundleArtifact> {
-  const generated = await compilePresentation(input.entryPoint, staging);
+  const generated = await compilePresentation(input.source, staging);
   const pending = presentationFiles(generated, staging);
   const manifest = createManifest(
     pending,
@@ -133,10 +199,7 @@ async function buildArtifact(
   });
 }
 
-function validateOptions(options: BundleOptions): BundleOptions {
-  if (options.entryPoint.length === 0) {
-    throw new BundleError("configuration", "entry point cannot be empty");
-  }
+function validateInput(options: BundleInput): BundleInput {
   if (options.outputDirectory.length === 0) {
     throw new BundleError("configuration", "output directory cannot be empty");
   }
@@ -151,12 +214,41 @@ function validateOptions(options: BundleOptions): BundleOptions {
   }
 
   return Object.freeze({
-    entryPoint: resolve(options.entryPoint),
     outputDirectory: resolve(options.outputDirectory),
     maxOutputBytes: options.maxOutputBytes,
+    source: validateSource(options.source),
     temporalCapability: validateTemporalCapability(options.temporalCapability),
     visualCapability: validateVisualCapability(options.visualCapability),
   });
+}
+
+function validateSource(source: PresentationSource): PresentationSource {
+  switch (source.kind) {
+    case "custom":
+      if (source.path.length === 0) {
+        throw new BundleError("configuration", "entry point cannot be empty");
+      }
+      return Object.freeze({ kind: source.kind, path: resolve(source.path) });
+    case "semanticDom":
+      return Object.freeze({
+        kind: source.kind,
+        motion: optionalSourcePath(source.motion, "motion entry"),
+        stylesheet: optionalSourcePath(source.stylesheet, "stylesheet"),
+      });
+  }
+}
+
+function optionalSourcePath(
+  path: string | undefined,
+  role: string,
+): string | undefined {
+  if (path === undefined) {
+    return undefined;
+  }
+  if (path.length === 0) {
+    throw new BundleError("configuration", `${role} cannot be empty`);
+  }
+  return resolve(path);
 }
 
 function validateTemporalCapability(
@@ -190,7 +282,7 @@ function validateVisualCapability(
 }
 
 async function compilePresentation(
-  entryPoint: string,
+  source: PresentationSource,
   staging: string,
 ): Promise<readonly OutputFile[]> {
   try {
@@ -202,20 +294,121 @@ async function compilePresentation(
       assetNames: "resources/[hash]",
       bundle: true,
       entryNames: "presentation",
-      entryPoints: [entryPoint],
+      ...buildSource(source),
       format: "esm",
       legalComments: "none",
       loader: VISUAL_RESOURCE_LOADERS,
       minify: true,
       outdir: staging,
       platform: "browser",
+      plugins: [publicOnmarkImports()],
       target: "es2024",
       write: false,
     });
+    rejectUnobservedStylesheetResources(source, result.outputFiles, staging);
     return result.outputFiles;
   } catch (error) {
+    if (error instanceof BundleError) {
+      throw error;
+    }
     throw new BundleError("build", "presentation compilation failed", error);
   }
+}
+
+function publicOnmarkImports(): Plugin {
+  return {
+    name: "onmark-public-imports",
+    setup(buildContext) {
+      buildContext.onResolve({ filter: /^onmark\// }, resolvePublicImport);
+    },
+  };
+}
+
+function resolvePublicImport(args: OnResolveArgs): OnResolveResult {
+  try {
+    return { path: resolveOnmarkExport(args.path) };
+  } catch (error) {
+    const failure = {
+      detail: error,
+      text: `cannot resolve public Onmark import ${args.path}`,
+    };
+    return { errors: [failure] };
+  }
+}
+
+function rejectUnobservedStylesheetResources(
+  source: PresentationSource,
+  outputFiles: readonly OutputFile[],
+  staging: string,
+): void {
+  if (source.kind !== "semanticDom" || source.stylesheet === undefined) {
+    return;
+  }
+  const resourcePaths = outputFiles
+    .map((file) => artifactPath(staging, file.path))
+    .filter((path) => path.startsWith("resources/"));
+  const stylesheetReferencesResource = outputFiles
+    .filter((file) => file.path.endsWith(".css"))
+    .map((file) => new TextDecoder().decode(file.contents))
+    .some((css) => resourcePaths.some((path) => css.includes(path)));
+  if (stylesheetReferencesResource) {
+    throw new BundleError(
+      "build",
+      "semantic stylesheet resources have no explicit readiness owner",
+    );
+  }
+}
+
+function buildSource(source: PresentationSource): BuildOptions {
+  switch (source.kind) {
+    case "custom":
+      return { entryPoints: [source.path] };
+    case "semanticDom":
+      return { stdin: semanticDomEntry(source.stylesheet, source.motion) };
+  }
+}
+
+function semanticDomEntry(
+  stylesheet: string | undefined,
+  motion: string | undefined,
+): NonNullable<BuildOptions["stdin"]> {
+  return {
+    contents: semanticDomModule(stylesheet, motion),
+    loader: "ts",
+    resolveDir: dirname(AUTHORING_ENTRY),
+    sourcefile: "onmark-semantic-dom.ts",
+  };
+}
+
+function semanticDomModule(
+  stylesheet: string | undefined,
+  motion: string | undefined,
+): string {
+  const stylesheetImport =
+    stylesheet === undefined ? [] : [`import ${JSON.stringify(stylesheet)};`];
+  const motionImport =
+    motion === undefined
+      ? []
+      : [`import { motion } from ${JSON.stringify(motion)};`];
+  const motionOption = motion === undefined ? [] : ["  motion,"];
+  return [
+    ...stylesheetImport,
+    ...motionImport,
+    'import { createDomPresentationBindings } from "@onmark/authoring";',
+    "import {",
+    "  installRuntimeHost,",
+    "  materializedVideoSource,",
+    "  PresentationRuntimeAdapter,",
+    '} from "@onmark/runtime";',
+    "",
+    "const bindings = createDomPresentationBindings({",
+    "  document,",
+    ...motionOption,
+    "  videoSource: materializedVideoSource,",
+    "});",
+    "installRuntimeHost(new PresentationRuntimeAdapter(bindings, 5_000));",
+    "",
+  ].join("\n");
 }
 
 // ── Artifact assembly

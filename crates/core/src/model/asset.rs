@@ -8,7 +8,7 @@ use std::fmt;
 
 use super::{AudioChannelLayout, AudioSampleRate, Duration, FrameRate};
 
-/// Byte width of the Gate-one SHA-256 asset digest.
+/// Byte width of the SHA-256 asset digest.
 const SHA256_BYTES: usize = 32;
 
 /// Immutable identity of the exact asset bytes consumed by compilation.
@@ -192,7 +192,7 @@ impl AssetMetadata {
     }
 }
 
-/// The track combinations that matter to Gate-one compilation.
+/// The track combinations retained by compilation.
 ///
 /// This remains private because callers ask only the two questions relevant to
 /// their element: whether an audio stream exists and whether normalized visual

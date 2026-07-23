@@ -24,8 +24,24 @@ import {
 
 // ── Presentation boundary ──
 
+/** Maximum exact-frame effects retained by one presentation adapter. */
+export const MAX_PRESENTATION_EFFECTS = 10_000;
+
 /** Immutable overlay placement projected from Timeline IR. */
 export type RuntimeOverlay = RuntimePlan["overlays"][number];
+/** Immutable scene container projected from Timeline IR. */
+export type RuntimeScene = RuntimePlan["scenes"][number];
+/** Immutable shot container projected from Timeline IR. */
+export type RuntimeShot = RuntimePlan["shots"][number];
+/** Immutable film identity projected from Timeline IR. */
+export type RuntimeNode = RuntimePlan["film"];
+
+/** Presentation-owned effects for one semantic container. */
+export interface ContainerPresentation {
+  readonly element: HTMLElement;
+  setVisible(visible: boolean): void;
+  dispose(): void;
+}
 
 /** Presentation-owned effects for one decoded video placement. */
 export interface VideoPresentation {
@@ -37,6 +53,7 @@ export interface VideoPresentation {
 
 /** Presentation-owned effects for one title or call-to-action placement. */
 export interface OverlayPresentation {
+  readonly element: HTMLElement;
   setVisible(visible: boolean): void;
   dispose(): void;
 }
@@ -49,12 +66,20 @@ export interface FrameEffect {
   dispose(): void | Promise<void>;
 }
 
+/** Browser resources and exact-frame effects produced by one extension program. */
+export interface PresentationExtensions {
+  readonly effects: readonly FrameEffect[];
+  readonly resources: readonly PresentationResource[];
+}
+
 /** Browser effects supplied by one presentation entry point. */
 export interface PresentationBindings {
-  bindVideo(placement: RuntimeVideo, index: number): VideoPresentation;
+  bindFilm(node: RuntimeNode): ContainerPresentation;
+  bindScene(scene: RuntimeScene): ContainerPresentation;
+  bindShot(shot: RuntimeShot): ContainerPresentation;
+  bindVideo(placement: RuntimeVideo): VideoPresentation;
   bindOverlay(placement: RuntimeOverlay): OverlayPresentation;
-  bindResources(plan: RuntimePlan): readonly PresentationResource[];
-  bindFrameEffects(plan: RuntimePlan): readonly FrameEffect[];
+  bindExtensions(plan: RuntimePlan): Promise<PresentationExtensions>;
 }
 
 interface BoundVideo {
@@ -68,11 +93,29 @@ interface BoundOverlay {
   readonly presentation: OverlayPresentation;
 }
 
+interface BoundContainer<T> {
+  readonly placement: T;
+  readonly presentation: ContainerPresentation;
+}
+
+interface BoundStructure {
+  readonly film: BoundContainer<RuntimeNode>;
+  readonly scenes: readonly BoundContainer<RuntimeScene>[];
+  readonly shots: readonly BoundContainer<RuntimeShot>[];
+}
+
+interface PendingStructure {
+  film: BoundContainer<RuntimeNode> | undefined;
+  readonly scenes: BoundContainer<RuntimeScene>[];
+  readonly shots: BoundContainer<RuntimeShot>[];
+}
+
 interface LoadedPresentation {
   readonly kind: "loaded";
   readonly effects: readonly FrameEffect[];
   readonly frameRate: RuntimePlan["frameRate"];
   readonly resources: readonly PresentationResource[];
+  readonly structure: BoundStructure;
   readonly videos: readonly BoundVideo[];
   readonly overlays: readonly BoundOverlay[];
 }
@@ -123,28 +166,39 @@ export class PresentationRuntimeAdapter implements RuntimeAdapter {
 
     let effects: readonly FrameEffect[] = [];
     let resources: readonly PresentationResource[] = [];
+    const structure: PendingStructure = {
+      film: undefined,
+      scenes: [],
+      shots: [],
+    };
+    let boundStructure: BoundStructure;
     const videos: BoundVideo[] = [];
     const overlays: BoundOverlay[] = [];
     try {
+      boundStructure = this.#bindStructure(plan, structure);
       this.#bindVideos(plan, videos);
       this.#bindOverlays(plan, overlays);
-      resources = ownPresentationResources(this.#bindings.bindResources(plan));
-      validatePresentationResources(resources);
-      effects = this.#bindings.bindFrameEffects(plan);
+      const extensions = await this.#bindings.bindExtensions(plan);
+      // Take both returned collections before either ownership projection or
+      // validation can fail; cleanup must retain every transferred resource.
+      effects = extensions.effects;
+      resources = extensions.resources;
       effects = ownFrameEffects(effects);
+      resources = ownPresentationResources(resources);
+      validateFrameEffects(effects);
+      validatePresentationResources(resources);
       await loadVideos(videos);
     } catch (error) {
       const cleanupFailure = await releasePresentation(
         effects,
         resources,
+        structure,
         videos,
         overlays,
       );
-      if (cleanupFailure !== undefined) {
-        // Incomplete release makes the adapter terminal; retrying would bind
-        // new effects beside browser state that no longer has one owner.
-        this.#state = { kind: "disposed" };
-      }
+      // A binding attempt may mutate author-owned state that generic cleanup
+      // cannot prove reusable. A fresh page owns the only valid retry.
+      this.#state = { kind: "disposed" };
       throw presentationLoadFailure(error, cleanupFailure);
     }
 
@@ -153,6 +207,7 @@ export class PresentationRuntimeAdapter implements RuntimeAdapter {
       effects,
       frameRate: plan.frameRate,
       resources,
+      structure: boundStructure,
       videos,
       overlays,
     };
@@ -183,11 +238,14 @@ export class PresentationRuntimeAdapter implements RuntimeAdapter {
     try {
       hideVideos(state.videos);
       const videos = await stageVideos(frame, state);
+      presentStructure(frame, state.structure);
       presentOverlays(frame, state.overlays);
       await applyFrameEffects(frame, state.effects);
       this.#staged = { frame, videos };
     } catch (error) {
       discardStagedVideos(state.videos);
+      this.#staged = undefined;
+      this.#state = { ...state, kind: "failed" };
       throw RuntimeAdapterError.fromUnknown(error, "frame staging failed");
     }
   }
@@ -206,6 +264,8 @@ export class PresentationRuntimeAdapter implements RuntimeAdapter {
       await confirmVideos(staged.videos);
       this.#staged = undefined;
     } catch (error) {
+      this.#staged = undefined;
+      this.#state = { ...this.#loadedState("confirm"), kind: "failed" };
       throw RuntimeAdapterError.fromUnknown(error, "frame confirmation failed");
     }
   }
@@ -224,6 +284,7 @@ export class PresentationRuntimeAdapter implements RuntimeAdapter {
     const failure = await releasePresentation(
       loaded?.effects ?? [],
       loaded?.resources ?? [],
+      loaded?.structure,
       loaded?.videos ?? [],
       loaded?.overlays ?? [],
     );
@@ -235,9 +296,35 @@ export class PresentationRuntimeAdapter implements RuntimeAdapter {
     }
   }
 
+  #bindStructure(
+    plan: RuntimePlan,
+    structure: PendingStructure,
+  ): BoundStructure {
+    const film = this.#bindings.bindFilm(plan.film);
+    structure.film = { placement: plan.film, presentation: film };
+    film.setVisible(true);
+
+    for (const placement of plan.scenes) {
+      const presentation = this.#bindings.bindScene(placement);
+      structure.scenes.push({ placement, presentation });
+      presentation.setVisible(false);
+    }
+    for (const placement of plan.shots) {
+      const presentation = this.#bindings.bindShot(placement);
+      structure.shots.push({ placement, presentation });
+      presentation.setVisible(false);
+    }
+
+    return {
+      film: structure.film,
+      scenes: structure.scenes,
+      shots: structure.shots,
+    };
+  }
+
   #bindVideos(plan: RuntimePlan, videos: BoundVideo[]): void {
-    for (const [index, placement] of plan.videos.entries()) {
-      const presentation = this.#bindings.bindVideo(placement, index);
+    for (const placement of plan.videos) {
+      const presentation = this.#bindings.bindVideo(placement);
       const resource = new DecodedVideo(
         presentation.element,
         this.#readinessTimeoutMilliseconds,
@@ -272,14 +359,23 @@ export class PresentationRuntimeAdapter implements RuntimeAdapter {
 function ownFrameEffects(
   effects: readonly FrameEffect[],
 ): readonly FrameEffect[] {
-  return Object.freeze(
-    effects.map((effect) =>
-      Object.freeze({
-        apply: effect.apply.bind(effect),
-        dispose: effect.dispose.bind(effect),
-      }),
-    ),
-  );
+  return Object.freeze(effects.map(ownFrameEffect));
+}
+
+function ownFrameEffect(effect: FrameEffect): FrameEffect {
+  return Object.freeze({
+    apply: effect.apply.bind(effect),
+    dispose: effect.dispose.bind(effect),
+  });
+}
+
+function validateFrameEffects(effects: readonly FrameEffect[]): void {
+  if (effects.length > MAX_PRESENTATION_EFFECTS) {
+    throw new RuntimeAdapterError(
+      "operation",
+      "presentation frame-effect count exceeds its limit",
+    );
+  }
 }
 
 async function loadVideos(videos: readonly BoundVideo[]): Promise<void> {
@@ -334,6 +430,24 @@ function presentOverlays(
   }
 }
 
+function presentStructure(
+  frame: RuntimeFrame,
+  structure: BoundStructure,
+): void {
+  presentContainers(frame, structure.scenes);
+  presentContainers(frame, structure.shots);
+}
+
+function presentContainers<
+  T extends { readonly interval: RuntimeOverlay["interval"] },
+>(frame: RuntimeFrame, containers: readonly BoundContainer<T>[]): void {
+  for (const container of containers) {
+    const { interval } = container.placement;
+    const visible = frame.index >= interval.start && frame.index < interval.end;
+    container.presentation.setVisible(visible);
+  }
+}
+
 function hideVideos(videos: readonly BoundVideo[]): void {
   for (const video of videos) {
     video.presentation.setVisible(false);
@@ -367,6 +481,7 @@ function presentationLoadFailure(
 async function releasePresentation(
   effects: readonly FrameEffect[],
   resources: readonly PresentationResource[],
+  structure: PendingStructure | BoundStructure | undefined,
   videos: readonly BoundVideo[],
   overlays: readonly BoundOverlay[],
 ): Promise<unknown | undefined> {
@@ -381,14 +496,57 @@ async function releasePresentation(
     const releaseFailure = releaseOverlay(overlay);
     failure ??= releaseFailure;
   }
+  const structureFailure = releaseStructure(structure);
+  failure ??= structureFailure;
   return failure;
+}
+
+function releaseStructure(
+  structure: PendingStructure | BoundStructure | undefined,
+): unknown | undefined {
+  if (structure === undefined) {
+    return undefined;
+  }
+
+  let failure = releaseContainers(structure.shots);
+  const sceneFailure = releaseContainers(structure.scenes);
+  failure ??= sceneFailure;
+  if (structure.film !== undefined) {
+    const filmFailure = releaseContainer(structure.film);
+    failure ??= filmFailure;
+  }
+  return failure;
+}
+
+function releaseContainers<T>(
+  containers: readonly BoundContainer<T>[],
+): unknown | undefined {
+  let failure: unknown;
+  // Children release before parents so cleanup never relies on detached DOM.
+  for (let index = containers.length - 1; index >= 0; index -= 1) {
+    const container = containers[index];
+    if (container !== undefined) {
+      const releaseFailure = releaseContainer(container);
+      failure ??= releaseFailure;
+    }
+  }
+  return failure;
+}
+
+function releaseContainer<T>(
+  container: BoundContainer<T>,
+): unknown | undefined {
+  return releaseAll([
+    () => container.presentation.setVisible(false),
+    () => container.presentation.dispose(),
+  ]);
 }
 
 async function releaseFrameEffects(
   effects: readonly FrameEffect[],
 ): Promise<unknown | undefined> {
   let failure: unknown;
-  for (const effect of effects) {
+  for (const effect of effects.toReversed()) {
     try {
       await effect.dispose();
     } catch (error) {

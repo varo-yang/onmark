@@ -15,12 +15,13 @@ use onmark_core::render_graph::{PartitionPlan, RenderGraph};
 use onmark_core::timeline::TimelineIr;
 use onmark_media::Ffprobe;
 use onmark_render::{
-    EncodedVideo, ExecutableUnit, Ffmpeg, RenderExecutor, RenderProfile, RenderUnit,
+    BrowserCaptureMode, EncodedVideo, ExecutableUnit, Ffmpeg, RenderExecutor, RenderProfile,
+    RenderUnit,
 };
 
 use crate::arguments::{RenderArgs, source_directory};
 use crate::assets::FrozenCatalog;
-use crate::bundler::{BundleArtifact, PresentationBundler};
+use crate::bundler::{BundleArtifact, PresentationBundler, PresentationSource};
 use crate::compilation;
 use crate::diagnostic;
 use crate::environment::Executables;
@@ -42,6 +43,7 @@ pub(super) enum RenderOutcome {
     },
     Completed {
         screenplay: AuthoredReport,
+        capture_mode: BrowserCaptureMode,
         video: EncodedVideo,
     },
 }
@@ -74,14 +76,17 @@ impl RenderOutcome {
                 let mut stderr = io::stderr().lock();
                 write_report(&mut stderr, &report).map(|()| ExitCode::FAILURE)
             }
-            Self::Completed { screenplay, video } => write_completed(&screenplay, &video),
+            Self::Completed {
+                screenplay,
+                capture_mode,
+                video,
+            } => write_completed(&screenplay, capture_mode, &video),
         };
         result.unwrap_or(ExitCode::FAILURE)
     }
 }
 
 pub(super) async fn run(args: RenderArgs) -> Result<RenderOutcome, CliError> {
-    let presentation = args.presentation();
     let output = args.output();
     let profile = RenderProfile::new(args.width, args.height)?;
     let source = input::read_utf8(
@@ -113,7 +118,7 @@ pub(super) async fn run(args: RenderArgs) -> Result<RenderOutcome, CliError> {
         None => None,
     };
 
-    validate_presentation(&presentation)?;
+    let presentation = presentation_source(&args)?;
     reject_existing_output(&output)?;
     let executables = Executables::discover(&args)?;
     create_output_directory(&output)?;
@@ -136,15 +141,12 @@ pub(super) async fn run(args: RenderArgs) -> Result<RenderOutcome, CliError> {
     let timeline = compiler::import_captions(timeline, caption_track)?;
 
     let bundle = PresentationBundler::new(executables.bundler)
-        .bundle(
-            &presentation,
-            args.temporal_capability,
-            args.visual_capability,
-        )
+        .bundle(&presentation)
         .await?;
     let (partitions, units) = materialize_units(&timeline, profile, &bundle, frozen)?;
 
     let executor = render_executor(executables.browser, executables.ffmpeg);
+    let capture_mode = executor.capture_mode();
     let video = executor
         .render_partitioned(&partitions, units, &output)
         .await?;
@@ -154,6 +156,7 @@ pub(super) async fn run(args: RenderArgs) -> Result<RenderOutcome, CliError> {
             source,
             diagnostics,
         },
+        capture_mode,
         video,
     })
 }
@@ -166,7 +169,7 @@ fn materialize_units(
 ) -> Result<(PartitionPlan, Vec<ExecutableUnit>), CliError> {
     let materialized = frozen.into_materialized()?;
     let bundle_directory = bundle.directory();
-    let partitions = RenderGraph::from_timeline(timeline, bundle.manifest().temporal_capability())
+    let partitions = RenderGraph::from_timeline(timeline, bundle.manifest().temporal_capability())?
         .into_partition();
     let mut units = Vec::with_capacity(partitions.units().len());
 
@@ -211,11 +214,32 @@ fn create_output_directory(output: &Path) -> Result<(), CliError> {
     fs::create_dir_all(parent).map_err(|error| CliError::create_output_directory(parent, error))
 }
 
-fn validate_presentation(presentation: &Path) -> Result<(), CliError> {
+fn presentation_source(args: &RenderArgs) -> Result<PresentationSource, CliError> {
+    if let Some(presentation) = args.presentation() {
+        validate_presentation_file(presentation)?;
+        return Ok(PresentationSource::Custom(presentation.to_owned()));
+    }
+
+    Ok(PresentationSource::SemanticDom {
+        stylesheet: optional_presentation_file(args.stylesheet())?,
+        motion: optional_presentation_file(args.motion())?,
+    })
+}
+
+fn optional_presentation_file(path: PathBuf) -> Result<Option<PathBuf>, CliError> {
+    match fs::metadata(&path) {
+        Ok(metadata) if metadata.is_file() => Ok(Some(path)),
+        Ok(_) => Err(CliError::InvalidPresentationSource(path)),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(CliError::inspect_presentation_source(&path, error)),
+    }
+}
+
+fn validate_presentation_file(presentation: &Path) -> Result<(), CliError> {
     let metadata = fs::metadata(presentation)
-        .map_err(|error| CliError::inspect_presentation(presentation, error))?;
+        .map_err(|error| CliError::inspect_presentation_source(presentation, error))?;
     if !metadata.is_file() {
-        return Err(CliError::InvalidPresentation(presentation.to_owned()));
+        return Err(CliError::InvalidPresentationSource(presentation.to_owned()));
     }
     Ok(())
 }
@@ -240,7 +264,11 @@ fn write_report(writer: &mut impl Write, report: &AuthoredReport) -> io::Result<
     diagnostic::write_all(writer, &report.path, &report.source, &report.diagnostics)
 }
 
-fn write_completed(report: &AuthoredReport, video: &EncodedVideo) -> io::Result<ExitCode> {
+fn write_completed(
+    report: &AuthoredReport,
+    capture_mode: BrowserCaptureMode,
+    video: &EncodedVideo,
+) -> io::Result<ExitCode> {
     let mut stderr = io::stderr().lock();
     write_report(&mut stderr, report)?;
     drop(stderr);
@@ -248,8 +276,9 @@ fn write_completed(report: &AuthoredReport, video: &EncodedVideo) -> io::Result<
     let mut stdout = io::stdout().lock();
     writeln!(
         stdout,
-        "Rendered {} frames to {}",
+        "Rendered {} frames with {} capture to {}",
         video.frames(),
+        capture_mode,
         video.path().display(),
     )?;
     Ok(ExitCode::SUCCESS)

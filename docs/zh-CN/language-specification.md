@@ -317,23 +317,25 @@ type 的内部子集拆成多个 token，整段声明也只产生一条诊断。
 
 ## 10. Presentation 选择与 props
 
-`presentation.ts` 由 render command 选择：显式传入
-`--presentation`，或由 screenplay 同目录发现。当前语言没有 `presents`
-attribute、`definePresentation`
-declaration，也没有 screenplay 到 presentation 的 typed props
-channel。已求解的 screenplay facts 只会作为 Rust-owned
-`BrowserPlan`，通过 runtime 的 `Load(plan)` command 到达浏览器。
+render command 默认把已求解的 video、title、CTA 与 caption fact 投影成中性的
+semantic DOM。同名 `film.css` 与 `film.motion.ts` 可以为这些 node 提供样式与
+element-local motion；缺失时不会补入 screenplay spelling、layout 或视觉默认值。
+`--presentation` 才会显式选择不受限的自定义 browser
+code。当前语言没有 `presents` attribute、`definePresentation` declaration，也没有
+screenplay 到 presentation 的 typed props channel。已求解的 screenplay facts 在两条
+路径中都只会作为 Rust-owned `BrowserPlan`，通过 runtime 的 `Load(plan)` command
+到达浏览器。
 
-既有 title、CTA 与导入 caption fact 构成封闭的内建 component
-contract：compiler 分配稳定 component identity，并且只携带已准入的语义角色、text
-与已求解 interval。这不是通用 screenplay props channel。
+Browser Plan 还会保留 film、scene、shot 与 content ownership。compiler 为每个投影 node
+分配稳定 identity，并且只携带已准入的 authored ID、语义角色、text、ownership 与 solved
+interval。这既不是通用 screenplay props channel，也不是第二条 presentation timeline。
 
 这是语言边界，不是未写下来的实现细节。未来的 screenplay-selected
 presentation 或 props feature 必须一起定义其 spelling、typed
 schema/default、canonical encoding、带 source 的 diagnostic、bundle/cache
 identity 和 temporal capability
-effect，并满足下方语言实验门槛。在那之前，静态 TypeScript import 是 presentation
-code，不是 screenplay props。浏览器 authoring contract 另见
+effect，并满足下方语言实验门槛。在那之前，stylesheet rule 与静态 TypeScript import
+都是 presentation code，不是 screenplay props。浏览器 authoring contract 另见
 [presentation contract](presentation-contract.md)。
 
 ## 11. 不进入 Gate 一的能力

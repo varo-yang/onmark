@@ -680,6 +680,7 @@ mod tests {
         );
         let partitions =
             RenderGraph::from_timeline(&timeline, PresentationTemporalCapability::RandomAccess)
+                .expect("the solved fixture has complete render ownership")
                 .into_partition();
         let partition = partitions
             .units()
@@ -889,6 +890,7 @@ mod tests {
         );
         let partitions =
             RenderGraph::from_timeline(&timeline, PresentationTemporalCapability::RandomAccess)
+                .expect("the solved fixture has complete render ownership")
                 .into_partition();
         let partition = partitions
             .units()

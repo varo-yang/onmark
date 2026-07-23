@@ -19,10 +19,10 @@ use onmark_core::protocol::{
 use onmark_core::render_graph::{PartitionPlan, RenderGraph};
 use onmark_media::{Ffprobe, SubtitleLimits, parse_webvtt};
 use onmark_render::{
-    BrowserErrorKind, BrowserLaunchPolicy, BrowserLimits, BrowserSession, CaptureEnvironmentId,
-    EncodeLimits, EncodedPng, ExecutableUnit, Ffmpeg, FrameArtifact, FrameArtifactLimits,
-    MaterializedAsset, RawRgbaHash, RenderErrorKind, RenderExecutor, RenderProfile, RenderUnit,
-    UnitRootLimits,
+    BrowserCaptureMode, BrowserErrorKind, BrowserLaunchPolicy, BrowserLimits, BrowserSession,
+    CaptureEnvironmentId, EncodeLimits, EncodedPng, ExecutableUnit, Ffmpeg, FrameArtifact,
+    FrameArtifactLimits, MaterializedAsset, RawRgbaHash, RenderErrorKind, RenderExecutor,
+    RenderProfile, RenderUnit, UnitRootLimits,
 };
 use serde::Deserialize;
 use sha2::{Digest as _, Sha256};
@@ -48,6 +48,7 @@ async fn rejects_units_that_do_not_match_the_partition_plan_before_launching_bro
     );
     let partitions =
         RenderGraph::from_timeline(&timeline, PresentationTemporalCapability::RandomAccess)
+            .expect("the solved fixture has complete render ownership")
             .into_partition();
     let directory = tempdir().expect("the test output directory must be available");
     let output = directory.path().join("partitioned.mp4");
@@ -71,6 +72,7 @@ async fn rejects_a_page_that_never_installs_the_runtime_host() {
     let mut session = BrowserSession::launch(
         headless_shell(),
         BrowserLaunchPolicy::local(),
+        BrowserCaptureMode::BeginFrame,
         render_profile(),
         browser_limits(Duration::from_secs(5)),
     )
@@ -94,6 +96,7 @@ async fn blocks_navigation_outside_the_private_resource_root() {
     let mut session = BrowserSession::launch(
         headless_shell(),
         BrowserLaunchPolicy::local(),
+        BrowserCaptureMode::BeginFrame,
         render_profile(),
         browser_limits(Duration::from_secs(5)),
     )
@@ -118,6 +121,7 @@ async fn bounds_a_runtime_adapter_that_never_finishes_loading() {
     let mut session = BrowserSession::launch(
         headless_shell(),
         BrowserLaunchPolicy::local(),
+        BrowserCaptureMode::BeginFrame,
         render_profile(),
         browser_limits(Duration::from_secs(5)),
     )
@@ -155,6 +159,20 @@ async fn captures_stable_raw_rgba_frames_across_independent_browser_sessions() {
     assert_eq!(
         first, second,
         "locked browser sessions must capture equal RGBA"
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires ONMARK_PORTABLE_CHROME and a built @onmark/runtime package"]
+async fn captures_stable_frames_through_the_portable_screenshot_backend() {
+    let fixture = browser_fixture();
+    let browser = required_path("ONMARK_PORTABLE_CHROME");
+    let first = capture_portable_fingerprint(&browser, &fixture).await;
+    let second = capture_portable_fingerprint(&browser, &fixture).await;
+
+    assert_eq!(
+        first, second,
+        "locked portable browser sessions must capture equal RGBA",
     );
 }
 
@@ -468,19 +486,32 @@ async fn freeze_asset(path: &Path) -> FrozenAsset {
 }
 
 async fn capture_protocol_fingerprint(fixture: &Url) -> RawRgbaHash {
+    capture_fingerprint(&headless_shell(), BrowserCaptureMode::BeginFrame, fixture).await
+}
+
+async fn capture_portable_fingerprint(browser: &Path, fixture: &Url) -> RawRgbaHash {
+    capture_fingerprint(browser, BrowserCaptureMode::Screenshot, fixture).await
+}
+
+async fn capture_fingerprint(
+    browser: &Path,
+    capture_mode: BrowserCaptureMode,
+    fixture: &Url,
+) -> RawRgbaHash {
     let mut session = BrowserSession::launch(
-        headless_shell(),
+        browser,
         BrowserLaunchPolicy::local(),
+        capture_mode,
         render_profile(),
         browser_limits(Duration::from_secs(10)),
     )
     .await
-    .expect("headless shell must launch");
+    .expect("the requested browser must launch");
     let result = exercise_protocol(&mut session, fixture).await;
     let shutdown = session.shutdown().await;
 
     let fingerprint = result.expect("the real browser protocol must capture deterministic frames");
-    shutdown.expect("headless shell must shut down cleanly");
+    shutdown.expect("the requested browser must shut down cleanly");
     fingerprint
 }
 
@@ -488,6 +519,7 @@ async fn capture_temporal_sequence(fixture: &Url) -> Vec<RawRgbaHash> {
     let mut session = BrowserSession::launch(
         headless_shell(),
         BrowserLaunchPolicy::local(),
+        BrowserCaptureMode::BeginFrame,
         render_profile(),
         browser_limits(Duration::from_secs(10)),
     )
@@ -993,6 +1025,7 @@ impl GateFourFixture {
             .expect("fixture captions must enter the frame grid");
         let partition_plan =
             RenderGraph::from_timeline(&timeline, bundle.manifest.temporal_capability())
+                .expect("the solved fixture has complete render ownership")
                 .into_partition();
         assert_eq!(
             partition_plan.units().len(),

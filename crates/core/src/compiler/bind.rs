@@ -43,7 +43,7 @@ impl BindReport {
     }
 }
 
-/// Binds one parsed document into Gate-one screenplay structure.
+/// Binds one parsed document into typed screenplay structure.
 ///
 /// Error diagnostics withhold the linked film from later compiler phases.
 #[must_use]

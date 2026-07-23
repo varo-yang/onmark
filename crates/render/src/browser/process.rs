@@ -1,4 +1,4 @@
-//! Owned headless-shell process with bounded, continuously drained diagnostics.
+//! Owned Chromium process with bounded, continuously drained diagnostics.
 //!
 //! Chromium writes its `DevTools` endpoint and later crash diagnostics to the
 //! same stderr stream. Onmark therefore keeps that stream open for the entire
@@ -6,6 +6,7 @@
 
 use std::collections::VecDeque;
 use std::ffi::OsString;
+use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::{ExitStatus, Stdio};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -58,6 +59,7 @@ const CAPTURE_BACKEND_ARGUMENTS: &[&str] = &[
     "--use-angle=swiftshader",
     "--enable-unsafe-swiftshader",
 ];
+const PORTABLE_SCREENSHOT_ARGUMENTS: &[&str] = &["--headless=new"];
 const SINGLE_PROCESS_ARGUMENTS: &[&str] = &[
     "--disable-dev-shm-usage",
     "--single-process",
@@ -73,6 +75,50 @@ const SINGLE_PROCESS_ARGUMENTS: &[&str] = &[
 pub struct BrowserLaunchPolicy {
     sandbox: ChromiumSandbox,
     process_model: ChromiumProcessModel,
+}
+
+/// Closed Chromium surface-commit mechanism selected by the execution host.
+///
+/// Both modes consume the same browser plan and runtime protocol. The choice
+/// changes only how the already-staged browser surface is committed and read.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BrowserCaptureMode {
+    /// Atomically commits and captures through headless shell's `BeginFrame` API.
+    BeginFrame,
+    /// Captures a runtime-staged surface through the portable Page API.
+    Screenshot,
+}
+
+impl BrowserCaptureMode {
+    /// Selects the capture contract carried by a local browser artifact.
+    ///
+    /// Chrome headless shell owns `BeginFrame`; ordinary Chrome and Chromium
+    /// use the portable screenshot path regardless of the host OS.
+    #[must_use]
+    pub fn for_executable(executable: &Path) -> Self {
+        let name = executable.file_name().and_then(|name| name.to_str());
+        if matches!(
+            name,
+            Some("chrome-headless-shell" | "chrome-headless-shell.exe")
+        ) {
+            Self::BeginFrame
+        } else {
+            Self::Screenshot
+        }
+    }
+
+    pub(super) const fn uses_begin_frame(self) -> bool {
+        matches!(self, Self::BeginFrame)
+    }
+}
+
+impl fmt::Display for BrowserCaptureMode {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::BeginFrame => "beginFrame",
+            Self::Screenshot => "screenshot",
+        })
+    }
 }
 
 impl BrowserLaunchPolicy {
@@ -119,7 +165,7 @@ enum ChromiumProcessModel {
     SingleProcess,
 }
 
-/// One headless-shell child and the task that drains its diagnostics.
+/// One Chromium child and the task that drains its diagnostics.
 #[derive(Debug)]
 pub(super) struct ChromiumProcess {
     child: Child,
@@ -131,6 +177,7 @@ impl ChromiumProcess {
     pub(super) async fn launch(
         executable: &Path,
         launch_policy: BrowserLaunchPolicy,
+        capture_mode: BrowserCaptureMode,
         profile: &Path,
         render_profile: RenderProfile,
         deadline: Duration,
@@ -138,7 +185,13 @@ impl ChromiumProcess {
         let executable = tokio::fs::canonicalize(executable)
             .await
             .map_err(|source| BrowserError::io(BrowserErrorKind::Launch, source))?;
-        let mut child = spawn_headless_shell(&executable, launch_policy, profile, render_profile)?;
+        let mut child = spawn_chromium(
+            &executable,
+            launch_policy,
+            capture_mode,
+            profile,
+            render_profile,
+        )?;
         let stderr = child
             .stderr
             .take()
@@ -158,7 +211,7 @@ impl ChromiumProcess {
                 process.abort(deadline).await;
                 return Err(process.failure(
                     BrowserErrorKind::Launch,
-                    "headless shell closed stderr before publishing its DevTools endpoint",
+                    "Chromium closed stderr before publishing its DevTools endpoint",
                 ));
             }
             Err(_) => {
@@ -190,7 +243,7 @@ impl ChromiumProcess {
                 let _ = self.finish_stderr(deadline).await;
                 return Err(self.failure(
                     BrowserErrorKind::Shutdown,
-                    "headless shell missed its shutdown deadline",
+                    "Chromium missed its shutdown deadline",
                 ));
             }
         };
@@ -233,7 +286,7 @@ impl ChromiumProcess {
     }
 
     fn exit_error(&self, kind: BrowserErrorKind, status: ExitStatus) -> BrowserError {
-        self.failure(kind, format!("headless shell exited with {status}"))
+        self.failure(kind, format!("Chromium exited with {status}"))
     }
 
     fn failure(&self, kind: BrowserErrorKind, message: impl Into<String>) -> BrowserError {
@@ -247,12 +300,15 @@ pub(super) struct BrowserDiagnostics(Arc<Mutex<VecDeque<u8>>>);
 
 impl BrowserDiagnostics {
     pub(super) fn snapshot(&self) -> Option<Box<str>> {
-        let mut retained = self.0.lock().unwrap_or_else(PoisonError::into_inner);
-        if retained.is_empty() {
-            return None;
-        }
+        let bytes = {
+            let mut retained = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+            if retained.is_empty() {
+                return None;
+            }
+            retained.make_contiguous().to_vec()
+        };
         Some(
-            String::from_utf8_lossy(retained.make_contiguous())
+            String::from_utf8_lossy(&bytes)
                 .into_owned()
                 .into_boxed_str(),
         )
@@ -276,21 +332,30 @@ impl BrowserDiagnostics {
     }
 
     fn devtools_endpoint(&self) -> Option<String> {
-        let mut retained = self.0.lock().unwrap_or_else(PoisonError::into_inner);
-        let stderr = String::from_utf8_lossy(retained.make_contiguous());
+        let bytes = {
+            let mut retained = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+            retained.make_contiguous().to_vec()
+        };
+        let stderr = String::from_utf8_lossy(&bytes);
         find_devtools_endpoint(&stderr)
     }
 }
 
-fn spawn_headless_shell(
+fn spawn_chromium(
     executable: &Path,
     launch_policy: BrowserLaunchPolicy,
+    capture_mode: BrowserCaptureMode,
     profile: &Path,
     render_profile: RenderProfile,
 ) -> Result<Child, BrowserError> {
     let mut command = Command::new(executable);
     command
-        .args(browser_arguments(launch_policy, profile, render_profile))
+        .args(browser_arguments(
+            launch_policy,
+            capture_mode,
+            profile,
+            render_profile,
+        ))
         .envs(sidecar_environment(executable))
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -322,11 +387,15 @@ fn sidecar_environment(executable: &Path) -> Vec<(&'static str, PathBuf)> {
 
 fn browser_arguments(
     launch_policy: BrowserLaunchPolicy,
+    capture_mode: BrowserCaptureMode,
     profile: &Path,
     render_profile: RenderProfile,
 ) -> Vec<OsString> {
     let mut arguments: Vec<OsString> = STANDARD_ARGUMENTS.iter().map(OsString::from).collect();
     arguments.extend(CAPTURE_BACKEND_ARGUMENTS.iter().map(OsString::from));
+    if capture_mode == BrowserCaptureMode::Screenshot {
+        arguments.extend(PORTABLE_SCREENSHOT_ARGUMENTS.iter().map(OsString::from));
+    }
     if launch_policy.disables_chromium_sandbox() {
         arguments.extend(DISABLED_SANDBOX_ARGUMENTS.iter().map(OsString::from));
     }
@@ -400,7 +469,7 @@ mod tests {
     use super::{
         BrowserDiagnostics, browser_arguments, find_devtools_endpoint, sidecar_environment,
     };
-    use crate::{BrowserLaunchPolicy, RenderProfile};
+    use crate::{BrowserCaptureMode, BrowserLaunchPolicy, RenderProfile};
 
     #[test]
     fn finds_the_latest_complete_devtools_endpoint() {
@@ -436,6 +505,7 @@ mod tests {
         let profile = RenderProfile::new(320, 180).expect("the fixture profile is valid");
         let arguments = browser_arguments(
             BrowserLaunchPolicy::isolated_worker(),
+            BrowserCaptureMode::BeginFrame,
             Path::new("/tmp/p"),
             profile,
         );
@@ -455,8 +525,12 @@ mod tests {
     #[test]
     fn local_arguments_lock_software_rendering_without_changing_process_model() {
         let profile = RenderProfile::new(320, 180).expect("the fixture profile is valid");
-        let arguments =
-            browser_arguments(BrowserLaunchPolicy::local(), Path::new("/tmp/p"), profile);
+        let arguments = browser_arguments(
+            BrowserLaunchPolicy::local(),
+            BrowserCaptureMode::BeginFrame,
+            Path::new("/tmp/p"),
+            profile,
+        );
 
         assert!(has_argument(&arguments, "--use-angle=swiftshader"));
         assert!(has_argument(&arguments, "--enable-unsafe-swiftshader"));
@@ -464,6 +538,37 @@ mod tests {
         assert!(!has_argument(&arguments, "--single-process"));
         assert!(!has_argument(&arguments, "--in-process-gpu"));
         assert!(!has_argument(&arguments, "--disable-dev-shm-usage"));
+    }
+
+    #[test]
+    fn portable_capture_launches_regular_chrome_headlessly() {
+        let profile = RenderProfile::new(320, 180).expect("the fixture profile is valid");
+        let arguments = browser_arguments(
+            BrowserLaunchPolicy::local(),
+            BrowserCaptureMode::Screenshot,
+            Path::new("/tmp/p"),
+            profile,
+        );
+
+        assert!(has_argument(&arguments, "--headless=new"));
+        assert!(has_argument(&arguments, "--use-angle=swiftshader"));
+        assert!(!has_argument(&arguments, "--no-sandbox"));
+    }
+
+    #[test]
+    fn derives_capture_mode_from_the_browser_artifact() {
+        assert_eq!(
+            BrowserCaptureMode::for_executable(Path::new("/tools/chrome-headless-shell")),
+            BrowserCaptureMode::BeginFrame,
+        );
+        assert_eq!(
+            BrowserCaptureMode::for_executable(Path::new("/Applications/Google Chrome")),
+            BrowserCaptureMode::Screenshot,
+        );
+        assert_eq!(
+            BrowserCaptureMode::for_executable(Path::new("C:/tools/chrome-headless-shell.exe")),
+            BrowserCaptureMode::BeginFrame,
+        );
     }
 
     #[test]

@@ -31,7 +31,11 @@ const VIDEO_READINESS_TIMEOUT_MILLISECONDS = 1_000;
 
 const bindings = createDomPresentationBindings({
   document,
-  frameEffects: temporalEffects,
+  motion: {
+    bind() {
+      return { effects: temporalEffects(), resources: [] };
+    },
+  },
   videoSource: materializedVideoSource,
 });
 installRuntimeHost(

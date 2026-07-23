@@ -21,6 +21,7 @@ use tokio::task::JoinError;
 use tokio::time::timeout;
 
 const DEADLINE: Duration = Duration::from_mins(2);
+const CLEANUP_DEADLINE: Duration = Duration::from_secs(5);
 const MAX_OUTPUT_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_MANIFEST_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_STDERR_BYTES: usize = 64 * 1024;
@@ -32,6 +33,56 @@ pub(super) struct PresentationBundler {
     executable: PathBuf,
 }
 
+/// Authored custom code or Onmark's neutral semantic DOM projection.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) enum PresentationSource {
+    Custom(PathBuf),
+    SemanticDom {
+        stylesheet: Option<PathBuf>,
+        motion: Option<PathBuf>,
+    },
+}
+
+impl PresentationSource {
+    fn temporal_capability(&self) -> PresentationTemporalCapability {
+        match self {
+            Self::SemanticDom {
+                stylesheet: None,
+                motion: None,
+            } => PresentationTemporalCapability::RandomAccess,
+            Self::Custom(_)
+            | Self::SemanticDom {
+                stylesheet: Some(_),
+                ..
+            }
+            | Self::SemanticDom {
+                motion: Some(_), ..
+            } => PresentationTemporalCapability::Sequential,
+        }
+    }
+
+    const fn visual_capability() -> PresentationVisualCapability {
+        PresentationVisualCapability::BrowserComposite
+    }
+
+    fn append_arguments(&self, command: &mut Command) {
+        match self {
+            Self::Custom(entry) => {
+                command.arg("--entry").arg(entry);
+            }
+            Self::SemanticDom { stylesheet, motion } => {
+                command.arg("--semantic-dom");
+                if let Some(stylesheet) = stylesheet {
+                    command.arg("--stylesheet").arg(stylesheet);
+                }
+                if let Some(motion) = motion {
+                    command.arg("--motion").arg(motion);
+                }
+            }
+        }
+    }
+}
+
 impl PresentationBundler {
     pub(super) fn new(executable: impl Into<PathBuf>) -> Self {
         Self {
@@ -41,16 +92,14 @@ impl PresentationBundler {
 
     pub(super) async fn bundle(
         &self,
-        entry: &Path,
-        temporal_capability: PresentationTemporalCapability,
-        visual_capability: PresentationVisualCapability,
+        source: &PresentationSource,
     ) -> Result<BundleArtifact, BundleError> {
         let root = tempfile::Builder::new()
             .prefix("onmark-bundle-")
             .tempdir()
             .map_err(BundleError::TemporaryDirectory)?;
         let directory = root.path().join("presentation");
-        let mut child = self.spawn(entry, &directory, temporal_capability, visual_capability)?;
+        let mut child = self.spawn(source, &directory)?;
         let stderr = child
             .stderr
             .take()
@@ -79,23 +128,20 @@ impl PresentationBundler {
 
     fn spawn(
         &self,
-        entry: &Path,
+        source: &PresentationSource,
         output: &Path,
-        temporal_capability: PresentationTemporalCapability,
-        visual_capability: PresentationVisualCapability,
     ) -> Result<tokio::process::Child, BundleError> {
         let mut command = Command::new(&self.executable);
+        source.append_arguments(&mut command);
         command
-            .arg("--entry")
-            .arg(entry)
             .arg("--output")
             .arg(output)
             .arg("--max-output-bytes")
             .arg(MAX_OUTPUT_BYTES.to_string())
             .arg("--temporal-capability")
-            .arg(temporal_capability.as_str())
+            .arg(source.temporal_capability().as_str())
             .arg("--visual-capability")
-            .arg(visual_capability.as_str())
+            .arg(PresentationSource::visual_capability().as_str())
             .kill_on_drop(true)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -137,6 +183,7 @@ pub(super) enum BundleError {
     DiagnosticTimeout,
     ManifestTask(JoinError),
     Terminate(io::Error),
+    TerminateTimeout,
     Timeout,
     Failed {
         status: ExitStatus,
@@ -183,6 +230,9 @@ impl fmt::Display for BundleError {
             }
             Self::ManifestTask(_) => formatter.write_str("bundle manifest reader did not finish"),
             Self::Terminate(_) => formatter.write_str("failed to terminate the bundler process"),
+            Self::TerminateTimeout => {
+                formatter.write_str("bundler termination missed its cleanup deadline")
+            }
             Self::Timeout => formatter.write_str("bundler exceeded its two-minute deadline"),
             Self::Failed { status, stderr } => {
                 write!(formatter, "bundler exited with {status}")?;
@@ -230,6 +280,7 @@ impl Error for BundleError {
             Self::ManifestDecode { source, .. } => Some(source),
             Self::MissingDiagnosticPipe
             | Self::DiagnosticTimeout
+            | Self::TerminateTimeout
             | Self::Timeout
             | Self::Failed { .. }
             | Self::ManifestLimit(_) => None,
@@ -361,11 +412,11 @@ async fn terminate(child: &mut tokio::process::Child) -> Result<(), BundleError>
             Ok(None) | Err(_) => Err(BundleError::Terminate(source)),
         };
     }
-    child
-        .wait()
-        .await
-        .map(|_| ())
-        .map_err(BundleError::Terminate)
+    match timeout(CLEANUP_DEADLINE, child.wait()).await {
+        Ok(Ok(_)) => Ok(()),
+        Ok(Err(source)) => Err(BundleError::Terminate(source)),
+        Err(_) => Err(BundleError::TerminateTimeout),
+    }
 }
 
 fn read_manifest(path: &Path) -> Result<BundleManifest, BundleError> {
@@ -393,9 +444,52 @@ fn read_manifest(path: &Path) -> Result<BundleManifest, BundleError> {
 mod tests {
     use std::collections::VecDeque;
     use std::future;
+    use std::path::PathBuf;
     use std::time::Duration;
 
-    use super::{BundleError, CapturedStderr, append_tail, finish_stderr_before};
+    use onmark_core::model::{PresentationTemporalCapability, PresentationVisualCapability};
+
+    use super::{
+        BundleError, CapturedStderr, PresentationSource, append_tail, finish_stderr_before,
+    };
+
+    #[test]
+    fn derives_capabilities_from_the_owned_presentation_surface() {
+        let styled_dom = PresentationSource::SemanticDom {
+            motion: None,
+            stylesheet: Some(PathBuf::from("film.css")),
+        };
+        let neutral_dom = PresentationSource::SemanticDom {
+            motion: None,
+            stylesheet: None,
+        };
+        let animated_dom = PresentationSource::SemanticDom {
+            motion: Some(PathBuf::from("film.motion.ts")),
+            stylesheet: None,
+        };
+        let custom = PresentationSource::Custom(PathBuf::from("presentation.ts"));
+
+        assert_eq!(
+            styled_dom.temporal_capability(),
+            PresentationTemporalCapability::Sequential,
+        );
+        assert_eq!(
+            neutral_dom.temporal_capability(),
+            PresentationTemporalCapability::RandomAccess,
+        );
+        assert_eq!(
+            animated_dom.temporal_capability(),
+            PresentationTemporalCapability::Sequential,
+        );
+        assert_eq!(
+            custom.temporal_capability(),
+            PresentationTemporalCapability::Sequential,
+        );
+        assert_eq!(
+            PresentationSource::visual_capability(),
+            PresentationVisualCapability::BrowserComposite,
+        );
+    }
 
     #[test]
     fn retains_only_the_bounded_diagnostic_tail() {

@@ -23,8 +23,24 @@ const plan: BrowserPlan = {
   frameRate: { numerator: 30, denominator: 1 },
   evaluation: { start: 10, end: 20 },
   output: { start: 10, end: 20 },
+  film: { nodeId: 0, authoredId: "film" },
+  scenes: [
+    {
+      node: { nodeId: 1, authoredId: "scene" },
+      interval: { start: 10, end: 20 },
+    },
+  ],
+  shots: [
+    {
+      node: { nodeId: 2, authoredId: "shot" },
+      sceneId: 1,
+      interval: { start: 10, end: 20 },
+    },
+  ],
   videos: [
     {
+      node: { nodeId: 3, authoredId: "video" },
+      shotId: 2,
       assetId:
         "sha256:0101010101010101010101010101010101010101010101010101010101010101",
       interval: { start: 12, end: 18 },
@@ -33,7 +49,8 @@ const plan: BrowserPlan = {
   ],
   overlays: [
     {
-      componentId: 0,
+      node: { nodeId: 4, authoredId: "title" },
+      shotId: 2,
       kind: "title",
       text: "Opening",
       interval: { start: 12, end: 18 },
@@ -182,6 +199,54 @@ test("makes a failed preparation terminal until disposal", async () => {
   assert.deepEqual(adapter.operations, ["load", "prepare:10", "dispose"]);
 });
 
+test("makes a failed load terminal until disposal", async () => {
+  const adapter = new RecordingAdapter();
+  const session = new RuntimeSession(adapter);
+  adapter.loadError = new RuntimeAdapterError(
+    "operation",
+    "presentation binding failed",
+  );
+
+  const failure = await session.dispatch(request(1, { type: "load", plan }));
+  assertFailure(failure, "loadFailed");
+
+  const retry = await session.dispatch(request(2, { type: "load", plan }));
+  assertFailure(retry, "invalidRequest");
+  assert.equal(
+    (await session.dispatch(request(3, { type: "dispose" }))).event.type,
+    "disposed",
+  );
+  assert.deepEqual(adapter.operations, ["load", "dispose"]);
+});
+
+test("makes a failed confirmation terminal until disposal", async () => {
+  const adapter = new RecordingAdapter();
+  const session = new RuntimeSession(adapter);
+
+  await session.dispatch(request(1, { type: "load", plan }));
+  await session.dispatch(request(2, { type: "prepare", evaluationStart: 10 }));
+  await session.dispatch(request(3, { type: "seek", frame: 10 }));
+  adapter.confirmError = new RuntimeAdapterError(
+    "readinessTimeout",
+    "decoded frame did not reach the compositor",
+    ["video:3"],
+  );
+
+  const failure = await session.dispatch(
+    request(4, { type: "confirm", frame: 10 }),
+  );
+  assertFailure(failure, "readinessTimeout");
+
+  const retry = await session.dispatch(
+    request(5, { type: "confirm", frame: 10 }),
+  );
+  assertFailure(retry, "invalidRequest");
+  assert.equal(
+    (await session.dispatch(request(6, { type: "dispose" }))).event.type,
+    "disposed",
+  );
+});
+
 test("contains untyped adapter exceptions", async () => {
   const adapter = new RecordingAdapter();
   const session = new RuntimeSession(adapter);
@@ -199,6 +264,19 @@ test("contains untyped adapter exceptions", async () => {
       "runtime adapter threw an untyped error",
     );
   }
+
+  const retry = await session.dispatch(request(4, { type: "seek", frame: 10 }));
+  assertFailure(retry, "invalidRequest");
+  assert.equal(
+    (await session.dispatch(request(5, { type: "dispose" }))).event.type,
+    "disposed",
+  );
+  assert.deepEqual(adapter.operations, [
+    "load",
+    "prepare:10",
+    "seek:10",
+    "dispose",
+  ]);
 });
 
 test("reserves readiness timeouts for operations that wait for a frame", async () => {
@@ -273,13 +351,37 @@ test("rejects interval relationships outside the browser plan contract", async (
   emptyOutput.output = { start: 10, end: 10 };
   const escapedOutput = structuredClone(plan);
   escapedOutput.output = { start: 9, end: 20 };
+  const escapedShot = structuredClone(plan);
+  escapedShot.scenes[0]!.interval = { start: 12, end: 18 };
+  const escapedVideo = structuredClone(plan);
+  escapedVideo.shots[0]!.interval = { start: 13, end: 17 };
 
   for (const invalidPlan of [
     reversedEvaluation,
     reversedOutput,
     emptyOutput,
     escapedOutput,
+    escapedShot,
+    escapedVideo,
   ]) {
+    const adapter = new RecordingAdapter();
+    const session = new RuntimeSession(adapter);
+    const rejected = await session.dispatch(
+      request(1, { type: "load", plan: invalidPlan }),
+    );
+
+    assertFailure(rejected, "invalidRequest");
+    assert.deepEqual(adapter.operations, []);
+  }
+});
+
+test("rejects invalid or duplicate authored node identity", async () => {
+  const invalidIdentity = structuredClone(plan);
+  invalidIdentity.film.authoredId = "bad id";
+  const duplicateIdentity = structuredClone(plan);
+  duplicateIdentity.shots[0]!.node.authoredId = "scene";
+
+  for (const invalidPlan of [invalidIdentity, duplicateIdentity]) {
     const adapter = new RecordingAdapter();
     const session = new RuntimeSession(adapter);
     const rejected = await session.dispatch(
@@ -316,11 +418,18 @@ test("rejects invalid browser overlay facts before adapter loading", async () =>
   firstOverlay(escapedOverlay).interval = { start: 9, end: 18 };
   const duplicateComponent = structuredClone(plan);
   duplicateComponent.overlays.push({ ...firstOverlay(duplicateComponent) });
+  const noncanonicalComponent = structuredClone(plan);
+  noncanonicalComponent.overlays.push({
+    ...firstOverlay(noncanonicalComponent),
+    node: { nodeId: 5, authoredId: "second-title" },
+  });
+  noncanonicalComponent.overlays.reverse();
 
   for (const invalidPlan of [
     emptyOverlay,
     escapedOverlay,
     duplicateComponent,
+    noncanonicalComponent,
   ]) {
     const adapter = new RecordingAdapter();
     const session = new RuntimeSession(adapter);

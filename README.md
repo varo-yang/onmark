@@ -11,8 +11,8 @@ Delivery gates one through seven are complete. No later delivery gate is
 currently active. Gate one renders and independently verifies one real
 screenplay through the compiler, browser protocol, Chromium, and FFmpeg. Gate
 two partitions one media-bearing two-shot film into two local Render Units and
-proves that their assembled
-decoded video and audio match the whole-film baseline. Gate three sends those
+proves that their assembled decoded video and audio match the whole-film
+baseline. Gate three sends those
 same portable units to two concurrent arm64 Lambda workers, verifies their
 immutable S3 frame artifacts against a remote whole-film capture by canonical
 raw-RGBA pixels, and assembles the partitions through the shared H.264/AAC
@@ -29,10 +29,11 @@ presentation code remains sequential. Deployment work remains frozen.
 
 Gate six carries content-addressed local image, SVG, and font resources through
 bounded browser readiness that names the resource still pending. It also gives
-the existing closed overlay facts Rust-owned component identity that remains
-stable across unit projections. Its Linux exit conformance proves equal pixels
-across cold browsers and whole-film versus partitioned execution without adding
-a general props channel, new screenplay spelling, or a second timing system.
+film, scene, shot, and content facts Rust-owned node identity and ownership that
+remain stable across unit projections. Its Linux exit conformance proves equal
+pixels across cold browsers and whole-film versus partitioned execution without
+adding a general props channel, new screenplay spelling, or a second timing
+system.
 
 Gate seven admits transparent browser presentation over persistent native media
 decode and composition for an explicitly separable visual capability. Its
@@ -54,40 +55,44 @@ there is still no queue, lease system, scheduler, or coordinator.
 
 ## Render
 
-The native command discovers `presentation.ts` beside the screenplay and writes
-a no-clobber `renders/<name>.mp4` by default:
+The native command needs only the screenplay as authored input and writes a
+no-clobber `renders/<name>.mp4` by default. A same-stem stylesheet such as
+`film.css` styles the neutral semantic DOM projection, and an optional
+`film.motion.ts` exports vendor-neutral motion assembled from adapters such as
+`onmark/motion/gsap`.
+`--presentation` remains the explicit escape hatch for unrestricted custom
+browser code:
 
 ```bash
 onmark render film.onmark
 onmark render film.onmark --presentation browser.ts --output review.mp4
 onmark render film.onmark --fps 30000/1001 --width 1920 --height 1080
 onmark render film.onmark --subtitle captions.vtt
-onmark render film.onmark --temporal-capability randomAccess
-onmark render film.onmark --visual-capability separableOverlay
 ```
 
 `--subtitle` imports strict UTF-8 `.srt`, `.vtt`, or `.ass` files without adding
 external-format syntax to the screenplay. Invalid files produce diagnostics
 against their own path and byte spans before browser or media processes start.
 
-`--temporal-capability` defaults to `sequential`. Use `randomAccess` only after
-conformance proves that every requested frame depends solely on immutable input
-and that exact frame; the declaration changes bundle identity and permits the
-Render Graph to split shot-scoped units.
+Presentation capabilities are not command-line assumptions. The built-in
+semantic DOM without authored CSS or motion is admitted for random access;
+stylesheets, motion, and custom presentations remain sequential. Local
+rendering conservatively keeps complete frame composition in Chromium. Stronger
+capabilities belong to conformance-admitted adapters and immutable bundle
+metadata.
 
-`--visual-capability` defaults to `browserComposite`. The
-`separableOverlay` declaration is reserved for presentations whose transparent
-foreground remains independent of primary-video pixels under the checked
-presentation contract. It enters bundle identity and is never inferred from
-source inspection.
-
-Rendering requires `onmark-bundle` and its Node.js runtime, Chrome for Testing's
-`chrome-headless-shell`, `ffmpeg`, and `ffprobe` to be installed. The renderer
-requires headless shell's CDP BeginFrameControl and does not fall back to
-ordinary Chrome. CDP does not currently support BeginFrameControl on macOS, so
-native macOS rendering requires a Linux worker or container. Use the execution
-override flags shown by `onmark render --help` when tools are not on the default
-paths.
+The current source-checkout build requires `onmark-bundle` and its Node.js
+runtime, Chromium, `ffmpeg`, and `ffprobe`; a single installable release artifact
+has not been published yet. On Linux, local rendering uses Chrome for Testing's
+`chrome-headless-shell` and CDP BeginFrameControl. On macOS and Windows, it uses
+ordinary Chrome's portable screenshot backend with the same screenplay,
+browser plan, runtime protocol, and encoder. That desktop path remains an
+experimental local capability until pinned macOS and Windows conformance is in
+CI. Onmark discovers standard Chrome installations there; use the execution
+override flags shown by `onmark render --help` for custom locations. The
+selected capture mode is printed after a successful render and deterministic
+comparisons only apply within the same locked browser environment and capture
+mode.
 
 ## Worker capture
 
@@ -104,8 +109,8 @@ capture-environment identity, the `bundle/` payload files named by that
 request's manifest, and any frozen `assets/sha256/` bytes. The worker accepts no
 screenplay and does not compile source. It publishes one checksum-verified,
 no-clobber frame artifact; retry reuse requires both the planned unit and the
-declared capture environment to match. This command proves the future worker
-interchange locally—it is not a cloud coordinator or a replacement for
+declared capture environment to match. This is the same portable interchange
+used by the Lambda adapter; it is not a cloud coordinator or a replacement for
 `onmark render`.
 
 ## Lambda capture adapter

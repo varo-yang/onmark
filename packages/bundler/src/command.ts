@@ -6,8 +6,10 @@ import { parseArgs } from "node:util";
 
 import {
   BundleError,
+  bundleDomPresentation,
   bundlePresentation,
   type BundleOptions,
+  type DomBundleOptions,
 } from "./presentation.js";
 import {
   BUNDLE_TEMPORAL_CAPABILITIES,
@@ -16,7 +18,7 @@ import {
 
 const USAGE = [
   "Usage: onmark-bundle",
-  "  --entry <path>",
+  "  (--entry <path> | --semantic-dom [--stylesheet <path>] [--motion <path>])",
   "  --output <directory>",
   "  --max-output-bytes <bytes>",
   "  --temporal-capability <sequential|randomAccess>",
@@ -25,21 +27,28 @@ const USAGE = [
 ].join("\n");
 
 type Command =
-  | { readonly kind: "bundle"; readonly options: BundleOptions }
+  | { readonly kind: "custom"; readonly options: BundleOptions }
+  | { readonly kind: "semanticDom"; readonly options: DomBundleOptions }
   | { readonly kind: "help" };
+
+// ── Execution ──
 
 try {
   const command = parseArguments(process.argv.slice(2));
   if (command.kind === "help") {
     process.stdout.write(USAGE);
-  } else {
+  } else if (command.kind === "custom") {
     await bundlePresentation(command.options);
+  } else {
+    await bundleDomPresentation(command.options);
   }
 } catch (error) {
   const failure = commandFailure(error);
   process.stderr.write(`${failure.kind}: ${failure.message}\n`);
   process.exitCode = failure.kind === "configuration" ? 2 : 1;
 }
+
+// ── Arguments ──
 
 function parseArguments(arguments_: readonly string[]): Command {
   const values = commandValues(arguments_);
@@ -50,7 +59,6 @@ function parseArguments(arguments_: readonly string[]): Command {
     return { kind: "help" };
   }
 
-  const entryPoint = oneValue(values.entry, "--entry");
   const outputDirectory = oneValue(values.output, "--output");
   const maxOutputBytes = parseByteLimit(
     oneValue(values["max-output-bytes"], "--max-output-bytes"),
@@ -62,16 +70,47 @@ function parseArguments(arguments_: readonly string[]): Command {
     oneValue(values["visual-capability"], "--visual-capability"),
   );
 
-  return {
-    kind: "bundle",
-    options: {
-      entryPoint,
-      maxOutputBytes,
-      outputDirectory,
-      temporalCapability,
-      visualCapability,
-    },
+  const controls = {
+    maxOutputBytes,
+    outputDirectory,
+    temporalCapability,
+    visualCapability,
   };
+  return presentationCommand(values, controls);
+}
+
+type BundleControls = Omit<BundleOptions, "entryPoint">;
+
+function presentationCommand(
+  values: ReturnType<typeof commandValues>,
+  controls: BundleControls,
+): Exclude<Command, { readonly kind: "help" }> {
+  const entryPoint = optionalOneValue(values.entry, "--entry");
+  const semanticDom = values["semantic-dom"] === true;
+  const motion = optionalOneValue(values.motion, "--motion");
+  const stylesheet = optionalOneValue(values.stylesheet, "--stylesheet");
+
+  if (entryPoint !== undefined) {
+    if (semanticDom || stylesheet !== undefined || motion !== undefined) {
+      throw invalidPresentationSource();
+    }
+    return { kind: "custom", options: { ...controls, entryPoint } };
+  }
+  if (!semanticDom) {
+    throw invalidPresentationSource();
+  }
+  const options: DomBundleOptions = {
+    ...controls,
+    ...(motion === undefined ? {} : { motion }),
+    ...(stylesheet === undefined ? {} : { stylesheet }),
+  };
+  return { kind: "semanticDom", options };
+}
+
+function invalidPresentationSource(): BundleError {
+  return configuration(
+    "use --entry alone or --semantic-dom with optional style and motion files",
+  );
 }
 
 function commandValues(arguments_: readonly string[]) {
@@ -83,7 +122,10 @@ function commandValues(arguments_: readonly string[]) {
         entry: { type: "string", multiple: true },
         help: { type: "boolean" },
         "max-output-bytes": { type: "string", multiple: true },
+        motion: { type: "string", multiple: true },
         output: { type: "string", multiple: true },
+        "semantic-dom": { type: "boolean" },
+        stylesheet: { type: "string", multiple: true },
         "temporal-capability": { type: "string", multiple: true },
         "visual-capability": { type: "string", multiple: true },
       },
@@ -133,6 +175,16 @@ function oneValue(values: readonly string[] | undefined, name: string): string {
   return value;
 }
 
+function optionalOneValue(
+  values: readonly string[] | undefined,
+  name: string,
+): string | undefined {
+  if (values !== undefined && values.length > 1) {
+    throw configuration(`${name} cannot be repeated`);
+  }
+  return values?.[0];
+}
+
 function parseByteLimit(value: string): number {
   const bytes = Number(value);
   if (!Number.isSafeInteger(bytes) || bytes <= 0) {
@@ -140,6 +192,8 @@ function parseByteLimit(value: string): number {
   }
   return bytes;
 }
+
+// ── Failures ──
 
 function configuration(message: string, cause?: unknown): BundleError {
   return new BundleError("configuration", message, cause);

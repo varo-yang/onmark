@@ -5,6 +5,8 @@
 //! random-access proof permits shot-scoped units.
 
 use std::collections::BTreeSet;
+use std::error::Error;
+use std::fmt;
 
 use crate::model::{FrameIndex, FrameInterval, FrozenAssetId, PresentationTemporalCapability};
 use crate::timeline::{TimelineContent, TimelineIr, TimelineShot};
@@ -22,11 +24,15 @@ pub struct RenderGraph {
 
 impl RenderGraph {
     /// Derives dependency regions from solved facts and presentation behavior.
-    #[must_use]
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InvalidRenderGraph`] when a nonempty audio placement starts
+    /// outside every derived visual region.
     pub fn from_timeline(
         timeline: &TimelineIr,
         capability: PresentationTemporalCapability,
-    ) -> Self {
+    ) -> Result<Self, InvalidRenderGraph> {
         let mut regions = match capability {
             PresentationTemporalCapability::Sequential => {
                 vec![RenderRegion::from_timeline(timeline)]
@@ -35,12 +41,12 @@ impl RenderGraph {
                 timeline.shots().map(RenderRegion::from_shot).collect()
             }
         };
-        assign_audio_assets(timeline, &mut regions);
+        assign_audio_assets(timeline, &mut regions)?;
 
-        Self {
+        Ok(Self {
             interval: timeline.interval(),
             regions,
-        }
+        })
     }
 
     /// Returns the half-open interval occupied by the complete film.
@@ -142,16 +148,56 @@ impl RenderRegion {
     }
 }
 
-fn assign_audio_assets(timeline: &TimelineIr, regions: &mut [RenderRegion]) {
+fn assign_audio_assets(
+    timeline: &TimelineIr,
+    regions: &mut [RenderRegion],
+) -> Result<(), InvalidRenderGraph> {
     for audio in timeline.audio() {
         let start = audio.timing().interval().start();
-        let owner = regions
-            .iter_mut()
-            .find(|region| region.owns(start))
-            .expect("Timeline audio starts inside one solved render region");
+        let Some(owner) = regions.iter_mut().find(|region| region.owns(start)) else {
+            return Err(InvalidRenderGraph {
+                asset_id: audio.asset_id(),
+                start,
+            });
+        };
         owner.media_assets.insert(audio.asset_id());
     }
+    Ok(())
 }
+
+/// Timeline inconsistency that prevents render-dependency construction.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct InvalidRenderGraph {
+    asset_id: FrozenAssetId,
+    start: FrameIndex,
+}
+
+impl InvalidRenderGraph {
+    /// Returns the audio asset that could not be assigned.
+    #[must_use]
+    pub const fn asset_id(self) -> FrozenAssetId {
+        self.asset_id
+    }
+
+    /// Returns its unowned absolute start frame.
+    #[must_use]
+    pub const fn start(self) -> FrameIndex {
+        self.start
+    }
+}
+
+impl fmt::Display for InvalidRenderGraph {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "audio asset {} starts outside every render region at frame {}",
+            self.asset_id,
+            self.start.get(),
+        )
+    }
+}
+
+impl Error for InvalidRenderGraph {}
 
 /// Immutable local-unit candidates produced by graph partitioning.
 ///
@@ -241,6 +287,7 @@ mod tests {
             &timeline,
             PresentationTemporalCapability::RandomAccess,
         )
+        .expect("the fixture timeline has complete render ownership")
         .into_partition();
 
         assert!(partition.units()[0].requires_media_asset(asset));
@@ -255,6 +302,7 @@ mod tests {
             &timeline,
             PresentationTemporalCapability::RandomAccess,
         )
+        .expect("empty audio requires no render ownership")
         .into_partition();
 
         assert!(
@@ -266,6 +314,21 @@ mod tests {
     }
 
     #[test]
+    fn rejects_audio_without_an_owning_region() {
+        let asset = FrozenAssetId::from_sha256([7; 32]);
+        let timeline = timeline_with_audio(asset, interval(20, 21));
+
+        let error = super::RenderGraph::from_timeline(
+            &timeline,
+            PresentationTemporalCapability::RandomAccess,
+        )
+        .expect_err("nonempty audio at the film end has no owning region");
+
+        assert_eq!(error.asset_id(), asset);
+        assert_eq!(error.start(), FrameIndex::new(20));
+    }
+
+    #[test]
     fn sequential_presentations_form_one_film_region() {
         let asset = FrozenAssetId::from_sha256([7; 32]);
         let timeline = timeline_with_audio(asset, interval(5, 15));
@@ -273,6 +336,7 @@ mod tests {
             &timeline,
             PresentationTemporalCapability::Sequential,
         )
+        .expect("the sequential film owns every audio placement")
         .into_partition();
 
         assert_eq!(partition.units().len(), 1);

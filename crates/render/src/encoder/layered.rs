@@ -287,6 +287,55 @@ impl LayeredSession {
         Ok(completion)
     }
 
+    pub(crate) async fn abort(mut self) -> Result<(), EncodeError> {
+        self.input.take();
+        let process = self.abort_process().await;
+        let frames = self.abort_frame_reader().await;
+        let stderr = self.abort_stderr().await;
+
+        process?;
+        frames?;
+        stderr
+    }
+
+    async fn abort_process(&mut self) -> Result<(), EncodeError> {
+        if self.reaped {
+            return Ok(());
+        }
+
+        let _ = self.child.start_kill();
+        match timeout(CLEANUP_TIMEOUT, self.child.wait()).await {
+            Ok(Ok(_)) => {
+                self.reaped = true;
+                Ok(())
+            }
+            Ok(Err(source)) => Err(EncodeError::io(
+                EncodeErrorKind::ProcessControl,
+                &self.diagnostic_path,
+                "failed to reap aborted layered FFmpeg composition",
+                source,
+            )),
+            Err(_) => Err(self.error(
+                EncodeErrorKind::ProcessControl,
+                "aborted layered FFmpeg composition missed its cleanup deadline",
+            )),
+        }
+    }
+
+    async fn abort_frame_reader(&mut self) -> Result<(), EncodeError> {
+        if self.frame_reader.is_none() {
+            return Ok(());
+        }
+        self.finish_frame_reader().await
+    }
+
+    async fn abort_stderr(&mut self) -> Result<(), EncodeError> {
+        if self.stderr.is_none() {
+            return Ok(());
+        }
+        self.finish_stderr().await.map(drop)
+    }
+
     async fn wait_for_exit(&mut self) -> Result<ExitStatus, EncodeError> {
         match timeout(self.limits.inactivity_timeout(), self.child.wait()).await {
             Ok(Ok(status)) => {

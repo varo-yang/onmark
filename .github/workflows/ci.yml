@@ -147,6 +147,7 @@ jobs:
         run: |
           pnpm --filter @onmark/runtime build
           pnpm --filter @onmark/authoring build
+          pnpm --filter @onmark/motion-gsap build
           pnpm --filter @onmark/bundler build
           chmod +x packages/bundler/dist/src/command.js
 
@@ -182,6 +183,7 @@ jobs:
           ONMARK_BUNDLER: ${{ runner.temp }}/onmark-tools/onmark-bundle
           ONMARK_CLI: ${{ github.workspace }}/target/release/onmark
           ONMARK_HEADLESS_SHELL: ${{ runner.temp }}/onmark-tools/chrome-headless-shell
+          ONMARK_PORTABLE_CHROME: ${{ runner.temp }}/onmark-tools/chrome-headless-shell
           ONMARK_FFMPEG: /usr/bin/ffmpeg
           ONMARK_FFPROBE: /usr/bin/ffprobe
         run: |

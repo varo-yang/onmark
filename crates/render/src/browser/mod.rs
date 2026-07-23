@@ -11,5 +11,5 @@ pub use error::{BrowserError, BrowserErrorKind};
 pub(crate) use frame::DecodedRgba;
 pub use frame::{CapturedFrame, EncodedPng, RawRgbaHash};
 pub use limits::{BrowserLimits, InvalidBrowserLimits};
-pub use process::BrowserLaunchPolicy;
+pub use process::{BrowserCaptureMode, BrowserLaunchPolicy};
 pub use session::BrowserSession;

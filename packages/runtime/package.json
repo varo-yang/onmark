@@ -14,7 +14,7 @@
     }
   },
   "scripts": {
-    "build": "tsc",
+    "build": "node ../../scripts/clean-typescript-output.mjs && tsc",
     "test": "pnpm build && node --test dist/test/*.test.js",
     "typecheck": "tsc --noEmit"
   }

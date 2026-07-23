@@ -260,6 +260,47 @@ impl FfmpegSession {
         })
     }
 
+    /// Stops an unfinished encoder and observes its bounded process cleanup.
+    pub(crate) async fn abort(mut self) -> Result<(), EncodeError> {
+        self.stdin.take();
+        let process = self.abort_process().await;
+        let stderr = self.abort_stderr().await;
+
+        process?;
+        stderr
+    }
+
+    async fn abort_process(&mut self) -> Result<(), EncodeError> {
+        if self.reaped {
+            return Ok(());
+        }
+
+        let _ = self.child.start_kill();
+        match timeout(CLEANUP_TIMEOUT, self.child.wait()).await {
+            Ok(Ok(_)) => {
+                self.reaped = true;
+                Ok(())
+            }
+            Ok(Err(source)) => Err(EncodeError::io(
+                EncodeErrorKind::ProcessControl,
+                &self.output,
+                "failed to reap an aborted FFmpeg encoder",
+                source,
+            )),
+            Err(_) => Err(self.error(
+                EncodeErrorKind::ProcessControl,
+                "aborted FFmpeg encoder missed its cleanup deadline",
+            )),
+        }
+    }
+
+    async fn abort_stderr(&mut self) -> Result<(), EncodeError> {
+        if self.stderr.is_none() {
+            return Ok(());
+        }
+        self.finish_stderr().await.map(drop)
+    }
+
     fn error(&self, kind: EncodeErrorKind, message: &'static str) -> EncodeError {
         EncodeError::new(kind, &self.output, message)
     }
@@ -440,15 +481,20 @@ mod tests {
 
         assert_eq!(error.kind(), EncodeErrorKind::InputWrite);
         assert!(error.to_string().contains("decoder rejected the PNG frame"));
-        drop(session);
+        session
+            .abort()
+            .await
+            .expect("aborting an already observed encoder failure is idempotent");
         assert!(!fixture.output().exists());
     }
 
     #[tokio::test]
     async fn browser_time_does_not_consume_encoder_inactivity_budget() {
-        let fixture = EncoderFixture::new("failed.mp4", Duration::from_millis(20), 4_096);
+        // Leave enough post-write budget for a loaded CI host to reap the
+        // intentionally failing child; only the pre-write pause crosses it.
+        let fixture = EncoderFixture::new("failed.mp4", Duration::from_secs(1), 4_096);
         let mut session = fixture.start();
-        sleep(Duration::from_millis(40)).await;
+        sleep(Duration::from_millis(1_100)).await;
 
         session
             .write_frame(&EncodedPng::new(vec![0]))
@@ -469,6 +515,19 @@ mod tests {
         let error = fixture.finish().await;
 
         assert_eq!(error.kind(), EncodeErrorKind::Timeout);
+        assert!(!fixture.output().exists());
+    }
+
+    #[tokio::test]
+    async fn observes_explicit_abort_and_removes_partial_output() {
+        let fixture = EncoderFixture::new("aborted.mp4", Duration::from_secs(1), 4_096);
+        let session = fixture.start();
+
+        session
+            .abort()
+            .await
+            .expect("the fixture encoder must be reaped explicitly");
+
         assert!(!fixture.output().exists());
     }
 

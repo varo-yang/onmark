@@ -57,7 +57,7 @@ The initial Rust workspace has only:
 
 Do not create coordinator, Lambda, render-graph, planner, syntax, or diagnostics crates merely because those concepts have names. Add modules first. The Lambda deployment surface appears at delivery gate three and wraps `onmark-render`; it never forks the engine.
 
-`onmark-core` module dependencies are enforced as a DAG: model is foundational; syntax/diagnostics/timeline may depend on model; compiler may depend on all four; protocol may depend on model/diagnostics/timeline. Domain modules never depend on protocol. New edges require an architecture-doc change and dependency-law test update.
+`onmark-core` module dependencies are enforced as a DAG: model is foundational; syntax/diagnostics/timeline may depend on model; render_graph may depend on model/timeline; compiler may depend on model/syntax/diagnostics/timeline; protocol may depend on model/diagnostics/timeline. Domain modules never depend on protocol. New edges require an architecture-doc change and dependency-law test update.
 
 `@onmark/runtime` is below authoring and bundler. Runtime owns frame hooks and temporal capability declarations. Authoring may import its types-only entrypoint; runtime never imports authoring or bundler.
 

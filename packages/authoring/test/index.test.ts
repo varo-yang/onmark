@@ -1,4 +1,4 @@
-// Public DOM-binding behavior over a controllable browser-document capability.
+// Public semantic DOM behavior over a deliberately small browser fake.
 
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -6,103 +6,140 @@ import test from "node:test";
 import {
   PRESENTATION_CLASSES,
   createDomPresentationBindings,
+  combineMotion,
 } from "../src/index.js";
 import type {
   FrameEffect,
   PresentationResource,
-  RuntimeOverlay,
   RuntimePlan,
-  RuntimeVideo,
 } from "@onmark/runtime/types";
 
-test("binds video and overlay facts into semantic presentation nodes", () => {
+// ── Semantic projection ──
+
+test("projects solved structure into nested semantic nodes", () => {
   const browser = new FakeDocument();
-  const bindings = createDomPresentationBindings({
-    document: asBrowserDocument(browser),
-    videoSource: ({ assetId }) => `./assets/${assetId}`,
-  });
+  const bindings = bindingsFor(browser);
 
-  const video = bindings.bindVideo(VIDEO, 3);
-  const overlay = bindings.bindOverlay(OVERLAY);
-  const videoNode = nodeAt(browser, 0);
-  const overlayNode = nodeAt(browser, 1);
+  const film = bindings.bindFilm(PLAN.film);
+  const scene = bindings.bindScene(PLAN.scenes[0]!);
+  const shot = bindings.bindShot(PLAN.shots[0]!);
+  const video = bindings.bindVideo(PLAN.videos[0]!);
+  const overlay = bindings.bindOverlay(PLAN.overlays[0]!);
 
-  assert.equal(videoNode.className, PRESENTATION_CLASSES.video);
-  assert.deepEqual(videoNode.dataset, { onmarkPlacement: "3" });
-  assert.equal(videoNode.hidden, true);
-  assert.equal(videoNode.muted, true);
-  assert.equal(videoNode.playsInline, true);
-  assert.equal(videoNode.tagName, "video");
-  assert.equal(video.source, `./assets/${VIDEO.assetId}`);
+  assert.equal(browser.body.children[0], film.element);
+  assert.deepEqual(tags(browser.body), [
+    "main",
+    "section",
+    "article",
+    "video",
+    "h1",
+  ]);
+  assert.equal(film.element.className, PRESENTATION_CLASSES.film);
+  assert.equal(scene.element.className, PRESENTATION_CLASSES.scene);
+  assert.equal(shot.element.className, PRESENTATION_CLASSES.shot);
   assert.equal(
-    overlayNode.className,
+    (video.element as unknown as FakeElement).className,
+    PRESENTATION_CLASSES.video,
+  );
+  assert.equal(
+    overlay.element.className,
     `${PRESENTATION_CLASSES.overlay} ${PRESENTATION_CLASSES.title}`,
   );
-  assert.deepEqual(overlayNode.dataset, { onmarkComponent: "7" });
-  assert.equal(overlayNode.hidden, true);
-  assert.equal(overlayNode.tagName, "div");
-  assert.equal(overlayNode.textContent, "Opening");
+  assert.equal(shot.element.id, "hero");
+  assert.deepEqual(shot.element.dataset, {
+    onmarkId: "hero",
+    onmarkNode: "2",
+  });
+  assert.equal(overlay.element.textContent, "Opening");
+  assert.equal(video.source, `./assets/${PLAN.videos[0]!.assetId}`);
 
+  film.setVisible(true);
+  scene.setVisible(true);
+  shot.setVisible(true);
   video.setVisible(true);
   overlay.setVisible(true);
   assert.equal(
-    browser.nodes.every(({ hidden }) => !hidden),
+    browser.created.every(({ hidden }) => !hidden),
     true,
   );
 
-  video.dispose();
   overlay.dispose();
+  video.dispose();
+  shot.dispose();
+  scene.dispose();
+  film.dispose();
   assert.equal(
-    browser.nodes.every(({ removed }) => removed),
+    browser.created.every(({ removed }) => removed),
     true,
   );
 });
 
-test("maps every overlay role to its stable semantic class", () => {
+test("maps every overlay role to one stable semantic element", () => {
   const browser = new FakeDocument();
-  const bindings = createDomPresentationBindings({
-    document: asBrowserDocument(browser),
-    videoSource: () => "unused",
+  const bindings = bindingsFor(browser);
+  bindings.bindFilm(PLAN.film);
+  bindings.bindScene(PLAN.scenes[0]!);
+  bindings.bindShot(PLAN.shots[0]!);
+
+  const title = bindings.bindOverlay(PLAN.overlays[0]!);
+  const callToAction = bindings.bindOverlay({
+    ...PLAN.overlays[0]!,
+    node: { nodeId: 5, authoredId: null },
+    kind: "callToAction",
+  });
+  const caption = bindings.bindOverlay({
+    ...PLAN.overlays[0]!,
+    node: { nodeId: 6, authoredId: null },
+    shotId: null,
+    kind: "caption",
   });
 
-  bindings.bindOverlay({ ...OVERLAY, kind: "title" });
-  bindings.bindOverlay({ ...OVERLAY, kind: "callToAction" });
-  bindings.bindOverlay({ ...OVERLAY, kind: "caption" });
-
-  assert.deepEqual(
-    browser.nodes.map(({ className }) => className),
-    [
-      `${PRESENTATION_CLASSES.overlay} ${PRESENTATION_CLASSES.title}`,
-      `${PRESENTATION_CLASSES.overlay} ${PRESENTATION_CLASSES.callToAction}`,
-      `${PRESENTATION_CLASSES.overlay} ${PRESENTATION_CLASSES.caption}`,
-    ],
+  assert.equal(title.element.tagName, "h1");
+  assert.equal(callToAction.element.tagName, "div");
+  assert.equal(
+    browser.body.children[0]?.children.includes(
+      caption.element as unknown as FakeElement,
+    ),
+    true,
   );
 });
 
-test("binds one immutable frame-effect collection to the loaded plan", () => {
+// ── Extension boundary ──
+
+test("delivers one immutable semantic view to local motion", async () => {
   const browser = new FakeDocument();
   const effect: FrameEffect = {
     apply(): void {},
     dispose(): void {},
   };
-  let received: RuntimePlan | undefined;
+  let targetKinds: readonly string[] = [];
   const bindings = createDomPresentationBindings({
     document: asBrowserDocument(browser),
-    frameEffects(plan) {
-      received = plan;
-      return [effect];
+    motion: {
+      bind(context) {
+        targetKinds = context.targets.map(({ kind }) => kind);
+        assert.equal(Object.isFrozen(context.targets), true);
+        assert.deepEqual(context.targets[0]?.interval, PLAN.evaluation);
+        return { effects: [effect], resources: [] };
+      },
     },
     videoSource: () => "unused",
   });
 
-  const effects = bindings.bindFrameEffects(PLAN);
+  bindings.bindFilm(PLAN.film);
+  bindings.bindScene(PLAN.scenes[0]!);
+  bindings.bindShot(PLAN.shots[0]!);
+  bindings.bindVideo(PLAN.videos[0]!);
+  bindings.bindOverlay(PLAN.overlays[0]!);
+  const extensions = await bindings.bindExtensions(PLAN);
 
-  assert.equal(received, PLAN);
-  assert.deepEqual(effects, [effect]);
-  assert.equal(Object.isFrozen(effects), true);
+  assert.deepEqual(targetKinds, ["film", "scene", "shot", "video", "title"]);
+  assert.equal(extensions.effects.length, 1);
+  assert.notEqual(extensions.effects[0], effect);
+  assert.equal(Object.isFrozen(extensions.effects), true);
 });
 
-test("binds one immutable resource collection to the loaded plan", () => {
+test("binds one immutable resource collection through motion", async () => {
   const browser = new FakeDocument();
   const resource: PresentationResource = {
     id: "poster",
@@ -110,69 +147,146 @@ test("binds one immutable resource collection to the loaded plan", () => {
     prepare(): void {},
     dispose(): void {},
   };
-  let received: RuntimePlan | undefined;
   const bindings = createDomPresentationBindings({
     document: asBrowserDocument(browser),
-    resources(plan) {
-      received = plan;
-      return [resource];
+    motion: {
+      bind() {
+        return { effects: [], resources: [resource] };
+      },
     },
     videoSource: () => "unused",
   });
 
-  const resources = bindings.bindResources(PLAN);
+  bindings.bindFilm(PLAN.film);
+  const extensions = await bindings.bindExtensions(PLAN);
 
-  assert.equal(received, PLAN);
-  assert.deepEqual(resources, [resource]);
-  assert.equal(Object.isFrozen(resources), true);
+  assert.equal(extensions.resources[0]?.id, resource.id);
+  assert.notEqual(extensions.resources[0], resource);
+  assert.equal(Object.isFrozen(extensions.resources), true);
 });
+
+test("releases prior extensions when later motion binding fails", async () => {
+  const browser = new FakeDocument();
+  const released: string[] = [];
+  const effect = disposableEffect(() => {
+    released.push("effect");
+    throw new Error("effect cleanup failed");
+  });
+  const motion = combineMotion(
+    {
+      bind() {
+        return {
+          effects: [effect],
+          resources: [disposableResource(() => released.push("resource"))],
+        };
+      },
+    },
+    {
+      bind(): never {
+        effect.dispose = () => {
+          released.push("mutated");
+        };
+        throw new Error("motion binding failed");
+      },
+    },
+  );
+  const bindings = createDomPresentationBindings({
+    document: asBrowserDocument(browser),
+    motion,
+    videoSource: () => "unused",
+  });
+
+  bindings.bindFilm(PLAN.film);
+  await assert.rejects(bindings.bindExtensions(PLAN), AggregateError);
+  assert.deepEqual(released, ["effect", "resource"]);
+});
+
+// ── Fixture ──
 
 const PLAN: RuntimePlan = {
   timelineVersion: 1,
   frameRate: { numerator: 30, denominator: 1 },
-  evaluation: { start: 0, end: 1 },
-  output: { start: 0, end: 1 },
-  videos: [],
-  overlays: [],
+  evaluation: { start: 0, end: 60 },
+  output: { start: 0, end: 60 },
+  film: { nodeId: 0, authoredId: "film" },
+  scenes: [
+    {
+      node: { nodeId: 1, authoredId: "opening" },
+      interval: { start: 0, end: 60 },
+    },
+  ],
+  shots: [
+    {
+      node: { nodeId: 2, authoredId: "hero" },
+      sceneId: 1,
+      interval: { start: 0, end: 60 },
+    },
+  ],
+  videos: [
+    {
+      node: { nodeId: 3, authoredId: null },
+      shotId: 2,
+      assetId:
+        "sha256:0101010101010101010101010101010101010101010101010101010101010101",
+      interval: { start: 0, end: 60 },
+      sourceFrameRate: { numerator: 30, denominator: 1 },
+    },
+  ],
+  overlays: [
+    {
+      node: { nodeId: 4, authoredId: null },
+      shotId: 2,
+      kind: "title",
+      text: "Opening",
+      interval: { start: 0, end: 60 },
+    },
+  ],
 };
 
-const VIDEO: RuntimeVideo = {
-  assetId:
-    "sha256:0101010101010101010101010101010101010101010101010101010101010101",
-  interval: { start: 0, end: 1 },
-  sourceFrameRate: { numerator: 30, denominator: 1 },
-};
+function disposableEffect(dispose: () => void): FrameEffect {
+  return { apply(): void {}, dispose };
+}
 
-const OVERLAY: RuntimeOverlay = {
-  componentId: 7,
-  kind: "title",
-  text: "Opening",
-  interval: { start: 0, end: 1 },
-};
+function disposableResource(dispose: () => void): PresentationResource {
+  return { id: "test", kind: "custom", prepare(): void {}, dispose };
+}
+
+function bindingsFor(browser: FakeDocument) {
+  return createDomPresentationBindings({
+    document: asBrowserDocument(browser),
+    videoSource: ({ assetId }) => `./assets/${assetId}`,
+  });
+}
 
 class FakeDocument {
-  readonly nodes: FakeElement[] = [];
-  readonly body = {
-    append: (element: FakeElement): void => {
-      this.nodes.push(element);
-    },
-  };
+  readonly body = new FakeElement("body");
+  readonly created: FakeElement[] = [];
 
   createElement(tagName: string): FakeElement {
-    return new FakeElement(tagName);
+    const element = new FakeElement(tagName);
+    this.created.push(element);
+    return element;
   }
 }
 
 class FakeElement {
-  className = "";
+  readonly children: FakeElement[] = [];
   readonly dataset: Record<string, string> = {};
+  className = "";
   hidden = false;
+  id = "";
   muted = false;
+  parent: FakeElement | undefined;
   playsInline = false;
   removed = false;
   textContent: string | null = null;
 
   constructor(readonly tagName: string) {}
+
+  append(element: FakeElement): void {
+    element.parent = this;
+    this.children.push(element);
+  }
 
   remove(): void {
     this.removed = true;
@@ -180,13 +294,13 @@ class FakeElement {
 }
 
 function asBrowserDocument(document: FakeDocument): Document {
-  // The fake deliberately implements only the DOM capabilities the public
-  // authoring facade consumes.
   return document as unknown as Document;
 }
 
-function nodeAt(document: FakeDocument, index: number): FakeElement {
-  const node = document.nodes[index];
-  assert.ok(node);
-  return node;
+function tags(root: FakeElement): string[] {
+  const result: string[] = [];
+  for (const child of root.children) {
+    result.push(child.tagName, ...tags(child));
+  }
+  return result;
 }

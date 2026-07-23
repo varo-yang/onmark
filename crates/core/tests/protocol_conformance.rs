@@ -79,20 +79,51 @@ fn browser_plan_requires_an_admitted_rate_for_every_video() {
 }
 
 #[test]
-fn browser_plan_retains_solved_overlay_facts() {
+fn browser_plan_retains_solved_structure_and_content_ownership() {
     let plan = serde_json::to_value(gate_one_plan()).expect("the browser plan must serialize");
 
+    assert_eq!(
+        plan["film"],
+        serde_json::json!({ "nodeId": 0, "authoredId": null }),
+    );
+    assert_eq!(
+        plan["scenes"],
+        serde_json::json!([{
+            "node": { "nodeId": 1, "authoredId": null },
+            "interval": { "start": 0, "end": 75 }
+        }]),
+    );
+    assert_eq!(
+        plan["shots"],
+        serde_json::json!([{
+            "node": { "nodeId": 2, "authoredId": null },
+            "sceneId": 1,
+            "interval": { "start": 0, "end": 75 }
+        }]),
+    );
+    assert_eq!(
+        plan["videos"],
+        serde_json::json!([{
+            "node": { "nodeId": 3, "authoredId": null },
+            "shotId": 2,
+            "assetId": "sha256:0101010101010101010101010101010101010101010101010101010101010101",
+            "interval": { "start": 0, "end": 75 },
+            "sourceFrameRate": { "numerator": 30, "denominator": 1 }
+        }]),
+    );
     assert_eq!(
         plan["overlays"],
         serde_json::json!([
             {
-                "componentId": 0,
+                "node": { "nodeId": 4, "authoredId": null },
+                "shotId": 2,
                 "kind": "title",
                 "text": "Opening",
                 "interval": { "start": 15, "end": 75 }
             },
             {
-                "componentId": 1,
+                "node": { "nodeId": 5, "authoredId": null },
+                "shotId": 2,
                 "kind": "callToAction",
                 "text": "Buy now",
                 "interval": { "start": 45, "end": 75 }
