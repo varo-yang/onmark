@@ -424,7 +424,7 @@ onmark/
 │   ├── render/     # browser, FFmpeg encoding, local executor
 │   └── cli/        # native tool face and composition root
 ├── packages/
-│   ├── runtime/ authoring/ motion-gsap/ bundler/
+│   ├── runtime/ authoring/ motion-gsap/ bundler/ launcher/
 ├── scripts/     # repository-only generation and quality checks
 ├── deploy/aws-lambda/  # Rust Lambda/S3 adapter after artifact conformance
 ├── schemas/ conformance/ evals/ examples/ docs/
@@ -444,16 +444,18 @@ its only product dependency is runtime's types-only public surface. Bundler is
 a separate package because it executes under Node, owns the esbuild and
 filesystem dependency budget, and produces a presentation directory consumed
 independently by native rendering. The CLI is a distinct release artifact that
-combines core compilation, media probing, the
-bundler process, and native rendering without moving their implementation
-details into one crate. The optional GSAP adapter is an internal package because
-its vendor dependency budget is independent of the vendor-free authoring
-facade. Inside the source workspace, authors consume the candidate
-`onmark/motion/gsap` facade. The root package export map owns that mapping, and
+combines core compilation, media probing, the bundler process, and native
+rendering without moving their implementation details into one crate. The
+private launcher package is the Node/npm process boundary for that artifact. It
+may depend on Node built-ins and the pinned browser installer, and it may start
+only the product bundler and native CLI; no product package depends back on it.
+The optional GSAP adapter is an internal package because its vendor dependency
+budget is independent of the vendor-free authoring facade. Inside the source
+workspace, authors consume the `onmark/motion/gsap` facade. The root package
+export map owns that mapping, and
 the bundler resolves every public `onmark/*` import through the map instead of
-selecting individual vendors.
-It is not a published product contract until an installable release artifact
-and external-consumer check exist.
+selecting individual vendors. The source-workspace mapping alone is not a
+product contract; the desktop admission below is its release owner.
 `onmark-aws-lambda` is a distinct Rust release artifact
 because Lambda is a different runtime and its handler owns the
 `aws-config`, `aws-sdk-s3`, and `lambda_runtime` dependency budget. Its
@@ -471,6 +473,52 @@ modules inside core. Render graph and planning initially join core at gate two.
 Worker execution belongs to render. Remote orchestration remains an external,
 short-lived composition concern unless a later product proves that durable
 coordination is necessary.
+
+### Desktop release artifact
+
+The desktop product exposes one `onmark` package, one `onmark` command, and the
+`onmark/authoring` and `onmark/motion/gsap` facades. Internal workspace packages
+are implementation modules, not installation steps.
+
+The private launcher is a thin npm boundary rather than a second CLI. It selects
+one optional platform package and passes explicit Node, bundler, browser
+provisioner, FFmpeg, and ffprobe paths to the native command. Rust still owns
+arguments, diagnostics, compilation, rendering, and exit status. Browser
+provisioning begins only after authored diagnostics, and no ambient executable
+is a silent fallback.
+
+All release automation is co-located under `scripts/release/`.
+`assemble-package.mjs` projects already-built TypeScript modules into the
+32 MiB public package, closes internal declaration imports, and hashes every
+payload except its own manifest. `cargo xtask release sidecar` admits the native
+`onmark`, FFmpeg, ffprobe, source archives, build record, and licenses into one
+target-specific package with a 384 MiB ceiling. Both assemblers use private
+staging and one final rename; neither compiles source, installs dependencies, or
+publishes.
+
+`media-sources.json` fixes every media source by URL, byte length, and SHA-256.
+The adjacent fetcher is the only network owner, while `build-media.sh` consumes
+only admitted local archives with autodetection, network, shared libraries, and
+nonfree components disabled. The sidecar rechecks the source manifest and build
+script byte for byte before admitting target binary formats and provenance.
+
+`packages/launcher/desktop-release.json` is the single supported-target and
+browser contract. It owns the pinned Chrome for Testing build, browser product,
+and archive digest; the native sidecar assembler rejects a differing target
+matrix. The launcher installs the selected browser through a bounded
+cross-process lock into a content-addressed cache and publishes it by atomic
+rename.
+
+The manual desktop-release workflow admits macOS arm64, Linux x64, and Windows
+x64 only after installing the two produced npm tarballs into an empty consumer
+and rendering the same screenplay in two independent browser sessions. It
+checks exact frame count, decoded audio, canonical raw-RGBA identity,
+product-import bundling, and no-clobber output. Cross-compilation and binary
+format inspection alone never establish target support.
+
+The Lambda ZIP remains a separate deployment artifact. Its bootstrap, archive
+budget, `/tmp` lifecycle, and S3 contract are not reused as desktop installer
+semantics.
 
 Gate one's native command is deliberately narrow: `onmark render <screenplay>`.
 It bundles a neutral semantic DOM presentation plus optional same-stem
@@ -569,24 +617,29 @@ lives under `scripts/`; it is not a product package or a miscellaneous
 application layer. Its Cargo manifest exists solely to give the Rust schema
 generator a pinned build-only dependency budget and a stable `cargo xtask` entry
 point. That binary is consumed only by developers and CI and may depend on core
-and `onmark-aws-lambda` with their `schema` features, `schemars`, and
-`serde`/`serde_json`; it disables the Lambda package's default runtime feature,
-so schema generation does not link AWS. Product crates and packages never
-depend on it. The Lambda dependency exists solely to publish that deployment
+and `onmark-aws-lambda` with their `schema` features, `schemars`,
+`serde`/`serde_json`, `sha2` for native release identities, and `tempfile` for
+private sidecar staging; it disables the Lambda package's default runtime feature, so
+schema generation does not link AWS. Product crates and packages never depend
+on it. The Lambda dependency exists solely to publish that deployment
 boundary's schemas, not to smuggle AWS into core. The adjacent Node generator
 may use the pinned schema-to-TypeScript and validation toolchain. `cargo xtask
 schema` writes every versioned schema, then invokes that generator. `cargo
 xtask eval audio` independently regrades the frozen audio-language experiment.
+The adjacent release scripts assemble the public npm package and admitted media;
+`cargo xtask release sidecar` assembles only the native platform payload. None
+of these tools installs or publishes product artifacts.
 `json-schema-to-typescript` emits reviewable browser types into runtime and the
 manifest type into bundler; Ajv emits standalone browser validation code at
 build time. The Lambda schemas intentionally have no TypeScript codec until a
-real TypeScript caller exists. Oxlint, a narrow repository-shape check,
-Prettier, and the pinned `@puppeteer/browsers` installer are repository-only
-development tools and never enter a product artifact. Real-process CI uses that
-installer only to fetch the exact Chrome for Testing headless-shell build under
-test. The browser runtime does not compile schemas dynamically. Exact tool
-versions are pinned in the lockfiles and `mise.toml`, and CI rejects stale
-generated artifacts.
+real TypeScript caller exists. Oxlint, a narrow repository-shape check, and
+Prettier are repository-only development tools and never enter a product
+artifact. Real-process CI uses the pinned `@puppeteer/browsers` installer to
+fetch the exact Chrome for Testing headless-shell build under test; the desktop
+launcher uses the same library as a production dependency to verify and expand
+its admitted release archive. The browser runtime does not compile schemas
+dynamically. Exact tool versions are pinned in the lockfiles and `mise.toml`,
+and CI rejects stale generated artifacts.
 
 `onmark-media` depends on core plus `serde` and `serde_json` for a private
 ffprobe response boundary. It starts the configured ffprobe executable directly
@@ -778,6 +831,14 @@ evidence. The boundary deliberately has no watch mode, plugin API, cache,
 development server, external fetch, or general asset-transformation policy.
 Esbuild's internal working memory remains governed by the pinned third-party
 implementation rather than the retained-output ceiling.
+
+`@onmark/launcher` is the private Node/npm boundary of the public desktop
+artifact. It may depend only on Node built-ins and the pinned browser download,
+proxy, and ZIP extraction libraries. It selects one admitted platform sidecar,
+passes explicit product-tool paths into the native CLI, and owns the verified
+browser cache. It does not import bundler, compiler, timing, render-graph,
+browser-runtime, or authoring semantics. Its only consumers are the generated
+public npm package and release conformance.
 
 Rust wire types are the source of truth. `cargo xtask schema` generates
 checked-in versioned JSON Schema, and CI requires regeneration to produce no

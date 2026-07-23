@@ -14,7 +14,7 @@ name = "onmark"
 path = "src/main.rs"
 
 [dependencies]
-clap = { version = "4.5.54", features = ["derive"] }
+clap = { version = "4.5.54", features = ["derive", "env"] }
 onmark-core = { path = "../core" }
 onmark-media = { path = "../media" }
 onmark-render = { path = "../render" }

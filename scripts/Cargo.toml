@@ -19,6 +19,8 @@ onmark-core = { path = "../crates/core", features = ["schema"] }
 schemars = "1.2.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+sha2 = "0.10.9"
+tempfile = "3.27.0"
 
 [lints]
 workspace = true

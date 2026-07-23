@@ -15,7 +15,7 @@ import type {
 export interface GsapMotionContext {
   readonly durationSeconds: number;
   readonly element: HTMLElement;
-  readonly timeline: gsap.core.Timeline;
+  readonly timeline: ReturnType<typeof gsap.timeline>;
 }
 
 /** Adds local animation to one Onmark-owned paused timeline. */

@@ -5,7 +5,6 @@ import { createHash } from "node:crypto";
 import { lstat, mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { fileURLToPath } from "node:url";
 
 import {
   build,
@@ -30,13 +29,13 @@ import {
   type BundleManifest as WireBundleManifest,
 } from "./generated/bundle-manifest.js";
 
-const AUTHORING_ENTRY = fileURLToPath(import.meta.resolve("@onmark/authoring"));
-const RUNTIME_ENTRY = fileURLToPath(import.meta.resolve("@onmark/runtime"));
 // Authored files live outside the package tree, so public facades resolve from
 // Onmark's own export map rather than from the temporary source directory.
 const resolveOnmarkExport = createRequire(
   new URL("../../../../package.json", import.meta.url),
 ).resolve;
+const AUTHORING_ENTRY = resolveOnmarkExport("#onmark-authoring");
+const RUNTIME_ENTRY = resolveOnmarkExport("#onmark-runtime");
 const VISUAL_RESOURCE_LOADERS = {
   ".avif": "file",
   ".gif": "file",

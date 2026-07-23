@@ -90,8 +90,19 @@ jobs:
       - name: Check TypeScript and JavaScript formatting
         run: pnpm format:check
 
+      - name: Check release shell scripts
+        run: bash -n scripts/release/build-media.sh
+
       - name: Test browser runtime
         run: pnpm test
+
+      - name: Assemble public npm package
+        run: |
+          package="$RUNNER_TEMP/onmark-package"
+          node scripts/release/assemble-package.mjs \
+            --source-revision "$GITHUB_SHA" \
+            --output "$package"
+          npm pack "$package" --pack-destination "$RUNNER_TEMP" --silent
 
       - name: Build documentation
         env:
@@ -135,7 +146,10 @@ jobs:
         id: chrome
         run: |
           root="$RUNNER_TEMP/onmark-browser"
-          pnpm exec browsers install chrome-headless-shell@149.0.7827.55 --path "$root"
+          build="$(node -p "require('./packages/launcher/desktop-release.json').browserBuild")"
+          browser="$(node -p "require('./packages/launcher/desktop-release.json').targets['linux-x64'].browser")"
+          test "$browser" = "chrome-headless-shell"
+          pnpm exec browsers install "$browser@$build" --path "$root"
           mapfile -t binaries < <(find "$root" -type f -name chrome-headless-shell -perm /111)
           test "${#binaries[@]}" -eq 1
           dependencies="$(dirname "${binaries[0]}")/deb.deps"

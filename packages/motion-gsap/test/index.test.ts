@@ -1,10 +1,21 @@
 // GSAP adapter behavior under exact, non-monotonic runtime frame requests.
 
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import type { PresentationExtensionContext } from "@onmark/authoring/types";
 import { gsapMotion } from "../src/index.js";
+
+test("emits a self-contained public timeline type", async () => {
+  const declaration = await readFile(
+    new URL("../src/index.d.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(declaration, /import \{ gsap \} from "gsap"/);
+  assert.match(declaration, /ReturnType<typeof gsap\.timeline>/);
+});
 
 test("seeks a paused local timeline from exact runtime frames", async () => {
   const state = { value: 0 };

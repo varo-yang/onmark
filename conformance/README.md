@@ -85,8 +85,9 @@ ONMARK_FFPROBE=/path/to/ffprobe \
 cargo test -p onmark-cli --test render -- --ignored
 ```
 
-CI runs all real-process conformance on Ubuntu 24.04 with Chrome for Testing
-149.0.7827.55 and Ubuntu's `FFmpeg` 7:6.1.1-3ubuntu5. Exact executable paths
+CI runs all real-process conformance on Ubuntu 24.04 with the Chrome for Testing
+build recorded in `packages/launcher/desktop-release.json` and Ubuntu's
+`FFmpeg` 7:6.1.1-3ubuntu5. Exact executable paths
 are supplied to every test; neither the runner's browser nor an ambient media
 tool can silently change the measured environment.
 

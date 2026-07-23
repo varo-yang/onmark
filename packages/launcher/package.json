@@ -1,0 +1,19 @@
+{
+  "name": "@onmark/launcher",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "onmark-release": "./dist/src/command.js"
+  },
+  "scripts": {
+    "build": "node ../../scripts/clean-typescript-output.mjs && tsc",
+    "test": "pnpm build && node --test dist/test/*.test.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@puppeteer/browsers": "3.0.6",
+    "proxy-agent": "8.0.2",
+    "yauzl": "3.4.0"
+  }
+}

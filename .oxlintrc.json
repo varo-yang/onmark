@@ -15,6 +15,15 @@
   },
   "overrides": [
     {
+      "files": [
+        "packages/launcher/src/browser-command.ts",
+        "packages/launcher/src/command.ts"
+      ],
+      "rules": {
+        "no-restricted-properties": "off"
+      }
+    },
+    {
       "files": ["packages/runtime/src/**/*.ts"],
       "rules": {
         "no-restricted-properties": [

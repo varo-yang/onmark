@@ -9,8 +9,13 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use crate::arguments::RenderArgs;
+use crate::browser_install::{self, BrowserInstallError};
+use crate::bundler::BundlerProcess;
 
 const HEADLESS_SHELL: &str = "chrome-headless-shell";
+const BROWSER_PROVISIONER: &str = "ONMARK_BROWSER_PROVISIONER";
+const BROWSER_PROVISIONER_ENTRY: &str = "ONMARK_BROWSER_PROVISIONER_ENTRY";
+const BUNDLER_ENTRY: &str = "ONMARK_BUNDLER_ENTRY";
 
 #[cfg(target_os = "macos")]
 const MACOS_BROWSERS: &[&str] = &[
@@ -23,15 +28,15 @@ const MACOS_BROWSERS: &[&str] = &[
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct Executables {
     pub(super) browser: PathBuf,
-    pub(super) bundler: PathBuf,
+    pub(super) bundler: BundlerProcess,
     pub(super) ffmpeg: PathBuf,
     pub(super) ffprobe: PathBuf,
 }
 
 impl Executables {
-    pub(super) fn discover(args: &RenderArgs) -> Result<Self, EnvironmentError> {
-        let browser = browser(args.browser.as_deref())?;
-        let bundler = locate("presentation bundler", &args.bundler)?;
+    pub(super) async fn discover(args: &RenderArgs) -> Result<Self, EnvironmentError> {
+        let browser = browser(args.browser.as_deref()).await?;
+        let bundler = bundler(&args.bundler)?;
         let ffmpeg = locate("FFmpeg", &args.ffmpeg)?;
         let ffprobe = locate("ffprobe", &args.ffprobe)?;
 
@@ -44,15 +49,42 @@ impl Executables {
     }
 }
 
-fn browser(requested: Option<&Path>) -> Result<PathBuf, EnvironmentError> {
+async fn browser(requested: Option<&Path>) -> Result<PathBuf, EnvironmentError> {
     if let Some(requested) = requested {
         return locate("browser", requested);
     }
 
-    default_browser().ok_or_else(|| EnvironmentError {
+    match (
+        env::var_os(BROWSER_PROVISIONER),
+        env::var_os(BROWSER_PROVISIONER_ENTRY),
+    ) {
+        (Some(provisioner), Some(entry)) => {
+            let provisioner = locate("browser provisioner", Path::new(&provisioner))?;
+            let entry = locate_file("browser provisioner entry", Path::new(&entry))?;
+            let browser_path = browser_install::provision(&provisioner, &entry)
+                .await
+                .map_err(EnvironmentError::Provision)?;
+            return locate("browser", &browser_path);
+        }
+        (None, None) => {}
+        _ => return Err(EnvironmentError::IncompleteBrowserProvisioner),
+    }
+
+    default_browser().ok_or_else(|| EnvironmentError::Missing {
         role: "browser",
         requested: PathBuf::from(default_browser_name()),
     })
+}
+
+fn bundler(requested: &Path) -> Result<BundlerProcess, EnvironmentError> {
+    let executable = locate("presentation bundler", requested)?;
+    match env::var_os(BUNDLER_ENTRY) {
+        Some(entry) => Ok(BundlerProcess::Node {
+            executable,
+            entry: locate_file("presentation bundler entry", Path::new(&entry))?,
+        }),
+        None => Ok(BundlerProcess::Direct(executable)),
+    }
 }
 
 fn default_browser() -> Option<PathBuf> {
@@ -106,31 +138,72 @@ pub(super) fn worker_browser(requested: &Path) -> Result<PathBuf, EnvironmentErr
     locate("browser", requested)
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(super) struct EnvironmentError {
-    role: &'static str,
-    requested: PathBuf,
+#[derive(Debug)]
+pub(super) enum EnvironmentError {
+    Missing {
+        role: &'static str,
+        requested: PathBuf,
+    },
+    MissingFile {
+        role: &'static str,
+        requested: PathBuf,
+    },
+    Provision(BrowserInstallError),
+    IncompleteBrowserProvisioner,
 }
 
 impl fmt::Display for EnvironmentError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            formatter,
-            "{} executable {} was not found",
-            self.role,
-            self.requested.display()
-        )?;
-        if self.role == "browser" {
-            formatter.write_str("; pass --browser <path>")?;
+        match self {
+            Self::Missing { role, requested } => {
+                write!(
+                    formatter,
+                    "{role} executable {} was not found",
+                    requested.display()
+                )?;
+                if *role == "browser" {
+                    formatter.write_str("; pass --browser <path>")?;
+                }
+                Ok(())
+            }
+            Self::MissingFile { role, requested } => {
+                write!(
+                    formatter,
+                    "{role} file {} was not found",
+                    requested.display()
+                )
+            }
+            Self::Provision(source) => source.fmt(formatter),
+            Self::IncompleteBrowserProvisioner => formatter.write_str(
+                "browser provisioner executable and entry module must be configured together",
+            ),
         }
-        Ok(())
     }
 }
 
-impl Error for EnvironmentError {}
+impl Error for EnvironmentError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Missing { .. }
+            | Self::MissingFile { .. }
+            | Self::IncompleteBrowserProvisioner => None,
+            Self::Provision(source) => Some(source),
+        }
+    }
+}
+
+fn locate_file(role: &'static str, requested: &Path) -> Result<PathBuf, EnvironmentError> {
+    requested
+        .is_file()
+        .then(|| requested.to_owned())
+        .ok_or_else(|| EnvironmentError::MissingFile {
+            role,
+            requested: requested.to_owned(),
+        })
+}
 
 fn locate(role: &'static str, requested: &Path) -> Result<PathBuf, EnvironmentError> {
-    executable_path(requested).ok_or_else(|| EnvironmentError {
+    executable_path(requested).ok_or_else(|| EnvironmentError::Missing {
         role,
         requested: requested.to_owned(),
     })

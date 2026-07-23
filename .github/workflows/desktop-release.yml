@@ -1,0 +1,137 @@
+name: Desktop release admission
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  admit:
+    name: Admit ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            target: darwin-arm64
+            native-cli: target/release/onmark
+          - runner: ubuntu-24.04
+            target: linux-x64
+            native-cli: target/release/onmark
+          - runner: windows-2025
+            target: win32-x64
+            native-cli: target/release/onmark.exe
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install pinned Rust toolchain
+        run: rustup show active-toolchain
+
+      - name: Install pinned pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
+        with:
+          version: 11.9.0
+
+      - name: Install pinned Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: 26.4.0
+          cache: pnpm
+
+      - name: Install Linux media build tools
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends nasm pkg-config
+
+      - name: Install macOS media build tools
+        if: runner.os == 'macOS'
+        run: brew install pkgconf
+
+      - name: Install Windows media build tools
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2.32.0
+        with:
+          install: >-
+            make
+            diffutils
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-nasm
+            mingw-w64-ucrt-x86_64-pkgconf
+          msystem: UCRT64
+          update: true
+
+      - name: Install TypeScript dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Fetch admitted media sources
+        run: node scripts/release/fetch-media.mjs .release/sources
+
+      - name: Build release media tools
+        if: runner.os != 'Windows'
+        run: scripts/release/build-media.sh .release/sources .release/media
+
+      - name: Build Windows release media tools
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: scripts/release/build-media.sh .release/sources .release/media
+
+      - name: Build public package modules
+        run: |
+          pnpm --filter @onmark/runtime build
+          pnpm --filter @onmark/authoring build
+          pnpm --filter @onmark/motion-gsap build
+          pnpm --filter @onmark/bundler build
+          pnpm --filter @onmark/launcher build
+
+      - name: Build native release CLI
+        run: cargo build --locked --release -p onmark-cli
+
+      - name: Assemble release packages
+        shell: bash
+        run: |
+          cargo xtask release sidecar \
+            --target "${{ matrix.target }}" \
+            --onmark "${{ matrix.native-cli }}" \
+            --media .release/media \
+            --source-revision "$GITHUB_SHA" \
+            --output .release/sidecar
+          node scripts/release/assemble-package.mjs \
+            --source-revision "$GITHUB_SHA" \
+            --output .release/product
+
+      - name: Admit installed product
+        shell: bash
+        run: |
+          npm_root="$(npm root --global)"
+          npm_cli="$(node -e 'process.stdout.write(require("node:path").join(process.argv[1], "npm/bin/npm-cli.js"))' "$npm_root")"
+          node scripts/release/admit.mjs \
+            "$npm_cli" \
+            .release/product \
+            .release/sidecar
+
+      - name: Pack admitted artifacts
+        shell: bash
+        run: |
+          mkdir -p .release/artifacts
+          npm pack .release/sidecar --pack-destination .release/artifacts --silent
+          npm pack .release/product --pack-destination .release/artifacts --silent
+
+      - name: Retain admitted artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: desktop-${{ matrix.target }}
+          path: .release/artifacts/*.tgz
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 7

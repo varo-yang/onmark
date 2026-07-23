@@ -6,6 +6,7 @@
 
 mod arguments;
 mod assets;
+mod browser_install;
 mod bundler;
 mod compilation;
 mod diagnostic;

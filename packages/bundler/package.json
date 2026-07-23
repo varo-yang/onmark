@@ -10,6 +10,9 @@
     ".": {
       "types": "./dist/src/index.d.ts",
       "default": "./dist/src/index.js"
+    },
+    "./command": {
+      "default": "./dist/src/command.js"
     }
   },
   "scripts": {

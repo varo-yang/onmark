@@ -120,7 +120,7 @@ pub(super) async fn run(args: RenderArgs) -> Result<RenderOutcome, CliError> {
 
     let presentation = presentation_source(&args)?;
     reject_existing_output(&output)?;
-    let executables = Executables::discover(&args)?;
+    let executables = Executables::discover(&args).await?;
     create_output_directory(&output)?;
     let ffprobe = ffprobe(executables.ffprobe);
     let frozen = FrozenCatalog::freeze(&film, source_directory(&args.screenplay), &ffprobe).await?;

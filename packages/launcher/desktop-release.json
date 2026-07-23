@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "browserBuild": "149.0.7827.55",
+  "targets": {
+    "darwin-arm64": {
+      "browser": "chrome",
+      "browserPlatform": "mac_arm",
+      "sha256": "311211b54c429245e2cec0314ee1e314085e9c00350215b95e1a879350786630"
+    },
+    "linux-x64": {
+      "browser": "chrome-headless-shell",
+      "browserPlatform": "linux",
+      "sha256": "410c9407d5de3fea80d9398666be06f2aa09154a3fa7b327dc254e336bb4c4b7"
+    },
+    "win32-x64": {
+      "browser": "chrome",
+      "browserPlatform": "win64",
+      "sha256": "ebc0c2b75e2ea98151a7f18ff47037bfcbab44a8660e79b9ffa6520f9b7607ab"
+    }
+  }
+}

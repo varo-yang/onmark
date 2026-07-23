@@ -1,6 +1,11 @@
 {
   "name": "onmark",
   "private": true,
+  "imports": {
+    "#onmark-authoring": "./packages/authoring/dist/src/index.js",
+    "#onmark-bundler-command": "./packages/bundler/dist/src/command.js",
+    "#onmark-runtime": "./packages/runtime/dist/src/index.js"
+  },
   "exports": {
     "./authoring": {
       "types": "./packages/authoring/src/index.ts",

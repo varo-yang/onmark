@@ -84,17 +84,31 @@ pub(super) struct RenderArgs {
     /// Presentation bundler executable.
     #[arg(
         long,
+        env = "ONMARK_BUNDLER",
+        hide_env = true,
         default_value = "onmark-bundle",
         help_heading = "Execution overrides"
     )]
     pub(super) bundler: PathBuf,
 
     /// `FFmpeg` executable.
-    #[arg(long, default_value = "ffmpeg", help_heading = "Execution overrides")]
+    #[arg(
+        long,
+        env = "ONMARK_FFMPEG",
+        hide_env = true,
+        default_value = "ffmpeg",
+        help_heading = "Execution overrides"
+    )]
     pub(super) ffmpeg: PathBuf,
 
     /// ffprobe executable.
-    #[arg(long, default_value = "ffprobe", help_heading = "Execution overrides")]
+    #[arg(
+        long,
+        env = "ONMARK_FFPROBE",
+        hide_env = true,
+        default_value = "ffprobe",
+        help_heading = "Execution overrides"
+    )]
     pub(super) ffprobe: PathBuf,
 
     /// Standalone SRT, `WebVTT`, or ASS file.

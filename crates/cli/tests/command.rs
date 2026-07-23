@@ -28,6 +28,14 @@ fn reports_authored_errors_before_environment_preflight() {
     let output = Command::new(env!("CARGO_BIN_EXE_onmark"))
         .arg("render")
         .arg(screenplay)
+        .env(
+            "ONMARK_BROWSER_PROVISIONER",
+            "author-errors-must-not-start-this",
+        )
+        .env(
+            "ONMARK_BROWSER_PROVISIONER_ENTRY",
+            "author-errors-must-not-read-this",
+        )
         .env("PATH", "")
         .output()
         .expect("the CLI can be started");
@@ -37,6 +45,7 @@ fn reports_authored_errors_before_environment_preflight() {
     let stderr = String::from_utf8(output.stderr).expect("diagnostics are UTF-8");
     assert!(stderr.contains("ONM-STRUCT-001"));
     assert!(!stderr.contains("executable"));
+    assert!(!stderr.contains("browser provisioner"));
 }
 
 #[test]

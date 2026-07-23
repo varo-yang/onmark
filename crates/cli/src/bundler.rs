@@ -30,7 +30,14 @@ const READ_BUFFER_BYTES: usize = 8 * 1024;
 /// Configured external bundler command with fixed output and timeout bounds.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct PresentationBundler {
-    executable: PathBuf,
+    process: BundlerProcess,
+}
+
+/// Direct development binary or Node-hosted release entry module.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) enum BundlerProcess {
+    Direct(PathBuf),
+    Node { executable: PathBuf, entry: PathBuf },
 }
 
 /// Authored custom code or Onmark's neutral semantic DOM projection.
@@ -84,10 +91,8 @@ impl PresentationSource {
 }
 
 impl PresentationBundler {
-    pub(super) fn new(executable: impl Into<PathBuf>) -> Self {
-        Self {
-            executable: executable.into(),
-        }
+    pub(super) const fn new(process: BundlerProcess) -> Self {
+        Self { process }
     }
 
     pub(super) async fn bundle(
@@ -131,7 +136,7 @@ impl PresentationBundler {
         source: &PresentationSource,
         output: &Path,
     ) -> Result<tokio::process::Child, BundleError> {
-        let mut command = Command::new(&self.executable);
+        let mut command = self.process.command();
         source.append_arguments(&mut command);
         command
             .arg("--output")
@@ -147,9 +152,28 @@ impl PresentationBundler {
             .stdout(Stdio::null())
             .stderr(Stdio::piped());
         command.spawn().map_err(|source| BundleError::Spawn {
-            executable: self.executable.clone(),
+            executable: self.process.executable().to_owned(),
             source,
         })
+    }
+}
+
+impl BundlerProcess {
+    fn command(&self) -> Command {
+        match self {
+            Self::Direct(executable) => Command::new(executable),
+            Self::Node { executable, entry } => {
+                let mut command = Command::new(executable);
+                command.arg(entry);
+                command
+            }
+        }
+    }
+
+    fn executable(&self) -> &Path {
+        match self {
+            Self::Direct(executable) | Self::Node { executable, .. } => executable.as_path(),
+        }
     }
 }
 
@@ -450,8 +474,24 @@ mod tests {
     use onmark_core::model::{PresentationTemporalCapability, PresentationVisualCapability};
 
     use super::{
-        BundleError, CapturedStderr, PresentationSource, append_tail, finish_stderr_before,
+        BundleError, BundlerProcess, CapturedStderr, PresentationSource, append_tail,
+        finish_stderr_before,
     };
+
+    #[test]
+    fn node_release_process_keeps_the_entry_module_before_product_arguments() {
+        let process = BundlerProcess::Node {
+            executable: PathBuf::from("/tools/node"),
+            entry: PathBuf::from("/product/bundler-command.js"),
+        };
+
+        let command = process.command();
+        assert_eq!(command.as_std().get_program(), "/tools/node");
+        assert_eq!(
+            command.as_std().get_args().collect::<Vec<_>>(),
+            ["/product/bundler-command.js"],
+        );
+    }
 
     #[test]
     fn derives_capabilities_from_the_owned_presentation_surface() {
