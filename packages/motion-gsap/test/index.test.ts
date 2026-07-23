@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { PresentationExtensionContext } from "@onmark/authoring";
+import type { PresentationExtensionContext } from "@onmark/authoring/types";
 import { gsapMotion } from "../src/index.js";
 
 test("seeks a paused local timeline from exact runtime frames", async () => {

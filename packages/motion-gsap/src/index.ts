@@ -7,7 +7,7 @@ import type {
   PresentationExtensionContext,
   PresentationTarget,
   PresentationTargetKind,
-} from "@onmark/authoring";
+} from "@onmark/authoring/types";
 
 // ── Public contract ──
 
