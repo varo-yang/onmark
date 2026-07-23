@@ -29,7 +29,7 @@ const PROCESS_DEADLINE: Duration = Duration::from_mins(3);
 async fn renders_one_screenplay_reliably_across_real_processes() {
     let directory = tempdir().expect("the conformance workspace is available");
     let fixture = Fixture::with_semantic_motion(directory.path(), "cli/gate-one.onmark");
-    let first = render_fixture_twice(&fixture, GATE_ONE_FRAME_COUNT, 15).await;
+    let first = render_fixture_twice(&fixture, SourceVideo::Solid, GATE_ONE_FRAME_COUNT, 15).await;
     assert!(
         first.inspection.has_motion_before(10),
         "the static source must expose exact-frame GSAP motion before the CTA boundary",
@@ -50,15 +50,16 @@ async fn assembles_two_partitioned_units_across_real_processes() {
     let fixture = Fixture::materialize(directory.path(), "cli/gate-four.onmark");
     fixture.generate_general_audio().await;
 
-    render_fixture_twice(&fixture, GATE_TWO_FRAME_COUNT, 0).await;
+    render_fixture_twice(&fixture, SourceVideo::Moving, GATE_TWO_FRAME_COUNT, 0).await;
 }
 
 async fn render_fixture_twice(
     fixture: &Fixture,
+    source_video: SourceVideo,
     expected_frames: usize,
     audio_start_frame: u64,
 ) -> VerifiedOutput {
-    fixture.generate_source_video().await;
+    fixture.generate_source_video(source_video).await;
     fixture.generate_voice_over().await;
 
     let first = fixture.render("first.mp4").await;
@@ -90,6 +91,21 @@ struct Fixture {
     screenplay: PathBuf,
 }
 
+#[derive(Clone, Copy)]
+enum SourceVideo {
+    Moving,
+    Solid,
+}
+
+impl SourceVideo {
+    fn lavfi_source(self) -> String {
+        match self {
+            Self::Moving => format!("testsrc2=size={WIDTH}x{HEIGHT}:rate=30:duration=1"),
+            Self::Solid => format!("color=c=0x17406d:size={WIDTH}x{HEIGHT}:rate=30:duration=1"),
+        }
+    }
+}
+
 impl Fixture {
     fn materialize(root: &Path, screenplay_fixture: &str) -> Self {
         let repository = repository();
@@ -118,8 +134,8 @@ impl Fixture {
         fixture
     }
 
-    async fn generate_source_video(&self) {
-        let source = format!("color=c=0x17406d:size={WIDTH}x{HEIGHT}:rate=30:duration=1");
+    async fn generate_source_video(&self, video: SourceVideo) {
+        let source = video.lavfi_source();
         let output = run_process(
             Command::new(required_path("ONMARK_FFMPEG"))
                 .args(["-nostdin", "-v", "error", "-f", "lavfi", "-i", &source])
