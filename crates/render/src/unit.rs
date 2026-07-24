@@ -8,13 +8,14 @@ use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use onmark_core::model::{
     AudioChannelLayout, AudioGain, AudioSampleConversionOverflow, AudioSampleCount, FrameInterval,
     FrameRate, FrozenAsset, FrozenAssetId, Rounding, VideoColorProfile, VideoDimensions,
 };
 use onmark_core::protocol::{BrowserPlan, BundleManifest, InvalidBrowserPlan};
-use onmark_core::render_graph::RenderPartition;
+use onmark_core::render_graph::{PartitionPlan, RenderPartition};
 use onmark_core::timeline::{TimelineAudio, TimelineIr};
 
 use crate::VisualExecutionPlan;
@@ -95,7 +96,7 @@ impl Error for InvalidMaterializedAsset {}
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RenderUnit {
     browser_plan: BrowserPlan,
-    bundle_manifest: BundleManifest,
+    bundle_manifest: Arc<BundleManifest>,
     profile: RenderProfile,
     videos: BTreeMap<FrozenAssetId, RenderVideo>,
     visual_execution: VisualExecutionPlan,
@@ -259,6 +260,41 @@ impl RenderUnit {
         )
     }
 
+    /// Composes every partition under one common visual execution path.
+    ///
+    /// A sequence uses native layering only when every partition proves the
+    /// admitted profile. Otherwise all units record browser composition before
+    /// materialization, so execution never changes paths after launch.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InvalidRenderUnit`] under the same conditions as
+    /// [`Self::from_partition`].
+    pub fn from_partition_plan(
+        timeline: &TimelineIr,
+        partitions: &PartitionPlan,
+        bundle_manifest: &BundleManifest,
+        profile: RenderProfile,
+        assets: impl IntoIterator<Item = MaterializedAsset>,
+    ) -> Result<Vec<Self>, InvalidRenderUnit> {
+        let available = materialized_catalog(assets)?;
+        let bundle_manifest = Arc::new(bundle_manifest.clone());
+        let mut units = Vec::with_capacity(partitions.units().len());
+
+        for partition in partitions.units() {
+            units.push(Self::compose_from_catalog(
+                timeline,
+                partition.evaluation(),
+                partition.output(),
+                Arc::clone(&bundle_manifest),
+                profile,
+                &available,
+            )?);
+        }
+        normalize_visual_execution(&mut units);
+        Ok(units)
+    }
+
     fn compose(
         timeline: &TimelineIr,
         evaluation: FrameInterval,
@@ -268,7 +304,25 @@ impl RenderUnit {
         assets: impl IntoIterator<Item = MaterializedAsset>,
     ) -> Result<Self, InvalidRenderUnit> {
         let available = materialized_catalog(assets)?;
-        let videos = render_videos(timeline, evaluation, &available)?;
+        Self::compose_from_catalog(
+            timeline,
+            evaluation,
+            output,
+            Arc::new(bundle_manifest),
+            profile,
+            &available,
+        )
+    }
+
+    fn compose_from_catalog(
+        timeline: &TimelineIr,
+        evaluation: FrameInterval,
+        output: FrameInterval,
+        bundle_manifest: Arc<BundleManifest>,
+        profile: RenderProfile,
+        available: &BTreeMap<FrozenAssetId, MaterializedAsset>,
+    ) -> Result<Self, InvalidRenderUnit> {
+        let videos = render_videos(timeline, evaluation, available)?;
         let source_frame_rates = videos
             .iter()
             .map(|(id, video)| (*id, video.source_frame_rate()))
@@ -276,14 +330,14 @@ impl RenderUnit {
         let browser_plan =
             BrowserPlan::from_timeline_for_unit(timeline, &source_frame_rates, evaluation, output)
                 .map_err(InvalidRenderUnit::BrowserPlan)?;
-        let audio = audio_plan(timeline, output, &available)?;
-        let visual_execution = VisualExecutionPlan::admit(
+        let audio = audio_plan(timeline, output, available)?;
+        let visual_execution = VisualExecutionPlan::select(
             bundle_manifest.visual_capability(),
+            bundle_manifest.frame_behavior(),
             &browser_plan,
             profile,
             videos.values(),
-        )
-        .map_err(InvalidRenderUnit::VisualComposition)?;
+        );
 
         Ok(Self {
             browser_plan,
@@ -320,7 +374,7 @@ impl RenderUnit {
     ) -> WorkerCaptureRequest {
         WorkerCaptureRequest::new(
             capture_environment,
-            self.bundle_manifest.clone(),
+            self.bundle_manifest.as_ref().clone(),
             self.browser_plan.clone(),
             self.profile,
             self.visual_execution.clone(),
@@ -345,8 +399,8 @@ impl RenderUnit {
         &self.visual_execution
     }
 
-    pub(crate) const fn bundle_manifest(&self) -> &BundleManifest {
-        &self.bundle_manifest
+    pub(crate) fn bundle_manifest(&self) -> &BundleManifest {
+        self.bundle_manifest.as_ref()
     }
 
     pub(crate) fn materialized_assets(&self) -> impl ExactSizeIterator<Item = &MaterializedAsset> {
@@ -365,6 +419,21 @@ impl RenderUnit {
     }
 }
 
+fn normalize_visual_execution(units: &mut [RenderUnit]) {
+    let all_layered = units
+        .iter()
+        .all(|unit| unit.visual_execution.layered_media().is_some());
+    if all_layered {
+        return;
+    }
+    for unit in units {
+        unit.visual_execution = VisualExecutionPlan::browser_composite(
+            unit.bundle_manifest.frame_behavior(),
+            &unit.browser_plan,
+        );
+    }
+}
+
 /// Reason solved and materialized facts cannot form one render unit.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[non_exhaustive]
@@ -380,8 +449,6 @@ pub enum InvalidRenderUnit {
         /// Exact profile rule that rejected it.
         source: UnsupportedVideo,
     },
-    /// The declared browser/media relationship cannot be executed faithfully.
-    VisualComposition(crate::UnsupportedVisualComposition),
     /// The audio plan would exceed the bounded process envelope.
     AudioTrackLimit,
     /// An audio placement escapes the solved film interval.
@@ -410,7 +477,6 @@ impl fmt::Display for InvalidRenderUnit {
                     "materialized video {id} is unsupported: {source}"
                 )
             }
-            Self::VisualComposition(source) => source.fmt(formatter),
             Self::AudioTrackLimit => {
                 write!(
                     formatter,
@@ -441,7 +507,6 @@ impl Error for InvalidRenderUnit {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::UnsupportedVideo { source, .. } => Some(source),
-            Self::VisualComposition(source) => Some(source),
             Self::AudioSampleConversion { source, .. } => Some(source),
             Self::BrowserPlan(source) => Some(source),
             _ => None,
@@ -571,13 +636,14 @@ fn owns_audio_start(output: FrameInterval, audio: &TimelineAudio) -> bool {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
+    use std::sync::Arc;
 
     use onmark_core::compiler;
     use onmark_core::model::{
         AssetMetadata, AssetRef, AudioChannelLayout, AudioGain, AudioSampleRate, Duration,
-        FrameRate, FrozenAsset, FrozenAssetId, PresentationTemporalCapability,
-        PresentationVisualCapability, SourceId, Timebase, VideoColorProfile, VideoDimensions,
-        VideoMetadata, VideoTiming,
+        FrameRate, FrozenAsset, FrozenAssetId, PresentationFrameBehavior,
+        PresentationTemporalCapability, PresentationVisualCapability, SourceId, Timebase,
+        VideoColorProfile, VideoDimensions, VideoMetadata, VideoTiming,
     };
     use onmark_core::protocol::BundleFile;
     use onmark_core::render_graph::RenderGraph;
@@ -587,7 +653,7 @@ mod tests {
         BundleManifest, CaptureEnvironmentId, InvalidRenderUnit, MAX_AUDIO_TRACKS,
         MaterializedAsset, RenderProfile, RenderUnit, WorkerCaptureRequest,
     };
-    use crate::UnsupportedVisualComposition;
+    use crate::BrowserCaptureCadence;
 
     #[test]
     fn composes_only_required_admitted_video_assets() {
@@ -759,19 +825,94 @@ mod tests {
             serde_json::from_str(&encoded).expect("the layered request validates once");
 
         assert_eq!(wire["visualExecution"]["mode"], "separableOverlay");
+        assert_eq!(wire["visualExecution"]["captureCadence"], "everyFrame");
         assert_eq!(wire["visualExecution"]["width"], 320);
         assert_eq!(decoded, request);
         assert_eq!(
             decoded.visual_execution().capability(),
             PresentationVisualCapability::SeparableOverlay,
         );
+        let mut invalid_cadence = wire.clone();
+        invalid_cadence["visualExecution"]["captureCadence"] =
+            serde_json::Value::from("placementBounded");
+        assert!(serde_json::from_value::<WorkerCaptureRequest>(invalid_cadence).is_err());
+
         let mut invalid = wire;
         invalid["visualExecution"]["width"] = serde_json::Value::from(322);
         assert!(serde_json::from_value::<WorkerCaptureRequest>(invalid).is_err());
     }
 
     #[test]
-    fn rejects_separable_overlay_without_one_complete_primary_video() {
+    fn admits_placement_bounded_capture_for_layered_foreground() {
+        let frozen = layered_video_asset(video_dimensions(), true);
+        let timeline = video_timeline(frozen.clone());
+        let materialized = MaterializedAsset::new(frozen, "/tmp/opening.mp4")
+            .expect("the fixture path is present");
+        let layered = RenderUnit::whole_film(
+            &timeline,
+            placement_bounded_manifest(PresentationVisualCapability::SeparableOverlay),
+            render_profile(),
+            [materialized],
+        )
+        .expect("native video leaves placement-bounded foreground pixels");
+
+        assert_eq!(
+            layered.visual_execution().capture_cadence(),
+            BrowserCaptureCadence::PlacementBounded,
+        );
+        let request = layered.worker_capture_request(CaptureEnvironmentId::from_sha256(
+            [7; CaptureEnvironmentId::BYTE_LENGTH],
+        ));
+        let wire = serde_json::to_value(request).expect("the admitted cadence serializes");
+        assert_eq!(
+            wire["visualExecution"]["captureCadence"],
+            "placementBounded",
+        );
+    }
+
+    #[test]
+    fn admits_placement_bounded_capture_for_static_browser_output() {
+        let timeline = solve(
+            r#"<film><scene><shot duration="1s"><title>Static</title></shot></scene></film>"#,
+            "unused.mp4",
+            video_asset(VideoTiming::Constant(frame_rate())),
+        );
+        let unit = RenderUnit::whole_film(
+            &timeline,
+            placement_bounded_manifest(PresentationVisualCapability::SeparableOverlay),
+            render_profile(),
+            [],
+        )
+        .expect("static browser composition is placement-bounded");
+
+        assert_eq!(
+            unit.visual_execution().capture_cadence(),
+            BrowserCaptureCadence::PlacementBounded,
+        );
+    }
+
+    #[test]
+    fn keeps_browser_video_on_per_frame_capture() {
+        let frozen = layered_video_asset(video_dimensions(), true);
+        let timeline = video_timeline(frozen.clone());
+        let materialized = MaterializedAsset::new(frozen, "/tmp/opening.mp4")
+            .expect("the fixture path is present");
+        let unit = RenderUnit::whole_film(
+            &timeline,
+            placement_bounded_manifest(PresentationVisualCapability::BrowserComposite),
+            render_profile(),
+            [materialized],
+        )
+        .expect("browser video remains a supported conservative path");
+
+        assert_eq!(
+            unit.visual_execution().capture_cadence(),
+            BrowserCaptureCadence::EveryFrame,
+        );
+    }
+
+    #[test]
+    fn keeps_browser_composition_without_one_complete_primary_video() {
         let frozen = layered_video_asset(video_dimensions(), true);
         let timeline = solve(
             r#"<film><scene><shot><video src="opening.mp4" /></shot><shot duration="1s" /></scene></film>"#,
@@ -780,56 +921,81 @@ mod tests {
         );
         let materialized = MaterializedAsset::new(frozen, "/tmp/opening.mp4")
             .expect("the fixture path is present");
-        let result = RenderUnit::whole_film(
+        let unit = RenderUnit::whole_film(
             &timeline,
             bundle_manifest_with(PresentationVisualCapability::SeparableOverlay),
             render_profile(),
             [materialized],
-        );
+        )
+        .expect("the capable presentation retains its conservative path");
 
-        assert_eq!(
-            result,
-            Err(InvalidRenderUnit::VisualComposition(
-                UnsupportedVisualComposition::IncompleteCoverage,
-            )),
-        );
+        assert!(unit.visual_execution().layered_media().is_none());
     }
 
     #[test]
-    fn rejects_separable_overlay_without_a_primary_video() {
+    fn keeps_browser_composition_without_a_primary_video() {
         let frozen = layered_video_asset(video_dimensions(), true);
         let timeline = solve(
             r#"<film><scene><shot duration="1s"><title>Static</title></shot></scene></film>"#,
             "unused.mp4",
             frozen,
         );
-        let result = RenderUnit::whole_film(
+        let unit = RenderUnit::whole_film(
             &timeline,
             bundle_manifest_with(PresentationVisualCapability::SeparableOverlay),
             render_profile(),
             [],
-        );
+        )
+        .expect("the capable presentation retains its conservative path");
 
-        assert_eq!(
-            result,
-            Err(InvalidRenderUnit::VisualComposition(
-                UnsupportedVisualComposition::PrimaryVideoCount,
-            )),
-        );
+        assert!(unit.visual_execution().layered_media().is_none());
     }
 
     #[test]
-    fn rejects_separable_overlay_without_native_pixel_facts() {
+    fn keeps_browser_composition_without_native_pixel_facts() {
         let mismatched = layered_video_asset(
             VideoDimensions::new(1_920, 1_080).expect("fixture dimensions are positive"),
             true,
         );
         let missing_color = layered_video_asset(video_dimensions(), false);
 
-        assert_separable_rejection(mismatched, UnsupportedVisualComposition::DimensionMismatch);
-        assert_separable_rejection(
-            missing_color,
-            UnsupportedVisualComposition::UnsupportedColorProfile,
+        assert_browser_composition(mismatched);
+        assert_browser_composition(missing_color);
+    }
+
+    #[test]
+    fn selects_one_visual_path_for_the_partition_plan() {
+        let frozen = layered_video_asset(video_dimensions(), true);
+        let timeline = solve(
+            r#"<film><scene><shot><video src="opening.mp4" /></shot><shot duration="1s"><title>Static</title></shot></scene></film>"#,
+            "opening.mp4",
+            frozen.clone(),
+        );
+        let partitions =
+            RenderGraph::from_timeline(&timeline, PresentationTemporalCapability::RandomAccess)
+                .expect("the fixture has complete render ownership")
+                .into_partition();
+        let materialized = MaterializedAsset::new(frozen, "/tmp/opening.mp4")
+            .expect("the fixture path is present");
+
+        let units = RenderUnit::from_partition_plan(
+            &timeline,
+            &partitions,
+            &bundle_manifest_with(PresentationVisualCapability::SeparableOverlay),
+            render_profile(),
+            [materialized],
+        )
+        .expect("the mixed sequence retains one conservative visual path");
+
+        assert_eq!(units.len(), 2);
+        assert!(Arc::ptr_eq(
+            &units[0].bundle_manifest,
+            &units[1].bundle_manifest,
+        ));
+        assert!(
+            units
+                .iter()
+                .all(|unit| unit.visual_execution().layered_media().is_none())
         );
     }
 
@@ -1028,30 +1194,54 @@ mod tests {
     }
 
     fn bundle_manifest_with(visual_capability: PresentationVisualCapability) -> BundleManifest {
+        bundle_manifest_for(visual_capability, PresentationFrameBehavior::PerFrame)
+    }
+
+    fn placement_bounded_manifest(
+        visual_capability: PresentationVisualCapability,
+    ) -> BundleManifest {
+        bundle_manifest_for(
+            visual_capability,
+            PresentationFrameBehavior::PlacementBounded,
+        )
+    }
+
+    fn bundle_manifest_for(
+        visual_capability: PresentationVisualCapability,
+        frame_behavior: PresentationFrameBehavior,
+    ) -> BundleManifest {
         const DIGEST: &str =
             "sha256:0101010101010101010101010101010101010101010101010101010101010101";
         let entry = BundleFile::new(BundleManifest::ENTRY_POINT, 1, DIGEST)
             .expect("the fixture entry is valid");
+        let temporal_capability = match frame_behavior {
+            PresentationFrameBehavior::PerFrame => PresentationTemporalCapability::Sequential,
+            PresentationFrameBehavior::PlacementBounded => {
+                PresentationTemporalCapability::RandomAccess
+            }
+        };
         BundleManifest::new(
-            PresentationTemporalCapability::Sequential,
+            temporal_capability,
             visual_capability,
+            frame_behavior,
             DIGEST,
             vec![entry],
         )
         .expect("the fixture manifest is valid")
     }
 
-    fn assert_separable_rejection(frozen: FrozenAsset, expected: UnsupportedVisualComposition) {
+    fn assert_browser_composition(frozen: FrozenAsset) {
         let timeline = video_timeline(frozen.clone());
         let materialized = MaterializedAsset::new(frozen, "/tmp/opening.mp4")
             .expect("the fixture path is present");
-        let result = RenderUnit::whole_film(
+        let unit = RenderUnit::whole_film(
             &timeline,
             bundle_manifest_with(PresentationVisualCapability::SeparableOverlay),
             render_profile(),
             [materialized],
-        );
+        )
+        .expect("the capable presentation retains its conservative path");
 
-        assert_eq!(result, Err(InvalidRenderUnit::VisualComposition(expected)));
+        assert!(unit.visual_execution().layered_media().is_none());
     }
 }

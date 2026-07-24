@@ -18,8 +18,10 @@ pub(super) fn spawn_ffmpeg(
     executable: &Path,
     output: &Path,
     frame_rate: WireFrameRate,
+    video_encoder_threads: usize,
 ) -> Result<Child, EncodeError> {
     let frame_rate = format!("{}/{}", frame_rate.numerator(), frame_rate.denominator());
+    let video_encoder_threads = video_encoder_threads.to_string();
     Command::new(executable)
         .args([
             OsStr::new("-nostdin"),
@@ -37,9 +39,9 @@ pub(super) fn spawn_ffmpeg(
             OsStr::new("-c:v"),
             OsStr::new("libx264"),
             // Encoder threads retain full-resolution reference frames. Keep
-            // that memory independent of the worker's available CPU count.
+            // the exact bounded policy independent of ambient CPU count.
             OsStr::new("-threads"),
-            OsStr::new("1"),
+            OsStr::new(&video_encoder_threads),
             OsStr::new("-pix_fmt"),
             OsStr::new("yuv420p"),
             OsStr::new("-movflags"),

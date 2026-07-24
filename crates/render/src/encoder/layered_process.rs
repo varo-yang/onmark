@@ -65,7 +65,11 @@ pub(super) fn validate_job(job: &LayeredJob, limits: EncodeLimits) -> Result<(),
     Ok(())
 }
 
-pub(super) fn spawn(executable: &Path, job: &LayeredJob) -> Result<Child, EncodeError> {
+pub(super) fn spawn(
+    executable: &Path,
+    job: &LayeredJob,
+    video_encoder_threads: usize,
+) -> Result<Child, EncodeError> {
     let rate = frame_rate(job.output_frame_rate);
     let frames = job.frame_count().to_string();
     let filter = composition_filter(job);
@@ -107,7 +111,7 @@ pub(super) fn spawn(executable: &Path, job: &LayeredJob) -> Result<Child, Encode
         "pipe:1",
     ]);
     if let Some(output) = job.destination.video_path() {
-        configure_video_output(&mut command, output, &frames);
+        configure_video_output(&mut command, output, &frames, video_encoder_threads);
     }
     command
         .stdin(Stdio::piped())
@@ -125,7 +129,13 @@ pub(super) fn spawn(executable: &Path, job: &LayeredJob) -> Result<Child, Encode
         })
 }
 
-fn configure_video_output(command: &mut Command, output: &Path, frames: &str) {
+fn configure_video_output(
+    command: &mut Command,
+    output: &Path,
+    frames: &str,
+    video_encoder_threads: usize,
+) {
+    let video_encoder_threads = video_encoder_threads.to_string();
     command
         .args([
             "-map",
@@ -136,7 +146,7 @@ fn configure_video_output(command: &mut Command, output: &Path, frames: &str) {
             "-c:v",
             "libx264",
             "-threads",
-            "1",
+            &video_encoder_threads,
             "-pix_fmt",
             "yuv420p",
             "-movflags",

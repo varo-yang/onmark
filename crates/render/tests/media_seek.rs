@@ -35,7 +35,7 @@ use onmark_core::protocol::{
 use onmark_media::Ffprobe;
 use onmark_render::{
     AdmittedVideo, BrowserCaptureMode, BrowserLaunchPolicy, BrowserLimits, BrowserSession,
-    EncodedPng, RenderProfile, UnsupportedVideo,
+    BrowserSessionOptions, EncodedPng, RenderProfile, UnsupportedVideo,
 };
 use serde::Deserialize;
 use tempfile::{Builder as TempDirBuilder, TempDir};
@@ -425,10 +425,13 @@ async fn capture_transparent_frame_sequence(
 async fn launch_browser() -> BrowserSession {
     BrowserSession::launch(
         headless_shell(),
-        browser_launch_policy(),
-        BrowserCaptureMode::BeginFrame,
-        render_profile(),
-        browser_limits(),
+        BrowserSessionOptions {
+            launch_policy: browser_launch_policy(),
+            graphics_backend: onmark_render::BrowserGraphicsBackend::SwiftShader,
+            capture_mode: BrowserCaptureMode::BeginFrame,
+            render_profile: render_profile(),
+            limits: browser_limits(),
+        },
     )
     .await
     .expect("headless shell must launch")

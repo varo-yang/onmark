@@ -12,7 +12,9 @@ use std::path::{Path, PathBuf};
 use std::process::{ExitStatus, Stdio};
 use std::time::Duration;
 
-use onmark_core::model::{PresentationTemporalCapability, PresentationVisualCapability};
+use onmark_core::model::{
+    PresentationFrameBehavior, PresentationTemporalCapability, PresentationVisualCapability,
+};
 use onmark_core::protocol::BundleManifest;
 use tempfile::TempDir;
 use tokio::io::{AsyncRead, AsyncReadExt as _};
@@ -50,26 +52,30 @@ pub(super) enum PresentationSource {
     },
 }
 
+#[derive(Clone, Copy)]
+struct PresentationCapabilities {
+    temporal: PresentationTemporalCapability,
+    visual: PresentationVisualCapability,
+    frame_behavior: PresentationFrameBehavior,
+}
+
 impl PresentationSource {
-    fn temporal_capability(&self) -> PresentationTemporalCapability {
+    const fn capabilities(&self) -> PresentationCapabilities {
         match self {
             Self::SemanticDom {
                 stylesheet: None,
                 motion: None,
-            } => PresentationTemporalCapability::RandomAccess,
-            Self::Custom(_)
-            | Self::SemanticDom {
-                stylesheet: Some(_),
-                ..
-            }
-            | Self::SemanticDom {
-                motion: Some(_), ..
-            } => PresentationTemporalCapability::Sequential,
+            } => PresentationCapabilities {
+                temporal: PresentationTemporalCapability::RandomAccess,
+                visual: PresentationVisualCapability::SeparableOverlay,
+                frame_behavior: PresentationFrameBehavior::PlacementBounded,
+            },
+            Self::Custom(_) | Self::SemanticDom { .. } => PresentationCapabilities {
+                temporal: PresentationTemporalCapability::Sequential,
+                visual: PresentationVisualCapability::BrowserComposite,
+                frame_behavior: PresentationFrameBehavior::PerFrame,
+            },
         }
-    }
-
-    const fn visual_capability() -> PresentationVisualCapability {
-        PresentationVisualCapability::BrowserComposite
     }
 
     fn append_arguments(&self, command: &mut Command) {
@@ -137,16 +143,19 @@ impl PresentationBundler {
         output: &Path,
     ) -> Result<tokio::process::Child, BundleError> {
         let mut command = self.process.command();
+        let capabilities = source.capabilities();
         source.append_arguments(&mut command);
         command
             .arg("--output")
             .arg(output)
             .arg("--max-output-bytes")
             .arg(MAX_OUTPUT_BYTES.to_string())
+            .arg("--frame-behavior")
+            .arg(capabilities.frame_behavior.as_str())
             .arg("--temporal-capability")
-            .arg(source.temporal_capability().as_str())
+            .arg(capabilities.temporal.as_str())
             .arg("--visual-capability")
-            .arg(PresentationSource::visual_capability().as_str())
+            .arg(capabilities.visual.as_str())
             .kill_on_drop(true)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -471,7 +480,9 @@ mod tests {
     use std::path::PathBuf;
     use std::time::Duration;
 
-    use onmark_core::model::{PresentationTemporalCapability, PresentationVisualCapability};
+    use onmark_core::model::{
+        PresentationFrameBehavior, PresentationTemporalCapability, PresentationVisualCapability,
+    };
 
     use super::{
         BundleError, BundlerProcess, CapturedStderr, PresentationSource, append_tail,
@@ -509,26 +520,31 @@ mod tests {
         };
         let custom = PresentationSource::Custom(PathBuf::from("presentation.ts"));
 
+        let neutral = neutral_dom.capabilities();
         assert_eq!(
-            styled_dom.temporal_capability(),
-            PresentationTemporalCapability::Sequential,
+            neutral.temporal,
+            PresentationTemporalCapability::RandomAccess
         );
         assert_eq!(
-            neutral_dom.temporal_capability(),
-            PresentationTemporalCapability::RandomAccess,
+            neutral.visual,
+            PresentationVisualCapability::SeparableOverlay
         );
         assert_eq!(
-            animated_dom.temporal_capability(),
-            PresentationTemporalCapability::Sequential,
+            neutral.frame_behavior,
+            PresentationFrameBehavior::PlacementBounded,
         );
-        assert_eq!(
-            custom.temporal_capability(),
-            PresentationTemporalCapability::Sequential,
-        );
-        assert_eq!(
-            PresentationSource::visual_capability(),
-            PresentationVisualCapability::BrowserComposite,
-        );
+        for source in [&styled_dom, &animated_dom, &custom] {
+            let authored = source.capabilities();
+            assert_eq!(
+                authored.temporal,
+                PresentationTemporalCapability::Sequential,
+            );
+            assert_eq!(
+                authored.visual,
+                PresentationVisualCapability::BrowserComposite,
+            );
+            assert_eq!(authored.frame_behavior, PresentationFrameBehavior::PerFrame,);
+        }
     }
 
     #[test]

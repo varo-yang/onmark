@@ -37,4 +37,7 @@ pub use time::{
     FrameConversionOverflow, FrameCount, FrameIndex, FrameInterval, FrameRate,
     InvalidFrameInterval, InvalidFrameRate, Rounding, Timebase,
 };
-pub use visual::{InvalidPresentationVisualCapability, PresentationVisualCapability};
+pub use visual::{
+    InvalidPresentationFrameBehavior, InvalidPresentationVisualCapability,
+    PresentationFrameBehavior, PresentationVisualCapability,
+};

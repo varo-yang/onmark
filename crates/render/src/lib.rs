@@ -22,8 +22,9 @@ mod worker;
 
 pub(crate) use browser::DecodedRgba;
 pub use browser::{
-    BrowserCaptureMode, BrowserError, BrowserErrorKind, BrowserLaunchPolicy, BrowserLimits,
-    BrowserSession, CapturedFrame, EncodedPng, InvalidBrowserLimits, RawRgbaHash,
+    BrowserCaptureMode, BrowserError, BrowserErrorKind, BrowserGraphicsBackend,
+    BrowserLaunchPolicy, BrowserLimits, BrowserSession, BrowserSessionOptions, CapturedFrame,
+    EncodedPng, InvalidBrowserLimits, RawRgbaHash,
 };
 pub use encoder::{
     EncodeError, EncodeErrorKind, EncodeLimits, EncodedVideo, Ffmpeg, FfmpegSession, InvalidFfmpeg,
@@ -47,5 +48,7 @@ pub use unit_root::{
     UnitRootLimits,
 };
 pub use video::{AdmittedVideo, UnsupportedVideo};
-pub use visual::{LayeredMediaPlan, UnsupportedVisualComposition, VisualExecutionPlan};
+pub use visual::{
+    BrowserCaptureCadence, LayeredMediaPlan, UnsupportedVisualComposition, VisualExecutionPlan,
+};
 pub use worker::{WorkerCaptureRequest, WorkerCaptureVersion};

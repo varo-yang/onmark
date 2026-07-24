@@ -5,6 +5,7 @@ import {
   access,
   mkdir,
   mkdtemp,
+  rename,
   rm,
   utimes,
   writeFile,
@@ -22,6 +23,8 @@ import {
 
 import { ensureBrowser } from "../src/browser.js";
 import { BROWSER_BUILD, desktopTarget } from "../src/release.js";
+
+// ── Installation behavior
 
 test("installs the pinned archive once and reuses the published browser", async () => {
   const root = await mkdtemp(join(tmpdir(), "onmark-launcher-"));
@@ -158,6 +161,51 @@ test("reclaims an abandoned installer within the caller wait budget", async () =
     await rm(root, { force: true, recursive: true });
   }
 });
+
+test("a reclaimed owner cannot publish or release the successor's installation lock", async () => {
+  const root = await mkdtemp(join(tmpdir(), "onmark-launcher-"));
+  try {
+    const firstStarted = Promise.withResolvers<void>();
+    const secondStarted = Promise.withResolvers<void>();
+    const releaseFirst = Promise.withResolvers<void>();
+    const releaseSecond = Promise.withResolvers<void>();
+    let calls = 0;
+    const installBrowser = async (
+      options: InstallOptions & { readonly unpack?: true },
+    ): Promise<InstalledBrowser> => {
+      calls += 1;
+      if (calls === 1) {
+        firstStarted.resolve();
+        await releaseFirst.promise;
+      } else {
+        secondStarted.resolve();
+        await releaseSecond.promise;
+      }
+      return writeBrowserFixture(options);
+    };
+    const options = browserOptions(root);
+    const lock = join(root, "cache", ".install.lock");
+    const reclaimed = join(root, "cache", ".install.lock.reclaimed");
+
+    const first = ensureBrowser(options, installBrowser);
+    await firstStarted.promise;
+    await rename(lock, reclaimed);
+    const second = ensureBrowser(options, installBrowser);
+    await secondStarted.promise;
+
+    releaseFirst.resolve();
+    await assert.rejects(first, /lease was lost before cache publication/);
+    await access(lock);
+
+    releaseSecond.resolve();
+    await second;
+    assert.equal(calls, 2);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+// ── Test support
 
 function browserOptions(root: string) {
   return {

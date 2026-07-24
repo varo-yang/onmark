@@ -197,9 +197,11 @@ only the validated identity and deterministic mapping.
 The bundle manifest has the same separation. Its contract identifies an
 immutable presentation artifact and its entry point, runtime version, fonts,
 static dependencies, and declared temporal and visual capabilities. The
-current manifest requires both capabilities and binds them into `bundleId`.
+current manifest also records whether browser-owned pixels may change between
+solved placement boundaries, and binds all three declarations into `bundleId`.
 Its identity is
-`{version,entryPoint,temporalCapability,visualCapability,files}`. It uses
+`{version,entryPoint,temporalCapability,visualCapability,frameBehavior,files}`.
+It uses
 SHA-256 over UTF-8 compact JSON, with files sorted by portable path and each
 entry ordered as
 `{bytes,path,sha256}`. This is a versioned contract, not an incidental
@@ -290,10 +292,26 @@ stale or blank frame; and retaining unrelated future layers can make whole-film
 and partition captures differ. Surface-initialization, placement-commit, and
 capture-baseline timestamps never become scheduling or protocol truth.
 
-Each output frame owns one normal capture command. A placement boundary adds one
-non-capturing commit and one post-confirm reconciliation capture; a missing
-first or exact boundary screenshot adds at most one bounded retry. This replaces
-animation-frame polling and a separate `Page.captureScreenshot` round trip.
+The portable visual plan records one checked browser-capture cadence.
+`everyFrame` gives each output frame one normal capture command. A
+`placementBounded` plan captures the first output frame and every solved
+placement boundary, then reuses that exact immutable PNG between boundaries.
+The renderer skips `Seek`, `Confirm`, and screenshot work for those reused
+foreground frames while still writing every output frame to the encoder or
+worker artifact. Native primary video therefore continues to advance through
+the existing compositor. A boundary capture still adds one non-capturing commit
+and one post-confirm reconciliation capture; a missing first or exact boundary
+screenshot adds at most one bounded retry.
+
+This cadence is not inferred from screenshot equality or source inspection.
+The bundle must declare `placementBounded`, that declaration requires
+`randomAccess`, and visual admission must prove that Chromium does not own a
+video placement. Browser-composite units containing video remain `everyFrame`
+even when the bundle grants the stronger behavior. The selected cadence is
+serialized with the worker visual plan and checked again against the bundle and
+browser plan during materialization. This is separate from Chromium's
+within-transaction no-damage response: one is a planned cross-frame fact, the
+other is bounded handling of an omitted screenshot payload.
 
 Direct rendering retains the PNG as its encoder payload. Worker capture also
 decodes it into the configured exact 8-bit RGBA viewport and hashes those
@@ -427,7 +445,7 @@ onmark/
 │   ├── runtime/ authoring/ motion-gsap/ bundler/ launcher/
 ├── scripts/     # repository-only generation and quality checks
 ├── deploy/aws-lambda/  # Rust Lambda/S3 adapter after artifact conformance
-├── schemas/ conformance/ evals/ examples/ docs/
+├── schemas/ conformance/ evals/ docs/
 ```
 
 The completed Gate-one milestone contains `onmark-core`, `onmark-media`,
@@ -507,18 +525,23 @@ browser contract. It owns the pinned Chrome for Testing build, browser product,
 and archive digest; the native sidecar assembler rejects a differing target
 matrix. The launcher installs the selected browser through a bounded
 cross-process lock into a content-addressed cache and publishes it by atomic
-rename.
+rename. Each lease has an owner-specific heartbeat marker; a reclaimed owner
+cannot publish cache bytes or refresh or remove its successor's lock.
 
 The manual desktop-release workflow admits macOS arm64, Linux x64, and Windows
 x64 only after installing the two produced npm tarballs into an empty consumer
 and rendering the same screenplay in two independent browser sessions. It
 checks exact frame count, decoded audio, canonical raw-RGBA identity,
-product-import bundling, and no-clobber output. Cross-compilation and binary
-format inspection alone never establish target support.
+product-import bundling, and no-clobber output. Each target artifact also
+retains the two real CLI render durations with its fixed profile; shared runner
+timings are evidence samples, not release thresholds. Cross-compilation and
+binary format inspection alone never establish target support.
 
 The Lambda ZIP remains a separate deployment artifact. Its bootstrap, archive
 budget, `/tmp` lifecycle, and S3 contract are not reused as desktop installer
 semantics.
+
+### Product commands and language evidence
 
 Gate one's native command is deliberately narrow: `onmark render <screenplay>`.
 It bundles a neutral semantic DOM presentation plus optional same-stem
@@ -570,6 +593,8 @@ experiments; the repository does not create an empty framework or invent a
 historical baseline when the source material is unavailable. Repository
 automation may parse and rescore frozen outputs without network access; it
 never turns CI into a live-model benchmark.
+
+### Dependency budgets and module direction
 
 Core's internal dependency DAG is CI-enforced: `model` depends on nothing;
 `syntax`, `diagnostics`, and `timeline` may depend on model; `render_graph` may
@@ -643,6 +668,8 @@ its admitted release archive. The browser runtime does not compile schemas
 dynamically. Exact tool versions are pinned in the lockfiles and `mise.toml`,
 and CI rejects stale generated artifacts.
 
+### Media normalization boundary
+
 `onmark-media` depends on core plus `serde` and `serde_json` for a private
 ffprobe response boundary. It starts the configured ffprobe executable directly
 with an argument array, never through a shell; wrappers that leave descendant
@@ -688,6 +715,8 @@ format-local errors exactly once into `ONM-CAPTION-*` diagnostics before
 presentation validation, media probing, or browser launch. File open and read
 failures remain typed infrastructure errors.
 
+### Browser and encoder boundary
+
 `onmark-render` owns the heavy Chromium and `FFmpeg` dependency budget. It uses
 `chromiumoxide` only as a CDP transport. Onmark launches and reaps headless
 shell itself so stderr remains continuously drained into a bounded diagnostic
@@ -695,8 +724,9 @@ tail after the `DevTools` endpoint appears. It uses `base64` only to decode
 CDP's required screenshot envelope, `png` only to decode a captured screenshot
 into canonical RGBA for its renderer-owned fingerprint, and `tokio` and
 `futures` only within this asynchronous execution boundary. `tempfile` gives
-every browser session an isolated profile, owns a private same-filesystem output
-staging directory, and retains one private RAII unit root.
+every browser session an isolated profile, gives each output a private
+same-filesystem staging directory, and gives each executable unit a private
+RAII resource root.
 
 Unit-root materialization uses `serde_json` only for the Rust-owned manifest
 encoding, `sha2` for streaming identity verification, and `url` for the browser
@@ -706,7 +736,7 @@ serialized directly into the private root. It rejects symlinks and non-files,
 copies verified bytes instead of linking mutable source paths, and bounds both
 retained file count and total bytes. The fixed safety envelope is 100,000 files
 and one tebibyte, while each caller supplies a smaller explicit policy. Parallel
-sessions therefore share neither Chrome locks nor admitted input paths, and a
+sequences therefore share neither Chrome locks nor admitted input paths, and a
 completed MP4 is published with a no-clobber hard link only after both processes
 finish cleanly.
 
@@ -715,10 +745,13 @@ deadlines, an encoder inactivity timeout, frame/input/capture-byte ceilings,
 bounded retained stderr, and explicit shutdown. Chromium, CDP, and subprocess
 types are translated into stable render-owned errors. Encoder lifetime remains
 bounded by finite frame and byte budgets plus timeouts on every write and
-finalization operation; time spent awaiting Chromium does not consume an encoder
-inactivity budget. Browser navigation waits separately for document load and the
-runtime host because the transport's navigation call does not itself establish
-that lifecycle barrier.
+finalization operation. The exact video-encoder thread count is part of that
+explicit host policy: the local CLI defaults to four threads, accepts a bounded
+explicit override, and the portable worker retains one. Neither path derives it
+from ambient CPU count. Time spent awaiting Chromium does not consume an encoder
+inactivity budget. Browser navigation waits separately for document load and
+the runtime host because the transport's navigation call does not itself
+establish that lifecycle barrier.
 
 Gate one captures one PNG at a time and writes it directly to `FFmpeg`'s
 `image2pipe`; there is no frame queue or whole-video buffer. The fixed H.264
@@ -754,18 +787,95 @@ AppArmor profile that grants `userns` only to the content-addressed Onmark
 browser-cache path, preserving Chromium's own sandbox. The lower-level
 real-process suite still uses a disposable runner-local `--no-sandbox` wrapper;
 neither exception changes product launch policy. Product and local browser
-launches keep Chromium's sandbox enabled by default. Every capture policy
-explicitly uses ANGLE's SwiftShader backend: host GPU availability must not
-change pixels or make whole-film and partition captures disagree. Local capture
-retains Chromium's normal multiprocess topology; an adapter may select
-`BrowserLaunchPolicy::isolated_worker()` only when an independently audited
-outer container or microVM owns equivalent process isolation. That policy also
-keeps the renderer and SwiftShader GPU in one process and disables the
-unavailable zygote rather than disabling graphics. The deployment-owned choice
-is part of the locked capture environment, is never selected by authored input
-or a worker invocation, and must be proven in its real execution environment
-before it is treated as a production launch contract. A failed Chromium launch
-never causes an automatic downgrade.
+launches keep Chromium's sandbox enabled by default. The canonical default and
+every worker policy explicitly use ANGLE's `SwiftShader` backend: host GPU
+availability must not silently change pixels or make whole-film and partition
+captures disagree. Desktop execution on macOS may instead select the explicit
+`Metal` graphics backend. It reads the active GL renderer back through CDP
+before page execution, and rejects software fallback. This is a distinct capture
+environment, not a faster implementation of the `SwiftShader` identity:
+backend-sensitive WebGL pixels are expected to differ. An opt-in macOS
+conformance test proves exact raw-RGBA repetition across independent Metal
+sessions, repeated and
+out-of-order seeks, and WAAPI, GSAP, and Three.js effects. It also retains the
+software sequence so an accidental collapse of the two environment identities
+is visible. The macOS CLI selects this verified backend and reports it beside
+the capture mode. Linux and Windows retain `SwiftShader`; another native
+backend requires its own admission evidence and explicit variant.
+
+The initial locked macOS performance run used Chrome for Testing
+149.0.7827.55 on an Apple M5 and the release CLI to render the checked-in
+CSS/GSAP presentation at 1,920×1,080 for 45 frames. Three independent
+`SwiftShader` runs took 10.80, 6.61, and 6.56 seconds; three Metal runs took
+7.28, 4.66, and 4.73 seconds. The warm pair is about 29% faster. These are
+end-to-end CLI samples, including compilation, bundling, browser launch,
+capture, and encoding; they do not justify a wider cross-platform claim.
+`--graphics software` retains the reproducible control path.
+
+The local CLI assigns four threads to the final H.264 encoder by default.
+`--video-encoder-threads` admits an explicit value from 1 through 64 for hosts
+with a different CPU or memory budget. Onmark never derives this value from the
+ambient core count: doing so would make encoding resources and output bytes
+change silently across hosts. Portable capture workers retain their
+deployment-owned one-thread policy and scale through partitions; they do not
+encode the assembled MP4.
+
+One validated local partition sequence retains one Chromium process and one
+continuous encoder. Each unit still receives a fresh runtime navigation, typed
+`Load`/`Prepare`/`Dispose` lifecycle, private resource policy, and empty
+screenshot cache. Retiring the preceding resource guard before installing the
+next root prevents process reuse from widening file access or reusing a
+no-damage frame across units. Worker artifacts remain one unit per browser
+process. A 640×360, 30 fps exploratory M5 run over identical 100 ms semantic-DOM
+shots exposed the fixed cost: four units fell from 2.49 to 1.29 seconds and
+eight from 5.22 to 2.18 seconds after process reuse. Whole-film and partitioned
+decoded-frame hashes remain equal in real-process conformance; the sample
+motivates the lifecycle boundary but is not a release performance threshold.
+
+The same sequence may reuse a browser foreground capture only when the bundle
+declares `placementBounded` and the admitted unit proves that Chromium owns no
+video pixels. Reuse stops at every plan-owned placement boundary and never
+crosses a unit navigation. Local rendering and worker capture consume the same
+serialized cadence; neither path grows an independent cache policy.
+The real-process layered fixture compares this path with an otherwise identical
+`everyFrame` bundle: all 75 output frames enter browser capture in the control
+and only one does in the placement-bounded candidate, while their canonical
+raw-RGBA sequences remain exactly equal across independent processes. Bounded
+retry and reconciliation readbacks remain visible in phase timing rather than
+being counted as additional authored frames.
+
+A release real-process run on an Apple M5 with Google Chrome 150.0.7871.186,
+the `Screenshot` backend, `SwiftShader`, and the 75-frame 1,920×1,080 layered
+fixture separated authored capture work from actual Chromium commands. The
+`everyFrame` control entered capture 75 times and issued 76 pixel commands;
+readback, pixel processing, and native write took 3.63 seconds, 6.7
+milliseconds, and 298 milliseconds. The `placementBounded` candidate entered
+capture once and issued two commands; the same phases took 367 milliseconds,
+0.07 milliseconds, and 169 milliseconds. Their canonical raw-RGBA sequences
+were exactly equal. The roughly one-second local browser launch in both runs is
+not Lambda evidence: the current cadence has not been deployed, and historical
+Lambda launch samples used different code and binaries.
+
+An Apple M5 encoder isolation run then compared the layered path with one, two,
+four, and eight x264 threads over the same 45-frame 1,920×1,080 input. Median
+wall times were 1.08, 0.84, 0.68, and 0.63 seconds; observed process peak RSS
+was approximately 533–541, 545, 561–577, and 605–615 MiB. Four threads retain
+most of the speedup without the last step's memory cost. Repeating the complete
+release CLI with that fixed policy produced byte-identical MP4s at 4.17 and
+3.99 seconds after warm-up. Changing the thread policy is not itself an
+identity comparison: x264 is lossy and may produce slightly different decoded
+pixels even from the same canonical input, so raw RGBA remains the
+deterministic visual oracle.
+
+Local capture retains Chromium's normal multiprocess topology. An adapter may
+select `BrowserLaunchPolicy::isolated_worker()` only when an independently
+audited outer container or microVM owns equivalent process isolation. That
+policy also keeps the renderer and SwiftShader GPU in one process and disables
+the unavailable zygote rather than disabling graphics. The deployment-owned
+choice is part of the locked capture environment, is never selected by authored
+input or a worker invocation, and must be proven in its real execution
+environment before it is treated as a production launch contract. A failed
+Chromium launch never causes an automatic downgrade.
 
 Gate-one native browser operations and decoded-video waits accept at most a
 one-day deadline, keeping every platform timer inside an explicit supported
@@ -777,6 +887,8 @@ as `InvalidNodeId` into source-located `Diagnostic` values, including
 phase-specific messages and help. `diagnostics` owns only the generic diagnostic
 representation and stable codes. Neither `model` nor `syntax` depends on
 diagnostics, and the translation must not be duplicated by callers.
+
+### TypeScript product direction
 
 On the TypeScript side, runtime is the foundation. Authoring's root entry
 consumes runtime's types-only contract and creates semantic video and overlay
@@ -843,6 +955,8 @@ browser cache. It does not import bundler, compiler, timing, render-graph,
 browser-runtime, or authoring semantics. Its only consumers are the generated
 public npm package and release conformance.
 
+### Wire generation and limits
+
 Rust wire types are the source of truth. `cargo xtask schema` generates
 checked-in versioned JSON Schema, and CI requires regeneration to produce no
 diff. A schema with a real TypeScript consumer also generates checked-in
@@ -879,6 +993,8 @@ descriptions of at most 1,024 characters each; the producer owns their
 deterministic order. The runtime-host property name and these resource limits
 are generated from Rust-owned schema metadata, so native execution, browser
 runtime, and validation do not maintain handwritten copies.
+
+### Lambda adapter
 
 AWS Lambda is an adapter, not another engine. The checked-in Rust
 `onmark-aws-lambda` binary owns V1 invocation/result schemas, the thin handler,
@@ -948,6 +1064,8 @@ separately reviewed. Other backends such as GCP, ECS, or Kubernetes follow the
 same adapter rule and consume the same worker request and artifact format. They
 own their own SDK, transport semantics, and release artifact; Lambda environment
 variables, ZIP layout, and S3 policy are not a generic cloud interface.
+
+### Deployment performance evidence
 
 A separate decoded-media experiment measures the steady capture path rather than
 package delivery. One 1,920×1,080 H.264 fixture produced 60 output frames at 30
@@ -1145,7 +1263,11 @@ placement equals the published interval, whose frozen source dimensions equal
 the output profile, and whose complete color tuple is BT.709 limited range.
 This is a layout proof, not a permanent full-screen convention: broader
 `cover`, `contain`, crop, and transform behavior requires explicit typed facts
-and independent evidence. Rust never infers those CSS decisions.
+and independent evidence. Rust never infers those CSS decisions. The declared
+capability permits both execution plans: materialization records
+`SeparableOverlay` only when these facts prove the native path and otherwise
+records `BrowserComposite`. This is deterministic planning before launch, not a
+runtime fallback; workers execute the transported choice exactly.
 
 Native frame-rate conversion may not inherit `FFmpeg`'s default `fps` rounding.
 The candidate projects each source PTS from the Rust-owned source/output
@@ -1186,32 +1308,13 @@ For this path the capture-environment identity covers the pinned `FFmpeg`
 binary and composition policy in addition to Chromium, fonts, launch policy,
 and other pixel-affecting host facts.
 
-The reviewed Gate-seven admission record in
-`conformance/layered-media-admission.md` passes these thresholds at commit
-`abb391b`: median wall time is 23.95% of the equally thread-bounded baseline,
-and median incremental peak RSS is 79.73%. This evidence admits implementation
-of the explicit production capability; it does not switch the pixel path for
-presentations without that capability or weaken the remaining capability and
-conformance work.
+The reviewed admission measurements, production commits, and closing CI evidence
+live in [`conformance/layered-media-admission.md`](../../conformance/layered-media-admission.md).
+The production branch retains one compositor across a local render sequence,
+one capacity-one frame queue, and one explicit `FFmpeg` framesync lookahead; the
+evidence record owns the historical samples and revisions that admitted it.
 
-The production branch retains one compositor across a local render sequence.
-Its media inputs are concatenated inside that process before one transparent
-browser stream is applied, so partitioning does not create encoded segments or
-a decoder per frame. One process accepts at most 64 media-bearing units; larger
-sequences fail before launch instead of opening an unbounded decoder set. A
-capture worker uses the same compositor for its one Render Unit and packages
-each canonical RGBA result into the existing lossless frame artifact. A
-capacity-one channel is the only frame queue. `FFmpeg` framesync owns one
-explicit foreground lookahead: the second fixed-size RGBA frame releases the
-first composed frame, and closing the input releases the final frame. Local
-execution drains each canonical frame without retaining its pixels; workers
-retain and fingerprint one RGBA frame at a time. Production commits `d62a5d1`,
-`d94081f`, and `0f2b3c1` implement and correct this branch. Shared Linux CI run
-[`29886364671`](https://github.com/varo-yang/onmark/actions/runs/29886364671)
-passes the quality suite and locked real-process exit fixture at `0f2b3c1`,
-closing Gate seven.
-
-Gate seven does not add VFR, new codecs, HDR, hardware acceleration, lossy
+Gate seven did not add VFR, new codecs, HDR, hardware acceleration, lossy
 screenshot transport, parallel browser capture, transitions, playback-rate
 control, Studio, component marketplace, or new screenplay spelling.
 Those remain separate measured or language gates.
@@ -1223,9 +1326,9 @@ skeleton.
 ## Open experimental questions
 
 Layered alpha caching beyond Gate seven's bounded stream, wire encoding,
-caption-style normalization, adapter
-seekability, and environment-locking granularity require prototypes and
-measurements.
+caption-style normalization, adapter seekability, Windows native-graphics
+admission, desktop default policy, and environment-locking granularity require
+prototypes and measurements.
 Gate-three native capture has selected headless shell's CDP BeginFrameControl;
 revisiting that boundary requires stronger correctness and performance evidence,
 not API novelty alone. The pure compiler boundary, deterministic protocol,

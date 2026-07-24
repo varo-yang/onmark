@@ -7,8 +7,8 @@ use std::path::{Path, PathBuf};
 use onmark_core::compiler;
 use onmark_core::model::{
     AssetMetadata, AssetRef, Duration, FrameRate, FrozenAsset, FrozenAssetId,
-    PresentationTemporalCapability, PresentationVisualCapability, SourceId, Timebase,
-    VideoDimensions, VideoMetadata, VideoTiming,
+    PresentationFrameBehavior, PresentationTemporalCapability, PresentationVisualCapability,
+    SourceId, Timebase, VideoDimensions, VideoMetadata, VideoTiming,
 };
 use onmark_core::protocol::{BundleFile, BundleManifest};
 use onmark_render::{
@@ -151,6 +151,7 @@ fn rejects_payload_or_bundle_identity_drift() {
     let invalid = BundleManifest::new(
         PresentationTemporalCapability::Sequential,
         PresentationVisualCapability::BrowserComposite,
+        PresentationFrameBehavior::PerFrame,
         digest(b"wrong identity"),
         fixture.manifest.files().to_vec(),
     )
@@ -226,6 +227,7 @@ fn rejects_file_limits_before_bundle_identity_work() {
     let manifest = BundleManifest::new(
         PresentationTemporalCapability::Sequential,
         PresentationVisualCapability::BrowserComposite,
+        PresentationFrameBehavior::PerFrame,
         digest(b"wrong identity"),
         files,
     )
@@ -303,6 +305,7 @@ struct BundleIdentity<'a> {
     entry_point: &'a str,
     temporal_capability: &'a str,
     visual_capability: &'a str,
+    frame_behavior: &'a str,
     files: &'a [BundleFile],
 }
 
@@ -312,12 +315,14 @@ fn manifest(files: Vec<BundleFile>) -> BundleManifest {
         entry_point: "index.html",
         temporal_capability: PresentationTemporalCapability::Sequential.as_str(),
         visual_capability: PresentationVisualCapability::BrowserComposite.as_str(),
+        frame_behavior: PresentationFrameBehavior::PerFrame.as_str(),
         files: &files,
     };
     let identity = serde_json::to_vec(&identity).expect("the fixture identity serializes");
     BundleManifest::new(
         PresentationTemporalCapability::Sequential,
         PresentationVisualCapability::BrowserComposite,
+        PresentationFrameBehavior::PerFrame,
         digest(&identity),
         files,
     )

@@ -12,7 +12,10 @@ use serde::de::Error as _;
 use serde::ser::SerializeStruct as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use crate::model::{FrozenAssetId, PresentationTemporalCapability, PresentationVisualCapability};
+use crate::model::{
+    FrozenAssetId, PresentationFrameBehavior, PresentationTemporalCapability,
+    PresentationVisualCapability,
+};
 
 const ENTRY_DOCUMENT: &str = "index.html";
 const MANIFEST_FILE: &str = "manifest.json";
@@ -78,6 +81,7 @@ pub struct BundleManifest {
     entry_point: Box<str>,
     temporal_capability: PresentationTemporalCapability,
     visual_capability: PresentationVisualCapability,
+    frame_behavior: PresentationFrameBehavior,
     #[cfg_attr(
         feature = "schema",
         schemars(length(min = 1, max = MAX_BUNDLE_FILES))
@@ -115,12 +119,14 @@ impl BundleManifest {
     pub fn new(
         temporal_capability: PresentationTemporalCapability,
         visual_capability: PresentationVisualCapability,
+        frame_behavior: PresentationFrameBehavior,
         bundle_id: impl Into<Box<str>>,
         files: Vec<BundleFile>,
     ) -> Result<Self, InvalidBundleManifest> {
         Self::from_parts(
             temporal_capability,
             visual_capability,
+            frame_behavior,
             bundle_id.into(),
             files,
         )
@@ -129,9 +135,15 @@ impl BundleManifest {
     fn from_parts(
         temporal_capability: PresentationTemporalCapability,
         visual_capability: PresentationVisualCapability,
+        frame_behavior: PresentationFrameBehavior,
         bundle_id: Box<str>,
         files: Vec<BundleFile>,
     ) -> Result<Self, InvalidBundleManifest> {
+        if frame_behavior == PresentationFrameBehavior::PlacementBounded
+            && temporal_capability != PresentationTemporalCapability::RandomAccess
+        {
+            return Err(InvalidBundleManifest::IncompatibleFrameBehavior);
+        }
         if !is_sha256(&bundle_id) {
             return Err(InvalidBundleManifest::InvalidBundleId);
         }
@@ -153,6 +165,7 @@ impl BundleManifest {
             entry_point: ENTRY_DOCUMENT.into(),
             temporal_capability,
             visual_capability,
+            frame_behavior,
             files,
         })
     }
@@ -187,6 +200,12 @@ impl BundleManifest {
         self.visual_capability
     }
 
+    /// Returns the proven cadence at which browser-owned pixels may change.
+    #[must_use]
+    pub const fn frame_behavior(&self) -> PresentationFrameBehavior {
+        self.frame_behavior
+    }
+
     /// Returns the canonical JSON identity payload whose SHA-256 names the bundle.
     #[must_use]
     pub const fn identity(&self) -> BundleIdentity<'_> {
@@ -214,11 +233,12 @@ impl Serialize for BundleIdentity<'_> {
         S: Serializer,
     {
         let manifest = self.manifest;
-        let mut identity = serializer.serialize_struct("BundleIdentity", 5)?;
+        let mut identity = serializer.serialize_struct("BundleIdentity", 6)?;
         identity.serialize_field("version", &manifest.version)?;
         identity.serialize_field("entryPoint", &manifest.entry_point)?;
         identity.serialize_field("temporalCapability", manifest.temporal_capability.as_str())?;
         identity.serialize_field("visualCapability", manifest.visual_capability.as_str())?;
+        identity.serialize_field("frameBehavior", manifest.frame_behavior.as_str())?;
         identity.serialize_field("files", &manifest.files)?;
         identity.end()
     }
@@ -229,12 +249,13 @@ impl Serialize for BundleManifest {
     where
         S: Serializer,
     {
-        let mut manifest = serializer.serialize_struct("BundleManifest", 6)?;
+        let mut manifest = serializer.serialize_struct("BundleManifest", 7)?;
         manifest.serialize_field("version", &self.version)?;
         manifest.serialize_field("bundleId", &self.bundle_id)?;
         manifest.serialize_field("entryPoint", &self.entry_point)?;
         manifest.serialize_field("temporalCapability", self.temporal_capability.as_str())?;
         manifest.serialize_field("visualCapability", self.visual_capability.as_str())?;
+        manifest.serialize_field("frameBehavior", self.frame_behavior.as_str())?;
         manifest.serialize_field("files", &self.files)?;
         manifest.end()
     }
@@ -251,6 +272,7 @@ impl<'de> Deserialize<'de> for BundleManifest {
             entry_point,
             temporal_capability,
             visual_capability,
+            frame_behavior,
             files,
         } = BundleManifestWire::deserialize(deserializer)?;
         if entry_point.as_ref() != ENTRY_DOCUMENT {
@@ -262,8 +284,17 @@ impl<'de> Deserialize<'de> for BundleManifest {
         let visual_capability = visual_capability
             .parse()
             .map_err(|_| D::Error::custom("invalid bundle visual capability"))?;
-        Self::from_parts(temporal_capability, visual_capability, bundle_id, files)
-            .map_err(D::Error::custom)
+        let frame_behavior = frame_behavior
+            .parse()
+            .map_err(|_| D::Error::custom("invalid bundle frame behavior"))?;
+        Self::from_parts(
+            temporal_capability,
+            visual_capability,
+            frame_behavior,
+            bundle_id,
+            files,
+        )
+        .map_err(D::Error::custom)
     }
 }
 
@@ -275,6 +306,7 @@ struct BundleManifestWire {
     entry_point: Box<str>,
     temporal_capability: Box<str>,
     visual_capability: Box<str>,
+    frame_behavior: Box<str>,
     files: Vec<BundleFile>,
 }
 
@@ -385,6 +417,8 @@ pub enum InvalidBundleManifest {
     FilePathConflict,
     /// The fixed browser entry document is absent.
     MissingEntryPoint,
+    /// Placement-bounded pixels require direct random-access evaluation.
+    IncompatibleFrameBehavior,
 }
 
 impl fmt::Display for InvalidBundleManifest {
@@ -397,6 +431,9 @@ impl fmt::Display for InvalidBundleManifest {
             Self::UnorderedFiles => "bundle manifest files are not in canonical path order",
             Self::FilePathConflict => "bundle manifest contains a file-directory path collision",
             Self::MissingEntryPoint => "bundle manifest does not contain index.html",
+            Self::IncompatibleFrameBehavior => {
+                "placement-bounded frame behavior requires random-access presentation timing"
+            }
         })
     }
 }
@@ -508,7 +545,9 @@ fn is_sha256(value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use crate::model::{PresentationTemporalCapability, PresentationVisualCapability};
+    use crate::model::{
+        PresentationFrameBehavior, PresentationTemporalCapability, PresentationVisualCapability,
+    };
 
     use super::{BundleFile, BundleManifest, InvalidBundleFile, InvalidBundleManifest};
 
@@ -520,6 +559,7 @@ mod tests {
         let manifest = BundleManifest::new(
             PresentationTemporalCapability::Sequential,
             PresentationVisualCapability::BrowserComposite,
+            PresentationFrameBehavior::PerFrame,
             DIGEST,
             vec![file],
         )
@@ -572,6 +612,7 @@ mod tests {
             BundleManifest::new(
                 PresentationTemporalCapability::Sequential,
                 PresentationVisualCapability::BrowserComposite,
+                PresentationFrameBehavior::PerFrame,
                 DIGEST,
                 vec![script.clone(), index.clone()],
             ),
@@ -581,6 +622,7 @@ mod tests {
             BundleManifest::new(
                 PresentationTemporalCapability::Sequential,
                 PresentationVisualCapability::BrowserComposite,
+                PresentationFrameBehavior::PerFrame,
                 DIGEST,
                 vec![script],
             ),
@@ -590,6 +632,7 @@ mod tests {
             BundleManifest::new(
                 PresentationTemporalCapability::Sequential,
                 PresentationVisualCapability::BrowserComposite,
+                PresentationFrameBehavior::PerFrame,
                 DIGEST,
                 vec![index],
             )
@@ -609,6 +652,7 @@ mod tests {
             BundleManifest::new(
                 PresentationTemporalCapability::Sequential,
                 PresentationVisualCapability::BrowserComposite,
+                PresentationFrameBehavior::PerFrame,
                 DIGEST,
                 vec![index, sibling, descendant],
             ),
@@ -620,7 +664,7 @@ mod tests {
     fn rejects_unknown_versions_and_incomplete_capabilities() {
         for source in [
             format!(
-                r#"{{"version":2,"bundleId":"{DIGEST}","entryPoint":"index.html","temporalCapability":"randomAccess","visualCapability":"browserComposite","files":[{{"bytes":1,"path":"index.html","sha256":"{DIGEST}"}}]}}"#,
+                r#"{{"version":2,"bundleId":"{DIGEST}","entryPoint":"index.html","temporalCapability":"randomAccess","visualCapability":"browserComposite","frameBehavior":"perFrame","files":[{{"bytes":1,"path":"index.html","sha256":"{DIGEST}"}}]}}"#,
             ),
             format!(
                 r#"{{"version":1,"bundleId":"{DIGEST}","entryPoint":"index.html","files":[{{"bytes":1,"path":"index.html","sha256":"{DIGEST}"}}]}}"#,
@@ -634,11 +678,12 @@ mod tests {
     }
 
     #[test]
-    fn current_identity_records_both_capabilities() {
+    fn current_identity_records_all_presentation_declarations() {
         let file = BundleFile::new("index.html", 1, DIGEST).expect("index is valid");
         let manifest = BundleManifest::new(
             PresentationTemporalCapability::RandomAccess,
             PresentationVisualCapability::SeparableOverlay,
+            PresentationFrameBehavior::PlacementBounded,
             DIGEST,
             vec![file],
         )
@@ -648,8 +693,24 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&manifest.identity()).expect("identity serializes"),
             format!(
-                r#"{{"version":1,"entryPoint":"index.html","temporalCapability":"randomAccess","visualCapability":"separableOverlay","files":[{{"bytes":1,"path":"index.html","sha256":"{DIGEST}"}}]}}"#,
+                r#"{{"version":1,"entryPoint":"index.html","temporalCapability":"randomAccess","visualCapability":"separableOverlay","frameBehavior":"placementBounded","files":[{{"bytes":1,"path":"index.html","sha256":"{DIGEST}"}}]}}"#,
             ),
+        );
+    }
+
+    #[test]
+    fn placement_bounded_frames_require_random_access() {
+        let file = BundleFile::new("index.html", 1, DIGEST).expect("index is valid");
+
+        assert_eq!(
+            BundleManifest::new(
+                PresentationTemporalCapability::Sequential,
+                PresentationVisualCapability::BrowserComposite,
+                PresentationFrameBehavior::PlacementBounded,
+                DIGEST,
+                vec![file],
+            ),
+            Err(InvalidBundleManifest::IncompatibleFrameBehavior),
         );
     }
 }

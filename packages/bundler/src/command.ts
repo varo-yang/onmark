@@ -12,6 +12,7 @@ import {
   type DomBundleOptions,
 } from "./presentation.js";
 import {
+  BUNDLE_FRAME_BEHAVIORS,
   BUNDLE_TEMPORAL_CAPABILITIES,
   BUNDLE_VISUAL_CAPABILITIES,
 } from "./generated/bundle-manifest.js";
@@ -21,6 +22,7 @@ const USAGE = [
   "  (--entry <path> | --semantic-dom [--stylesheet <path>] [--motion <path>])",
   "  --output <directory>",
   "  --max-output-bytes <bytes>",
+  "  --frame-behavior <perFrame|placementBounded>",
   "  --temporal-capability <sequential|randomAccess>",
   "  --visual-capability <browserComposite|separableOverlay>",
   "",
@@ -63,6 +65,9 @@ function parseArguments(arguments_: readonly string[]): Command {
   const maxOutputBytes = parseByteLimit(
     oneValue(values["max-output-bytes"], "--max-output-bytes"),
   );
+  const frameBehavior = parseFrameBehavior(
+    oneValue(values["frame-behavior"], "--frame-behavior"),
+  );
   const temporalCapability = parseTemporalCapability(
     oneValue(values["temporal-capability"], "--temporal-capability"),
   );
@@ -71,6 +76,7 @@ function parseArguments(arguments_: readonly string[]): Command {
   );
 
   const controls = {
+    frameBehavior,
     maxOutputBytes,
     outputDirectory,
     temporalCapability,
@@ -120,6 +126,7 @@ function commandValues(arguments_: readonly string[]) {
       allowPositionals: false,
       options: {
         entry: { type: "string", multiple: true },
+        "frame-behavior": { type: "string", multiple: true },
         help: { type: "boolean" },
         "max-output-bytes": { type: "string", multiple: true },
         motion: { type: "string", multiple: true },
@@ -162,6 +169,16 @@ function parseVisualCapability(
   throw configuration(
     "--visual-capability must be browserComposite or separableOverlay",
   );
+}
+
+function parseFrameBehavior(value: string): BundleOptions["frameBehavior"] {
+  const behavior = BUNDLE_FRAME_BEHAVIORS.find(
+    (candidate) => candidate === value,
+  );
+  if (behavior !== undefined) {
+    return behavior;
+  }
+  throw configuration("--frame-behavior must be perFrame or placementBounded");
 }
 
 function oneValue(values: readonly string[] | undefined, name: string): string {

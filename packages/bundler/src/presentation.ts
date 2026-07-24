@@ -15,12 +15,14 @@ import {
   type Plugin,
 } from "esbuild";
 import type {
+  PresentationFrameBehavior,
   PresentationTemporalCapability,
   PresentationVisualCapability,
 } from "@onmark/runtime/types";
 
 import {
   BUNDLE_ENTRY_POINT,
+  BUNDLE_FRAME_BEHAVIORS,
   BUNDLE_MANIFEST_FILE,
   BUNDLE_TEMPORAL_CAPABILITIES,
   BUNDLE_VISUAL_CAPABILITIES,
@@ -69,6 +71,7 @@ export interface BundleOptions {
   readonly maxOutputBytes: number;
   readonly temporalCapability: PresentationTemporalCapability;
   readonly visualCapability: PresentationVisualCapability;
+  readonly frameBehavior: PresentationFrameBehavior;
 }
 
 /** Explicit inputs for the neutral semantic DOM presentation. */
@@ -79,6 +82,7 @@ export interface DomBundleOptions {
   readonly maxOutputBytes: number;
   readonly temporalCapability: PresentationTemporalCapability;
   readonly visualCapability: PresentationVisualCapability;
+  readonly frameBehavior: PresentationFrameBehavior;
 }
 
 /** Published directory and its owned immutable manifest snapshot. */
@@ -112,6 +116,7 @@ interface BundleInput {
   readonly maxOutputBytes: number;
   readonly temporalCapability: PresentationTemporalCapability;
   readonly visualCapability: PresentationVisualCapability;
+  readonly frameBehavior: PresentationFrameBehavior;
 }
 
 type PresentationSource =
@@ -136,6 +141,7 @@ export async function bundlePresentation(
     source: { kind: "custom", path: options.entryPoint },
     temporalCapability: options.temporalCapability,
     visualCapability: options.visualCapability,
+    frameBehavior: options.frameBehavior,
   });
 }
 
@@ -153,6 +159,7 @@ export async function bundleDomPresentation(
     },
     temporalCapability: options.temporalCapability,
     visualCapability: options.visualCapability,
+    frameBehavior: options.frameBehavior,
   });
 }
 
@@ -183,6 +190,7 @@ async function buildArtifact(
     pending,
     input.temporalCapability,
     input.visualCapability,
+    input.frameBehavior,
   );
   const manifestBytes = encodeManifest(manifest);
   enforceOutputLimit(pending, manifestBytes, input.maxOutputBytes);
@@ -212,12 +220,28 @@ function validateInput(options: BundleInput): BundleInput {
     );
   }
 
+  const temporalCapability = validateTemporalCapability(
+    options.temporalCapability,
+  );
+  const visualCapability = validateVisualCapability(options.visualCapability);
+  const frameBehavior = validateFrameBehavior(options.frameBehavior);
+  if (
+    frameBehavior === "placementBounded" &&
+    temporalCapability !== "randomAccess"
+  ) {
+    throw new BundleError(
+      "configuration",
+      "placement-bounded frames require random-access presentation timing",
+    );
+  }
+
   return Object.freeze({
     outputDirectory: resolve(options.outputDirectory),
     maxOutputBytes: options.maxOutputBytes,
     source: validateSource(options.source),
-    temporalCapability: validateTemporalCapability(options.temporalCapability),
-    visualCapability: validateVisualCapability(options.visualCapability),
+    temporalCapability,
+    visualCapability,
+    frameBehavior,
   });
 }
 
@@ -277,6 +301,21 @@ function validateVisualCapability(
   throw new BundleError(
     "configuration",
     "visual capability must be browserComposite or separableOverlay",
+  );
+}
+
+function validateFrameBehavior(
+  behavior: PresentationFrameBehavior,
+): PresentationFrameBehavior {
+  const admitted = BUNDLE_FRAME_BEHAVIORS.find(
+    (candidate) => candidate === behavior,
+  );
+  if (admitted !== undefined) {
+    return admitted;
+  }
+  throw new BundleError(
+    "configuration",
+    "frame behavior must be perFrame or placementBounded",
   );
 }
 
@@ -497,6 +536,7 @@ function createManifest(
   files: NonEmpty<PendingFile>,
   temporalCapability: PresentationTemporalCapability,
   visualCapability: PresentationVisualCapability,
+  frameBehavior: PresentationFrameBehavior,
 ): BundleManifest {
   const entries = manifestFiles(files);
   const identity = JSON.stringify({
@@ -504,6 +544,7 @@ function createManifest(
     entryPoint: BUNDLE_ENTRY_POINT,
     temporalCapability,
     visualCapability,
+    frameBehavior,
     files: entries,
   });
 
@@ -513,6 +554,7 @@ function createManifest(
     entryPoint: BUNDLE_ENTRY_POINT,
     temporalCapability,
     visualCapability,
+    frameBehavior,
     files: entries,
   });
 }

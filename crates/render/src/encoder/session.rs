@@ -81,7 +81,12 @@ impl Ffmpeg {
                 "FFmpeg encoding requires a Tokio runtime",
             )
         })?;
-        let mut child = spawn_ffmpeg(&self.executable, &output, frame_rate)?;
+        let mut child = spawn_ffmpeg(
+            &self.executable,
+            &output,
+            frame_rate,
+            self.limits.video_encoder_threads(),
+        )?;
         let Some(stdin) = child.stdin.take() else {
             return Err(EncodeError::new(
                 EncodeErrorKind::Spawn,
@@ -446,6 +451,7 @@ mod tests {
     use crate::EncodedPng;
     use crate::encoder::AudioInput;
 
+    const FIXTURE_INACTIVITY_TIMEOUT: Duration = Duration::from_secs(5);
     const FIXTURE_RETRY_TIMEOUT: Duration = Duration::from_secs(5);
     // The broken-pipe fixture retries writes until the kernel exposes closure.
     const FIXTURE_MAX_FRAMES: u64 = 10_000;
@@ -453,7 +459,7 @@ mod tests {
 
     #[tokio::test]
     async fn translates_a_failed_encoder_and_removes_its_partial_output() {
-        let fixture = EncoderFixture::new("failed.mp4", Duration::from_secs(1), 4_096);
+        let fixture = EncoderFixture::new("failed.mp4", FIXTURE_INACTIVITY_TIMEOUT, 4_096);
         let error = fixture.finish().await;
 
         assert_eq!(error.kind(), EncodeErrorKind::Failed);
@@ -463,7 +469,7 @@ mod tests {
 
     #[tokio::test]
     async fn retains_only_the_bounded_encoder_diagnostic_tail() {
-        let fixture = EncoderFixture::new("failed-tail.mp4", Duration::from_secs(1), 64);
+        let fixture = EncoderFixture::new("failed-tail.mp4", FIXTURE_INACTIVITY_TIMEOUT, 64);
         let error = fixture.finish().await;
         let message = error.to_string();
 
@@ -475,7 +481,7 @@ mod tests {
 
     #[tokio::test]
     async fn retains_encoder_diagnostics_when_frame_input_breaks() {
-        let fixture = EncoderFixture::new("write-failed.mp4", Duration::from_secs(1), 4_096);
+        let fixture = EncoderFixture::new("write-failed.mp4", FIXTURE_INACTIVITY_TIMEOUT, 4_096);
         let mut session = fixture.start();
         let error = fixture.write_until_input_breaks(&mut session).await;
 
@@ -492,7 +498,7 @@ mod tests {
     async fn browser_time_does_not_consume_encoder_inactivity_budget() {
         // Leave enough post-write budget for a loaded CI host to reap the
         // intentionally failing child; only the pre-write pause crosses it.
-        let fixture = EncoderFixture::new("failed.mp4", Duration::from_secs(1), 4_096);
+        let fixture = EncoderFixture::new("failed.mp4", FIXTURE_INACTIVITY_TIMEOUT, 4_096);
         let mut session = fixture.start();
         sleep(Duration::from_millis(1_100)).await;
 
@@ -520,7 +526,7 @@ mod tests {
 
     #[tokio::test]
     async fn observes_explicit_abort_and_removes_partial_output() {
-        let fixture = EncoderFixture::new("aborted.mp4", Duration::from_secs(1), 4_096);
+        let fixture = EncoderFixture::new("aborted.mp4", FIXTURE_INACTIVITY_TIMEOUT, 4_096);
         let session = fixture.start();
 
         session
@@ -533,7 +539,7 @@ mod tests {
 
     #[tokio::test]
     async fn removes_a_failed_audio_mix_after_retaining_its_diagnostics() {
-        let fixture = EncoderFixture::new("failed.mp4", Duration::from_secs(1), 4_096);
+        let fixture = EncoderFixture::new("failed.mp4", FIXTURE_INACTIVITY_TIMEOUT, 4_096);
         let visual = EncodedVideo {
             path: fixture.directory.path().join("visual.mp4"),
             frames: 1,

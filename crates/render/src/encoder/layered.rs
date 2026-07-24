@@ -129,7 +129,7 @@ impl LayeredSession {
                 "layered composition requires a Tokio runtime",
             )
         })?;
-        let mut child = spawn(executable, &job)?;
+        let mut child = spawn(executable, &job, limits.video_encoder_threads())?;
         let input = take_pipe(child.stdin.take(), &job.diagnostic_path, "input")?;
         let stdout = take_pipe(child.stdout.take(), &job.diagnostic_path, "frame output")?;
         let stderr = take_pipe(

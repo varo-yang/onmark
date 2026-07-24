@@ -2,8 +2,11 @@
 
 use std::path::{Path, PathBuf};
 
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use onmark_core::model::FrameRate;
+use onmark_render::{BrowserGraphicsBackend, EncodeLimits};
+
+use crate::execution::LOCAL_VIDEO_ENCODER_THREADS;
 
 /// Native entry point for deterministic screenplay rendering.
 #[derive(Debug, Parser)]
@@ -81,6 +84,19 @@ pub(super) struct RenderArgs {
     #[arg(long, help_heading = "Execution overrides")]
     pub(super) browser: Option<PathBuf>,
 
+    /// Browser graphics implementation. Omit to use the admitted host default.
+    #[arg(long, value_enum, help_heading = "Execution overrides")]
+    graphics: Option<GraphicsBackend>,
+
+    /// Threads assigned to the final H.264 encoder.
+    #[arg(
+        long,
+        default_value_t = LOCAL_VIDEO_ENCODER_THREADS,
+        value_parser = parse_video_encoder_threads,
+        help_heading = "Execution overrides"
+    )]
+    video_encoder_threads: usize,
+
     /// Presentation bundler executable.
     #[arg(
         long,
@@ -138,6 +154,31 @@ impl RenderArgs {
             Path::new("renders").join(stem).with_extension("mp4")
         })
     }
+
+    pub(super) fn graphics_backend(&self) -> Option<BrowserGraphicsBackend> {
+        self.graphics.map(GraphicsBackend::into_render_backend)
+    }
+
+    pub(super) const fn video_encoder_threads(&self) -> usize {
+        self.video_encoder_threads
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+enum GraphicsBackend {
+    Software,
+    #[cfg(target_os = "macos")]
+    Metal,
+}
+
+impl GraphicsBackend {
+    const fn into_render_backend(self) -> BrowserGraphicsBackend {
+        match self {
+            Self::Software => BrowserGraphicsBackend::SwiftShader,
+            #[cfg(target_os = "macos")]
+            Self::Metal => BrowserGraphicsBackend::Metal,
+        }
+    }
 }
 
 pub(super) fn source_directory(source: &Path) -> &Path {
@@ -164,11 +205,27 @@ fn parse_rate_component(value: &str) -> Result<u32, String> {
         .map_err(|_| "frame rate must be a positive integer or exact rational".to_owned())
 }
 
+fn parse_video_encoder_threads(value: &str) -> Result<usize, String> {
+    let message = || {
+        format!(
+            "video encoder threads must be an integer from 1 through {}",
+            EncodeLimits::MAX_VIDEO_ENCODER_THREADS,
+        )
+    };
+    let threads = value.parse().map_err(|_| message())?;
+    if !(1..=EncodeLimits::MAX_VIDEO_ENCODER_THREADS).contains(&threads) {
+        return Err(message());
+    }
+    Ok(threads)
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::Path;
 
-    use super::{Cli, Command, WorkerCommand};
+    use onmark_render::{BrowserGraphicsBackend, EncodeLimits};
+
+    use super::{Cli, Command, LOCAL_VIDEO_ENCODER_THREADS, WorkerCommand};
     use clap::Parser;
 
     #[test]
@@ -185,6 +242,67 @@ mod tests {
         assert_eq!(args.output(), Path::new("renders/film.mp4"));
         assert_eq!(args.frame_rate.numerator(), 30);
         assert_eq!(args.frame_rate.denominator(), 1);
+        assert_eq!(args.graphics_backend(), None);
+        assert_eq!(args.video_encoder_threads(), LOCAL_VIDEO_ENCODER_THREADS);
+    }
+
+    #[test]
+    fn accepts_explicit_browser_graphics_overrides() {
+        let cli =
+            Cli::try_parse_from(["onmark", "render", "film.onmark", "--graphics", "software"])
+                .expect("the software graphics override is valid on every host");
+        let Command::Render(args) = cli.command else {
+            panic!("the fixture must parse as a render command");
+        };
+        assert_eq!(
+            args.graphics_backend(),
+            Some(BrowserGraphicsBackend::SwiftShader),
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn accepts_the_admitted_metal_override() {
+        let cli = Cli::try_parse_from(["onmark", "render", "film.onmark", "--graphics", "metal"])
+            .expect("the Metal graphics override is admitted on macOS");
+        let Command::Render(args) = cli.command else {
+            panic!("the fixture must parse as a render command");
+        };
+        assert_eq!(args.graphics_backend(), Some(BrowserGraphicsBackend::Metal));
+    }
+
+    #[test]
+    fn accepts_bounded_video_encoder_threads() {
+        for threads in [1, EncodeLimits::MAX_VIDEO_ENCODER_THREADS] {
+            let spelling = threads.to_string();
+            let cli = Cli::try_parse_from([
+                "onmark",
+                "render",
+                "film.onmark",
+                "--video-encoder-threads",
+                &spelling,
+            ])
+            .expect("the thread count stays inside the render safety envelope");
+            let Command::Render(args) = cli.command else {
+                panic!("the fixture must parse as a render command");
+            };
+            assert_eq!(args.video_encoder_threads(), threads);
+        }
+    }
+
+    #[test]
+    fn rejects_unbounded_video_encoder_threads() {
+        for threads in [0, EncodeLimits::MAX_VIDEO_ENCODER_THREADS + 1] {
+            let spelling = threads.to_string();
+            let result = Cli::try_parse_from([
+                "onmark",
+                "render",
+                "film.onmark",
+                "--video-encoder-threads",
+                &spelling,
+            ]);
+            assert!(result.is_err());
+        }
     }
 
     #[test]

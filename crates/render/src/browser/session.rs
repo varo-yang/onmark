@@ -12,11 +12,12 @@ use chromiumoxide::browser::Browser;
 use chromiumoxide::cdp::browser_protocol::dom::Rgba;
 use chromiumoxide::cdp::browser_protocol::emulation::SetDefaultBackgroundColorOverrideParams;
 use chromiumoxide::cdp::browser_protocol::headless_experimental::{
-    BeginFrameParams, BeginFrameReturns, ScreenshotParams, ScreenshotParamsFormat,
+    BeginFrameParams, BeginFrameReturns,
 };
 use chromiumoxide::cdp::browser_protocol::page::{
     BringToFrontParams, CaptureScreenshotFormat, CaptureScreenshotParams,
 };
+use chromiumoxide::cdp::browser_protocol::system_info::GetInfoParams;
 use chromiumoxide::cdp::browser_protocol::target::CreateTargetParams;
 use chromiumoxide::error::CdpError;
 use chromiumoxide::handler::viewport::Viewport;
@@ -31,22 +32,33 @@ use tokio::task::JoinHandle;
 use tokio::time::{Instant, sleep, timeout, timeout_at};
 use url::Url;
 
+use super::compositor::{CompositorClock, CompositorTransaction};
 use super::error::{BrowserError, BrowserErrorKind};
 use super::frame::{CapturedFrame, EncodedPng};
 use super::limits::BrowserLimits;
 use super::process::{
-    BrowserCaptureMode, BrowserDiagnostics, BrowserLaunchPolicy, ChromiumProcess,
+    BrowserCaptureMode, BrowserDiagnostics, BrowserGraphicsBackend, BrowserLaunchPolicy,
+    ChromiumProcess,
 };
 use super::resource::ResourceGuard;
 use crate::RenderProfile;
 
 const READINESS_POLL_INTERVAL: Duration = Duration::from_millis(10);
-const SURFACE_INITIALIZATION_TIME_MILLIS: f64 = 1.0;
-const COMPOSITOR_BASE_TIME_MILLIS: f64 = 1_000.0;
-// One transaction may use two positive substeps. A one-millisecond stride
-// keeps every substep representable and strictly before the next placement.
-const COMPOSITOR_TRANSACTION_STEP_MILLIS: f64 = 1.0;
-const MAX_COMPOSITOR_OFFSET_MILLIS: f64 = 0.001;
+
+/// Immutable controls for one browser process and render surface.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct BrowserSessionOptions {
+    /// Process isolation and sandbox policy owned by the execution host.
+    pub launch_policy: BrowserLaunchPolicy,
+    /// Graphics implementation admitted for the capture environment.
+    pub graphics_backend: BrowserGraphicsBackend,
+    /// Chromium surface-commit mechanism selected for the executable.
+    pub capture_mode: BrowserCaptureMode,
+    /// Exact viewport dimensions owned by the render plan.
+    pub render_profile: RenderProfile,
+    /// Bounded process deadline and retained capture bytes.
+    pub limits: BrowserLimits,
+}
 
 /// One owned headless browser process and its single render page.
 #[derive(Debug)]
@@ -61,6 +73,7 @@ pub struct BrowserSession {
     // The capture phase owns this cache through `&mut self`; it is not shared
     // across requests or tasks.
     last_capture: Option<EncodedPng>,
+    capture_commands: u64,
     capture_mode: BrowserCaptureMode,
     compositor: CompositorClock,
     limits: BrowserLimits,
@@ -74,6 +87,10 @@ impl BrowserSession {
         self.render_profile
     }
 
+    pub(crate) const fn capture_commands(&self) -> u64 {
+        self.capture_commands
+    }
+
     /// Launches a bounded headless browser session using an explicit executable.
     ///
     /// # Errors
@@ -82,16 +99,21 @@ impl BrowserSession {
     /// startup, or initial page creation fails.
     pub async fn launch(
         executable: impl AsRef<Path>,
-        launch_policy: BrowserLaunchPolicy,
-        capture_mode: BrowserCaptureMode,
-        render_profile: RenderProfile,
-        limits: BrowserLimits,
+        options: BrowserSessionOptions,
     ) -> Result<Self, BrowserError> {
+        let BrowserSessionOptions {
+            launch_policy,
+            graphics_backend,
+            capture_mode,
+            render_profile,
+            limits,
+        } = options;
         let target = render_target(capture_mode).map_err(BrowserError::configuration)?;
         let profile = browser_profile()?;
         let (mut process, endpoint) = ChromiumProcess::launch(
             executable.as_ref(),
             launch_policy,
+            graphics_backend,
             capture_mode,
             profile.path(),
             render_profile,
@@ -135,6 +157,12 @@ impl BrowserSession {
                 return Err(error);
             }
         };
+        if let Err(error) =
+            validate_graphics_backend(&browser, graphics_backend, diagnostics.clone()).await
+        {
+            cleanup_failed_launch(&mut browser, handler, &mut process, limits.deadline()).await;
+            return Err(error);
+        }
 
         Ok(Self {
             browser,
@@ -144,6 +172,7 @@ impl BrowserSession {
             diagnostics,
             resources: None,
             last_capture: None,
+            capture_commands: 0,
             capture_mode,
             compositor: CompositorClock::new(),
             limits,
@@ -155,17 +184,20 @@ impl BrowserSession {
     /// Restricts the page to one private resource root, navigates it, and waits
     /// for the runtime host to become ready.
     ///
+    /// A local sequence may reuse the Chromium process across independent
+    /// units. Each navigation first retires the preceding root policy and
+    /// capture cache; bytes from one unit therefore cannot satisfy another.
+    ///
     /// # Errors
     ///
     /// Returns [`BrowserError`] when the resource policy cannot be installed,
     /// Chrome rejects navigation, the load event misses its deadline, or the
     /// bundle never installs its runtime host.
     pub async fn navigate(&mut self, url: &Url, resource_root: &Path) -> Result<(), BrowserError> {
-        if self.resources.is_some() {
-            return Err(BrowserError::without_source(
-                BrowserErrorKind::ResourcePolicy,
-            ));
+        if let Some(resources) = self.resources.take() {
+            resources.stop().await?;
         }
+        self.last_capture = None;
         self.resources = Some(ResourceGuard::install(&self.page, resource_root).await?);
         self.page
             .goto(url.as_str())
@@ -203,18 +235,22 @@ impl BrowserSession {
 
     /// Initializes the target surface before the first captured frame.
     ///
-    /// The fixed pre-baseline timestamp lets Chromium allocate and paint the
-    /// page surface without consuming an authored frame.
+    /// The first navigation uses a fixed pre-baseline timestamp. Reused targets
+    /// take a later tick from the same session clock, so navigation never
+    /// rewinds Chromium's compositor time.
     ///
     /// # Errors
     ///
     /// Returns [`BrowserError`] when the compositor frame cannot complete.
     pub async fn initialize_capture_surface(
-        &self,
+        &mut self,
         frame_rate: WireFrameRate,
     ) -> Result<(), BrowserError> {
         match self.capture_mode {
-            BrowserCaptureMode::BeginFrame => self.initialize_begin_frame_surface(frame_rate).await,
+            BrowserCaptureMode::BeginFrame => {
+                let parameters = self.compositor.initialize(frame_rate);
+                self.initialize_begin_frame_surface(parameters).await
+            }
             BrowserCaptureMode::Screenshot => self.activate_portable_surface().await,
         }
     }
@@ -265,7 +301,7 @@ impl BrowserSession {
             .await
     }
 
-    pub(crate) async fn capture_png_after_placement_boundary(
+    pub(crate) async fn capture_png_after_surface_change(
         &mut self,
         frame: WireFrame,
         frame_rate: WireFrameRate,
@@ -276,16 +312,16 @@ impl BrowserSession {
         let transaction = self.compositor.begin(frame, frame_rate);
         // Runtime staging may introduce a layer that was absent from the
         // compositor. Commit it immediately before this capture transaction so
-        // the new placement is visible without changing authored time.
+        // the new surface is visible without changing authored time.
         self.page
-            .execute(transaction.placement_parameters())
+            .execute(transaction.surface_commit_parameters())
             .await
             .map_err(|source| self.cdp_error(BrowserErrorKind::Capture, source))?;
         self.capture_begin_frame(transaction, MissingScreenshot::RetryOnce)
             .await
     }
 
-    /// Reconciles a placement boundary after decoded-media confirmation.
+    /// Reconciles a freshly staged surface after media confirmation.
     ///
     /// The exact capture is retained when Chromium reports no further damage.
     /// If confirmation allowed a pending layer to settle, the next bounded
@@ -338,9 +374,10 @@ impl BrowserSession {
     }
 
     async fn capture(
-        &self,
+        &mut self,
         parameters: BeginFrameParams,
     ) -> Result<BeginFrameReturns, BrowserError> {
+        self.record_capture_command();
         self.page
             .execute(parameters)
             .await
@@ -350,10 +387,10 @@ impl BrowserSession {
 
     async fn initialize_begin_frame_surface(
         &self,
-        frame_rate: WireFrameRate,
+        parameters: BeginFrameParams,
     ) -> Result<(), BrowserError> {
         self.page
-            .execute(surface_initialization_parameters(frame_rate))
+            .execute(parameters)
             .await
             .map(|_| ())
             .map_err(|source| self.cdp_error(BrowserErrorKind::Capture, source))
@@ -368,6 +405,7 @@ impl BrowserSession {
     }
 
     async fn capture_screenshot(&mut self) -> Result<EncodedPng, BrowserError> {
+        self.record_capture_command();
         let response = self
             .page
             .execute(portable_screenshot_parameters())
@@ -396,6 +434,12 @@ impl BrowserSession {
         let capture = EncodedPng::new(bytes);
         self.last_capture = Some(capture.clone());
         Ok(capture)
+    }
+
+    fn record_capture_command(&mut self) {
+        // Telemetry must never become a rendering failure after the validated
+        // frame limit has already bounded useful work.
+        self.capture_commands = self.capture_commands.saturating_add(1);
     }
 
     /// Captures one encoder PNG together with canonical raw-RGBA evidence.
@@ -477,6 +521,48 @@ impl BrowserSession {
     }
 }
 
+async fn validate_graphics_backend(
+    browser: &Browser,
+    requested: BrowserGraphicsBackend,
+    diagnostics: BrowserDiagnostics,
+) -> Result<(), BrowserError> {
+    let response = browser
+        .execute(GetInfoParams::default())
+        .await
+        .map_err(|source| {
+            BrowserError::cdp_with_diagnostics(
+                BrowserErrorKind::GraphicsBackend,
+                source,
+                diagnostics.snapshot(),
+            )
+        })?
+        .result;
+    let renderer = response
+        .gpu
+        .aux_attributes
+        .as_ref()
+        .and_then(|attributes| attributes.get("glRenderer"))
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| {
+            BrowserError::process(
+                BrowserErrorKind::GraphicsBackend,
+                "Chromium did not report its active GL renderer",
+                diagnostics.snapshot(),
+            )
+        })?;
+    if requested.accepts_renderer(renderer) {
+        return Ok(());
+    }
+    Err(BrowserError::process(
+        BrowserErrorKind::GraphicsBackend,
+        format!(
+            "requested {}, but Chromium activated {renderer}",
+            requested.label()
+        ),
+        diagnostics.snapshot(),
+    ))
+}
+
 #[derive(Clone, Copy)]
 enum MissingScreenshot {
     ReusePrevious,
@@ -552,118 +638,6 @@ fn portable_screenshot_parameters() -> CaptureScreenshotParams {
         .build()
 }
 
-/// Monotonic CDP time owned by capture order, independent of authored time.
-///
-/// Runtime effects may seek backward or repeat a frame. Chromium compositor
-/// transactions may not: each transaction receives the next positive tick and
-/// merely remembers which authored frame it is committing.
-#[derive(Debug)]
-struct CompositorClock {
-    next_capture_time_millis: f64,
-    active: Option<CompositorTransaction>,
-}
-
-impl CompositorClock {
-    const fn new() -> Self {
-        Self {
-            next_capture_time_millis: COMPOSITOR_BASE_TIME_MILLIS,
-            active: None,
-        }
-    }
-
-    fn begin(
-        &mut self,
-        authored_frame: WireFrame,
-        frame_rate: WireFrameRate,
-    ) -> CompositorTransaction {
-        let interval_millis = frame_interval_millis(frame_rate);
-        let transaction = CompositorTransaction {
-            authored_frame,
-            capture_time_millis: self.next_capture_time_millis,
-            interval_millis,
-        };
-        self.next_capture_time_millis += COMPOSITOR_TRANSACTION_STEP_MILLIS;
-        self.active = Some(transaction);
-        transaction
-    }
-
-    fn active_for(&self, authored_frame: WireFrame) -> Option<CompositorTransaction> {
-        self.active
-            .filter(|transaction| transaction.authored_frame == authored_frame)
-    }
-}
-
-/// The ordered placement, capture, retry, and reconciliation ticks for one frame.
-#[derive(Clone, Copy, Debug)]
-struct CompositorTransaction {
-    authored_frame: WireFrame,
-    capture_time_millis: f64,
-    interval_millis: f64,
-}
-
-impl CompositorTransaction {
-    fn placement_parameters(self) -> BeginFrameParams {
-        visual_frame_parameters(
-            self.capture_time_millis - self.offset_millis(),
-            self.interval_millis,
-        )
-    }
-
-    fn capture_parameters(self) -> BeginFrameParams {
-        captured_frame_parameters(self.capture_time_millis, self.interval_millis)
-    }
-
-    fn retry_parameters(self) -> BeginFrameParams {
-        captured_frame_parameters(
-            self.capture_time_millis + self.offset_millis(),
-            self.interval_millis,
-        )
-    }
-
-    fn reconciliation_parameters(self) -> BeginFrameParams {
-        captured_frame_parameters(
-            self.capture_time_millis + self.offset_millis() * 2.0,
-            self.interval_millis,
-        )
-    }
-
-    fn offset_millis(self) -> f64 {
-        (self.interval_millis / 4.0).min(MAX_COMPOSITOR_OFFSET_MILLIS)
-    }
-}
-
-fn captured_frame_parameters(frame_time_ticks: f64, interval: f64) -> BeginFrameParams {
-    let screenshot = ScreenshotParams::builder()
-        .format(ScreenshotParamsFormat::Png)
-        .optimize_for_speed(true)
-        .build();
-
-    BeginFrameParams::builder()
-        .frame_time_ticks(frame_time_ticks)
-        .interval(interval)
-        .screenshot(screenshot)
-        .build()
-}
-
-fn visual_frame_parameters(frame_time_ticks: f64, interval: f64) -> BeginFrameParams {
-    BeginFrameParams::builder()
-        .frame_time_ticks(frame_time_ticks)
-        .interval(interval)
-        .no_display_updates(false)
-        .build()
-}
-
-fn surface_initialization_parameters(frame_rate: WireFrameRate) -> BeginFrameParams {
-    visual_frame_parameters(
-        SURFACE_INITIALIZATION_TIME_MILLIS,
-        frame_interval_millis(frame_rate),
-    )
-}
-
-fn frame_interval_millis(frame_rate: WireFrameRate) -> f64 {
-    f64::from(frame_rate.denominator()) * 1_000.0 / f64::from(frame_rate.numerator())
-}
-
 fn maximum_base64_length(decoded_bytes: usize) -> usize {
     decoded_bytes.div_ceil(3).saturating_mul(4)
 }
@@ -732,13 +706,9 @@ async fn shutdown_handler(
 #[cfg(test)]
 mod tests {
     use chromiumoxide::error::CdpError;
-    use onmark_core::model::FrameRate;
-    use onmark_core::protocol::{WireFrame, WireFrameRate};
 
     use super::{
-        COMPOSITOR_TRANSACTION_STEP_MILLIS, CompositorClock, handler_exit_error,
-        maximum_base64_length, portable_screenshot_parameters, render_target,
-        surface_initialization_parameters,
+        handler_exit_error, maximum_base64_length, portable_screenshot_parameters, render_target,
     };
     use crate::{BrowserCaptureMode, BrowserErrorKind};
 
@@ -763,133 +733,6 @@ mod tests {
         assert_eq!(screenshot.from_surface, Some(true));
         assert_eq!(screenshot.capture_beyond_viewport, Some(false));
         assert_eq!(screenshot.optimize_for_speed, Some(true));
-    }
-
-    #[test]
-    fn compositor_transactions_follow_capture_order_not_authored_frames() {
-        let rate = WireFrameRate::from(
-            FrameRate::new(30, 1).expect("the fixture rate is canonical and nonzero"),
-        );
-        let mut clock = CompositorClock::new();
-        let captures = [17, 3, 29, 17].map(|index| {
-            let frame = WireFrame::new(index).expect("the fixture frame is browser-safe");
-            compositor_time(&clock.begin(frame, rate).capture_parameters())
-        });
-
-        assert!(captures.windows(2).all(|pair| {
-            (pair[1] - pair[0] - COMPOSITOR_TRANSACTION_STEP_MILLIS).abs() < f64::EPSILON
-        }));
-    }
-
-    #[test]
-    fn active_transaction_remembers_its_authored_frame() {
-        let frame = WireFrame::new(17).expect("the fixture frame is browser-safe");
-        let other = WireFrame::new(3).expect("the fixture frame is browser-safe");
-        let rate = WireFrameRate::from(
-            FrameRate::new(30, 1).expect("the fixture rate is canonical and nonzero"),
-        );
-        let mut clock = CompositorClock::new();
-        clock.begin(frame, rate);
-
-        assert_eq!(
-            clock
-                .active_for(frame)
-                .map(|transaction| transaction.authored_frame),
-            Some(frame),
-        );
-        assert!(clock.active_for(other).is_none());
-    }
-
-    #[test]
-    fn surface_initialization_is_visual_and_precedes_the_capture_baseline() {
-        let rate = WireFrameRate::from(
-            FrameRate::new(30, 1).expect("the fixture rate is canonical and nonzero"),
-        );
-        let parameters = surface_initialization_parameters(rate);
-
-        assert_eq!(parameters.frame_time_ticks, Some(1.0));
-        assert_eq!(parameters.no_display_updates, Some(false));
-        assert_eq!(parameters.interval, Some(1_000.0 / 30.0));
-        assert_eq!(parameters.screenshot, None);
-    }
-
-    #[test]
-    fn staged_placement_precedes_its_capture_transaction() {
-        let frame = WireFrame::new(15).expect("the fixture frame is browser-safe");
-        let rate = WireFrameRate::from(
-            FrameRate::new(30, 1).expect("the fixture rate is canonical and nonzero"),
-        );
-        let mut clock = CompositorClock::new();
-        let transaction = clock.begin(frame, rate);
-        let commit = transaction.placement_parameters();
-        let capture = transaction.capture_parameters();
-
-        assert_eq!(commit.frame_time_ticks, Some(999.999));
-        assert_eq!(commit.no_display_updates, Some(false));
-        assert_eq!(commit.screenshot, None);
-        assert_eq!(capture.frame_time_ticks, Some(1_000.0));
-        let screenshot = capture
-            .screenshot
-            .expect("every exact compositor frame must carry its capture");
-        assert_eq!(screenshot.format, Some(super::ScreenshotParamsFormat::Png));
-        assert_eq!(screenshot.optimize_for_speed, Some(true));
-    }
-
-    #[test]
-    fn capture_followups_advance_by_distinct_bounded_offsets() {
-        let frame = WireFrame::new(15).expect("the fixture frame is browser-safe");
-        let rate = WireFrameRate::from(
-            FrameRate::new(30, 1).expect("the fixture rate is canonical and nonzero"),
-        );
-        let mut clock = CompositorClock::new();
-        let transaction = clock.begin(frame, rate);
-        let initial = transaction.capture_parameters();
-        let retry = transaction.retry_parameters();
-        let reconciliation = transaction.reconciliation_parameters();
-
-        assert_eq!(initial.frame_time_ticks, Some(1_000.0));
-        assert_eq!(retry.frame_time_ticks, Some(1_000.001));
-        assert_eq!(reconciliation.frame_time_ticks, Some(1_000.002));
-        assert_eq!(retry.interval, initial.interval);
-        assert_eq!(retry.screenshot, initial.screenshot);
-        assert_eq!(reconciliation.interval, initial.interval);
-        assert_eq!(reconciliation.screenshot, initial.screenshot);
-    }
-
-    #[test]
-    fn compositor_substeps_remain_between_adjacent_transactions() {
-        let previous = WireFrame::new(17).expect("the fixture frame is browser-safe");
-        let frame = WireFrame::new(3).expect("the fixture frame is browser-safe");
-        let next = WireFrame::new(29).expect("the fixture frame is browser-safe");
-        let rates = [
-            FrameRate::new(u32::MAX, 1).expect("the high fixture rate is valid"),
-            FrameRate::new(1, u32::MAX).expect("the low fixture rate is valid"),
-        ];
-
-        for rate in rates.map(WireFrameRate::from) {
-            let mut clock = CompositorClock::new();
-            let previous = clock.begin(previous, rate);
-            let current = clock.begin(frame, rate);
-            let next = clock.begin(next, rate);
-            let previous_reconciliation = compositor_time(&previous.reconciliation_parameters());
-            let commit = compositor_time(&current.placement_parameters());
-            let capture = compositor_time(&current.capture_parameters());
-            let retry = compositor_time(&current.retry_parameters());
-            let reconciliation = compositor_time(&current.reconciliation_parameters());
-            let next_commit = compositor_time(&next.placement_parameters());
-
-            assert!(previous_reconciliation < commit);
-            assert!(commit < capture);
-            assert!(capture < retry);
-            assert!(retry < reconciliation);
-            assert!(reconciliation < next_commit);
-        }
-    }
-
-    fn compositor_time(parameters: &super::BeginFrameParams) -> f64 {
-        parameters
-            .frame_time_ticks
-            .expect("frame parameters carry compositor time")
     }
 
     #[test]

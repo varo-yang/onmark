@@ -5,9 +5,9 @@ use std::str::FromStr;
 
 /// Proven relationship between a presentation's output and requested frames.
 ///
-/// Unknown presentation code is [`Sequential`](Self::Sequential). Random
-/// access is an explicit claim that each requested frame depends only on
-/// immutable inputs and that exact frame.
+/// Unknown presentation code requires `Sequential`. Random access is an
+/// explicit claim that each requested frame depends only on immutable inputs
+/// and that exact frame.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "schema", schemars(rename_all = "camelCase"))]
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]

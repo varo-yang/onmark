@@ -44,6 +44,13 @@ Chromium-media path for presentations without the capability. The real-process
 exit fixture passes; this is neither new screenplay syntax nor a hidden
 fallback.
 
+The executor now also carries an independent, proved browser-frame behavior.
+For placement-bounded foregrounds it captures only the first frame and solved
+placement changes, then shares the immutable PNG between intervening output
+frames. The real-process layered control reduces browser evaluation from 75
+authored frames to one while retaining exact canonical raw-RGBA output;
+browser-owned video and unknown authored effects remain per-frame.
+
 The completed foundation includes the pure compiler and versioned wire types in
 `onmark-core`; bounded ffprobe and strict SubRip/WebVTT/ASS normalization in
 `onmark-media`; deterministic video and overlay presentation in
@@ -76,21 +83,31 @@ against their own path and byte spans before browser or media processes start.
 
 Presentation capabilities are not command-line assumptions. The built-in
 semantic DOM without authored CSS or motion is admitted for random access;
-stylesheets, motion, and custom presentations remain sequential. Local
-rendering conservatively keeps complete frame composition in Chromium. Stronger
-capabilities belong to conformance-admitted adapters and immutable bundle
-metadata.
+stylesheets, motion, and custom presentations remain sequential. The same
+product-owned neutral presentation also permits native primary-media
+composition and proves that its browser foreground changes only at solved
+placement boundaries. Planning selects native composition only when every
+partition proves the admitted layout and color facts, and selects sparse
+browser capture only when Chromium owns no video pixels. Otherwise the
+execution plan records complete Chromium composition or per-frame capture
+before launch. Stronger authored capabilities belong to conformance-admitted
+adapters and immutable bundle metadata; neither path is inferred from source
+text or observed pixel equality.
 
 The desktop artifact is admitted on macOS arm64, Linux x64, and Windows x64,
 although it has not yet been published to npm. It exposes one `onmark` package
 and command, carries the native CLI, `ffmpeg`, and `ffprobe` in a platform
 sidecar, and installs the pinned browser into a verified private cache. Linux
 uses Chrome for Testing's `chrome-headless-shell` with CDP BeginFrameControl;
-macOS and Windows use ordinary Chrome's portable screenshot backend. Every
-target renders the same admitted screenplay twice in an empty consumer before
-release artifacts are retained. Use the execution override flags shown by
-`onmark render --help` only for explicit custom tool locations. Deterministic
-comparisons apply within the same locked browser environment and capture mode.
+macOS and Windows use ordinary Chrome's portable screenshot backend. macOS
+selects Metal and verifies the active renderer through CDP; Linux and Windows
+retain `SwiftShader`. Every target renders the same admitted screenplay twice
+in an empty consumer before release artifacts are retained. Execution overrides
+remain explicit: `--graphics software` selects the canonical software control,
+and `--video-encoder-threads` can replace the stable four-thread local default
+with a bounded value from 1 through 64.
+Deterministic comparisons apply within the same locked browser environment,
+capture mode, and graphics backend.
 
 ## Worker capture
 

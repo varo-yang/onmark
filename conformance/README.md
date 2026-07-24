@@ -55,6 +55,20 @@ ONMARK_HEADLESS_SHELL=/path/to/chrome-headless-shell \
 The smoke crosses the versioned browser protocol, captures two distinct frames,
 and requires a repeated capture of the same frame to produce identical PNG bytes.
 
+On macOS, the opt-in platform-graphics check uses the portable screenshot
+backend, reads the active renderer back through CDP, and rejects a software
+fallback. It compares independent Metal sessions over out-of-order WAAPI, GSAP,
+and Three.js frames, while retaining a `SwiftShader` sequence to prove the two
+graphics environments are not being conflated:
+
+```bash
+ONMARK_BUNDLER=/path/to/onmark-bundle \
+ONMARK_PORTABLE_CHROME=/path/to/chrome \
+cargo test -p onmark-render --test render \
+  seeks_dynamic_frames_deterministically_on_metal \
+  -- --exact --ignored
+```
+
 The full local-render smoke generates and probes a real H.264 source, verifies
 its frozen identity during unit materialization, decodes it through Chromium,
 streams every captured frame through `FFmpeg`, probes the published MP4, and
@@ -94,6 +108,12 @@ tool can silently change the measured environment.
 Gate seven's production layered-media path is enabled only for the explicit
 `separableOverlay` capability. Shared Linux CI runs its cold-repeatability,
 whole-versus-partition, frozen BT.709 patch-bound, and real-process exit checks.
+The exit fixture also builds otherwise identical `everyFrame` and
+`placementBounded` foreground bundles. It requires the latter to reduce
+browser capture work from 75 authored frames to one while retaining exact
+canonical raw-RGBA equality.
+Either headless shell or ordinary Chrome may run that portable equivalence
+check; the locked Linux suite remains the release authority.
 The original performance admission remains reproducible but separate because
 shared-runner noise must not decide a production pixel path. On the pinned
 admission machine, run the five alternating 1,920×1,080 baseline/candidate

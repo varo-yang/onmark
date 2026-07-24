@@ -10,8 +10,9 @@ use super::capture::{
 use super::{RenderError, invalid_plan, layered_job};
 use crate::encoder::{LayeredCompletion, LayeredOutput};
 use crate::{
-    BrowserCaptureMode, BrowserLaunchPolicy, BrowserLimits, BrowserSession, CaptureEnvironmentId,
-    ExecutableUnit, Ffmpeg, FrameArtifact, FrameArtifactErrorKind, FrameArtifactLimits,
+    BrowserCaptureMode, BrowserGraphicsBackend, BrowserLaunchPolicy, BrowserLimits, BrowserSession,
+    BrowserSessionOptions, CaptureEnvironmentId, ExecutableUnit, Ffmpeg, FrameArtifact,
+    FrameArtifactErrorKind, FrameArtifactLimits,
 };
 
 /// Aggregate wall-time attribution for one browser capture session.
@@ -21,11 +22,13 @@ use crate::{
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct FrameCaptureMetrics {
     pub(super) frames: u64,
+    pub(super) browser_captures: u64,
+    pub(super) browser_capture_commands: u64,
     pub(super) launch: Duration,
     pub(super) runtime_setup: Duration,
     pub(super) seek: Duration,
     pub(super) readback: Duration,
-    pub(super) fingerprint: Duration,
+    pub(super) pixel_processing: Duration,
     pub(super) confirm: Duration,
     pub(super) write: Duration,
     pub(super) shutdown: Duration,
@@ -36,6 +39,24 @@ impl FrameCaptureMetrics {
     #[must_use]
     pub const fn frames(self) -> u64 {
         self.frames
+    }
+
+    /// Returns how many authored output frames entered browser capture.
+    ///
+    /// Bounded retry and reconciliation readbacks contribute to
+    /// [`Self::readback`] rather than appearing as additional authored frames.
+    #[must_use]
+    pub const fn browser_captures(self) -> u64 {
+        self.browser_captures
+    }
+
+    /// Returns the number of pixel-capture commands sent to Chromium.
+    ///
+    /// Unlike [`Self::browser_captures`], this includes bounded retries and
+    /// placement reconciliation.
+    #[must_use]
+    pub const fn browser_capture_commands(self) -> u64 {
+        self.browser_capture_commands
     }
 
     /// Returns Chromium process and CDP connection time.
@@ -62,10 +83,10 @@ impl FrameCaptureMetrics {
         self.readback
     }
 
-    /// Returns aggregate PNG decode and canonical raw-RGBA hashing time.
+    /// Returns aggregate browser-PNG decoding and raw-RGBA hashing time.
     #[must_use]
-    pub const fn fingerprint(self) -> Duration {
-        self.fingerprint
+    pub const fn pixel_processing(self) -> Duration {
+        self.pixel_processing
     }
 
     /// Returns aggregate decoded-media confirmation time.
@@ -74,7 +95,7 @@ impl FrameCaptureMetrics {
         self.confirm
     }
 
-    /// Returns aggregate frame-sink write time.
+    /// Returns aggregate native composition, canonicalization, and sink-write time.
     #[must_use]
     pub const fn write(self) -> Duration {
         self.write
@@ -121,9 +142,20 @@ impl FrameCaptureReport {
 pub struct FrameCaptureExecutor {
     browser_executable: PathBuf,
     capture_mode: BrowserCaptureMode,
+    graphics_backend: BrowserGraphicsBackend,
     launch_policy: BrowserLaunchPolicy,
     browser_limits: BrowserLimits,
     ffmpeg: Ffmpeg,
+}
+
+/// One owned Chromium lifetime that may execute several local partitions.
+///
+/// Worker capture still creates one of these per artifact. Local assembly may
+/// retain it across a validated sequence to amortize process startup while
+/// each unit keeps its own runtime disposal and private resource root.
+pub(super) struct FrameCaptureSession {
+    browser: BrowserSession,
+    metrics: FrameCaptureMetrics,
 }
 
 impl FrameCaptureExecutor {
@@ -143,16 +175,32 @@ impl FrameCaptureExecutor {
         Self {
             browser_executable: browser_executable.into(),
             capture_mode,
+            graphics_backend: BrowserGraphicsBackend::SwiftShader,
             launch_policy,
             browser_limits,
             ffmpeg,
         }
     }
 
+    /// Selects the immutable graphics implementation for each browser session.
+    ///
+    /// This is an execution-host decision, never an automatic fallback.
+    #[must_use]
+    pub fn with_graphics_backend(mut self, graphics_backend: BrowserGraphicsBackend) -> Self {
+        self.graphics_backend = graphics_backend;
+        self
+    }
+
     /// Returns the browser surface mechanism selected for this executor.
     #[must_use]
     pub const fn capture_mode(&self) -> BrowserCaptureMode {
         self.capture_mode
+    }
+
+    /// Returns the graphics implementation selected for this executor.
+    #[must_use]
+    pub const fn graphics_backend(&self) -> BrowserGraphicsBackend {
+        self.graphics_backend
     }
 
     /// Captures one independently executable unit into a verified worker artifact.
@@ -282,6 +330,32 @@ impl FrameCaptureExecutor {
             .map_err(|source| RenderError::artifact(artifact, source))
     }
 
+    pub(super) async fn start_session(
+        &self,
+        profile: crate::RenderProfile,
+        output: &Path,
+    ) -> Result<FrameCaptureSession, RenderError> {
+        let started = Instant::now();
+        let browser = BrowserSession::launch(
+            &self.browser_executable,
+            BrowserSessionOptions {
+                launch_policy: self.launch_policy,
+                graphics_backend: self.graphics_backend,
+                capture_mode: self.capture_mode,
+                render_profile: profile,
+                limits: self.browser_limits,
+            },
+        )
+        .await
+        .map_err(|source| RenderError::browser(output, source))?;
+        let metrics = FrameCaptureMetrics {
+            launch: started.elapsed(),
+            ..FrameCaptureMetrics::default()
+        };
+
+        Ok(FrameCaptureSession { browser, metrics })
+    }
+
     pub(super) async fn capture_unit(
         &self,
         unit: &ExecutableUnit,
@@ -289,6 +363,20 @@ impl FrameCaptureExecutor {
         requests: RequestSequence,
         output: &Path,
     ) -> Result<FrameCaptureMetrics, RenderError> {
+        let mut session = self.start_session(unit.profile(), output).await?;
+        let capture = session.capture(unit, frames, requests, output).await;
+        session.finish(capture, output).await
+    }
+}
+
+impl FrameCaptureSession {
+    pub(super) async fn capture(
+        &mut self,
+        unit: &ExecutableUnit,
+        frames: &mut FrameSink<'_>,
+        requests: RequestSequence,
+        output: &Path,
+    ) -> Result<(), RenderError> {
         let foreground = unit
             .visual_execution()
             .layered_media()
@@ -298,44 +386,38 @@ impl FrameCaptureExecutor {
             Some(plan) => (plan, CaptureSurface::Transparent),
             None => (unit.browser_plan(), CaptureSurface::Opaque),
         };
-        let launch_started = Instant::now();
-        let mut browser = BrowserSession::launch(
-            &self.browser_executable,
-            self.launch_policy,
-            self.capture_mode,
-            unit.profile(),
-            self.browser_limits,
-        )
-        .await
-        .map_err(|source| RenderError::browser(output, source))?;
-        let mut metrics = FrameCaptureMetrics {
-            launch: launch_started.elapsed(),
-            ..FrameCaptureMetrics::default()
-        };
-
-        let render_result = render_session(
-            &mut browser,
+        render_session(
+            &mut self.browser,
             frames,
-            &mut metrics,
+            &mut self.metrics,
             CaptureTask {
                 plan,
                 requests,
                 entry_url: unit.entry_url(),
                 resource_root: unit.resource_root(),
                 surface,
+                cadence: unit.visual_execution().capture_cadence(),
                 output,
             },
         )
-        .await;
-        let shutdown_started = Instant::now();
-        let shutdown_result = browser
+        .await
+    }
+
+    pub(super) async fn finish(
+        mut self,
+        capture: Result<(), RenderError>,
+        output: &Path,
+    ) -> Result<FrameCaptureMetrics, RenderError> {
+        let started = Instant::now();
+        let shutdown = self
+            .browser
             .shutdown()
             .await
             .map_err(|source| RenderError::browser(output, source));
-        metrics.shutdown = shutdown_started.elapsed();
+        self.metrics.shutdown = started.elapsed();
 
-        match (render_result, shutdown_result) {
-            (Ok(()), Ok(())) => Ok(metrics),
+        match (capture, shutdown) {
+            (Ok(()), Ok(())) => Ok(self.metrics),
             (Err(render), Ok(())) => Err(render),
             (Ok(()), Err(shutdown)) => Err(shutdown),
             (Err(render), Err(shutdown)) => {

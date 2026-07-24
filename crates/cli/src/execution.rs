@@ -13,6 +13,8 @@ const MAX_CAPTURE_BYTES: usize = 64 * 1024 * 1024;
 const MAX_ENCODED_FRAMES: u64 = 1_000_000;
 const MAX_ENCODER_INPUT_BYTES: u64 = 128 * 1024 * 1024 * 1024;
 const MAX_PROCESS_STDERR_BYTES: usize = 1024 * 1024;
+pub(super) const LOCAL_VIDEO_ENCODER_THREADS: usize = 4;
+const WORKER_VIDEO_ENCODER_THREADS: usize = 1;
 const MAX_UNIT_FILES: usize = 10_000;
 const MAX_UNIT_BYTES: u64 = 256 * 1024 * 1024 * 1024;
 
@@ -25,13 +27,22 @@ pub(super) fn browser_limits() -> BrowserLimits {
         .expect("the CLI browser policy stays within the render safety envelope")
 }
 
-pub(super) fn encode_limits() -> EncodeLimits {
+pub(super) fn local_encode_limits(video_encoder_threads: usize) -> EncodeLimits {
+    encode_limits(video_encoder_threads)
+}
+
+pub(super) fn worker_encode_limits() -> EncodeLimits {
+    encode_limits(WORKER_VIDEO_ENCODER_THREADS)
+}
+
+fn encode_limits(video_encoder_threads: usize) -> EncodeLimits {
     EncodeLimits::new(
         ENCODER_INACTIVITY_TIMEOUT,
         MAX_ENCODED_FRAMES,
         MAX_ENCODER_INPUT_BYTES,
         MAX_PROCESS_STDERR_BYTES,
     )
+    .and_then(|limits| limits.with_video_encoder_threads(video_encoder_threads))
     .expect("the CLI encoder policy stays within the render safety envelope")
 }
 

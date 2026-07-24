@@ -16,6 +16,8 @@ import { basename, join, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
+import { withObservedCleanup } from "./observed-cleanup.mjs";
+
 const MAX_CAPTURED_BYTES = 1024 * 1024;
 const RENDER_TIMEOUT_MILLISECONDS = 10 * 60_000;
 const TOOL_TIMEOUT_MILLISECONDS = 2 * 60_000;
@@ -27,27 +29,32 @@ const HEIGHT = 180;
 async function main() {
   const request = parseArguments(process.argv);
   const root = await mkdtemp(join(tmpdir(), "onmark-desktop-admission-"));
-  try {
-    await admitRelease(request, root);
-  } finally {
-    await rm(root, { force: true, recursive: true });
-  }
+  await withObservedCleanup(
+    async () => {
+      const report = await admitRelease(request, root);
+      await writePerformanceReport(request.performanceReport, report);
+    },
+    () => rm(root, { force: true, recursive: true }),
+    "desktop admission failed and workspace cleanup also failed",
+  );
 }
 
 function parseArguments(argv) {
-  const [npmCli, product, sidecar] = argv.slice(2);
+  const [npmCli, product, sidecar, performanceReport] = argv.slice(2);
   if (
     npmCli === undefined ||
     product === undefined ||
     sidecar === undefined ||
-    argv.length !== 5
+    performanceReport === undefined ||
+    argv.length !== 6
   ) {
     throw new Error(
-      "expected `node scripts/release/admit.mjs <npm-cli.js> <product-directory> <sidecar-directory>`",
+      "expected `node scripts/release/admit.mjs <npm-cli.js> <product-directory> <sidecar-directory> <report.json>`",
     );
   }
   return Object.freeze({
     npmCli: resolve(npmCli),
+    performanceReport: resolve(performanceReport),
     product: resolve(product),
     sidecar: resolve(sidecar),
   });
@@ -68,7 +75,7 @@ async function admitRelease(request, root) {
   const tools = releaseTools(consumer);
   await materializeFilm(film);
   await generateMedia(tools.ffmpeg, film);
-  await admitRender(tools, film);
+  return admitRender(tools, film);
 }
 
 async function packRelease(request, destination) {
@@ -175,15 +182,19 @@ async function generateMedia(ffmpeg, directory) {
   await writeFile(rawVideo, rawVideoSequence());
   await writeFile(rawAudio, Buffer.alloc(48_000 * 2));
 
-  try {
-    await encodeVideo(ffmpeg, directory, rawVideo);
-    await encodeAudio(ffmpeg, directory, rawAudio);
-  } finally {
-    await Promise.all([
-      rm(rawVideo, { force: true }),
-      rm(rawAudio, { force: true }),
-    ]);
-  }
+  await withObservedCleanup(
+    async () => {
+      await encodeVideo(ffmpeg, directory, rawVideo);
+      await encodeAudio(ffmpeg, directory, rawAudio);
+    },
+    async () => {
+      await Promise.all([
+        rm(rawVideo, { force: true }),
+        rm(rawAudio, { force: true }),
+      ]);
+    },
+    "media generation failed and raw-input cleanup also failed",
+  );
 }
 
 function rawVideoSequence() {
@@ -272,23 +283,13 @@ async function admitRender(tools, directory) {
   const screenplay = join(directory, "film.onmark");
   const first = join(directory, "first.mp4");
   const second = join(directory, "second.mp4");
-  // Separate CLI invocations guarantee independent native and browser sessions.
-  for (const output of [first, second]) {
-    await runInvocation(
-      appendArguments(tools.onmark, [
-        "render",
-        screenplay,
-        "--output",
-        output,
-        "--width",
-        String(WIDTH),
-        "--height",
-        String(HEIGHT),
-      ]),
-      directory,
-      RENDER_TIMEOUT_MILLISECONDS,
-    );
-  }
+  const outputs = Object.freeze([first, second]);
+  const renderMilliseconds = await renderIndependently(
+    tools.onmark,
+    screenplay,
+    outputs,
+    directory,
+  );
 
   const [firstVideo, secondVideo, firstAudio, secondAudio] = await Promise.all([
     decodedVideoHash(tools.ffmpeg, first, directory),
@@ -329,6 +330,45 @@ async function admitRender(tools, directory) {
   if (before !== after) {
     throw new Error("failed no-clobber render changed the existing output");
   }
+
+  return Object.freeze({
+    frames: EXPECTED_OUTPUT_FRAMES,
+    height: HEIGHT,
+    renderMilliseconds,
+    target: releaseTarget(),
+    width: WIDTH,
+  });
+}
+
+async function renderIndependently(onmark, screenplay, outputs, directory) {
+  const renderMilliseconds = [];
+  // Separate CLI invocations guarantee independent native and browser sessions.
+  for (const output of outputs) {
+    const invocation = appendArguments(onmark, [
+      "render",
+      screenplay,
+      "--output",
+      output,
+      "--width",
+      String(WIDTH),
+      "--height",
+      String(HEIGHT),
+    ]);
+    const milliseconds = await measureInvocation(
+      invocation,
+      directory,
+      RENDER_TIMEOUT_MILLISECONDS,
+    );
+    renderMilliseconds.push(milliseconds);
+  }
+  return Object.freeze(renderMilliseconds);
+}
+
+async function writePerformanceReport(path, report) {
+  // Shared runners retain samples for comparison; only locked admission owns
+  // performance thresholds.
+  const bytes = `${JSON.stringify(report, null, 2)}\n`;
+  await writeFile(path, bytes, { flag: "wx" });
 }
 
 function decodedVideoHash(ffmpeg, input, directory) {
@@ -434,6 +474,13 @@ async function run(command, arguments_, cwd, timeout) {
 
 async function runInvocation(invocation, cwd, timeout) {
   return run(invocation.command, invocation.arguments, cwd, timeout);
+}
+
+async function measureInvocation(invocation, cwd, timeout) {
+  const started = process.hrtime.bigint();
+  await runInvocation(invocation, cwd, timeout);
+  const nanoseconds = process.hrtime.bigint() - started;
+  return Number(nanoseconds) / 1_000_000;
 }
 
 async function runStatus(command, arguments_, cwd, timeout) {

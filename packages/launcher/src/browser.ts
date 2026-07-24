@@ -9,8 +9,10 @@ import {
   readdir,
   rename,
   rm,
+  rmdir,
   stat,
   utimes,
+  writeFile,
 } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
@@ -48,12 +50,25 @@ interface InstallLockTimings {
   readonly waitMilliseconds: number;
 }
 
+interface InstallLease {
+  readonly directory: string;
+  readonly marker: string;
+}
+
+interface BrowserInstallation {
+  readonly cacheDirectory: string;
+  readonly hostPlatform: NodeJS.Platform;
+  readonly installBrowser: BrowserInstaller;
+  readonly target: DesktopTarget;
+}
+
 const INSTALL_LOCK_TIMINGS: InstallLockTimings = {
   heartbeatMilliseconds: 10_000,
   pollMilliseconds: 200,
   staleMilliseconds: 60_000,
   waitMilliseconds: 3 * 60_000,
 };
+const INSTALL_LOCK_OWNER_PREFIX = ".owner-";
 const INSTALL_STAGING_PREFIX = ".browser-install-";
 
 export class BrowserInstallError extends Error {
@@ -72,7 +87,7 @@ export async function ensureBrowser(
   const target = desktopTarget(options.host);
   await mkdir(options.cacheDirectory, { recursive: true });
 
-  return withInstallLock(options.cacheDirectory, async () => {
+  return withInstallLock(options.cacheDirectory, async (lease) => {
     const admittedCache = join(
       options.cacheDirectory,
       BROWSER_BUILD,
@@ -88,24 +103,38 @@ export async function ensureBrowser(
       return installed.executablePath;
     }
 
+    await verifyInstallLease(lease);
     await removeAbandonedStaging(admittedCache);
     await removeIncompleteInstall(installed);
-    return installVerifiedBrowser(
-      admittedCache,
-      target,
-      options.host.platform,
+    return installVerifiedBrowser(lease, {
+      cacheDirectory: admittedCache,
+      hostPlatform: options.host.platform,
       installBrowser,
-    );
+      target,
+    });
   });
 }
 
 async function installVerifiedBrowser(
-  cacheDirectory: string,
-  target: DesktopTarget,
-  hostPlatform: NodeJS.Platform,
-  installBrowser: BrowserInstaller,
+  lease: InstallLease,
+  installation: BrowserInstallation,
 ): Promise<string> {
-  const staging = await mkdtemp(join(cacheDirectory, INSTALL_STAGING_PREFIX));
+  const staging = await mkdtemp(
+    join(installation.cacheDirectory, INSTALL_STAGING_PREFIX),
+  );
+  return withObservedCleanup(
+    () => publishVerifiedBrowser(lease, installation, staging),
+    () => rm(staging, { force: true, recursive: true }),
+    "browser installation failed and staging cleanup also failed",
+  );
+}
+
+async function publishVerifiedBrowser(
+  lease: InstallLease,
+  installation: BrowserInstallation,
+  staging: string,
+): Promise<string> {
+  const { cacheDirectory, hostPlatform, installBrowser, target } = installation;
   try {
     const staged = await installBrowser({
       browser: target.browser,
@@ -126,6 +155,7 @@ async function installVerifiedBrowser(
       target.browserPlatform,
     );
     await mkdir(dirname(destination.path), { recursive: true });
+    await verifyInstallLease(lease);
     await rename(staged.path, destination.path);
     if (!(await isExecutable(destination.executablePath, hostPlatform))) {
       throw new BrowserInstallError(
@@ -141,8 +171,6 @@ async function installVerifiedBrowser(
       `failed to install ${target.browser} ${BROWSER_BUILD}`,
       error,
     );
-  } finally {
-    await rm(staging, { force: true, recursive: true });
   }
 }
 
@@ -208,50 +236,57 @@ async function isExecutable(
 
 async function withInstallLock<T>(
   cacheDirectory: string,
-  action: () => Promise<T>,
+  action: (lease: InstallLease) => Promise<T>,
   timings: InstallLockTimings = INSTALL_LOCK_TIMINGS,
 ): Promise<T> {
   const lock = join(cacheDirectory, ".install.lock");
-  await acquireInstallLock(lock, timings);
+  const lease = await acquireInstallLock(lock, timings);
   const heartbeat = setInterval(() => {
-    void refreshInstallLock(lock);
+    void refreshInstallLease(lease);
   }, timings.heartbeatMilliseconds);
   heartbeat.unref();
 
+  return withObservedCleanup(
+    () => action(lease),
+    async () => {
+      clearInterval(heartbeat);
+      await releaseInstallLock(lease);
+    },
+    "browser installation failed and lease cleanup also failed",
+  );
+}
+
+async function refreshInstallLease(lease: InstallLease): Promise<void> {
+  const now = new Date();
   try {
-    return await action();
-  } finally {
-    clearInterval(heartbeat);
-    await rm(lock, { force: true, recursive: true });
+    await utimes(lease.marker, now, now);
+  } catch {
+    // A reclaimer may have moved this exact lease. The owner-specific marker
+    // prevents the resumed heartbeat from touching a successor's lock.
   }
 }
 
-async function refreshInstallLock(lock: string): Promise<void> {
+async function verifyInstallLease(lease: InstallLease): Promise<void> {
   const now = new Date();
   try {
-    await utimes(lock, now, now);
-  } catch {
-    // A concurrent reclaimer may already own the abandoned directory. Losing
-    // that race cannot admit partial browser bytes.
+    await utimes(lease.marker, now, now);
+  } catch (error) {
+    throw new BrowserInstallError(
+      "browser installation lease was lost before cache publication",
+      error,
+    );
   }
 }
 
 async function acquireInstallLock(
   lock: string,
   timings: InstallLockTimings,
-): Promise<void> {
+): Promise<InstallLease> {
   const deadline = Date.now() + timings.waitMilliseconds;
   while (Date.now() < deadline) {
-    try {
-      await mkdir(lock);
-      return;
-    } catch (error) {
-      if (!isErrno(error, "EEXIST")) {
-        throw new BrowserInstallError(
-          "failed to acquire the browser installation lock",
-          error,
-        );
-      }
+    const lease = await tryAcquireInstallLock(lock);
+    if (lease !== undefined) {
+      return lease;
     }
 
     await reclaimAbandonedLock(lock, timings.staleMilliseconds);
@@ -263,13 +298,69 @@ async function acquireInstallLock(
   );
 }
 
+async function tryAcquireInstallLock(
+  lock: string,
+): Promise<InstallLease | undefined> {
+  const owner = randomUUID();
+  const candidate = `${lock}.candidate-${owner}`;
+  const markerName = `${INSTALL_LOCK_OWNER_PREFIX}${owner}`;
+  await mkdir(candidate);
+  return withObservedCleanup(
+    async () => {
+      try {
+        await writeFile(join(candidate, markerName), "", { flag: "wx" });
+      } catch (error) {
+        throw new BrowserInstallError(
+          "failed to prepare the browser installation lock",
+          error,
+        );
+      }
+
+      try {
+        await rename(candidate, lock);
+      } catch (error) {
+        if (isLockContention(error) || (await installLockExists(lock))) {
+          return undefined;
+        }
+        throw new BrowserInstallError(
+          "failed to acquire the browser installation lock",
+          error,
+        );
+      }
+
+      return {
+        directory: lock,
+        marker: join(lock, markerName),
+      };
+    },
+    () => rm(candidate, { force: true, recursive: true }),
+    "browser installation lock acquisition and candidate cleanup both failed",
+  );
+}
+
+async function releaseInstallLock(lease: InstallLease): Promise<void> {
+  await rm(lease.marker, { force: true });
+  try {
+    await rmdir(lease.directory);
+  } catch (error) {
+    if (
+      isErrno(error, "ENOENT") ||
+      isErrno(error, "ENOTEMPTY") ||
+      isErrno(error, "EEXIST")
+    ) {
+      return;
+    }
+    throw error;
+  }
+}
+
 async function reclaimAbandonedLock(
   lock: string,
   staleMilliseconds: number,
 ): Promise<void> {
   let modified: number;
   try {
-    modified = (await stat(lock)).mtimeMs;
+    modified = await installLockModifiedAt(lock);
   } catch (error) {
     if (isErrno(error, "ENOENT")) {
       return;
@@ -292,6 +383,35 @@ async function reclaimAbandonedLock(
   await rm(abandoned, { force: true, recursive: true });
 }
 
+async function installLockModifiedAt(lock: string): Promise<number> {
+  const owners = (await readdir(lock))
+    .filter((entry) => entry.startsWith(INSTALL_LOCK_OWNER_PREFIX))
+    .sort();
+  const owner = owners[0];
+  if (owners.length === 1 && owner !== undefined) {
+    return (await stat(join(lock, owner))).mtimeMs;
+  }
+  return (await stat(lock)).mtimeMs;
+}
+
+function isLockContention(error: unknown): boolean {
+  return isErrno(error, "EEXIST") || isErrno(error, "ENOTEMPTY");
+}
+
+async function installLockExists(lock: string): Promise<boolean> {
+  try {
+    return (await stat(lock)).isDirectory();
+  } catch (error) {
+    if (isErrno(error, "ENOENT")) {
+      return false;
+    }
+    throw new BrowserInstallError(
+      "failed to inspect the browser installation lock",
+      error,
+    );
+  }
+}
+
 function isErrno(error: unknown, code: string): boolean {
   return error instanceof Error && "code" in error && error.code === code;
 }
@@ -300,4 +420,32 @@ function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, milliseconds);
   });
+}
+
+async function withObservedCleanup<T>(
+  action: () => Promise<T>,
+  cleanup: () => Promise<void>,
+  combinedMessage: string,
+): Promise<T> {
+  let outcome:
+    | { readonly status: "fulfilled"; readonly value: T }
+    | { readonly reason: unknown; readonly status: "rejected" };
+  try {
+    outcome = { status: "fulfilled", value: await action() };
+  } catch (error) {
+    outcome = { reason: error, status: "rejected" };
+  }
+
+  try {
+    await cleanup();
+  } catch (cleanupError) {
+    if (outcome.status === "fulfilled") {
+      throw cleanupError;
+    }
+    throw new AggregateError([outcome.reason, cleanupError], combinedMessage);
+  }
+  if (outcome.status === "rejected") {
+    throw outcome.reason;
+  }
+  return outcome.value;
 }

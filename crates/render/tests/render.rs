@@ -19,10 +19,10 @@ use onmark_core::protocol::{
 use onmark_core::render_graph::{PartitionPlan, RenderGraph};
 use onmark_media::{Ffprobe, SubtitleLimits, parse_webvtt};
 use onmark_render::{
-    BrowserCaptureMode, BrowserErrorKind, BrowserLaunchPolicy, BrowserLimits, BrowserSession,
-    CaptureEnvironmentId, EncodeLimits, EncodedPng, ExecutableUnit, Ffmpeg, FrameArtifact,
-    FrameArtifactLimits, MaterializedAsset, RawRgbaHash, RenderErrorKind, RenderExecutor,
-    RenderProfile, RenderUnit, UnitRootLimits,
+    BrowserCaptureMode, BrowserErrorKind, BrowserGraphicsBackend, BrowserLaunchPolicy,
+    BrowserLimits, BrowserSession, BrowserSessionOptions, CaptureEnvironmentId, EncodeLimits,
+    EncodedPng, ExecutableUnit, Ffmpeg, FrameArtifact, FrameArtifactLimits, MaterializedAsset,
+    RawRgbaHash, RenderErrorKind, RenderExecutor, RenderProfile, RenderUnit, UnitRootLimits,
 };
 use serde::Deserialize;
 use sha2::{Digest as _, Sha256};
@@ -71,10 +71,7 @@ async fn rejects_units_that_do_not_match_the_partition_plan_before_launching_bro
 async fn rejects_a_page_that_never_installs_the_runtime_host() {
     let mut session = BrowserSession::launch(
         headless_shell(),
-        BrowserLaunchPolicy::local(),
-        BrowserCaptureMode::BeginFrame,
-        render_profile(),
-        browser_limits(Duration::from_secs(5)),
+        browser_options(BrowserCaptureMode::BeginFrame, Duration::from_secs(5)),
     )
     .await
     .expect("headless shell must launch");
@@ -95,10 +92,7 @@ async fn rejects_a_page_that_never_installs_the_runtime_host() {
 async fn blocks_navigation_outside_the_private_resource_root() {
     let mut session = BrowserSession::launch(
         headless_shell(),
-        BrowserLaunchPolicy::local(),
-        BrowserCaptureMode::BeginFrame,
-        render_profile(),
-        browser_limits(Duration::from_secs(5)),
+        browser_options(BrowserCaptureMode::BeginFrame, Duration::from_secs(5)),
     )
     .await
     .expect("headless shell must launch");
@@ -120,10 +114,7 @@ async fn blocks_navigation_outside_the_private_resource_root() {
 async fn bounds_a_runtime_adapter_that_never_finishes_loading() {
     let mut session = BrowserSession::launch(
         headless_shell(),
-        BrowserLaunchPolicy::local(),
-        BrowserCaptureMode::BeginFrame,
-        render_profile(),
-        browser_limits(Duration::from_secs(5)),
+        browser_options(BrowserCaptureMode::BeginFrame, Duration::from_secs(5)),
     )
     .await
     .expect("headless shell must launch");
@@ -193,6 +184,34 @@ async fn seeks_browser_animation_playheads_deterministically() {
     );
 }
 
+#[cfg(target_os = "macos")]
+#[tokio::test]
+#[ignore = "requires ONMARK_BUNDLER and ONMARK_PORTABLE_CHROME"]
+async fn seeks_dynamic_frames_deterministically_on_metal() {
+    let directory = tempdir().expect("the experiment workspace must be available");
+    let bundle = FixtureBundle::build_temporal(directory.path()).await;
+    let browser = required_path("ONMARK_PORTABLE_CHROME");
+    let entry = bundle.entry_url();
+    let software =
+        capture_portable_temporal_sequence(&browser, BrowserGraphicsBackend::SwiftShader, &entry)
+            .await;
+    let first =
+        capture_portable_temporal_sequence(&browser, BrowserGraphicsBackend::Metal, &entry).await;
+    let second =
+        capture_portable_temporal_sequence(&browser, BrowserGraphicsBackend::Metal, &entry).await;
+
+    assert_eq!(first, second, "independent browser processes must agree");
+    assert_ne!(
+        first, software,
+        "the fixture must expose backend-sensitive WebGL pixels",
+    );
+    assert_eq!(first[0], first[3], "repeated exact frames must agree");
+    assert!(
+        first.windows(2).any(|frames| frames[0] != frames[1]),
+        "the experiment must contain visible temporal change",
+    );
+}
+
 #[tokio::test]
 #[ignore = "requires ONMARK_HEADLESS_SHELL, ONMARK_FFMPEG, and ONMARK_FFPROBE"]
 async fn renders_the_gate_one_plan_to_a_verified_mp4() {
@@ -218,17 +237,19 @@ async fn renders_the_gate_one_plan_to_a_verified_mp4() {
 }
 
 #[tokio::test]
-#[ignore = "requires Linux ONMARK_BUNDLER, ONMARK_HEADLESS_SHELL, ONMARK_FFMPEG, and ONMARK_FFPROBE"]
+#[ignore = "requires ONMARK_BUNDLER, ONMARK_HEADLESS_SHELL or ONMARK_PORTABLE_CHROME, ONMARK_FFMPEG, and ONMARK_FFPROBE"]
 async fn renders_and_repeats_the_production_layered_path() {
     let directory = tempdir().expect("the test output directory must be available");
     let bundle = FixtureBundle::build_layered(directory.path()).await;
+    let per_frame_bundle = FixtureBundle::build_layered_per_frame(directory.path()).await;
     let source = directory.path().join("source.mp4");
     let output = directory.path().join("layered.mp4");
+    let per_frame_path = directory.path().join("per-frame.onmark-frames");
     let first_path = directory.path().join("first.onmark-frames");
     let second_path = directory.path().join("second.onmark-frames");
     generate_source_video(&source, "2.5").await;
     let frozen = freeze_asset(&source).await;
-    let executor = real_executor(100);
+    let executor = layered_executor(100);
 
     let rendered = executor
         .render(
@@ -237,8 +258,27 @@ async fn renders_and_repeats_the_production_layered_path() {
         )
         .await
         .expect("the admitted layered path must render one MP4");
+    let per_frame = executor
+        .capture_frame_artifact_report(
+            &executable_video_unit(&per_frame_bundle, frozen.clone(), source.clone()),
+            capture_environment(),
+            &per_frame_path,
+            frame_artifact_limits(),
+        )
+        .await
+        .expect("the per-frame control capture must publish");
+    let per_frame_metrics = per_frame
+        .metrics()
+        .expect("the control performs a fresh capture");
+    assert_eq!(per_frame_metrics.browser_captures(), FRAME_COUNT);
+    assert!(
+        per_frame_metrics.browser_capture_commands() >= FRAME_COUNT,
+        "each authored capture requires at least one Chromium command",
+    );
+    let per_frame = per_frame.into_artifact();
+
     let first = executor
-        .capture_frame_artifact(
+        .capture_frame_artifact_report(
             &executable_video_unit(&bundle, frozen.clone(), source.clone()),
             capture_environment(),
             &first_path,
@@ -246,6 +286,16 @@ async fn renders_and_repeats_the_production_layered_path() {
         )
         .await
         .expect("the first layered worker capture must publish");
+    let placement_bounded_metrics = first
+        .metrics()
+        .expect("the admitted path performs a fresh capture");
+    assert_eq!(placement_bounded_metrics.browser_captures(), 1);
+    assert!(
+        placement_bounded_metrics.browser_capture_commands()
+            < per_frame_metrics.browser_capture_commands(),
+        "placement-bounded capture must remove Chromium commands",
+    );
+    let first = first.into_artifact();
     let second = executor
         .capture_frame_artifact(
             &executable_video_unit(&bundle, frozen, source),
@@ -256,6 +306,12 @@ async fn renders_and_repeats_the_production_layered_path() {
         .await
         .expect("the repeated layered worker capture must publish");
 
+    FrameArtifact::verify_raw_rgba_equivalence(
+        std::slice::from_ref(&per_frame),
+        std::slice::from_ref(&first),
+    )
+    .await
+    .expect("placement-bounded reuse must preserve every canonical output pixel");
     FrameArtifact::verify_raw_rgba_equivalence(
         std::slice::from_ref(&first),
         std::slice::from_ref(&second),
@@ -294,6 +350,10 @@ async fn renders_random_access_media_equally_as_one_or_two_units() {
     assert_eq!(partitioned.frames(), TWO_UNIT_FRAME_COUNT);
     let whole = inspect_gate_four_output(&whole_output).await;
     let partitioned = inspect_gate_four_output(&partitioned_output).await;
+    assert_eq!(
+        whole.video_hashes, partitioned.video_hashes,
+        "reusing Chromium across units must preserve whole-film pixels",
+    );
     assert_eq!(
         whole.audio_hashes, partitioned.audio_hashes,
         "partitioning must not change the decoded final audio",
@@ -500,10 +560,7 @@ async fn capture_fingerprint(
 ) -> RawRgbaHash {
     let mut session = BrowserSession::launch(
         browser,
-        BrowserLaunchPolicy::local(),
-        capture_mode,
-        render_profile(),
-        browser_limits(Duration::from_secs(10)),
+        browser_options(capture_mode, Duration::from_secs(10)),
     )
     .await
     .expect("the requested browser must launch");
@@ -516,20 +573,56 @@ async fn capture_fingerprint(
 }
 
 async fn capture_temporal_sequence(fixture: &Url) -> Vec<RawRgbaHash> {
-    let mut session = BrowserSession::launch(
-        headless_shell(),
+    capture_temporal_sequence_with(
+        &headless_shell(),
         BrowserLaunchPolicy::local(),
+        BrowserGraphicsBackend::SwiftShader,
         BrowserCaptureMode::BeginFrame,
-        render_profile(),
-        browser_limits(Duration::from_secs(10)),
+        fixture,
     )
     .await
-    .expect("headless shell must launch");
+}
+
+#[cfg(target_os = "macos")]
+async fn capture_portable_temporal_sequence(
+    browser: &Path,
+    graphics_backend: BrowserGraphicsBackend,
+    fixture: &Url,
+) -> Vec<RawRgbaHash> {
+    capture_temporal_sequence_with(
+        browser,
+        BrowserLaunchPolicy::local(),
+        graphics_backend,
+        BrowserCaptureMode::Screenshot,
+        fixture,
+    )
+    .await
+}
+
+async fn capture_temporal_sequence_with(
+    browser: &Path,
+    launch_policy: BrowserLaunchPolicy,
+    graphics_backend: BrowserGraphicsBackend,
+    capture_mode: BrowserCaptureMode,
+    fixture: &Url,
+) -> Vec<RawRgbaHash> {
+    let mut session = BrowserSession::launch(
+        browser,
+        BrowserSessionOptions {
+            launch_policy,
+            graphics_backend,
+            capture_mode,
+            render_profile: render_profile(),
+            limits: browser_limits(Duration::from_secs(10)),
+        },
+    )
+    .await
+    .expect("the requested browser must launch");
     let result = exercise_temporal_sequence(&mut session, fixture).await;
     let shutdown = session.shutdown().await;
 
     let fingerprints = result.expect("the temporal experiment must capture every frame");
-    shutdown.expect("headless shell must shut down cleanly");
+    shutdown.expect("the requested browser must shut down cleanly");
     fingerprints
 }
 
@@ -851,6 +944,16 @@ fn browser_limits(deadline: Duration) -> BrowserLimits {
     BrowserLimits::new(deadline, 8 * 1024 * 1024).expect("the fixture browser limits are bounded")
 }
 
+fn browser_options(capture_mode: BrowserCaptureMode, deadline: Duration) -> BrowserSessionOptions {
+    BrowserSessionOptions {
+        launch_policy: BrowserLaunchPolicy::local(),
+        graphics_backend: BrowserGraphicsBackend::SwiftShader,
+        capture_mode,
+        render_profile: render_profile(),
+        limits: browser_limits(deadline),
+    }
+}
+
 fn render_profile() -> RenderProfile {
     RenderProfile::new(WIDTH, HEIGHT).expect("the fixture render profile is valid")
 }
@@ -860,6 +963,18 @@ fn capture_environment() -> CaptureEnvironmentId {
 }
 
 fn real_executor(max_frames: u64) -> RenderExecutor {
+    render_executor(headless_shell(), max_frames)
+}
+
+fn layered_executor(max_frames: u64) -> RenderExecutor {
+    let browser = env::var_os("ONMARK_HEADLESS_SHELL")
+        .or_else(|| env::var_os("ONMARK_PORTABLE_CHROME"))
+        .map(PathBuf::from)
+        .expect("ONMARK_HEADLESS_SHELL or ONMARK_PORTABLE_CHROME must name an executable");
+    render_executor(browser, max_frames)
+}
+
+fn render_executor(browser: PathBuf, max_frames: u64) -> RenderExecutor {
     let limits = EncodeLimits::new(
         Duration::from_secs(30),
         max_frames,
@@ -870,11 +985,7 @@ fn real_executor(max_frames: u64) -> RenderExecutor {
     let ffmpeg = Ffmpeg::new(required_path("ONMARK_FFMPEG"), limits)
         .expect("the FFmpeg executable path is present");
 
-    RenderExecutor::new(
-        headless_shell(),
-        browser_limits(Duration::from_secs(10)),
-        ffmpeg,
-    )
+    RenderExecutor::new(browser, browser_limits(Duration::from_secs(10)), ffmpeg)
 }
 
 fn frame_artifact_limits() -> FrameArtifactLimits {
@@ -1051,26 +1162,17 @@ impl GateFourFixture {
         )
         .expect("the complete fixture forms one whole-film unit");
         let whole_film = bundle.materialize(whole_film);
-        let partitioned_units: Vec<_> = partition_plan
-            .units()
-            .iter()
-            .map(|partition| {
-                let assets = materialized_assets
-                    .iter()
-                    .filter(|asset| partition.requires_media_asset(asset.id()))
-                    .cloned();
-                let unit = RenderUnit::from_partition(
-                    &timeline,
-                    partition,
-                    bundle.manifest.clone(),
-                    render_profile(),
-                    assets,
-                )
-                .expect("each graph partition forms one local unit");
-
-                bundle.materialize(unit)
-            })
-            .collect();
+        let partitioned_units: Vec<_> = RenderUnit::from_partition_plan(
+            &timeline,
+            &partition_plan,
+            &bundle.manifest,
+            render_profile(),
+            materialized_assets,
+        )
+        .expect("the graph partitions form one local sequence")
+        .into_iter()
+        .map(|unit| bundle.materialize(unit))
+        .collect();
         assert!(partitioned_units.iter().all(|unit| {
             unit.browser_plan()
                 .overlays()
@@ -1118,17 +1220,31 @@ impl FixtureBundle {
             "temporal-experiment.ts",
             "randomAccess",
             "browserComposite",
+            "perFrame",
         )
         .await
     }
 
     async fn build_layered(workspace: &Path) -> Self {
+        Self::build_layered_with(workspace, "layered-bundle", "placementBounded").await
+    }
+
+    async fn build_layered_per_frame(workspace: &Path) -> Self {
+        Self::build_layered_with(workspace, "layered-per-frame-bundle", "perFrame").await
+    }
+
+    async fn build_layered_with(
+        workspace: &Path,
+        directory_name: &str,
+        frame_behavior: &str,
+    ) -> Self {
         Self::build(
             workspace,
-            "layered-bundle",
+            directory_name,
             "layered-presentation.ts",
-            "sequential",
+            "randomAccess",
             "separableOverlay",
+            frame_behavior,
         )
         .await
     }
@@ -1139,6 +1255,7 @@ impl FixtureBundle {
         entry_name: &str,
         temporal_capability: &str,
         visual_capability: &str,
+        frame_behavior: &str,
     ) -> Self {
         let directory = workspace.join(directory_name);
         let bundled = Command::new(required_path("ONMARK_BUNDLER"))
@@ -1147,6 +1264,7 @@ impl FixtureBundle {
             .args(["--output"])
             .arg(&directory)
             .args(["--max-output-bytes", "2000000"])
+            .args(["--frame-behavior", frame_behavior])
             .args(["--temporal-capability", temporal_capability])
             .args(["--visual-capability", visual_capability])
             .output();

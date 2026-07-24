@@ -160,11 +160,13 @@ impl CaptureHandler {
 fn log_capture_metrics(metrics: FrameCaptureMetrics) {
     lambda_runtime::tracing::info!(
         frames = metrics.frames(),
+        browser_captures = metrics.browser_captures(),
+        browser_capture_commands = metrics.browser_capture_commands(),
         launch_ms = metrics.launch().as_millis(),
         runtime_setup_ms = metrics.runtime_setup().as_millis(),
         seek_ms = metrics.seek().as_millis(),
         readback_ms = metrics.readback().as_millis(),
-        fingerprint_ms = metrics.fingerprint().as_millis(),
+        pixel_processing_ms = metrics.pixel_processing().as_millis(),
         confirm_ms = metrics.confirm().as_millis(),
         write_ms = metrics.write().as_millis(),
         shutdown_ms = metrics.shutdown().as_millis(),

@@ -251,6 +251,7 @@ impl<'de> Deserialize<'de> for WorkerCaptureRequest {
             .visual_execution
             .validate(
                 request.bundle.visual_capability(),
+                request.bundle.frame_behavior(),
                 &request.browser_plan,
                 request.profile,
             )

@@ -260,20 +260,8 @@ fn render_units(
     profile: RenderProfile,
     assets: &[MaterializedAsset],
 ) -> Vec<RenderUnit> {
-    partitions
-        .units()
-        .iter()
-        .map(|partition| {
-            RenderUnit::from_partition(
-                timeline,
-                partition,
-                manifest.clone(),
-                profile,
-                assets.to_vec(),
-            )
-            .expect("each graph partition forms one render unit")
-        })
-        .collect()
+    RenderUnit::from_partition_plan(timeline, partitions, manifest, profile, assets.to_vec())
+        .expect("the graph partitions form one render sequence")
 }
 
 fn freeze_catalog(media: &media::GeneratedMedia, probe: &Ffprobe) -> FrozenCatalog {

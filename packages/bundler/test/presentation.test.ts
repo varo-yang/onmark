@@ -40,6 +40,7 @@ test("builds the semantic DOM presentation without an authored entry", async () 
     const artifact = await bundleDomPresentation({
       stylesheet,
       outputDirectory: join(workspace, "bundle"),
+      frameBehavior: "perFrame",
       maxOutputBytes: 1_000_000,
       temporalCapability: "sequential",
       visualCapability: "browserComposite",
@@ -87,6 +88,7 @@ test("rejects semantic stylesheet resources even when motion is present", async 
           stylesheet,
           ...(motionEntry === undefined ? {} : { motion: motionEntry }),
           outputDirectory: join(workspace, `bundle-${index}`),
+          frameBehavior: "perFrame",
           maxOutputBytes: 1_000_000,
           temporalCapability: "sequential",
           visualCapability: "browserComposite",
@@ -107,6 +109,7 @@ test("adds no visual defaults when the semantic DOM has no stylesheet", async ()
   try {
     const artifact = await bundleDomPresentation({
       outputDirectory: join(workspace, "bundle"),
+      frameBehavior: "perFrame",
       maxOutputBytes: 1_000_000,
       temporalCapability: "sequential",
       visualCapability: "browserComposite",
@@ -141,6 +144,7 @@ test("bundles same-stem vendor-neutral motion through the semantic entry", async
     const artifact = await bundleDomPresentation({
       motion,
       outputDirectory: join(workspace, "bundle"),
+      frameBehavior: "perFrame",
       maxOutputBytes: 1_000_000,
       temporalCapability: "randomAccess",
       visualCapability: "browserComposite",
@@ -165,6 +169,7 @@ test("builds a deterministic immutable presentation artifact", async () => {
     const first = await bundlePresentation({
       entryPoint,
       outputDirectory: join(workspace, "first"),
+      frameBehavior: "perFrame",
       maxOutputBytes: 1_000_000,
       temporalCapability: "sequential",
       visualCapability: "browserComposite",
@@ -172,6 +177,7 @@ test("builds a deterministic immutable presentation artifact", async () => {
     const second = await bundlePresentation({
       entryPoint,
       outputDirectory: join(workspace, "second"),
+      frameBehavior: "perFrame",
       maxOutputBytes: 1_000_000,
       temporalCapability: "sequential",
       visualCapability: "browserComposite",
@@ -179,6 +185,7 @@ test("builds a deterministic immutable presentation artifact", async () => {
     const randomAccess = await bundlePresentation({
       entryPoint,
       outputDirectory: join(workspace, "random-access"),
+      frameBehavior: "perFrame",
       maxOutputBytes: 1_000_000,
       temporalCapability: "randomAccess",
       visualCapability: "browserComposite",
@@ -186,9 +193,18 @@ test("builds a deterministic immutable presentation artifact", async () => {
     const separableOverlay = await bundlePresentation({
       entryPoint,
       outputDirectory: join(workspace, "separable-overlay"),
+      frameBehavior: "perFrame",
       maxOutputBytes: 1_000_000,
       temporalCapability: "sequential",
       visualCapability: "separableOverlay",
+    });
+    const placementBounded = await bundlePresentation({
+      entryPoint,
+      outputDirectory: join(workspace, "placement-bounded"),
+      frameBehavior: "placementBounded",
+      maxOutputBytes: 1_000_000,
+      temporalCapability: "randomAccess",
+      visualCapability: "browserComposite",
     });
 
     assert.deepEqual(first.manifest, second.manifest);
@@ -208,6 +224,15 @@ test("builds a deterministic immutable presentation artifact", async () => {
       separableOverlay.manifest.bundleId,
       bundleIdentity(separableOverlay.manifest),
     );
+    assert.deepEqual(first.manifest.files, placementBounded.manifest.files);
+    assert.notEqual(
+      first.manifest.bundleId,
+      placementBounded.manifest.bundleId,
+    );
+    assert.equal(
+      placementBounded.manifest.bundleId,
+      bundleIdentity(placementBounded.manifest),
+    );
     assert.deepEqual(
       first.manifest.files.map((file) => file.path),
       [BUNDLE_ENTRY_POINT, "presentation.css", "presentation.js"],
@@ -222,6 +247,31 @@ test("builds a deterministic immutable presentation artifact", async () => {
     assert.match(html, /src="\.\/presentation\.js"/u);
     assert.match(html, /href="\.\/presentation\.css"/u);
     assert.deepEqual(savedManifest, first.manifest);
+  } finally {
+    await rm(workspace, { force: true, recursive: true });
+  }
+});
+
+test("rejects placement-bounded pixels without random access", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "onmark-bundler-test-"));
+  try {
+    const entryPoint = join(workspace, "presentation.ts");
+    await writeFile(entryPoint, ENTRY_SOURCE, "utf8");
+
+    await assert.rejects(
+      bundlePresentation({
+        entryPoint,
+        outputDirectory: join(workspace, "bundle"),
+        frameBehavior: "placementBounded",
+        maxOutputBytes: 1_000_000,
+        temporalCapability: "sequential",
+        visualCapability: "browserComposite",
+      }),
+      (error: unknown) =>
+        error instanceof BundleError &&
+        error.message ===
+          "placement-bounded frames require random-access presentation timing",
+    );
   } finally {
     await rm(workspace, { force: true, recursive: true });
   }
@@ -247,6 +297,7 @@ test("carries local visual resources into the immutable bundle", async () => {
     const first = await bundlePresentation({
       entryPoint,
       outputDirectory: join(workspace, "first"),
+      frameBehavior: "perFrame",
       maxOutputBytes: 1_000_000,
       temporalCapability: "sequential",
       visualCapability: "browserComposite",
@@ -254,6 +305,7 @@ test("carries local visual resources into the immutable bundle", async () => {
     const second = await bundlePresentation({
       entryPoint,
       outputDirectory: join(workspace, "second"),
+      frameBehavior: "perFrame",
       maxOutputBytes: 1_000_000,
       temporalCapability: "sequential",
       visualCapability: "browserComposite",
@@ -304,6 +356,7 @@ test("does not publish an oversized or pre-existing artifact", async () => {
       bundlePresentation({
         entryPoint,
         outputDirectory,
+        frameBehavior: "perFrame",
         maxOutputBytes: 1,
         temporalCapability: "sequential",
         visualCapability: "browserComposite",
@@ -318,6 +371,7 @@ test("does not publish an oversized or pre-existing artifact", async () => {
     await bundlePresentation({
       entryPoint,
       outputDirectory,
+      frameBehavior: "perFrame",
       maxOutputBytes: 1_000_000,
       temporalCapability: "sequential",
       visualCapability: "browserComposite",
@@ -326,6 +380,7 @@ test("does not publish an oversized or pre-existing artifact", async () => {
       bundlePresentation({
         entryPoint,
         outputDirectory,
+        frameBehavior: "perFrame",
         maxOutputBytes: 1_000_000,
         temporalCapability: "sequential",
         visualCapability: "browserComposite",
@@ -349,6 +404,7 @@ test("keeps the checked-in video presentation bundle current", async () => {
     await bundlePresentation({
       entryPoint: join(repository, "conformance/browser/video-presentation.ts"),
       outputDirectory,
+      frameBehavior: "perFrame",
       maxOutputBytes: 1_000_000,
       temporalCapability: "randomAccess",
       visualCapability: "browserComposite",
@@ -379,6 +435,7 @@ test("bundles the Gate-five temporal experiment with its browser libraries", asy
         "conformance/browser/temporal-experiment.ts",
       ),
       outputDirectory,
+      frameBehavior: "perFrame",
       maxOutputBytes: 2_000_000,
       temporalCapability: "randomAccess",
       visualCapability: "browserComposite",
@@ -403,6 +460,7 @@ function bundleIdentity(manifest: BundleManifest): string {
     entryPoint: manifest.entryPoint,
     temporalCapability: manifest.temporalCapability,
     visualCapability: manifest.visualCapability,
+    frameBehavior: manifest.frameBehavior,
     files: manifest.files,
   });
   const digest = createHash("sha256").update(identity).digest("hex");

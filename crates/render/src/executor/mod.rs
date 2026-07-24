@@ -22,8 +22,9 @@ use crate::encoder::{
 };
 use crate::unit::MAX_AUDIO_TRACKS;
 use crate::{
-    BrowserCaptureMode, BrowserLaunchPolicy, BrowserLimits, CaptureEnvironmentId, EncodedVideo,
-    ExecutableUnit, Ffmpeg, FfmpegSession, FrameArtifact, FrameArtifactLimits,
+    BrowserCaptureMode, BrowserGraphicsBackend, BrowserLaunchPolicy, BrowserLimits,
+    CaptureEnvironmentId, EncodedVideo, ExecutableUnit, Ffmpeg, FfmpegSession, FrameArtifact,
+    FrameArtifactLimits,
 };
 
 pub use error::{RenderError, RenderErrorKind};
@@ -58,10 +59,25 @@ impl RenderExecutor {
         }
     }
 
+    /// Selects the immutable graphics implementation for browser capture.
+    ///
+    /// The default remains [`BrowserGraphicsBackend::SwiftShader`].
+    #[must_use]
+    pub fn with_graphics_backend(mut self, graphics_backend: BrowserGraphicsBackend) -> Self {
+        self.capture = self.capture.with_graphics_backend(graphics_backend);
+        self
+    }
+
     /// Returns the browser surface mechanism selected for this executor.
     #[must_use]
     pub const fn capture_mode(&self) -> BrowserCaptureMode {
         self.capture.capture_mode()
+    }
+
+    /// Returns the graphics implementation selected for browser capture.
+    #[must_use]
+    pub const fn graphics_backend(&self) -> BrowserGraphicsBackend {
+        self.capture.graphics_backend()
     }
 
     /// Renders one independently executable unit into an H.264 MP4 artifact.
@@ -89,9 +105,10 @@ impl RenderExecutor {
 
     /// Renders contiguous independent units into one complete MP4 artifact.
     ///
-    /// Every unit keeps its own verified browser root and browser session. The
-    /// encoder instead receives their output frames in order as one continuous
-    /// stream, then mixes all absolute Timeline audio placements once.
+    /// Every unit keeps its own verified browser root and runtime lifecycle.
+    /// Local execution reuses one browser process for the validated sequence;
+    /// the encoder receives output frames in order as one continuous stream,
+    /// then mixes all absolute Timeline audio placements once.
     ///
     /// # Errors
     ///
@@ -131,6 +148,24 @@ impl RenderExecutor {
     ) -> Result<FrameArtifact, RenderError> {
         self.capture
             .capture_frame_artifact(unit, capture_environment, artifact, limits)
+            .await
+    }
+
+    /// Captures one worker artifact together with bounded phase timings.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RenderError`] under the same conditions as
+    /// [`Self::capture_frame_artifact`].
+    pub async fn capture_frame_artifact_report(
+        &self,
+        unit: &ExecutableUnit,
+        capture_environment: CaptureEnvironmentId,
+        artifact: &Path,
+        limits: FrameArtifactLimits,
+    ) -> Result<FrameCaptureReport, RenderError> {
+        self.capture
+            .capture_frame_artifact_report(unit, capture_environment, artifact, limits)
             .await
     }
 
@@ -185,16 +220,19 @@ impl RenderExecutor {
     ) -> Result<EncodedVideo, RenderError> {
         let ValidatedSequence {
             frame_rate,
-            layered,
+            visual_path,
             requests,
         } = self.validate_sequence(&units, expected_output, output)?;
-        if layered {
-            return self
-                .render_layered_sequence(&units, requests, audio, frame_rate, output)
-                .await;
+        match visual_path {
+            SequenceVisualPath::Browser => {
+                self.render_browser_sequence(&units, requests, audio, frame_rate, output)
+                    .await
+            }
+            SequenceVisualPath::Layered => {
+                self.render_layered_sequence(&units, requests, audio, frame_rate, output)
+                    .await
+            }
         }
-        self.render_browser_sequence(&units, requests, audio, frame_rate, output)
-            .await
     }
 
     async fn render_browser_sequence(
@@ -210,15 +248,16 @@ impl RenderExecutor {
             .ffmpeg
             .start(staging.visual_path(), frame_rate)
             .map_err(|source| RenderError::encoder(output, source))?;
-        for (unit, requests) in units.iter().zip(requests) {
-            let mut frames = FrameSink::Encoder(&mut encoder);
-            let capture = self
-                .capture
-                .capture_unit(unit, &mut frames, requests, output)
-                .await;
-            if let Err(capture) = capture {
-                return Err(abort_encoder(encoder, capture, output).await);
-            }
+        let capture = self
+            .capture_units(
+                units,
+                requests,
+                CaptureDestination::Encoder(&mut encoder),
+                output,
+            )
+            .await;
+        if let Err(capture) = capture {
+            return Err(abort_encoder(encoder, capture, output).await);
         }
         self.finish_sequence(encoder, staging, audio, frame_rate, output)
             .await
@@ -242,15 +281,16 @@ impl RenderExecutor {
             .ffmpeg
             .start_layered(job)
             .map_err(|source| RenderError::encoder(output, source))?;
-        for (unit, requests) in units.iter().zip(requests) {
-            let mut frames = FrameSink::LayeredVideo(&mut compositor);
-            let capture = self
-                .capture
-                .capture_unit(unit, &mut frames, requests, output)
-                .await;
-            if let Err(capture) = capture {
-                return Err(abort_compositor(compositor, capture, output).await);
-            }
+        let capture = self
+            .capture_units(
+                units,
+                requests,
+                CaptureDestination::Layered(&mut compositor),
+                output,
+            )
+            .await;
+        if let Err(capture) = capture {
+            return Err(abort_compositor(compositor, capture, output).await);
         }
         let completion = compositor
             .finish()
@@ -268,6 +308,32 @@ impl RenderExecutor {
             .await
             .map_err(|source| RenderError::encoder(output, source))?;
         staging.publish(video, output)
+    }
+
+    async fn capture_units(
+        &self,
+        units: &[ExecutableUnit],
+        requests: Vec<RequestSequence>,
+        mut destination: CaptureDestination<'_>,
+        output: &Path,
+    ) -> Result<(), RenderError> {
+        let Some(first) = units.first() else {
+            return Err(invalid_plan(
+                output,
+                "browser render sequence contains no units",
+            ));
+        };
+        let mut session = self.capture.start_session(first.profile(), output).await?;
+        let capture = async {
+            for (unit, requests) in units.iter().zip(requests) {
+                let mut frames = destination.frames();
+                session.capture(unit, &mut frames, requests, output).await?;
+            }
+            Ok(())
+        }
+        .await;
+
+        session.finish(capture, output).await.map(|_| ())
     }
 
     async fn finish_sequence(
@@ -352,7 +418,10 @@ impl RenderExecutor {
             return Err(invalid_plan(output, "render sequence contains no units"));
         };
         let frame_rate = first.browser_plan().frame_rate();
-        let layered = first.visual_execution().layered_media().is_some();
+        let visual_path = match first.visual_execution().layered_media() {
+            Some(_) => SequenceVisualPath::Layered,
+            None => SequenceVisualPath::Browser,
+        };
         let mut expected_start = expected_output.start().get();
         let mut total_frames = 0_u64;
         let mut requests = Vec::with_capacity(units.len());
@@ -387,7 +456,7 @@ impl RenderExecutor {
 
         Ok(ValidatedSequence {
             frame_rate,
-            layered,
+            visual_path,
             requests,
         })
     }
@@ -448,8 +517,27 @@ fn collect_audio_inputs(
 /// Execution facts whose frame count is already representable by request IDs.
 struct ValidatedSequence {
     frame_rate: WireFrameRate,
-    layered: bool,
+    visual_path: SequenceVisualPath,
     requests: Vec<RequestSequence>,
+}
+
+enum SequenceVisualPath {
+    Browser,
+    Layered,
+}
+
+enum CaptureDestination<'a> {
+    Encoder(&'a mut FfmpegSession),
+    Layered(&'a mut LayeredSession),
+}
+
+impl CaptureDestination<'_> {
+    fn frames(&mut self) -> FrameSink<'_> {
+        match self {
+            Self::Encoder(encoder) => FrameSink::Encoder(encoder),
+            Self::Layered(compositor) => FrameSink::LayeredVideo(compositor),
+        }
+    }
 }
 
 fn validate_unit_identity(

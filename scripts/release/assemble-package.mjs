@@ -16,6 +16,8 @@ import { dirname, join, relative, resolve, sep } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
+import { withObservedCleanup } from "./observed-cleanup.mjs";
+
 const MAX_PRODUCT_BYTES = 32 * 1024 * 1024;
 const MAX_SOURCE_REVISION_BYTES = 256;
 const MANIFEST_NAME = "onmark-release.json";
@@ -40,12 +42,14 @@ async function main() {
   const staging = await mkdtemp(
     join(dirname(request.output), ".onmark-product-"),
   );
-  try {
-    await assembleProduct(staging, request.sourceRevision);
-    await rename(staging, request.output);
-  } finally {
-    await rm(staging, { force: true, recursive: true });
-  }
+  await withObservedCleanup(
+    async () => {
+      await assembleProduct(staging, request.sourceRevision);
+      await rename(staging, request.output);
+    },
+    () => rm(staging, { force: true, recursive: true }),
+    "desktop assembly failed and staging cleanup also failed",
+  );
 }
 
 function parseArguments(arguments_) {

@@ -8,7 +8,8 @@ use std::error::Error;
 use std::fmt;
 
 use onmark_core::model::{
-    FrozenAssetId, PresentationVisualCapability, VideoColorProfile, VideoDimensions,
+    FrozenAssetId, PresentationFrameBehavior, PresentationVisualCapability, VideoColorProfile,
+    VideoDimensions,
 };
 use onmark_core::protocol::BrowserPlan;
 use serde::ser::SerializeStruct as _;
@@ -18,81 +19,173 @@ use crate::{RenderProfile, RenderVideo};
 
 const BROWSER_COMPOSITE: &str = "browserComposite";
 const SEPARABLE_OVERLAY: &str = "separableOverlay";
+const EVERY_FRAME: &str = "everyFrame";
+const PLACEMENT_BOUNDED: &str = "placementBounded";
 const BT709_LIMITED: &str = "bt709Limited";
 
 /// Checked visual path carried by local and remote execution.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum VisualExecutionPlan {
-    /// Chromium owns the complete frame.
+pub struct VisualExecutionPlan {
+    composition: VisualComposition,
+    capture_cadence: BrowserCaptureCadence,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum VisualComposition {
     BrowserComposite,
-    /// Chromium owns a transparent foreground over one admitted native video.
     SeparableOverlay(LayeredMediaPlan),
 }
 
+/// Planned cadence at which Chromium must return browser-owned pixels.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BrowserCaptureCadence {
+    /// Browser-owned pixels may differ at every authored frame.
+    EveryFrame,
+    /// One exact capture is reusable until the next placement boundary.
+    PlacementBounded,
+}
+
 impl VisualExecutionPlan {
-    pub(crate) fn admit<'a>(
+    pub(crate) fn select<'a>(
         capability: PresentationVisualCapability,
+        frame_behavior: PresentationFrameBehavior,
         plan: &BrowserPlan,
         profile: RenderProfile,
         videos: impl ExactSizeIterator<Item = &'a RenderVideo>,
-    ) -> Result<Self, UnsupportedVisualComposition> {
-        if capability == PresentationVisualCapability::BrowserComposite {
-            return Ok(Self::BrowserComposite);
-        }
+    ) -> Self {
+        let composition = select_composition(capability, plan, profile, videos);
+        Self::new(composition, frame_behavior, plan)
+    }
 
-        let mut videos = videos;
-        if videos.len() != 1 || plan.videos().len() != 1 {
-            return Err(UnsupportedVisualComposition::PrimaryVideoCount);
-        }
-        let video = videos
-            .next()
-            .expect("the exact-size check proved one materialized video");
-        let placement = &plan.videos()[0];
-
-        validate_layered_placement(plan, profile, video.asset().id(), video.dimensions())?;
-        if video.color_profile() != Some(VideoColorProfile::Bt709Limited) {
-            return Err(UnsupportedVisualComposition::UnsupportedColorProfile);
-        }
-
-        Ok(Self::SeparableOverlay(LayeredMediaPlan {
-            asset_id: placement.asset_id().into(),
-            asset_identity: placement.asset_identity(),
-            dimensions: video.dimensions(),
-        }))
+    pub(crate) fn browser_composite(
+        frame_behavior: PresentationFrameBehavior,
+        plan: &BrowserPlan,
+    ) -> Self {
+        Self::new(VisualComposition::BrowserComposite, frame_behavior, plan)
     }
 
     pub(crate) fn validate(
         &self,
         capability: PresentationVisualCapability,
+        frame_behavior: PresentationFrameBehavior,
         plan: &BrowserPlan,
         profile: RenderProfile,
     ) -> Result<(), UnsupportedVisualComposition> {
-        match (capability, self) {
-            (PresentationVisualCapability::BrowserComposite, Self::BrowserComposite) => Ok(()),
-            (PresentationVisualCapability::SeparableOverlay, Self::SeparableOverlay(media)) => {
-                validate_layered_plan(media, plan, profile)
-            }
-            _ => Err(UnsupportedVisualComposition::CapabilityMismatch),
+        match (capability, &self.composition) {
+            (
+                PresentationVisualCapability::BrowserComposite
+                | PresentationVisualCapability::SeparableOverlay,
+                VisualComposition::BrowserComposite,
+            ) => {}
+            (
+                PresentationVisualCapability::SeparableOverlay,
+                VisualComposition::SeparableOverlay(media),
+            ) => validate_layered_plan(media, plan, profile)?,
+            _ => return Err(UnsupportedVisualComposition::CapabilityMismatch),
         }
+
+        if self.capture_cadence == capture_cadence(frame_behavior, &self.composition, plan) {
+            return Ok(());
+        }
+        Err(UnsupportedVisualComposition::CaptureCadenceMismatch)
     }
 
     /// Returns the presentation capability proved by this execution plan.
     #[must_use]
     pub const fn capability(&self) -> PresentationVisualCapability {
-        match self {
-            Self::BrowserComposite => PresentationVisualCapability::BrowserComposite,
-            Self::SeparableOverlay(_) => PresentationVisualCapability::SeparableOverlay,
+        match &self.composition {
+            VisualComposition::BrowserComposite => PresentationVisualCapability::BrowserComposite,
+            VisualComposition::SeparableOverlay(_) => {
+                PresentationVisualCapability::SeparableOverlay
+            }
         }
     }
 
     /// Returns native media facts when Chromium owns only the foreground.
     #[must_use]
     pub const fn layered_media(&self) -> Option<&LayeredMediaPlan> {
-        match self {
-            Self::BrowserComposite => None,
-            Self::SeparableOverlay(media) => Some(media),
+        match &self.composition {
+            VisualComposition::BrowserComposite => None,
+            VisualComposition::SeparableOverlay(media) => Some(media),
         }
     }
+
+    /// Returns how often Chromium must produce browser-owned pixels.
+    #[must_use]
+    pub const fn capture_cadence(&self) -> BrowserCaptureCadence {
+        self.capture_cadence
+    }
+
+    fn new(
+        composition: VisualComposition,
+        frame_behavior: PresentationFrameBehavior,
+        plan: &BrowserPlan,
+    ) -> Self {
+        let capture_cadence = capture_cadence(frame_behavior, &composition, plan);
+        Self {
+            composition,
+            capture_cadence,
+        }
+    }
+}
+
+fn select_composition<'a>(
+    capability: PresentationVisualCapability,
+    plan: &BrowserPlan,
+    profile: RenderProfile,
+    videos: impl ExactSizeIterator<Item = &'a RenderVideo>,
+) -> VisualComposition {
+    if capability == PresentationVisualCapability::BrowserComposite {
+        return VisualComposition::BrowserComposite;
+    }
+    let Some(media) = select_layered_media_plan(plan, profile, videos) else {
+        return VisualComposition::BrowserComposite;
+    };
+    VisualComposition::SeparableOverlay(media)
+}
+
+fn capture_cadence(
+    frame_behavior: PresentationFrameBehavior,
+    composition: &VisualComposition,
+    plan: &BrowserPlan,
+) -> BrowserCaptureCadence {
+    let browser_owns_video =
+        matches!(composition, VisualComposition::BrowserComposite) && !plan.videos().is_empty();
+    if frame_behavior == PresentationFrameBehavior::PlacementBounded && !browser_owns_video {
+        BrowserCaptureCadence::PlacementBounded
+    } else {
+        BrowserCaptureCadence::EveryFrame
+    }
+}
+
+fn select_layered_media_plan<'a>(
+    plan: &BrowserPlan,
+    profile: RenderProfile,
+    mut videos: impl ExactSizeIterator<Item = &'a RenderVideo>,
+) -> Option<LayeredMediaPlan> {
+    // A bundle capability permits native layering; it never requires it.
+    // Missing proof therefore selects the conservative browser path instead of
+    // turning an optimization opportunity into a render failure.
+    if videos.len() != 1 || plan.videos().len() != 1 {
+        return None;
+    }
+    let video = videos
+        .next()
+        .expect("the exact-size check proved one materialized video");
+    let placement = &plan.videos()[0];
+
+    if validate_layered_placement(plan, profile, video.asset().id(), video.dimensions()).is_err() {
+        return None;
+    }
+    if video.color_profile() != Some(VideoColorProfile::Bt709Limited) {
+        return None;
+    }
+
+    Some(LayeredMediaPlan {
+        asset_id: placement.asset_id().into(),
+        asset_identity: placement.asset_identity(),
+        dimensions: video.dimensions(),
+    })
 }
 
 impl Serialize for VisualExecutionPlan {
@@ -100,15 +193,17 @@ impl Serialize for VisualExecutionPlan {
     where
         S: Serializer,
     {
-        match self {
-            Self::BrowserComposite => {
-                let mut plan = serializer.serialize_struct("VisualExecutionPlan", 1)?;
+        match &self.composition {
+            VisualComposition::BrowserComposite => {
+                let mut plan = serializer.serialize_struct("VisualExecutionPlan", 2)?;
                 plan.serialize_field("mode", BROWSER_COMPOSITE)?;
+                plan.serialize_field("captureCadence", &self.capture_cadence)?;
                 plan.end()
             }
-            Self::SeparableOverlay(media) => {
-                let mut plan = serializer.serialize_struct("VisualExecutionPlan", 5)?;
+            VisualComposition::SeparableOverlay(media) => {
+                let mut plan = serializer.serialize_struct("VisualExecutionPlan", 6)?;
                 plan.serialize_field("mode", SEPARABLE_OVERLAY)?;
+                plan.serialize_field("captureCadence", &self.capture_cadence)?;
                 plan.serialize_field("assetId", media.asset_id())?;
                 plan.serialize_field("width", &media.dimensions().width())?;
                 plan.serialize_field("height", &media.dimensions().height())?;
@@ -126,13 +221,50 @@ impl<'de> Deserialize<'de> for VisualExecutionPlan {
     {
         let wire = VisualExecutionPlanWire::deserialize(deserializer)?;
         match wire {
-            VisualExecutionPlanWire::BrowserComposite => Ok(Self::BrowserComposite),
+            VisualExecutionPlanWire::BrowserComposite { capture_cadence } => Ok(Self {
+                composition: VisualComposition::BrowserComposite,
+                capture_cadence,
+            }),
             VisualExecutionPlanWire::SeparableOverlay {
+                capture_cadence,
                 asset_id,
                 width,
                 height,
                 color_profile,
-            } => layered_media(asset_id, width, height, &color_profile).map(Self::SeparableOverlay),
+            } => Ok(Self {
+                composition: VisualComposition::SeparableOverlay(layered_media(
+                    asset_id,
+                    width,
+                    height,
+                    &color_profile,
+                )?),
+                capture_cadence,
+            }),
+        }
+    }
+}
+
+impl Serialize for BrowserCaptureCadence {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(match self {
+            Self::EveryFrame => EVERY_FRAME,
+            Self::PlacementBounded => PLACEMENT_BOUNDED,
+        })
+    }
+}
+
+impl<'de> Deserialize<'de> for BrowserCaptureCadence {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        match <Box<str>>::deserialize(deserializer)?.as_ref() {
+            EVERY_FRAME => Ok(Self::EveryFrame),
+            PLACEMENT_BOUNDED => Ok(Self::PlacementBounded),
+            _ => Err(serde::de::Error::custom("invalid browser capture cadence")),
         }
     }
 }
@@ -145,8 +277,11 @@ impl<'de> Deserialize<'de> for VisualExecutionPlan {
     tag = "mode"
 )]
 enum VisualExecutionPlanWire {
-    BrowserComposite,
+    BrowserComposite {
+        capture_cadence: BrowserCaptureCadence,
+    },
     SeparableOverlay {
+        capture_cadence: BrowserCaptureCadence,
         asset_id: Box<str>,
         width: u32,
         height: u32,
@@ -243,6 +378,8 @@ fn validate_layered_placement(
 pub enum UnsupportedVisualComposition {
     /// The bundle capability and portable execution proof disagree.
     CapabilityMismatch,
+    /// The transported capture cadence and admitted bundle proof disagree.
+    CaptureCadenceMismatch,
     /// The admitted path requires exactly one primary-video placement.
     PrimaryVideoCount,
     /// The portable native-media identity differs from the solved placement.
@@ -260,6 +397,9 @@ impl fmt::Display for UnsupportedVisualComposition {
         formatter.write_str(match self {
             Self::CapabilityMismatch => {
                 "visual execution plan does not match the bundle capability"
+            }
+            Self::CaptureCadenceMismatch => {
+                "visual execution plan does not match the bundle frame behavior"
             }
             Self::PrimaryVideoCount => {
                 "separable overlay requires exactly one primary-video placement"

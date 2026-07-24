@@ -18,6 +18,8 @@ pub enum BrowserErrorKind {
     Profile,
     /// Chromium could not launch or expose CDP.
     Launch,
+    /// Chromium did not activate the requested graphics implementation.
+    GraphicsBackend,
     /// The initial page target could not be created.
     PageCreation,
     /// The page could not navigate to the render bundle.
@@ -172,6 +174,7 @@ impl fmt::Display for BrowserErrorKind {
             Self::Configuration => "invalid browser configuration",
             Self::Profile => "failed to create a private Chromium profile",
             Self::Launch => "failed to launch Chromium",
+            Self::GraphicsBackend => "Chromium rejected the requested graphics backend",
             Self::PageCreation => "failed to create the render page",
             Self::Navigation => "failed to navigate the render page",
             Self::ResourcePolicy => "failed to enforce the browser resource policy",

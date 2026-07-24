@@ -10,3 +10,8 @@ export const PRESENTATION_VISUAL_CAPABILITIES = Object.freeze([
   "separableOverlay",
 ] as const);
 export type PresentationVisualCapability = (typeof PRESENTATION_VISUAL_CAPABILITIES)[number];
+export const PRESENTATION_FRAME_BEHAVIORS = Object.freeze([
+  "perFrame",
+  "placementBounded",
+] as const);
+export type PresentationFrameBehavior = (typeof PRESENTATION_FRAME_BEHAVIORS)[number];

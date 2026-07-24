@@ -139,7 +139,9 @@ jobs:
           node scripts/release/admit.mjs \
             "$npm_cli" \
             .release/product \
-            .release/sidecar
+            .release/sidecar \
+            .release/performance.json
+          test -s .release/performance.json
 
       - name: Pack admitted artifacts
         shell: bash
@@ -152,7 +154,9 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: desktop-${{ matrix.target }}
-          path: .release/artifacts/*.tgz
+          path: |
+            .release/artifacts/*.tgz
+            .release/performance.json
           if-no-files-found: error
           include-hidden-files: true
           retention-days: 7

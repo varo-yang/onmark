@@ -3,6 +3,7 @@
 export type { RuntimeFrame } from "./clock.js";
 export type { RuntimeVideo } from "./media.js";
 export type {
+  PresentationFrameBehavior,
   PresentationTemporalCapability,
   PresentationVisualCapability,
 } from "./generated/bundle-layout.js";

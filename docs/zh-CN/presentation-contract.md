@@ -126,8 +126,11 @@ Load(plan) -> Prepare(evaluationStart)
 target 上，如果先等 callback 再发送 `BeginFrame`，两边会形成死锁。因此
 `FrameStaged(frame)` 只表示 browser
 state 已能进入 compositor。native 随后为每个 output
-frame 发送一次正常的、同时 commit frame state 与 capture PNG 的
-`HeadlessExperimental.beginFrame`。在 video 或 overlay boundary，native 会先在当前
+frame behavior 选中的 frame 发送一次正常的、同时 commit frame state 与 capture PNG 的
+`HeadlessExperimental.beginFrame`。`perFrame` 选择所有 output frame；
+`placementBounded` 只选择首个 output frame 与每个已求解 placement boundary，
+中间 output frame 会复用上一份精确 PNG，不再发起 runtime transaction。在 video 或
+overlay boundary，native 会先在当前
 compositor transaction capture tick 之前的固定亚毫秒 offset 发送一次无 screenshot
 commit，让新可见 layer 获得一次 compositor turn，同时不保留无关 inactive
 layer，也不推进剧本时间。compositor tick 严格按 capture 顺序向前；
@@ -234,9 +237,11 @@ canonical identity，Rust 在 Render Graph 分片前消费它。
 
 ## Visual capability
 
-`PresentationVisualCapability` 声明 Chromium 拥有哪些像素。它是 build metadata，
-不是 screenplay spelling，也绝不从 presentation source 猜测。本地 CLI 固定使用
-`browserComposite`，底层 conformance bundler 只为已证明产物显式传值。
+`PresentationVisualCapability` 声明 Chromium 可以拥有哪些像素。它是 build metadata，
+不是 screenplay spelling，也绝不从未知 presentation code 猜测。CLI 自己拥有、且没有
+authored CSS 或 motion 的 neutral semantic DOM 声明 `separableOverlay`；authored CSS、
+motion 与 custom entry 仍保持 `browserComposite`。底层 conformance bundler 只为已证明
+产物显式传值。
 
 - `browserComposite` 表示 Chromium 拥有包括主视频在内的完整画面，是未知
   presentation code 的保守能力；
@@ -252,11 +257,37 @@ conformance 接纳，不能因为 source scan 暂时没找到禁用 token 就获
 当前 native path 刻意比 presentation promise 更窄：必须恰好有一个覆盖完整 published
 interval 的主视频，冻结的 source dimensions 必须与 output profile 完全一致，并且完整
 color tuple 必须属于已准入的 BT.709 limited-range profile。这些检查避免 Rust 重造 CSS
-layout。声明能力却不满足 native profile 时，执行会在启动进程前失败，绝不偷偷回退到
-browser composition。
+layout。capability 是许可而不是执行命令：planning 只在这些事实证明 native profile 时选择
+`separableOverlay`，否则把 `browserComposite` 明确写进 execution plan。计划一旦生成便不可
+变；worker 启动后绝不换路，transported plan 若超出 capability 仍会校验失败。
 
-当前 Bundle Manifest 把 temporal 与 visual capability 都纳入 canonical identity。
-bundle 是可重建产物而非 authored data；reader 只接受当前版本，旧 bundle 直接重建。
+当前 Bundle Manifest 把 temporal、visual capability 与下面的 frame behavior 都纳入
+canonical identity。bundle 是可重建产物而非 authored data；reader 只接受当前版本，
+旧 bundle 直接重建。
+
+## Frame behavior
+
+`PresentationFrameBehavior` 声明 browser-owned pixels 是否会在 Rust-owned placement
+boundary 之间变化：
+
+- `perFrame` 是保守值，Chromium 可能需要求值并捕获每个 authored frame；
+- `placementBounded` 证明 visible fact 不跨 video、overlay 或 structural placement
+  boundary 时，browser pixels 保持完全相同。
+
+该声明与 visual separability 相互独立。CLI 自己拥有、且没有 authored CSS 或 motion
+的 neutral semantic DOM 声明 `placementBounded`；authored CSS、motion 与 custom
+presentation 都保持 `perFrame`。更强行为必须同时具备 `randomAccess`：只有后续 boundary
+frame 可以直接求值时，native 才能跳过中间的 `Seek` 与 `Confirm`。
+
+capability 仍是许可，不是 cache 指令。planning 只会在 Chromium 不拥有 video pixels
+时记录 `placementBounded` capture。含 browser video 的 browser-composite unit 仍是
+`everyFrame`；native-video `separableOverlay` unit 与纯静态 browser unit 才能使用更强
+cadence。native 捕获首个 output frame 与每个已求解 boundary，然后在中间 output frame
+之间共享同一份 encoded PNG payload，但仍逐帧写入 encoder 或 worker artifact。
+
+frame behavior 是进入 `bundleId` 的 immutable build metadata。它绝不从 source token、
+观测到的 pixel equality、compositor damage 或 screenplay spelling 推断。worker request
+携带已准入 cadence；任何与 bundle declaration 或 materialized visual plan 不一致的值都会被拒绝。
 
 ## 素材
 

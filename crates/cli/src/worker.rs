@@ -58,7 +58,7 @@ async fn capture(args: WorkerCaptureArgs) -> Result<WorkerOutcome, CliError> {
         BrowserLaunchPolicy::local(),
         BrowserCaptureMode::BeginFrame,
         execution::browser_limits(),
-        Ffmpeg::new(args.ffmpeg, execution::encode_limits())?,
+        Ffmpeg::new(args.ffmpeg, execution::worker_encode_limits())?,
     );
     let artifact = capture
         .capture_frame_artifact(

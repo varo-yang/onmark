@@ -6,6 +6,8 @@ import { basename, join, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
+import { withObservedCleanup } from "./observed-cleanup.mjs";
+
 const MAX_SOURCE_BYTES = 16 * 1024 * 1024;
 const MAX_DOWNLOAD_REDIRECTS = 5;
 const DOWNLOAD_TIMEOUT_MILLISECONDS = 2 * 60_000;
@@ -76,26 +78,28 @@ async function admitSource(directory, source) {
   }
 
   const staging = join(directory, `.${source.name}.${randomUUID()}`);
-  try {
-    const response = await fetchSource(source);
-    if (!response.ok) {
-      throw new Error(
-        `cannot download ${source.name}: HTTP ${response.status}`,
-      );
-    }
+  await withObservedCleanup(
+    async () => {
+      const response = await fetchSource(source);
+      if (!response.ok) {
+        throw new Error(
+          `cannot download ${source.name}: HTTP ${response.status}`,
+        );
+      }
 
-    const declared = response.headers.get("content-length");
-    if (declared !== null && Number(declared) !== source.bytes) {
-      throw new Error(`${source.name} has an unexpected content length`);
-    }
-    const bytes = await readBounded(response, source);
-    verifySource(bytes, source);
-    await writeFile(staging, bytes, { flag: "wx" });
-    await rm(destination, { force: true });
-    await rename(staging, destination);
-  } finally {
-    await rm(staging, { force: true });
-  }
+      const declared = response.headers.get("content-length");
+      if (declared !== null && Number(declared) !== source.bytes) {
+        throw new Error(`${source.name} has an unexpected content length`);
+      }
+      const bytes = await readBounded(response, source);
+      verifySource(bytes, source);
+      await writeFile(staging, bytes, { flag: "wx" });
+      await rm(destination, { force: true });
+      await rename(staging, destination);
+    },
+    () => rm(staging, { force: true }),
+    `downloading ${source.name} failed and staging cleanup also failed`,
+  );
 }
 
 async function fetchSource(source) {

@@ -4,7 +4,7 @@
 //! across independently captured or compressed artifacts.
 
 use std::io::Cursor;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use png::{BitDepth, ColorType, Decoder, Limits, Transformations};
 use sha2::{Digest as _, Sha256};
@@ -14,39 +14,89 @@ use crate::RenderProfile;
 
 const RGBA_CHANNELS: usize = 4;
 
+// Successful normalization is immutable and shared by every payload clone.
+#[derive(Debug)]
+struct EncodedPngPayload {
+    bytes: Vec<u8>,
+    decoded: OnceLock<DecodedPng>,
+}
+
 /// One immutable PNG screenshot retained across capture and encoder boundaries.
 ///
 /// Chromium may omit pixels when the compositor reports no damage. Clones
-/// therefore share the encoded payload so reusing the preceding frame never
-/// copies a viewport-sized allocation.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct EncodedPng(Arc<Vec<u8>>);
+/// therefore share both encoded and successfully normalized pixels, so reusing
+/// the preceding frame never copies or decodes a viewport-sized allocation.
+#[derive(Clone, Debug)]
+pub struct EncodedPng(Arc<EncodedPngPayload>);
 
 impl EncodedPng {
     pub(crate) fn new(bytes: Vec<u8>) -> Self {
-        Self(Arc::new(bytes))
+        Self(Arc::new(EncodedPngPayload {
+            bytes,
+            decoded: OnceLock::new(),
+        }))
     }
 
     /// Returns the encoded PNG bytes.
     #[must_use]
     pub fn as_bytes(&self) -> &[u8] {
-        self.0.as_slice()
+        self.0.bytes.as_slice()
     }
 
     /// Transfers ownership of the encoded PNG bytes.
     #[must_use]
     pub fn into_bytes(self) -> Vec<u8> {
-        Arc::try_unwrap(self.0).unwrap_or_else(|bytes| bytes.as_ref().clone())
+        match Arc::try_unwrap(self.0) {
+            Ok(payload) => payload.bytes,
+            Err(payload) => payload.bytes.clone(),
+        }
     }
 
     pub(crate) fn decode_rgba(&self, profile: RenderProfile) -> Result<DecodedRgba, BrowserError> {
-        decode_rgba(self, profile)
+        if let Some(pixels) = self.cached_pixels(profile) {
+            return Ok(pixels);
+        }
+
+        let pixels = decode_png(self, profile)?;
+        let decoded = DecodedPng {
+            profile,
+            pixels: pixels.clone(),
+        };
+        if self.0.decoded.set(decoded).is_ok() {
+            return Ok(pixels);
+        }
+        // A concurrent decode may have won the immutable cache. Reuse it only
+        // when it proved the same profile; otherwise retain this exact result.
+        Ok(self.cached_pixels(profile).unwrap_or(pixels))
+    }
+
+    fn cached_pixels(&self, profile: RenderProfile) -> Option<DecodedRgba> {
+        self.0
+            .decoded
+            .get()
+            .filter(|decoded| decoded.profile == profile)
+            .map(|decoded| decoded.pixels.clone())
     }
 }
 
+impl PartialEq for EncodedPng {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_bytes() == other.as_bytes()
+    }
+}
+
+impl Eq for EncodedPng {}
+
+#[derive(Debug)]
+struct DecodedPng {
+    profile: RenderProfile,
+    pixels: DecodedRgba,
+}
+
 /// One profile-sized browser frame normalized for native pixel composition.
+#[derive(Clone, Debug)]
 pub(crate) struct DecodedRgba {
-    bytes: Box<[u8]>,
+    bytes: Arc<[u8]>,
 }
 
 impl DecodedRgba {
@@ -108,7 +158,7 @@ impl CapturedFrame {
     }
 }
 
-fn decode_rgba(png: &EncodedPng, profile: RenderProfile) -> Result<DecodedRgba, BrowserError> {
+fn decode_png(png: &EncodedPng, profile: RenderProfile) -> Result<DecodedRgba, BrowserError> {
     let expected = expected_rgba_bytes(profile)?;
     // The profile has already bounded a frame. Give the decoder that same
     // budget before it sees untrusted compressed pixels.
@@ -174,16 +224,16 @@ fn expected_rgba_bytes(profile: RenderProfile) -> Result<usize, BrowserError> {
         .ok_or_else(|| BrowserError::capture_pixels("render profile exceeds RGBA accounting"))
 }
 
-fn checked_rgba(pixels: Vec<u8>, expected: usize) -> Result<Box<[u8]>, BrowserError> {
+fn checked_rgba(pixels: Vec<u8>, expected: usize) -> Result<Arc<[u8]>, BrowserError> {
     if pixels.len() != expected {
         return Err(BrowserError::capture_pixels(
             "captured RGBA PNG has an unexpected pixel length",
         ));
     }
-    Ok(pixels.into_boxed_slice())
+    Ok(pixels.into())
 }
 
-fn rgb_to_rgba(pixels: &[u8], expected: usize) -> Result<Box<[u8]>, BrowserError> {
+fn rgb_to_rgba(pixels: &[u8], expected: usize) -> Result<Arc<[u8]>, BrowserError> {
     let rgb_bytes = expected / RGBA_CHANNELS * 3;
     if pixels.len() != rgb_bytes {
         return Err(BrowserError::capture_pixels(
@@ -196,7 +246,7 @@ fn rgb_to_rgba(pixels: &[u8], expected: usize) -> Result<Box<[u8]>, BrowserError
         rgba.extend_from_slice(pixel);
         rgba.push(u8::MAX);
     }
-    Ok(rgba.into_boxed_slice())
+    Ok(rgba.into())
 }
 
 #[cfg(test)]
@@ -324,6 +374,22 @@ mod tests {
         let cloned = original.clone();
 
         assert!(Arc::ptr_eq(&original.0, &cloned.0));
+    }
+
+    #[test]
+    fn cloned_pngs_share_one_successful_rgba_decode() {
+        let profile = RenderProfile::new(2, 2).expect("the two-by-two profile is valid");
+        let original = encoded_png(png::ColorType::Rgba, 2, 2, &[7; 16]);
+        let cloned = original.clone();
+
+        let first = original
+            .decode_rgba(profile)
+            .expect("the original PNG decodes");
+        let second = cloned
+            .decode_rgba(profile)
+            .expect("the cloned PNG reuses decoded pixels");
+
+        assert!(Arc::ptr_eq(&first.bytes, &second.bytes));
     }
 
     fn encoded_png(color: png::ColorType, width: u32, height: u32, pixels: &[u8]) -> EncodedPng {

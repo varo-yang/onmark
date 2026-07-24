@@ -15,8 +15,8 @@ use onmark_core::render_graph::{PartitionPlan, RenderGraph};
 use onmark_core::timeline::TimelineIr;
 use onmark_media::Ffprobe;
 use onmark_render::{
-    BrowserCaptureMode, EncodedVideo, ExecutableUnit, Ffmpeg, RenderExecutor, RenderProfile,
-    RenderUnit,
+    BrowserCaptureMode, BrowserGraphicsBackend, EncodedVideo, ExecutableUnit, Ffmpeg,
+    RenderExecutor, RenderProfile, RenderUnit,
 };
 
 use crate::arguments::{RenderArgs, source_directory};
@@ -36,6 +36,13 @@ pub(super) struct AuthoredReport {
     diagnostics: Vec<Diagnostic>,
 }
 
+struct LocalExecutorOptions {
+    browser: PathBuf,
+    ffmpeg: PathBuf,
+    graphics_backend: BrowserGraphicsBackend,
+    video_encoder_threads: usize,
+}
+
 /// Authored rejection or a completed local render, both retaining diagnostics.
 pub(super) enum RenderOutcome {
     Rejected {
@@ -44,6 +51,7 @@ pub(super) enum RenderOutcome {
     Completed {
         screenplay: AuthoredReport,
         capture_mode: BrowserCaptureMode,
+        graphics_backend: BrowserGraphicsBackend,
         video: EncodedVideo,
     },
 }
@@ -79,8 +87,9 @@ impl RenderOutcome {
             Self::Completed {
                 screenplay,
                 capture_mode,
+                graphics_backend,
                 video,
-            } => write_completed(&screenplay, capture_mode, &video),
+            } => write_completed(&screenplay, capture_mode, graphics_backend, &video),
         };
         result.unwrap_or(ExitCode::FAILURE)
     }
@@ -145,8 +154,18 @@ pub(super) async fn run(args: RenderArgs) -> Result<RenderOutcome, CliError> {
         .await?;
     let (partitions, units) = materialize_units(&timeline, profile, &bundle, frozen)?;
 
-    let executor = render_executor(executables.browser, executables.ffmpeg);
+    let graphics_backend = args
+        .graphics_backend()
+        .unwrap_or_else(local_graphics_backend);
+    let executor = LocalExecutorOptions {
+        browser: executables.browser,
+        ffmpeg: executables.ffmpeg,
+        graphics_backend,
+        video_encoder_threads: args.video_encoder_threads(),
+    }
+    .into_executor();
     let capture_mode = executor.capture_mode();
+    let graphics_backend = executor.graphics_backend();
     let video = executor
         .render_partitioned(&partitions, units, &output)
         .await?;
@@ -157,6 +176,7 @@ pub(super) async fn run(args: RenderArgs) -> Result<RenderOutcome, CliError> {
             diagnostics,
         },
         capture_mode,
+        graphics_backend,
         video,
     })
 }
@@ -171,30 +191,19 @@ fn materialize_units(
     let bundle_directory = bundle.directory();
     let partitions = RenderGraph::from_timeline(timeline, bundle.manifest().temporal_capability())?
         .into_partition();
-    let mut units = Vec::with_capacity(partitions.units().len());
-
-    for partition in partitions.units() {
-        // Partition roots are isolated. Shared frozen bytes may therefore be
-        // selected by multiple partitions, but only graph-proven inputs enter
-        // each composition.
-        let required_assets = materialized
-            .assets()
-            .iter()
-            .filter(|asset| partition.requires_media_asset(asset.id()))
-            .cloned();
-        let unit = RenderUnit::from_partition(
-            timeline,
-            partition,
-            bundle.manifest().clone(),
-            profile,
-            required_assets,
-        )?;
-        units.push(ExecutableUnit::materialize(
-            unit,
-            &bundle_directory,
-            execution::unit_root_limits(),
-        )?);
-    }
+    let planned = RenderUnit::from_partition_plan(
+        timeline,
+        &partitions,
+        bundle.manifest(),
+        profile,
+        materialized.assets().iter().cloned(),
+    )?;
+    let units = planned
+        .into_iter()
+        .map(|unit| {
+            ExecutableUnit::materialize(unit, &bundle_directory, execution::unit_root_limits())
+        })
+        .collect::<Result<Vec<_>, _>>()?;
 
     Ok((partitions, units))
 }
@@ -253,11 +262,33 @@ fn ffprobe(executable: PathBuf) -> Ffprobe {
     .expect("the CLI probe policy stays within the media safety envelope")
 }
 
-fn render_executor(browser: PathBuf, ffmpeg: PathBuf) -> RenderExecutor {
-    let ffmpeg = Ffmpeg::new(ffmpeg, execution::encode_limits())
+impl LocalExecutorOptions {
+    fn into_executor(self) -> RenderExecutor {
+        let Self {
+            browser,
+            ffmpeg,
+            graphics_backend,
+            video_encoder_threads,
+        } = self;
+        let ffmpeg = Ffmpeg::new(
+            ffmpeg,
+            execution::local_encode_limits(video_encoder_threads),
+        )
         .expect("environment discovery returns a non-empty FFmpeg path");
 
-    RenderExecutor::new(browser, execution::browser_limits(), ffmpeg)
+        RenderExecutor::new(browser, execution::browser_limits(), ffmpeg)
+            .with_graphics_backend(graphics_backend)
+    }
+}
+
+#[cfg(target_os = "macos")]
+const fn local_graphics_backend() -> BrowserGraphicsBackend {
+    BrowserGraphicsBackend::Metal
+}
+
+#[cfg(not(target_os = "macos"))]
+const fn local_graphics_backend() -> BrowserGraphicsBackend {
+    BrowserGraphicsBackend::SwiftShader
 }
 
 fn write_report(writer: &mut impl Write, report: &AuthoredReport) -> io::Result<()> {
@@ -267,6 +298,7 @@ fn write_report(writer: &mut impl Write, report: &AuthoredReport) -> io::Result<
 fn write_completed(
     report: &AuthoredReport,
     capture_mode: BrowserCaptureMode,
+    graphics_backend: BrowserGraphicsBackend,
     video: &EncodedVideo,
 ) -> io::Result<ExitCode> {
     let mut stderr = io::stderr().lock();
@@ -276,9 +308,10 @@ fn write_completed(
     let mut stdout = io::stdout().lock();
     writeln!(
         stdout,
-        "Rendered {} frames with {} capture to {}",
+        "Rendered {} frames with {} capture on {} to {}",
         video.frames(),
         capture_mode,
+        graphics_backend,
         video.path().display(),
     )?;
     Ok(ExitCode::SUCCESS)

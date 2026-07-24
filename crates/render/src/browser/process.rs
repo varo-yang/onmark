@@ -53,11 +53,17 @@ const STANDARD_ARGUMENTS: &[&str] = &[
     "--use-mock-keychain",
 ];
 const DISABLED_SANDBOX_ARGUMENTS: &[&str] = &["--no-sandbox", "--disable-setuid-sandbox"];
-const CAPTURE_BACKEND_ARGUMENTS: &[&str] = &[
+const SWIFTSHADER_ARGUMENTS: &[&str] = &[
     "--ignore-gpu-blocklist",
     "--use-gl=angle",
     "--use-angle=swiftshader",
     "--enable-unsafe-swiftshader",
+];
+#[cfg(target_os = "macos")]
+const METAL_ARGUMENTS: &[&str] = &[
+    "--ignore-gpu-blocklist",
+    "--use-gl=angle",
+    "--use-angle=metal",
 ];
 const PORTABLE_SCREENSHOT_ARGUMENTS: &[&str] = &["--headless=new"];
 const SINGLE_PROCESS_ARGUMENTS: &[&str] = &[
@@ -75,6 +81,57 @@ const SINGLE_PROCESS_ARGUMENTS: &[&str] = &[
 pub struct BrowserLaunchPolicy {
     sandbox: ChromiumSandbox,
     process_model: ChromiumProcessModel,
+}
+
+/// Graphics implementation selected before Chromium launch.
+///
+/// The selection is immutable for one browser process and never falls back
+/// automatically. `SwiftShader` remains the canonical default; Metal is an
+/// explicit macOS admission whose capture environment includes the host
+/// graphics stack.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BrowserGraphicsBackend {
+    /// Locks ANGLE to the packaged software renderer.
+    SwiftShader,
+    /// Locks ANGLE to Metal on an admitted macOS host.
+    #[cfg(target_os = "macos")]
+    Metal,
+}
+
+impl BrowserGraphicsBackend {
+    const fn arguments(self) -> &'static [&'static str] {
+        match self {
+            Self::SwiftShader => SWIFTSHADER_ARGUMENTS,
+            #[cfg(target_os = "macos")]
+            Self::Metal => METAL_ARGUMENTS,
+        }
+    }
+
+    const fn uses_swiftshader(self) -> bool {
+        matches!(self, Self::SwiftShader)
+    }
+
+    pub(super) fn accepts_renderer(self, renderer: &str) -> bool {
+        match self {
+            Self::SwiftShader => renderer.contains("SwiftShader"),
+            #[cfg(target_os = "macos")]
+            Self::Metal => renderer.contains("Metal") && !renderer.contains("SwiftShader"),
+        }
+    }
+
+    pub(super) const fn label(self) -> &'static str {
+        match self {
+            Self::SwiftShader => "SwiftShader",
+            #[cfg(target_os = "macos")]
+            Self::Metal => "Metal",
+        }
+    }
+}
+
+impl fmt::Display for BrowserGraphicsBackend {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.label())
+    }
 }
 
 /// Closed Chromium surface-commit mechanism selected by the execution host.
@@ -178,6 +235,7 @@ impl ChromiumProcess {
     pub(super) async fn launch(
         executable: &Path,
         launch_policy: BrowserLaunchPolicy,
+        graphics_backend: BrowserGraphicsBackend,
         capture_mode: BrowserCaptureMode,
         profile: &Path,
         render_profile: RenderProfile,
@@ -189,6 +247,7 @@ impl ChromiumProcess {
         let mut child = spawn_chromium(
             &executable,
             launch_policy,
+            graphics_backend,
             capture_mode,
             profile,
             render_profile,
@@ -345,6 +404,7 @@ impl BrowserDiagnostics {
 fn spawn_chromium(
     executable: &Path,
     launch_policy: BrowserLaunchPolicy,
+    graphics_backend: BrowserGraphicsBackend,
     capture_mode: BrowserCaptureMode,
     profile: &Path,
     render_profile: RenderProfile,
@@ -353,11 +413,12 @@ fn spawn_chromium(
     command
         .args(browser_arguments(
             launch_policy,
+            graphics_backend,
             capture_mode,
             profile,
             render_profile,
         ))
-        .envs(sidecar_environment(executable))
+        .envs(sidecar_environment(executable, graphics_backend))
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
@@ -366,7 +427,10 @@ fn spawn_chromium(
         .map_err(|source| BrowserError::io(BrowserErrorKind::Launch, source))
 }
 
-fn sidecar_environment(executable: &Path) -> Vec<(&'static str, PathBuf)> {
+fn sidecar_environment(
+    executable: &Path,
+    graphics_backend: BrowserGraphicsBackend,
+) -> Vec<(&'static str, PathBuf)> {
     let Some(root) = executable.parent() else {
         return Vec::new();
     };
@@ -375,9 +439,11 @@ fn sidecar_environment(executable: &Path) -> Vec<(&'static str, PathBuf)> {
     if libraries.is_dir() {
         environment.push(("LD_LIBRARY_PATH", libraries));
     }
-    let vulkan = root.join("vk_swiftshader_icd.json");
-    if vulkan.is_file() {
-        environment.push(("VK_ICD_FILENAMES", vulkan));
+    if graphics_backend.uses_swiftshader() {
+        let vulkan = root.join("vk_swiftshader_icd.json");
+        if vulkan.is_file() {
+            environment.push(("VK_ICD_FILENAMES", vulkan));
+        }
     }
     let fonts = root.join("fonts.conf");
     if fonts.is_file() {
@@ -388,12 +454,13 @@ fn sidecar_environment(executable: &Path) -> Vec<(&'static str, PathBuf)> {
 
 fn browser_arguments(
     launch_policy: BrowserLaunchPolicy,
+    graphics_backend: BrowserGraphicsBackend,
     capture_mode: BrowserCaptureMode,
     profile: &Path,
     render_profile: RenderProfile,
 ) -> Vec<OsString> {
     let mut arguments: Vec<OsString> = STANDARD_ARGUMENTS.iter().map(OsString::from).collect();
-    arguments.extend(CAPTURE_BACKEND_ARGUMENTS.iter().map(OsString::from));
+    arguments.extend(graphics_backend.arguments().iter().map(OsString::from));
     if capture_mode == BrowserCaptureMode::Screenshot {
         arguments.extend(PORTABLE_SCREENSHOT_ARGUMENTS.iter().map(OsString::from));
     }
@@ -470,7 +537,7 @@ mod tests {
     use super::{
         BrowserDiagnostics, browser_arguments, find_devtools_endpoint, sidecar_environment,
     };
-    use crate::{BrowserCaptureMode, BrowserLaunchPolicy, RenderProfile};
+    use crate::{BrowserCaptureMode, BrowserGraphicsBackend, BrowserLaunchPolicy, RenderProfile};
 
     #[test]
     fn finds_the_latest_complete_devtools_endpoint() {
@@ -506,6 +573,7 @@ mod tests {
         let profile = RenderProfile::new(320, 180).expect("the fixture profile is valid");
         let arguments = browser_arguments(
             BrowserLaunchPolicy::isolated_worker(),
+            BrowserGraphicsBackend::SwiftShader,
             BrowserCaptureMode::BeginFrame,
             Path::new("/tmp/p"),
             profile,
@@ -528,6 +596,7 @@ mod tests {
         let profile = RenderProfile::new(320, 180).expect("the fixture profile is valid");
         let arguments = browser_arguments(
             BrowserLaunchPolicy::local(),
+            BrowserGraphicsBackend::SwiftShader,
             BrowserCaptureMode::BeginFrame,
             Path::new("/tmp/p"),
             profile,
@@ -546,6 +615,7 @@ mod tests {
         let profile = RenderProfile::new(320, 180).expect("the fixture profile is valid");
         let arguments = browser_arguments(
             BrowserLaunchPolicy::local(),
+            BrowserGraphicsBackend::SwiftShader,
             BrowserCaptureMode::Screenshot,
             Path::new("/tmp/p"),
             profile,
@@ -554,6 +624,23 @@ mod tests {
         assert!(has_argument(&arguments, "--headless=new"));
         assert!(has_argument(&arguments, "--use-angle=swiftshader"));
         assert!(!has_argument(&arguments, "--no-sandbox"));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn metal_selects_no_software_fallback() {
+        let profile = RenderProfile::new(320, 180).expect("the fixture profile is valid");
+        let arguments = browser_arguments(
+            BrowserLaunchPolicy::local(),
+            BrowserGraphicsBackend::Metal,
+            BrowserCaptureMode::Screenshot,
+            Path::new("/tmp/p"),
+            profile,
+        );
+
+        assert!(has_argument(&arguments, "--use-angle=metal"));
+        assert!(!has_argument(&arguments, "--use-angle=swiftshader"));
+        assert!(!has_argument(&arguments, "--enable-unsafe-swiftshader"));
     }
 
     #[cfg(target_os = "linux")]
@@ -601,7 +688,10 @@ mod tests {
         fs::write(root.path().join("fonts.conf"), b"<fontconfig/>")
             .expect("the sidecar font configuration is writable");
 
-        let environment = sidecar_environment(&root.path().join("chrome-headless-shell"));
+        let environment = sidecar_environment(
+            &root.path().join("chrome-headless-shell"),
+            BrowserGraphicsBackend::SwiftShader,
+        );
 
         assert_eq!(
             environment,
@@ -613,6 +703,48 @@ mod tests {
                 ),
                 ("FONTCONFIG_FILE", root.path().join("fonts.conf")),
             ],
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn metal_does_not_inherit_the_swiftshader_manifest() {
+        let root = TempDir::new().expect("the fixture root is writable");
+        fs::write(root.path().join("vk_swiftshader_icd.json"), b"{}")
+            .expect("the sidecar Vulkan manifest is writable");
+
+        let environment =
+            sidecar_environment(&root.path().join("chrome"), BrowserGraphicsBackend::Metal);
+
+        assert!(
+            environment
+                .iter()
+                .all(|(name, _)| *name != "VK_ICD_FILENAMES")
+        );
+    }
+
+    #[test]
+    fn graphics_backends_reject_renderer_fallbacks() {
+        assert!(
+            BrowserGraphicsBackend::SwiftShader
+                .accepts_renderer("ANGLE (Google, SwiftShader Device)")
+        );
+        assert!(
+            !BrowserGraphicsBackend::SwiftShader
+                .accepts_renderer("ANGLE (Apple, ANGLE Metal Renderer)")
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn metal_accepts_only_the_native_renderer() {
+        assert!(
+            BrowserGraphicsBackend::Metal
+                .accepts_renderer("ANGLE (Apple, ANGLE Metal Renderer: Apple M5)")
+        );
+        assert!(!BrowserGraphicsBackend::Metal.accepts_renderer("ANGLE (Apple, OpenGL Renderer)"));
+        assert!(
+            !BrowserGraphicsBackend::Metal.accepts_renderer("ANGLE (Google, SwiftShader Device)")
         );
     }
 

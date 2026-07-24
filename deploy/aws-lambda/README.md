@@ -192,9 +192,13 @@ Two GiB minimized measured GB-seconds, eight GiB minimized latency, and four GiB
 sat between them. At eight GiB, aggregate time across the 60 frames was 2.96
 seconds in runtime staging and media seek, 3.83 seconds in BeginFrame screenshot
 readback, 0.79 seconds in PNG decoding and raw-RGBA hashing, and under 0.2 seconds
-in confirmation plus artifact writes. The next performance work therefore
-targets decoded-media seeking and PNG screenshot transport, not handler control
-flow or S3 publication.
+in confirmation plus artifact writes. This originally directed investigation
+toward decoded-media seeking and screenshot transport rather than handler
+control flow or S3 publication. Later local isolation found no wall-time win
+from replacing the PNG pipe with repeated raw RGBA. Current telemetry instead
+separates authored capture entries, actual Chromium pixel commands, readback,
+pixel processing, and native writes; it has not yet been deployed to this
+Lambda fixture.
 
 An earlier 66-second observation is not a cold-start baseline. The pre-fix frame
 handshake stalled until its deadline, and the AWS CLI's default 60-second read

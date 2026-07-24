@@ -35,8 +35,23 @@
       "minimum": 0,
       "type": "integer"
     },
+    "PresentationFrameBehavior": {
+      "description": "Proven cadence at which browser-owned pixels may change.\n\nUnknown presentation code requires `PerFrame`. Placement-bounded pixels may\nchange only when the browser plan changes its active structural placements,\nso execution may reuse one exact capture between those boundaries.",
+      "oneOf": [
+        {
+          "const": "perFrame",
+          "description": "Browser-owned pixels may differ at every authored frame.",
+          "type": "string"
+        },
+        {
+          "const": "placementBounded",
+          "description": "Browser-owned pixels are constant between placement boundaries.",
+          "type": "string"
+        }
+      ]
+    },
     "PresentationTemporalCapability": {
-      "description": "Proven relationship between a presentation's output and requested frames.\n\nUnknown presentation code is [`Sequential`](Self::Sequential). Random\naccess is an explicit claim that each requested frame depends only on\nimmutable inputs and that exact frame.",
+      "description": "Proven relationship between a presentation's output and requested frames.\n\nUnknown presentation code requires `Sequential`. Random access is an\nexplicit claim that each requested frame depends only on immutable inputs\nand that exact frame.",
       "oneOf": [
         {
           "const": "sequential",
@@ -51,7 +66,7 @@
       ]
     },
     "PresentationVisualCapability": {
-      "description": "Proven relationship between browser presentation pixels and primary media.\n\nUnknown presentation code is [`BrowserComposite`](Self::BrowserComposite).\nA separable overlay is an explicit claim that the browser output is a\ntransparent foreground independent of the primary video beneath it.",
+      "description": "Proven relationship between browser presentation pixels and primary media.\n\nUnknown presentation code requires `BrowserComposite`. A separable overlay\nis an explicit claim that the browser output is a transparent foreground\nindependent of the primary video beneath it.",
       "oneOf": [
         {
           "const": "browserComposite",
@@ -87,6 +102,9 @@
       "minItems": 1,
       "type": "array"
     },
+    "frameBehavior": {
+      "$ref": "#/$defs/PresentationFrameBehavior"
+    },
     "temporalCapability": {
       "$ref": "#/$defs/PresentationTemporalCapability"
     },
@@ -103,6 +121,7 @@
     "entryPoint",
     "temporalCapability",
     "visualCapability",
+    "frameBehavior",
     "files"
   ],
   "title": "BundleManifest",

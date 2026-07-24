@@ -453,6 +453,12 @@ fn assert_success(output: &Output, expected_frames: usize) {
         "screenshot"
     };
     assert!(stdout.contains(&format!("with {capture_mode} capture")));
+    let graphics_backend = if cfg!(target_os = "macos") {
+        "Metal"
+    } else {
+        "SwiftShader"
+    };
+    assert!(stdout.contains(&format!("on {graphics_backend}")));
 }
 
 fn assert_process_success(operation: &str, output: &Output) {

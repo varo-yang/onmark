@@ -139,15 +139,18 @@ it observes, but waiting for that callback before issuing `BeginFrame` would
 deadlock a target controlled by CDP BeginFrameControl. `FrameStaged(frame)`
 therefore means browser state is ready to enter the compositor. Native then
 issues one normal capture-bearing `HeadlessExperimental.beginFrame` command for
-each output frame. At a video or overlay boundary, native first commits the
-staged placement without a screenshot at a fixed sub-millisecond offset before
-the current compositor transaction's capture tick. This gives a newly visible
-layer one compositor turn without retaining unrelated inactive layers or
-advancing screenplay time. The capture command then commits frame state and
-captures the PNG at that tick. These compositor ticks advance strictly in
-capture order; `RuntimeFrame.index` remains authored time and may move backward
-or repeat. A no-damage response normally reuses
-the preceding PNG, but a boundary never does so; a missing boundary or first
+each frame selected by the checked capture cadence. `perFrame` selects every
+output frame; `placementBounded` selects the first output frame and every solved
+placement boundary, while intervening output frames reuse the exact preceding
+PNG without another runtime transaction. At a video or overlay boundary, native
+first commits the staged placement without a screenshot at a fixed
+sub-millisecond offset before the current compositor transaction's capture
+tick. This gives a newly visible layer one compositor turn without retaining
+unrelated inactive layers or advancing screenplay time. The capture command
+then commits frame state and captures the PNG at that tick. These compositor
+ticks advance strictly in capture order; `RuntimeFrame.index` remains authored
+time and may move backward or repeat. A no-damage response normally reuses the
+preceding PNG, but a boundary never does so; a missing boundary or first
 screenshot receives one bounded sub-millisecond retry. `Confirm(frame)` waits
 for the already-registered callback. At a placement boundary that observer may
 complete on the pre-capture commit; runtime media state cannot change between
@@ -275,10 +278,12 @@ Graph partitioning.
 
 ## Visual capabilities
 
-`PresentationVisualCapability` states which pixels Chromium owns. It is build
-metadata, not screenplay spelling, and is never inferred from presentation
-source. Local CLI rendering uses `browserComposite`; the low-level conformance
-bundler requires an explicit value for an already-proved artifact.
+`PresentationVisualCapability` states which pixels Chromium may own. It is build
+metadata, not screenplay spelling, and is never inferred from unknown
+presentation code. The CLI's neutral semantic DOM without authored CSS or
+motion is product-owned and declares `separableOverlay`; authored CSS, motion,
+and custom entries remain `browserComposite`. The low-level conformance bundler
+requires an explicit value for an already-proved artifact.
 
 - `browserComposite` means Chromium owns the complete frame, including primary
   video. It is the conservative capability for unknown presentation code.
@@ -298,13 +303,46 @@ The current native path is deliberately narrower than the presentation promise:
 one primary video must cover the complete published interval, its frozen source
 dimensions must equal the output profile, and its complete color tuple must be
 the admitted BT.709 limited-range profile. These checks avoid reconstructing
-CSS layout in Rust. A declared capability outside this native profile fails
-before process launch; it never silently falls back to browser composition.
+CSS layout in Rust. Capability is permission, not an execution command: planning
+selects `separableOverlay` only when these facts prove the native profile and
+otherwise records `browserComposite`. The resulting execution plan is immutable;
+a worker never changes paths after launch, and a transported plan that exceeds
+its capability still fails validation.
 
 The current bundle manifest places temporal and visual capabilities in canonical
-bundle identity. Bundles are reproducible build products rather than authored
-data; only the current manifest version is accepted, and older bundles are
-rebuilt.
+bundle identity together with the frame behavior below. Bundles are
+reproducible build products rather than authored data; only the current
+manifest version is accepted, and older bundles are rebuilt.
+
+## Frame behavior
+
+`PresentationFrameBehavior` states whether browser-owned pixels may change
+between Rust-owned placement boundaries:
+
+- `perFrame` is the conservative value. Chromium may need to evaluate and
+  capture every authored frame.
+- `placementBounded` proves that browser pixels remain identical until a video,
+  overlay, or structural placement boundary changes the visible facts.
+
+This declaration is independent of visual separability. The CLI's neutral
+semantic DOM without authored CSS or motion declares `placementBounded`;
+authored CSS, motion, and custom presentations remain `perFrame`. The stronger
+behavior requires `randomAccess`: native may skip intermediate `Seek` and
+`Confirm` calls only when later boundary frames can be evaluated directly.
+
+Capability remains permission rather than a cache instruction. Planning records
+`placementBounded` capture only when Chromium owns no video pixels. A
+browser-composite unit containing video stays `everyFrame`; a native-video
+`separableOverlay` unit and a static browser-only unit may use the stronger
+cadence. Native captures the first output frame and every solved boundary, then
+shares the exact encoded PNG payload between intervening output frames while
+still writing each frame to the encoder or worker artifact.
+
+Frame behavior is immutable bundle metadata included in `bundleId`. It is never
+inferred from source tokens, observed pixel equality, compositor damage, or
+screenplay spelling. The worker request carries the admitted cadence and
+rejects any value that disagrees with the bundle declaration or materialized
+visual plan.
 
 ## Assets
 
