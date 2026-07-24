@@ -192,6 +192,8 @@ or derive a new media duration from the DOM.
 - Compiler node identity is whole-film renderable-semantic preorder. Unit
   projections retain that identity, so a later partition binds the correct
   elements in the unchanged complete document.
+- During that unit, direct semantic children omitted from its plan remain
+  hidden even when authored CSS gives them an explicit display value.
 - Imported captions are the only DOM nodes created by the facade because they
   do not exist in the authored document.
 - The runtime toggles container and content visibility from solved intervals;

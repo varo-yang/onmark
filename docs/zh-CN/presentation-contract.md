@@ -175,6 +175,8 @@ presentation 收到的 placement 已经包含绝对帧区间。它可以决定 t
 - bound node 临时携带 `data-om-node`；authored ID 保持普通 HTML ID；
 - compiler node identity 是完整 film 的 renderable-semantic preorder。unit projection
   即使省略更早 node 仍保留该 identity，因此 later partition 能在完整 HTML 中绑定正确元素；
+- 当前 unit 的 plan 未包含的直属 semantic child 始终隐藏，即使 authored CSS
+  显式设置了其 display；
 - 导入 caption 是 facade 唯一创建的 DOM node，因为它不在 authored document 中；
 - runtime 根据已求解 interval 切换 container 与 content visibility，CSS 独占 layout
   与视觉设计。

@@ -34,8 +34,15 @@ const ELEMENTS = Object.freeze({
   video: "video",
 });
 
+// A unit keeps the complete authored document. Unbound semantic siblings must
+// not leak pixels into its partition, even through authored display rules.
 const VISIBILITY_RULE = [
-  "[data-om-node][hidden] { display: none !important; }",
+  "[data-om-node][hidden],",
+  "om-film > om-scene:not([data-om-node]),",
+  "om-scene > om-shot:not([data-om-node]),",
+  "om-shot > :is(video, om-title, om-cta):not([data-om-node]) {",
+  "  display: none !important;",
+  "}",
   "om-cues, om-cue, om-music, om-sfx, om-vo {",
   "  display: none !important;",
   "}",

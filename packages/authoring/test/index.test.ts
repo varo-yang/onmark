@@ -69,7 +69,7 @@ test("binds solved structure without replacing authored HTML", () => {
   );
 });
 
-test("owns hidden display independently of authored display rules", () => {
+test("owns bound and omitted semantic visibility independently of authored CSS", () => {
   const browser = new FakeDocument();
   const bindings = bindingsFor(browser);
   const film = bindings.bindFilm(PLAN.film);
@@ -78,7 +78,12 @@ test("owns hidden display independently of authored display rules", () => {
   assert.equal(
     visibility?.textContent,
     [
-      "[data-om-node][hidden] { display: none !important; }",
+      "[data-om-node][hidden],",
+      "om-film > om-scene:not([data-om-node]),",
+      "om-scene > om-shot:not([data-om-node]),",
+      "om-shot > :is(video, om-title, om-cta):not([data-om-node]) {",
+      "  display: none !important;",
+      "}",
       "om-cues, om-cue, om-music, om-sfx, om-vo {",
       "  display: none !important;",
       "}",
