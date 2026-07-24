@@ -1,0 +1,13 @@
+# onmark resolution test rendering; not a wire format
+film id=demo
+  scene id=launch
+    shot id=hero duration=-
+      video id=- src=hero.mp4 delay=-
+      om-title id=- start=shot-start
+        text "\n        Write " @0:273..288
+        text "native." @0:309..316
+        text "\n      " @0:323..330
+index
+  demo -> om-film @0:29..33
+  hero -> om-shot @0:182..186
+  launch -> om-scene @0:102..108

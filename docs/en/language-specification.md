@@ -44,46 +44,58 @@ attribute/reference resolution phase rather than discarding them.
 Illustrative syntax:
 
 ```html
-<film>
-  <music src="score.wav" gain="25%" />
-  <cues>
-    <cue id="offer" time="3s" />
-    <cue id="cta" time="7s" />
-  </cues>
-  <scene id="sale">
-    <shot id="hero">
-      <video src="product.mp4" />
-      <sfx src="reveal.wav" delay="250ms" />
-      <title cue="offer">30% OFF</title>
-      <cta cue="cta">Buy now</cta>
-    </shot>
-  </scene>
-</film>
+<om-film>
+  <om-music src="score.wav" gain="25%"></om-music>
+  <om-cues>
+    <om-cue id="offer" time="3s"></om-cue>
+    <om-cue id="cta" time="7s"></om-cue>
+  </om-cues>
+  <om-scene id="sale">
+    <om-shot id="hero">
+      <video src="product.mp4"></video>
+      <om-sfx src="reveal.wav" delay="250ms"></om-sfx>
+      <om-title cue="offer">30% OFF</om-title>
+      <om-cta cue="cta">Buy now</om-cta>
+    </om-shot>
+  </om-scene>
+</om-film>
 ```
 
 `cue="offer"` is the Gate-one spelling for aligning an overlay to a named cue.
 Free-form `begin`, `end`, and `until` expressions are not part of the language.
 
-## Markup syntax
+## HTML syntax
 
-Screenplays use XML-compatible fragment markup. Syntax preserves a sequence of
-top-level nodes and validates tokens, element nesting, closing-tag matches,
-duplicate attributes, and character references. Binding later requires exactly
-one top-level `film`; root cardinality, known element names, legal containment,
-required attributes, IDs, and references are language semantics rather than
-markup well-formedness.
+A screenplay is one authored HTML document. Ordinary HTML owns layout and
+presentation; the closed Onmark custom-element vocabulary owns screenplay
+meaning. Its authored element namespace is `om-`; longer product, package, and
+artifact names retain the full `onmark` spelling. The compiler tokenizes HTML
+directly while preserving authored byte
+spans and source order. It deliberately owns a strict authored-element stack
+instead of adopting browser tree-recovery rules, so malformed presentation
+markup cannot silently change semantic ownership. Every non-void authored
+element therefore needs a matching end tag even where browser HTML would allow
+that tag to be omitted.
 
-Element and attribute names are case-sensitive qualified names. The syntax tree
-owns decoded text and attribute values together with byte-accurate source spans.
-Comments are ignored, CDATA becomes ordinary text, and XML declarations,
-processing instructions, and document type declarations are not part of the
-screenplay surface.
+HTML element and attribute names are ASCII case-insensitive and enter the syntax
+tree in their normalized lowercase spelling. Comments are ignored. Text,
+attributes, `<style>`, and `<script>` raw text retain authored spans; standard
+HTML character references are decoded once. The standard `<!doctype html>` is
+accepted, while non-HTML document types are rejected. A trailing solidus is
+accepted only on HTML void elements; using `<om-shot />` reports malformed
+syntax and keeps that non-void element open, matching browser interpretation.
 
-Text and attribute values support the five predefined XML entities (`amp`, `lt`,
-`gt`, `quot`, and `apos`) plus decimal and hexadecimal references to characters
-allowed by XML 1.0. Other named entities, malformed references, surrogate
-values, out-of-range Unicode values, and XML-forbidden characters are syntax
-errors. Onmark does not process DTDs, custom entities, or external entities.
+Binding requires exactly one `<om-film>` semantic document root. It may be
+authored directly in an HTML fragment or as a direct child of the standard
+`html`/`body` document shell. Only that shell is transparent: nesting the film
+inside a presentation container such as `div` does not change screenplay
+ownership. Ordinary HTML siblings, document text, `head`, and presentation
+descendants remain presentation-owned and do not enter the linked film. Root
+cardinality, known `om-*` names, legal containment, required attributes,
+IDs, and references are language semantics rather than tokenizer concerns.
+Native descendants inside
+`<om-title>`, `<om-cta>`, or `<om-vo>` contribute their text in
+source order without becoming screenplay nodes.
 
 Markup ingestion is bounded before semantic binding. One screenplay may contain
 at most 8 MiB of UTF-8 source, 65,536 retained syntax items, and 32 simultaneously
@@ -206,7 +218,7 @@ Initial markup diagnostics are:
 | `ONM-SYNTAX-004` | an invalid character or entity reference appears in text or an attribute    |
 | `ONM-SYNTAX-005` | the source ends before an open element is closed                            |
 | `ONM-SYNTAX-006` | a closing tag appears without an open element                               |
-| `ONM-SYNTAX-007` | an XML declaration, processing instruction, or document type is unsupported |
+| `ONM-SYNTAX-007` | a non-HTML document type is unsupported                               |
 | `ONM-SYNTAX-008` | screenplay markup exceeds a bounded syntax resource                         |
 
 Initial binding, resolution, and timing diagnostics are:
@@ -216,8 +228,8 @@ Initial binding, resolution, and timing diagnostics are:
 | `ONM-ID-001`     | an authored ID is empty or contains ASCII whitespace                  |
 | `ONM-ID-002`     | an authored ID duplicates another ID in the same film                 |
 | `ONM-STRUCT-001` | an element is outside the current screenplay vocabulary               |
-| `ONM-STRUCT-002` | the document has no top-level `film` element                          |
-| `ONM-STRUCT-003` | the document has more than one top-level `film` element               |
+| `ONM-STRUCT-002` | the document has no semantic `film` root                             |
+| `ONM-STRUCT-003` | the document has more than one semantic `film` root                  |
 | `ONM-STRUCT-004` | a known element appears outside its legal parent                      |
 | `ONM-STRUCT-005` | a film contains more than one `cues` container                        |
 | `ONM-STRUCT-006` | authored text appears in a structural or empty element                |
@@ -263,17 +275,19 @@ Bad:
 constraint graph node 17 is unsatisfied
 ```
 
-## Presentation selection and props
+## Presentation and props
 
-The render command projects solved video, title, CTA, and caption facts into a
-neutral semantic DOM by default. Same-stem `film.css` and `film.motion.ts` files
-may style those nodes and bind element-local motion; neither adds screenplay
-spelling or visual defaults when absent.
-`--presentation` explicitly selects unrestricted custom browser code instead.
-The screenplay has no `presents` attribute, `definePresentation` declaration,
-or typed props channel in the current language. Its solved facts reach either
-path only as the Rust-owned `BrowserPlan` delivered through the runtime
-`Load(plan)` command.
+The authored HTML is also the presentation. Onmark binds solved video, title,
+CTA, and caption facts onto the existing semantic elements without replacing
+ordinary DOM, classes, nested markup, or inline styles. An optional
+`<script type="module" data-om-motion>` exports one `motion` value and may
+import admitted browser adapters such as `onmark/motion/gsap`. No other script
+element is admitted by the bundling boundary.
+
+There is no same-stem CSS or motion convention, `--presentation` escape hatch,
+`presents` attribute, `definePresentation` declaration, or separate typed props
+channel. Solved facts reach the document only as the Rust-owned `BrowserPlan`
+delivered through `Load(plan)`.
 
 The Browser Plan also retains film, scene, shot, and content ownership. The
 compiler assigns every projected node a stable identity and carries only the

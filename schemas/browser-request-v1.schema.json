@@ -115,7 +115,7 @@
       "type": "object"
     },
     "BrowserNodeId": {
-      "description": "Stable browser identity for one Timeline element or imported caption.",
+      "description": "Stable browser identity for one Timeline element or imported caption.\n\nAuthored nodes use their renderable semantic preorder in the complete film.\nUnit projections retain that identity when earlier nodes are omitted, so a\nbrowser can bind any partition against the unchanged authored document.",
       "format": "uint32",
       "maximum": 4294967295,
       "minimum": 0,

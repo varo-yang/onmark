@@ -1,6 +1,6 @@
 # onmark diagnostic test rendering; not a wire format
-ONM-STRUCT-004 error @0:1..6 element <scene> is not allowed at the top level
-  help: move <scene> to a valid screenplay container
-ONM-STRUCT-003 error @0:20..24 screenplay contains more than one top-level <film> element
-  help: keep exactly one top-level <film> element
-  related @0:11..15 the first <film> element is here
+ONM-STRUCT-004 error @0:1..9 element <om-scene> is not allowed at the document root
+  help: move <om-scene> to a valid screenplay container
+ONM-STRUCT-003 error @0:45..52 screenplay contains more than one <om-film> document root
+  help: keep exactly one <om-film> document root
+  related @0:24..31 the first <om-film> element is here

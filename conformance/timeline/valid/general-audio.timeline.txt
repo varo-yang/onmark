@@ -1,10 +1,10 @@
 # onmark timeline test rendering; not a wire format
-timeline v=1 fps=30/1 film=<film> id=mix interval=0..120
-  scene <scene> id=- interval=0..120 start=film-start end=children
-    shot <shot> id=opening interval=0..60 start=film-start end=longest-content
+timeline v=1 fps=30/1 film=<om-film> id=mix interval=0..120
+  scene <om-scene> id=- interval=0..120 start=film-start end=children
+    shot <om-shot> id=opening interval=0..60 start=film-start end=longest-content
       video <video> id=- interval=0..60 start=shot-start end=asset-duration asset=sha256:0202020202020202020202020202020202020202020202020202020202020202
-      vo <vo> id=- interval=0..30 start=shot-start end=asset-duration asset=sha256:0303030303030303030303030303030303030303030303030303030303030303 text="Meet Onmark."
-    shot <shot> id=closing interval=60..120 start=sequential end=longest-content
+      vo <om-vo> id=- interval=0..30 start=shot-start end=asset-duration asset=sha256:0303030303030303030303030303030303030303030303030303030303030303 text="Meet Onmark."
+    shot <om-shot> id=closing interval=60..120 start=sequential end=longest-content
       video <video> id=- interval=60..120 start=shot-start end=asset-duration asset=sha256:0505050505050505050505050505050505050505050505050505050505050505
   audio kind=music interval=0..120 start=film-start end=film-end asset=sha256:0101010101010101010101010101010101010101010101010101010101010101 gain=1/4
   audio kind=sound-effect interval=8..23 start=authored-delay end=asset-duration asset=sha256:0404040404040404040404040404040404040404040404040404040404040404 gain=1/2

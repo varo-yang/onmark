@@ -1,0 +1,19 @@
+<om-film>
+  <om-cues>
+    <om-cue id="late" time="5s"></om-cue>
+  </om-cues>
+  <om-scene>
+    <om-shot id="conflict" duration="1s">
+      <video src="clip.mp4"></video>
+    </om-shot>
+    <om-shot id="missing-media" duration="1s">
+      <om-vo>Words</om-vo>
+    </om-shot>
+    <om-shot id="outside" duration="1s">
+      <om-title cue="late">Too late</om-title>
+    </om-shot>
+    <om-shot id="untimed">
+      <om-title delay="1s">No recovered bounds</om-title>
+    </om-shot>
+  </om-scene>
+</om-film>

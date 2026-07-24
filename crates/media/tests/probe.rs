@@ -244,7 +244,11 @@ fn frozen_identity_and_probed_metadata_drive_timeline_solving() {
     let assets = BTreeMap::from([(asset, frozen)]);
     let parsed = compiler::parse(
         SourceId::new(0),
-        r#"<film><scene><shot><video src="valid.mp4" /></shot></scene></film>"#,
+        concat!(
+            "<om-film><om-scene><om-shot>",
+            r#"<video src="valid.mp4"></video>"#,
+            "</om-shot></om-scene></om-film>",
+        ),
     );
     let (document, diagnostics) = parsed.into_parts();
     assert!(diagnostics.is_empty());

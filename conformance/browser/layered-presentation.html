@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      html,
+      body,
+      om-film,
+      om-scene,
+      om-shot {
+        background: transparent;
+        height: 100%;
+        margin: 0;
+        width: 100%;
+      }
+
+      body {
+        overflow: hidden;
+      }
+    </style>
+  </head>
+  <body>
+    <om-film>
+      <om-scene>
+        <om-shot><video src="source.mp4"></video></om-shot>
+      </om-scene>
+    </om-film>
+  </body>
+</html>

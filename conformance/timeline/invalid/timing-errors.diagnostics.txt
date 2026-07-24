@@ -1,10 +1,10 @@
 # onmark diagnostic test rendering; not a wire format
-ONM-TIME-003 error @0:102..104 explicit shot duration conflicts with media-derived duration
+ONM-TIME-003 error @0:127..129 explicit shot duration conflicts with media-derived duration
   help: remove the explicit duration or the timed media content
-  related @0:113..137 media-derived duration is available here
-ONM-ASSET-001 error @0:200..214 element <vo> needs a frozen media source for timeline solving
-  help: add src="..." to <vo>
-ONM-TIME-004 error @0:283..287 content starts at frame 150, outside its shot interval 90..120
+  related @0:138..168 media-derived duration is available here
+ONM-ASSET-001 error @0:237..257 element <om-vo> needs a frozen media source for timeline solving
+  help: add src="..." to <om-vo>
+ONM-TIME-004 error @0:335..339 content starts at frame 150, outside its shot interval 90..120
   help: use an earlier cue or delay, or extend the owning shot
-ONM-TIME-002 error @0:322..405 shot has no media or explicit duration
+ONM-TIME-002 error @0:380..475 shot has no media or explicit duration
   help: add timed media content or an explicit shot duration

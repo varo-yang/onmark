@@ -57,12 +57,8 @@ pub(super) struct WorkerCaptureArgs {
 
 #[derive(Debug, Args)]
 pub(super) struct RenderArgs {
-    /// Screenplay to compile.
+    /// Authored HTML document to compile and render.
     pub(super) screenplay: PathBuf,
-
-    /// Custom browser entry. Omit to use semantic DOM and same-stem CSS.
-    #[arg(short, long)]
-    presentation: Option<PathBuf>,
 
     /// MP4 destination. Defaults to `renders/<screenplay>.mp4`.
     #[arg(short, long)]
@@ -133,18 +129,6 @@ pub(super) struct RenderArgs {
 }
 
 impl RenderArgs {
-    pub(super) fn presentation(&self) -> Option<&Path> {
-        self.presentation.as_deref()
-    }
-
-    pub(super) fn stylesheet(&self) -> PathBuf {
-        self.screenplay.with_extension("css")
-    }
-
-    pub(super) fn motion(&self) -> PathBuf {
-        self.screenplay.with_extension("motion.ts")
-    }
-
     pub(super) fn output(&self) -> PathBuf {
         self.output.clone().unwrap_or_else(|| {
             let stem = self
@@ -230,15 +214,12 @@ mod tests {
 
     #[test]
     fn derives_stable_project_defaults_from_the_screenplay() {
-        let cli = Cli::try_parse_from(["onmark", "render", "project/film.onmark"])
+        let cli = Cli::try_parse_from(["onmark", "render", "project/film.html"])
             .expect("the minimal command is valid");
         let Command::Render(args) = cli.command else {
             panic!("the fixture must parse as a render command");
         };
 
-        assert_eq!(args.presentation(), None);
-        assert_eq!(args.stylesheet(), Path::new("project/film.css"));
-        assert_eq!(args.motion(), Path::new("project/film.motion.ts"));
         assert_eq!(args.output(), Path::new("renders/film.mp4"));
         assert_eq!(args.frame_rate.numerator(), 30);
         assert_eq!(args.frame_rate.denominator(), 1);
@@ -248,9 +229,8 @@ mod tests {
 
     #[test]
     fn accepts_explicit_browser_graphics_overrides() {
-        let cli =
-            Cli::try_parse_from(["onmark", "render", "film.onmark", "--graphics", "software"])
-                .expect("the software graphics override is valid on every host");
+        let cli = Cli::try_parse_from(["onmark", "render", "film.html", "--graphics", "software"])
+            .expect("the software graphics override is valid on every host");
         let Command::Render(args) = cli.command else {
             panic!("the fixture must parse as a render command");
         };
@@ -263,7 +243,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn accepts_the_admitted_metal_override() {
-        let cli = Cli::try_parse_from(["onmark", "render", "film.onmark", "--graphics", "metal"])
+        let cli = Cli::try_parse_from(["onmark", "render", "film.html", "--graphics", "metal"])
             .expect("the Metal graphics override is admitted on macOS");
         let Command::Render(args) = cli.command else {
             panic!("the fixture must parse as a render command");
@@ -278,7 +258,7 @@ mod tests {
             let cli = Cli::try_parse_from([
                 "onmark",
                 "render",
-                "film.onmark",
+                "film.html",
                 "--video-encoder-threads",
                 &spelling,
             ])
@@ -297,7 +277,7 @@ mod tests {
             let result = Cli::try_parse_from([
                 "onmark",
                 "render",
-                "film.onmark",
+                "film.html",
                 "--video-encoder-threads",
                 &spelling,
             ]);
@@ -307,7 +287,7 @@ mod tests {
 
     #[test]
     fn accepts_exact_rational_rates_and_rejects_decimals() {
-        let cli = Cli::try_parse_from(["onmark", "render", "film.onmark", "--fps", "30000/1001"])
+        let cli = Cli::try_parse_from(["onmark", "render", "film.html", "--fps", "30000/1001"])
             .expect("an exact rational rate is valid");
         let Command::Render(args) = cli.command else {
             panic!("the fixture must parse as a render command");
@@ -315,9 +295,7 @@ mod tests {
         assert_eq!(args.frame_rate.numerator(), 30_000);
         assert_eq!(args.frame_rate.denominator(), 1_001);
 
-        assert!(
-            Cli::try_parse_from(["onmark", "render", "film.onmark", "--fps", "29.97",]).is_err()
-        );
+        assert!(Cli::try_parse_from(["onmark", "render", "film.html", "--fps", "29.97",]).is_err());
     }
 
     #[test]
@@ -326,7 +304,7 @@ mod tests {
             Cli::try_parse_from([
                 "onmark",
                 "render",
-                "film.onmark",
+                "film.html",
                 "--temporal-capability",
                 "randomAccess",
             ])
@@ -336,7 +314,7 @@ mod tests {
             Cli::try_parse_from([
                 "onmark",
                 "render",
-                "film.onmark",
+                "film.html",
                 "--visual-capability",
                 "separableOverlay",
             ])
@@ -349,7 +327,7 @@ mod tests {
         let cli = Cli::try_parse_from([
             "onmark",
             "render",
-            "film.onmark",
+            "film.html",
             "--subtitle",
             "captions.srt",
         ])
@@ -364,7 +342,7 @@ mod tests {
             Cli::try_parse_from([
                 "onmark",
                 "render",
-                "film.onmark",
+                "film.html",
                 "--subtitle",
                 "captions.srt",
                 "--subtitle",

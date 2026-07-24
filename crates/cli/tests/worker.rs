@@ -307,15 +307,20 @@ fn static_request_in(capture_environment: CaptureEnvironmentId) -> WorkerCapture
 }
 
 fn one_shot_timeline() -> TimelineIr {
-    solve_timeline(
-        r#"<film><scene><shot duration="1s"><title>Gate three</title></shot></scene></film>"#,
-    )
+    solve_timeline(concat!(
+        "<om-film><om-scene>",
+        r#"<om-shot duration="1s"><om-title>Gate three</om-title></om-shot>"#,
+        "</om-scene></om-film>",
+    ))
 }
 
 fn two_shot_timeline() -> TimelineIr {
-    solve_timeline(
-        r#"<film><scene><shot duration="1s"><title>Opening</title></shot><shot duration="1s"><title>Closing</title></shot></scene></film>"#,
-    )
+    solve_timeline(concat!(
+        "<om-film><om-scene>",
+        r#"<om-shot duration="1s"><om-title>Opening</om-title></om-shot>"#,
+        r#"<om-shot duration="1s"><om-title>Closing</om-title></om-shot>"#,
+        "</om-scene></om-film>",
+    ))
 }
 
 fn solve_timeline(source: &str) -> TimelineIr {

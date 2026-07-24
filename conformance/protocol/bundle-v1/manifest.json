@@ -1,35 +1,20 @@
 {
   "version": 1,
-  "bundleId": "sha256:c037f9a2bd33e8c8e8ea7ab58273f0ba32447c468ae11114a2aa3b161a970760",
+  "bundleId": "sha256:c8e3d8b0ccb71154ccc8c0f135a860de2158e1b00d0afc06d23c86fdfb3b0b53",
   "entryPoint": "index.html",
   "temporalCapability": "randomAccess",
   "visualCapability": "browserComposite",
   "frameBehavior": "perFrame",
   "files": [
     {
-      "bytes": 299,
+      "bytes": 714,
       "path": "index.html",
-      "sha256": "sha256:d1c2db6bb3d8d28dba3ac2015b6cb08e37fd71a2733f0a4ad2ef1d7eb783e4fa"
+      "sha256": "sha256:a30b9cab831a35429e93cd974ce4e8268c48f5ae9c1408472c915accc14e0639"
     },
     {
-      "bytes": 683,
-      "path": "presentation.css",
-      "sha256": "sha256:a6acd58a63f94dbee690c6a58452b699eb860eac05ee096636523feceb1947ce"
-    },
-    {
-      "bytes": 87052,
+      "bytes": 86256,
       "path": "presentation.js",
-      "sha256": "sha256:c198a3b0b27db68db551c368941387cd16074d9fa7d7a6656fa210254bd65628"
-    },
-    {
-      "bytes": 318,
-      "path": "resources/npwql46y.svg",
-      "sha256": "sha256:f32f11b2301fcc81a0ea539c58f199281252dbbdd7874649957cdc7712cc1d47"
-    },
-    {
-      "bytes": 58520,
-      "path": "resources/xf7eofvw.ttf",
-      "sha256": "sha256:077f7245f6459045495b1ca0493f2b426c421d2112d10b48a38ff8858a07397a"
+      "sha256": "sha256:4f05339494e8f667b44650a2711a495a59eaae694dd8fd38b82bf64a37b1b86b"
     }
   ]
 }

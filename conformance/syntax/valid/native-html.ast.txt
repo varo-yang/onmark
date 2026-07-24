@@ -1,0 +1,31 @@
+# onmark syntax test rendering; not a wire format
+document
+  text "\n" @0:15..16
+  element om-film @0:16..336
+    attribute id="demo" @0:25..34 value@0:29..33
+    text "\n  " @0:35..38
+    element style @0:38..77
+      text ".accent { color: lime; }" @0:45..69
+    text "\n  " @0:77..80
+    element om-scene @0:80..251
+      text "\n    " @0:90..95
+      element om-shot @0:95..237
+        text "\n      " @0:104..111
+        element video @0:111..153
+          attribute class="media" @0:118..129 value@0:125..129
+          attribute src="hero.mp4" @0:130..144 value@0:135..143
+        text "\n      " @0:153..160
+        element om-title @0:160..222
+          text "Write " @0:170..176
+          element span @0:176..211
+            attribute class="accent" @0:182..196 value@0:189..195
+            text "native." @0:197..204
+        text "\n    " @0:222..227
+      text "\n  " @0:237..240
+    text "\n  " @0:251..254
+    element script @0:254..325
+      attribute type="module" @0:262..275 value@0:268..274
+      attribute data-om-motion="" @0:276..290 value@0:290..290
+      text "export const motion = {};" @0:291..316
+    text "\n" @0:325..326
+  text "\n" @0:336..337

@@ -37,16 +37,7 @@ impl ResourceGuard {
         let page = page.clone();
         let task = tokio::spawn(async move {
             while let Some(request) = requests.next().await {
-                if policy.allows(&request.request.url).await {
-                    page.execute(ContinueRequestParams::new(request.request_id.clone()))
-                        .await?;
-                } else {
-                    page.execute(FailRequestParams::new(
-                        request.request_id.clone(),
-                        ErrorReason::BlockedByClient,
-                    ))
-                    .await?;
-                }
+                handle_request(&page, &policy, &request).await?;
             }
             Ok(())
         });
@@ -66,6 +57,24 @@ impl ResourceGuard {
             .map_err(|source| BrowserError::join(BrowserErrorKind::ResourcePolicy, source))?
             .map_err(resource_cdp_error)
     }
+}
+
+async fn handle_request(
+    page: &Page,
+    policy: &ResourcePolicy,
+    request: &EventRequestPaused,
+) -> Result<(), CdpError> {
+    if policy.allows(&request.request.url).await {
+        page.execute(ContinueRequestParams::new(request.request_id.clone()))
+            .await?;
+    } else {
+        page.execute(FailRequestParams::new(
+            request.request_id.clone(),
+            ErrorReason::BlockedByClient,
+        ))
+        .await?;
+    }
+    Ok(())
 }
 
 fn resource_cdp_error(source: CdpError) -> BrowserError {

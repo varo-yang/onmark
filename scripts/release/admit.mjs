@@ -166,13 +166,10 @@ function releaseTarget() {
 
 async function materializeFilm(directory) {
   const repository = fileURLToPath(new URL("../../", import.meta.url));
-  for (const [source, destination] of [
-    ["conformance/cli/gate-one.onmark", "film.onmark"],
-    ["conformance/browser/semantic-presentation.css", "film.css"],
-    ["conformance/browser/semantic-presentation.motion.ts", "film.motion.ts"],
-  ]) {
-    await copyFile(join(repository, source), join(directory, destination));
-  }
+  await copyFile(
+    join(repository, "conformance/cli/gate-one.html"),
+    join(directory, "film.html"),
+  );
 }
 
 async function generateMedia(ffmpeg, directory) {
@@ -280,7 +277,7 @@ async function encodeAudio(ffmpeg, directory, input) {
 }
 
 async function admitRender(tools, directory) {
-  const screenplay = join(directory, "film.onmark");
+  const screenplay = join(directory, "film.html");
   const first = join(directory, "first.mp4");
   const second = join(directory, "second.mp4");
   const outputs = Object.freeze([first, second]);

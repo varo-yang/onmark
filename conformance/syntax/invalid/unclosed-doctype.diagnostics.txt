@@ -1,5 +1,5 @@
 # onmark diagnostic test rendering; not a wire format
-ONM-SYNTAX-007 error @0:0..16 document type declaration is not supported in a screenplay
-  help: remove the document type declaration
-ONM-SYNTAX-001 error @0:16..16 screenplay markup is malformed
+ONM-SYNTAX-007 error @0:0..10 only the standard HTML document type is supported
+  help: use <!doctype html> or remove the document type
+ONM-SYNTAX-001 error @0:10..10 screenplay markup is malformed
   help: check tag delimiters, quotes, and other markup punctuation

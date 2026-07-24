@@ -23,6 +23,7 @@
   "dependencies": {
     "@onmark/authoring": "workspace:*",
     "@onmark/runtime": "workspace:*",
-    "esbuild": "0.28.1"
+    "esbuild": "0.28.1",
+    "parse5": "8.0.1"
   }
 }

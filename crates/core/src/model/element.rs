@@ -50,21 +50,21 @@ impl GeneralAudioKind {
 }
 
 impl ElementKind {
-    /// Recognizes an unqualified, case-sensitive screenplay element name.
+    /// Recognizes one HTML-normalized screenplay element name.
     #[must_use]
     pub fn from_local_name(name: &str) -> Option<Self> {
         match name {
-            "film" => Some(Self::Film),
-            "cues" => Some(Self::Cues),
-            "cue" => Some(Self::Cue),
-            "scene" => Some(Self::Scene),
-            "shot" => Some(Self::Shot),
+            "om-film" => Some(Self::Film),
+            "om-cues" => Some(Self::Cues),
+            "om-cue" => Some(Self::Cue),
+            "om-scene" => Some(Self::Scene),
+            "om-shot" => Some(Self::Shot),
             "video" => Some(Self::Video),
-            "vo" => Some(Self::VoiceOver),
-            "music" => Some(Self::Music),
-            "sfx" => Some(Self::SoundEffect),
-            "title" => Some(Self::Title),
-            "cta" => Some(Self::CallToAction),
+            "om-vo" => Some(Self::VoiceOver),
+            "om-music" => Some(Self::Music),
+            "om-sfx" => Some(Self::SoundEffect),
+            "om-title" => Some(Self::Title),
+            "om-cta" => Some(Self::CallToAction),
             _ => None,
         }
     }
@@ -73,17 +73,17 @@ impl ElementKind {
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::Film => "film",
-            Self::Cues => "cues",
-            Self::Cue => "cue",
-            Self::Scene => "scene",
-            Self::Shot => "shot",
+            Self::Film => "om-film",
+            Self::Cues => "om-cues",
+            Self::Cue => "om-cue",
+            Self::Scene => "om-scene",
+            Self::Shot => "om-shot",
             Self::Video => "video",
-            Self::VoiceOver => "vo",
-            Self::Music => "music",
-            Self::SoundEffect => "sfx",
-            Self::Title => "title",
-            Self::CallToAction => "cta",
+            Self::VoiceOver => "om-vo",
+            Self::Music => "om-music",
+            Self::SoundEffect => "om-sfx",
+            Self::Title => "om-title",
+            Self::CallToAction => "om-cta",
         }
     }
 }
@@ -101,7 +101,8 @@ mod tests {
     #[test]
     fn recognizes_the_closed_screenplay_vocabulary() {
         let names = [
-            "film", "cues", "cue", "scene", "shot", "video", "vo", "music", "sfx", "title", "cta",
+            "om-film", "om-cues", "om-cue", "om-scene", "om-shot", "video", "om-vo", "om-music",
+            "om-sfx", "om-title", "om-cta",
         ];
 
         for name in names {
@@ -110,7 +111,7 @@ mod tests {
             assert_eq!(kind.as_str(), name);
         }
 
-        assert_eq!(ElementKind::from_local_name("audio"), None);
-        assert_eq!(ElementKind::from_local_name("Film"), None);
+        assert_eq!(ElementKind::from_local_name("film"), None);
+        assert_eq!(ElementKind::from_local_name("om-Film"), None);
     }
 }

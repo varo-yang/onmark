@@ -351,7 +351,11 @@ fn conformance_bundle(version: &str) -> PathBuf {
 
 fn static_timeline() -> onmark_core::timeline::TimelineIr {
     solve_timeline(
-        r#"<film><scene><shot duration="1s"><title>Frame</title></shot></scene></film>"#,
+        concat!(
+            "<om-film><om-scene>",
+            r#"<om-shot duration="1s"><om-title>Frame</om-title></om-shot>"#,
+            "</om-scene></om-film>",
+        ),
         &BTreeMap::new(),
     )
 }
@@ -362,7 +366,11 @@ fn video_timeline(frozen: FrozenAsset) -> onmark_core::timeline::TimelineIr {
         frozen,
     )]);
     solve_timeline(
-        r#"<film><scene><shot><video src="opening.mp4" /></shot></scene></film>"#,
+        concat!(
+            "<om-film><om-scene><om-shot>",
+            r#"<video src="opening.mp4"></video>"#,
+            "</om-shot></om-scene></om-film>",
+        ),
         &assets,
     )
 }

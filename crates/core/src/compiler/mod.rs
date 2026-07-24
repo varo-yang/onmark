@@ -6,7 +6,7 @@
 //! use onmark_core::compiler;
 //! use onmark_core::model::{FrameRate, SourceId, Timebase};
 //!
-//! let source = r#"<film><scene><shot duration="1s" /></scene></film>"#;
+//! let source = r#"<om-film><om-scene><om-shot duration="1s"></om-shot></om-scene></om-film>"#;
 //! let parsed = compiler::parse(SourceId::new(0), source);
 //! let (document, syntax_diagnostics) = parsed.into_parts();
 //! assert!(syntax_diagnostics.is_empty());

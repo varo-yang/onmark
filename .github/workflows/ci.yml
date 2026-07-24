@@ -79,7 +79,9 @@ jobs:
         run: cargo xtask schema --check
 
       - name: Regrade frozen language evaluations
-        run: cargo xtask eval audio
+        run: |
+          cargo xtask eval audio
+          cargo xtask eval html
 
       - name: Check TypeScript
         run: pnpm typecheck

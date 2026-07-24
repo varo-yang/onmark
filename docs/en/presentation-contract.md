@@ -2,45 +2,53 @@
 
 > Status: browser authoring contract through Gate seven.
 
-`film.onmark` is the only required authored entry. It owns screenplay facts:
-structure, content, IDs, cues, media references, and timing relationships. The
-normal render path projects solved facts into semantic DOM nodes and, when
-present, bundles the same-stem stylesheet `film.css` and motion module
-`film.motion.ts`. The projection contains no colors, layout, motion, theme, or
-component template of its own.
+`film.html` is the complete authored entry. Onmark custom elements own
+screenplay facts—structure, IDs, cues, media references, and timing
+relationships—while ordinary HTML and inline CSS own presentation. An optional
+inline module marked `type="module" data-om-motion` exports browser effects.
+There is no parallel stylesheet, motion file, generated DOM, template, or
+custom-entry mode.
 
-Films that need arbitrary DOM, Canvas, WebGL, resource lifecycles, or library
-adapters may select a custom TypeScript entry with `--presentation`. This path
-retains the complete presentation boundary rather than making the simple path
-less flexible. Rust still owns every interval. CSS and TypeScript may render
-solved facts, but they must not resolve cues, infer shot durations, partition
-work, or choose frame ranges.
+The browser receives the author's unchanged DOM. Rust still owns every
+interval: HTML, CSS, Canvas, WebGL, GSAP, Three.js, and other browser libraries
+may render solved facts, but they must not resolve cues, infer shot durations,
+partition work, or choose frame ranges.
 
 ## Minimal entry
 
-The normal path contains no authored JavaScript:
+Static films need no authored JavaScript:
 
 ```bash
-onmark render film.onmark
+onmark render film.html
 ```
 
-If `film.css` exists, the bundler includes it. CSS may style `.onmark-film`,
-`.onmark-scene`, `.onmark-shot`, `.onmark-video`, `.onmark-title`,
-`.onmark-call-to-action`, and `.onmark-caption`; otherwise browser defaults are
-left untouched. The semantic stylesheet path does not admit local fonts or
-images whose readiness must be observed, even when motion is present; those
-resources require a custom presentation and explicit `PresentationResource`
-registration. If `film.motion.ts` exists, it
-exports one `motion` value:
+CSS is ordinary inline HTML:
 
-```ts
-import { gsapMotion } from "onmark/motion/gsap";
+```html
+<style>
+  .headline {
+    color: white;
+    font: 700 8vw/1 sans-serif;
+  }
+</style>
 
-export const motion = gsapMotion({
-  title({ element, timeline }) {
-    timeline.from(element, { opacity: 0, y: 40, duration: 0.4 });
-  },
-});
+<om-film>
+  <om-scene>
+    <om-shot duration="3s">
+      <om-title class="headline">Native HTML. Exact time.</om-title>
+    </om-shot>
+  </om-scene>
+</om-film>
+
+<script type="module" data-om-motion>
+  import { gsapMotion } from "onmark/motion/gsap";
+
+  export const motion = gsapMotion({
+    title({ element, timeline }) {
+      timeline.from(element, { opacity: 0, y: 40, duration: 0.4 });
+    },
+  });
+</script>
 ```
 
 `gsapMotion` accepts one semantic motion definition. Named handlers such as
@@ -54,20 +62,11 @@ target. Cross-shot transitions are not admitted: their windows and neighbor
 dependencies must first become Rust-owned Render Graph facts rather than a
 second timing policy in TypeScript.
 
-The bundler compiles a fixed infrastructure entry that imports those optional
-files and installs the semantic DOM runtime. Authors do not construct a runtime
-adapter, register a global timeline, or own cleanup. The artifact remains
-immutable and Rust-owned manifest facts remain its identity source.
-
-An advanced presentation is explicit:
-
-```bash
-onmark render film.onmark --presentation presentation.ts
-```
-
-Custom code composes `PresentationBindings` with `@onmark/runtime` directly.
-The bundler-generated neutral entry is the only owner of the convenience
-wiring, keeping authoring dependent on runtime types rather than runtime values.
+The bundler extracts that one optional module, compiles its imports, restores
+the runtime script at the same source position, and otherwise preserves the
+authored HTML bytes. Authors do not construct a runtime adapter, register a
+global timeline, or own infrastructure cleanup. The immutable artifact and its
+capabilities remain Rust-owned manifest facts.
 
 ## Public adapter lifecycle
 
@@ -172,8 +171,7 @@ The boundary is strict:
 | Screenplay and imported captions         | authored structure, text, media references, cues, local delays             |
 | Rust compiler                            | parsing, normalization, reference resolution, exact timing, Timeline IR    |
 | Runtime                                  | protocol state, frame clock, decoded video readiness, visibility intervals |
-| Default authoring or custom presentation | DOM shape and browser effects                                              |
-| Presentation CSS                         | layout, typography, and visual styling                                     |
+| Authored HTML and motion                  | DOM shape, layout, typography, and browser effects                         |
 | Renderer                                 | materialized asset paths, Chromium, capture, encoding                      |
 
 The presentation receives placements that already contain absolute frame
@@ -183,22 +181,21 @@ or derive a new media duration from the DOM.
 
 ## Authoring facade
 
-`@onmark/authoring` provides the default semantic DOM bindings:
+`@onmark/authoring` binds solved facts onto the authored semantic elements:
 
 - `createDomPresentationBindings({ document, videoSource, motion? })`
-  is the low-level facade used by the generated entry and custom adapters.
-- Film, scene, and shot facts become nested `<main>`, `<section>`, and
-  `<article>` containers. Video and authored overlays attach to their owning
-  shot; imported captions attach to the film root.
-- Every node carries `data-onmark-node`; an authored ID also becomes the DOM ID
-  and `data-onmark-id`.
+  is the infrastructure facade installed by the bundle entry.
+- `<om-film>`, `<om-scene>`, `<om-shot>`, `<video>`,
+  `<om-title>`, and `<om-cta>` remain the exact authored elements.
+- Every bound node temporarily carries `data-om-node`; authored IDs remain
+  ordinary HTML IDs.
+- Compiler node identity is whole-film renderable-semantic preorder. Unit
+  projections retain that identity, so a later partition binds the correct
+  elements in the unchanged complete document.
+- Imported captions are the only DOM nodes created by the facade because they
+  do not exist in the authored document.
 - The runtime toggles container and content visibility from solved intervals;
   CSS owns layout and visual design.
-
-The default facade is deliberately small. A presentation can implement
-`PresentationBindings` directly for Canvas, WebGL, or custom DOM, but the same
-rules apply: bindings create browser resources, `setVisible` applies visibility,
-and `dispose` releases resources terminally.
 
 More precisely, the production adapter binds film, scene, and shot containers
 before content, then calls `bindVideo(placement)`, `bindOverlay(placement)`, and
@@ -215,13 +212,12 @@ overlay visibility. Bindings own those effects, not interval arithmetic.
 ## Plan facts, component selection, and props
 
 The current language does **not** have `presents`, `definePresentation`, or a
-screenplay-to-presentation props channel. `onmark render` uses the semantic DOM
-projection unless `--presentation` explicitly selects custom code. The only
-dynamic facts delivered to either path are the Rust-owned `BrowserPlan` facts
+separate screenplay-to-presentation props channel. The dynamic facts delivered
+to authored HTML are the Rust-owned `BrowserPlan` facts
 sent by `Load(plan)`: frame rate, evaluation and output intervals, semantic
 structure and ownership, video placements, and title, CTA, or imported-caption
 overlay placements. Stylesheet
-rules and static values imported by custom TypeScript are presentation code,
+rules and static values imported by the inline module are presentation code,
 not screenplay props.
 
 Those existing facts are the closed built-in component contract: `nodeId` is
@@ -244,10 +240,10 @@ parameters, a mutable side channel, or an invented `presents` attribute.
 The bundle contract carries the closed `PresentationTemporalCapability`, owned
 by `@onmark/runtime`. It currently admits `sequential` and `randomAccess`;
 `warmup(n)` and wider dependency categories remain architectural ideas rather
-than public values. It is not a user CLI option. The CLI admits the built-in
-semantic DOM without authored CSS or motion for random access. Any stylesheet,
-motion, or custom presentation remains sequential. The low-level conformance
-bundler requires an explicit value when constructing an already-proved artifact.
+than public values. It is not a user CLI option. Authored HTML is conservatively
+sequential until conformance admits a stronger presentation artifact. The
+low-level conformance bundler requires an explicit value when constructing an
+already-proved artifact.
 
 The low-level `FrameEffect` and `PresentationResource` boundaries are owned by
 `@onmark/runtime`. `@onmark/authoring` exposes the vendor-neutral
@@ -279,11 +275,9 @@ Graph partitioning.
 ## Visual capabilities
 
 `PresentationVisualCapability` states which pixels Chromium may own. It is build
-metadata, not screenplay spelling, and is never inferred from unknown
-presentation code. The CLI's neutral semantic DOM without authored CSS or
-motion is product-owned and declares `separableOverlay`; authored CSS, motion,
-and custom entries remain `browserComposite`. The low-level conformance bundler
-requires an explicit value for an already-proved artifact.
+metadata, not screenplay spelling, and is never inferred from authored browser
+code. The CLI conservatively declares `browserComposite`. The low-level
+conformance bundler requires an explicit value for an already-proved artifact.
 
 - `browserComposite` means Chromium owns the complete frame, including primary
   video. It is the conservative capability for unknown presentation code.
@@ -324,11 +318,10 @@ between Rust-owned placement boundaries:
 - `placementBounded` proves that browser pixels remain identical until a video,
   overlay, or structural placement boundary changes the visible facts.
 
-This declaration is independent of visual separability. The CLI's neutral
-semantic DOM without authored CSS or motion declares `placementBounded`;
-authored CSS, motion, and custom presentations remain `perFrame`. The stronger
-behavior requires `randomAccess`: native may skip intermediate `Seek` and
-`Confirm` calls only when later boundary frames can be evaluated directly.
+This declaration is independent of visual separability. The CLI conservatively
+declares `perFrame`. The stronger behavior requires `randomAccess`: native may
+skip intermediate `Seek` and `Confirm` calls only when later boundary frames
+can be evaluated directly.
 
 Capability remains permission rather than a cache instruction. Planning records
 `placementBounded` capture only when Chromium owns no video pixels. A
@@ -358,11 +351,12 @@ the Rust-owned browser plan. Presentations should not reconstruct native paths,
 read source files, or assume a working directory. The renderer verifies bytes
 before the browser sees them.
 
-Gate six now lets presentation JavaScript or CSS import local AVIF, GIF, JPEG,
-PNG, SVG, WebP, OTF, TTF, WOFF, and WOFF2 files. The bundler copies those bytes
-under opaque `resources/` paths and includes them in the existing bounded,
-content-addressed manifest. Bundling proves byte identity only; browser
-readiness requires explicit registration:
+The inline motion module may import local AVIF, GIF, JPEG, PNG, SVG, WebP, OTF,
+TTF, WOFF, WOFF2, or a local CSS module that references those formats. The
+bundler copies imported bytes under opaque `resources/` paths and includes them
+in the bounded, content-addressed manifest. A raw relative URL in authored HTML
+or inline `<style>` is not a bundle import. Bundling proves byte identity only;
+browser readiness requires explicit registration:
 
 ```ts
 interface PresentationResource {

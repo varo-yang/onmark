@@ -740,7 +740,12 @@ mod tests {
     fn composes_a_partition_into_its_own_browser_interval() {
         let frozen = video_asset(VideoTiming::Constant(frame_rate()));
         let timeline = solve(
-            r#"<film><scene><shot duration="1s"><title>Opening</title></shot><shot duration="2s"><title>Closing</title></shot></scene></film>"#,
+            concat!(
+                "<om-film><om-scene>",
+                r#"<om-shot duration="1s"><om-title>Opening</om-title></om-shot>"#,
+                r#"<om-shot duration="2s"><om-title>Closing</om-title></om-shot>"#,
+                "</om-scene></om-film>",
+            ),
             "unused.mp4",
             frozen,
         );
@@ -873,7 +878,11 @@ mod tests {
     #[test]
     fn admits_placement_bounded_capture_for_static_browser_output() {
         let timeline = solve(
-            r#"<film><scene><shot duration="1s"><title>Static</title></shot></scene></film>"#,
+            concat!(
+                "<om-film><om-scene>",
+                r#"<om-shot duration="1s"><om-title>Static</om-title></om-shot>"#,
+                "</om-scene></om-film>",
+            ),
             "unused.mp4",
             video_asset(VideoTiming::Constant(frame_rate())),
         );
@@ -915,7 +924,12 @@ mod tests {
     fn keeps_browser_composition_without_one_complete_primary_video() {
         let frozen = layered_video_asset(video_dimensions(), true);
         let timeline = solve(
-            r#"<film><scene><shot><video src="opening.mp4" /></shot><shot duration="1s" /></scene></film>"#,
+            concat!(
+                "<om-film><om-scene>",
+                r#"<om-shot><video src="opening.mp4"></video></om-shot>"#,
+                r#"<om-shot duration="1s"></om-shot>"#,
+                "</om-scene></om-film>",
+            ),
             "opening.mp4",
             frozen.clone(),
         );
@@ -936,7 +950,11 @@ mod tests {
     fn keeps_browser_composition_without_a_primary_video() {
         let frozen = layered_video_asset(video_dimensions(), true);
         let timeline = solve(
-            r#"<film><scene><shot duration="1s"><title>Static</title></shot></scene></film>"#,
+            concat!(
+                "<om-film><om-scene>",
+                r#"<om-shot duration="1s"><om-title>Static</om-title></om-shot>"#,
+                "</om-scene></om-film>",
+            ),
             "unused.mp4",
             frozen,
         );
@@ -967,7 +985,12 @@ mod tests {
     fn selects_one_visual_path_for_the_partition_plan() {
         let frozen = layered_video_asset(video_dimensions(), true);
         let timeline = solve(
-            r#"<film><scene><shot><video src="opening.mp4" /></shot><shot duration="1s"><title>Static</title></shot></scene></film>"#,
+            concat!(
+                "<om-film><om-scene>",
+                r#"<om-shot><video src="opening.mp4"></video></om-shot>"#,
+                r#"<om-shot duration="1s"><om-title>Static</om-title></om-shot>"#,
+                "</om-scene></om-film>",
+            ),
             "opening.mp4",
             frozen.clone(),
         );
@@ -1011,7 +1034,11 @@ mod tests {
             ),
         );
         let timeline = solve(
-            r#"<film><scene><shot><vo src="voice.mp3" delay="500ms">Read me</vo></shot></scene></film>"#,
+            concat!(
+                "<om-film><om-scene><om-shot>",
+                r#"<om-vo src="voice.mp3" delay="500ms">Read me</om-vo>"#,
+                "</om-shot></om-scene></om-film>",
+            ),
             "voice.mp3",
             voice.clone(),
         );
@@ -1050,7 +1077,12 @@ mod tests {
             ),
         );
         let timeline = solve(
-            r#"<film><scene><shot duration="1s" /><shot><vo src="voice.mp3">Read me</vo></shot></scene></film>"#,
+            concat!(
+                "<om-film><om-scene>",
+                r#"<om-shot duration="1s"></om-shot>"#,
+                r#"<om-shot><om-vo src="voice.mp3">Read me</om-vo></om-shot>"#,
+                "</om-scene></om-film>",
+            ),
             "voice.mp3",
             voice.clone(),
         );
@@ -1092,8 +1124,8 @@ mod tests {
             ),
         );
         let source = format!(
-            "<film><scene><shot>{}</shot></scene></film>",
-            r#"<vo src="voice.mp3" />"#.repeat(MAX_AUDIO_TRACKS + 1)
+            "<om-film><om-scene><om-shot>{}</om-shot></om-scene></om-film>",
+            r#"<om-vo src="voice.mp3"></om-vo>"#.repeat(MAX_AUDIO_TRACKS + 1)
         );
         let timeline = solve(&source, "voice.mp3", voice.clone());
         let materialized =
@@ -1112,7 +1144,11 @@ mod tests {
 
     fn video_timeline(frozen: FrozenAsset) -> TimelineIr {
         solve(
-            r#"<film><scene><shot><video src="opening.mp4" /></shot></scene></film>"#,
+            concat!(
+                "<om-film><om-scene><om-shot>",
+                r#"<video src="opening.mp4"></video>"#,
+                "</om-shot></om-scene></om-film>",
+            ),
             "opening.mp4",
             frozen,
         )

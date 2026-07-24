@@ -1094,7 +1094,11 @@ fn browser_plan_with_source_rate(
     )]);
     let parsed = compiler::parse(
         SourceId::new(0),
-        r#"<film><scene><shot><video src="experiment.mp4" /></shot></scene></film>"#,
+        concat!(
+            "<om-film><om-scene><om-shot>",
+            r#"<video src="experiment.mp4"></video>"#,
+            "</om-shot></om-scene></om-film>",
+        ),
     );
     let (document, diagnostics) = parsed.into_parts();
     assert!(diagnostics.is_empty());

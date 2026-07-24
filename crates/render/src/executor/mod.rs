@@ -489,17 +489,18 @@ fn collect_audio_inputs(
     output: &Path,
 ) -> Result<Vec<AudioInput>, RenderError> {
     let mut audio = Vec::new();
-    for unit in units {
-        for input in unit.audio_inputs_rebased_to(origin) {
-            if audio.len() == MAX_AUDIO_TRACKS {
-                return Err(RenderError::new(
-                    RenderErrorKind::PlanTooLarge,
-                    output,
-                    "render sequence exceeds the configured audio-track limit",
-                ));
-            }
-            audio.push(input);
+    for input in units
+        .iter()
+        .flat_map(|unit| unit.audio_inputs_rebased_to(origin))
+    {
+        if audio.len() == MAX_AUDIO_TRACKS {
+            return Err(RenderError::new(
+                RenderErrorKind::PlanTooLarge,
+                output,
+                "render sequence exceeds the configured audio-track limit",
+            ));
         }
+        audio.push(input);
     }
     audio.sort_by_key(AudioInput::mix_order);
     if audio

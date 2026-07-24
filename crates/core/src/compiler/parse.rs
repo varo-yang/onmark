@@ -5,9 +5,7 @@
 
 use crate::diagnostics::{Diagnostic, DiagnosticCode, Diagnostics};
 use crate::model::{SourceId, SourceSpan};
-use crate::syntax::{
-    self, SourceDocument, SyntaxError, SyntaxErrorKind, SyntaxResource, UnsupportedDirective,
-};
+use crate::syntax::{self, SourceDocument, SyntaxError, SyntaxErrorKind, SyntaxResource};
 
 use super::diagnostic::author_diagnostic;
 
@@ -63,6 +61,7 @@ pub fn parse(source: SourceId, text: &str) -> ParseReport {
 fn translate_error(error: &SyntaxError) -> Diagnostic {
     match error.kind() {
         SyntaxErrorKind::MalformedMarkup => malformed_markup(error.span()),
+        SyntaxErrorKind::SelfClosingNonVoid { name } => self_closing_non_void(error.span(), name),
         SyntaxErrorKind::MismatchedClosingTag {
             expected,
             found,
@@ -81,9 +80,7 @@ fn translate_error(error: &SyntaxError) -> Diagnostic {
         SyntaxErrorKind::UnexpectedClosingTag { found } => {
             unexpected_closing_tag(error.span(), found)
         }
-        SyntaxErrorKind::UnsupportedDirective { directive } => {
-            unsupported_directive(error.span(), *directive)
-        }
+        SyntaxErrorKind::UnsupportedDocumentType => unsupported_document_type(error.span()),
         SyntaxErrorKind::ResourceLimit { resource } => resource_limit(error.span(), *resource),
     }
 }
@@ -94,6 +91,15 @@ fn malformed_markup(primary: SourceSpan) -> Diagnostic {
         primary,
         "screenplay markup is malformed",
         "check tag delimiters, quotes, and other markup punctuation",
+    )
+}
+
+fn self_closing_non_void(primary: SourceSpan, name: &str) -> Diagnostic {
+    author_diagnostic(
+        DiagnosticCode::MalformedSyntax,
+        primary,
+        format!("<{name}> is not an HTML void element and cannot self-close"),
+        format!("replace <{name} /> with <{name}></{name}>"),
     )
 }
 
@@ -160,18 +166,12 @@ fn unexpected_closing_tag(primary: SourceSpan, found: &str) -> Diagnostic {
     )
 }
 
-fn unsupported_directive(primary: SourceSpan, directive: UnsupportedDirective) -> Diagnostic {
-    let name = match directive {
-        UnsupportedDirective::ProcessingInstruction => "processing instruction",
-        UnsupportedDirective::XmlDeclaration => "XML declaration",
-        UnsupportedDirective::DocumentTypeDeclaration => "document type declaration",
-    };
-
+fn unsupported_document_type(primary: SourceSpan) -> Diagnostic {
     author_diagnostic(
         DiagnosticCode::UnsupportedMarkupDirective,
         primary,
-        format!("{name} is not supported in a screenplay"),
-        format!("remove the {name}"),
+        "only the standard HTML document type is supported",
+        "use <!doctype html> or remove the document type",
     )
 }
 
@@ -212,7 +212,7 @@ mod tests {
 
     #[test]
     fn translates_one_fatal_tokenizer_error_once() {
-        let report = parse(SourceId::new(0), "<film id=\"");
+        let report = parse(SourceId::new(0), "<om-film id=\"");
         let diagnostics = report.diagnostics().iter().collect::<Vec<_>>();
 
         assert_eq!(diagnostics.len(), 1);
@@ -221,23 +221,27 @@ mod tests {
 
     #[test]
     fn locates_a_fatal_error_after_multibyte_text() {
-        let report = parse(SourceId::new(0), "<film>片<");
+        let source = "<om-film>片<div id=\"";
+        let report = parse(SourceId::new(0), source);
         let diagnostic = report
             .diagnostics()
             .iter()
-            .next()
+            .find(|diagnostic| diagnostic.code() == DiagnosticCode::MalformedSyntax)
             .expect("the fixture contains malformed markup");
 
         assert_eq!(diagnostic.code(), DiagnosticCode::MalformedSyntax);
-        assert_eq!(diagnostic.primary().start().get(), 9);
-        assert_eq!(diagnostic.primary().end().get(), 9);
+        assert_eq!(
+            diagnostic.primary().start().get(),
+            u64::try_from(source.len()).expect("the source length fits in u64"),
+        );
+        assert_eq!(diagnostic.primary().end(), diagnostic.primary().start());
     }
 
     #[test]
     fn distinguishes_recoverable_structure_failures() {
-        let unclosed = parse(SourceId::new(0), "<film>");
-        let unexpected = parse(SourceId::new(0), "</film>");
-        let directive = parse(SourceId::new(0), "<?render now?><film/>");
+        let unclosed = parse(SourceId::new(0), "<om-film>");
+        let unexpected = parse(SourceId::new(0), "</om-film>");
+        let directive = parse(SourceId::new(0), "<!doctype screenplay><om-film></om-film>");
 
         assert_eq!(first_code(&unclosed), Some(DiagnosticCode::UnclosedElement),);
         assert_eq!(

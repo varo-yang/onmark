@@ -1,0 +1,26 @@
+{
+  "batches": [
+    {
+      "id": 1,
+      "kind": "generation",
+      "cases": [
+        "simple-hero",
+        "three-beats",
+        "cue-cta",
+        "nested-emphasis",
+        "decorative-layer"
+      ]
+    },
+    {
+      "id": 2,
+      "kind": "local-edit-and-repair",
+      "cases": [
+        "edit-copy",
+        "append-shot",
+        "add-cued-cta",
+        "repair-markup",
+        "reject-coordinate-edit"
+      ]
+    }
+  ]
+}

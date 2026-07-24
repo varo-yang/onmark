@@ -1,7 +1,7 @@
 # onmark diagnostic test rendering; not a wire format
-ONM-ATTR-001 error @0:41..46 attribute "until" is not allowed on <shot>
+ONM-ATTR-001 error @0:50..55 attribute "until" is not allowed on <om-shot>
   help: remove the "until" attribute
-ONM-ATTR-001 error @0:56..61 attribute "begin" is not allowed on <shot>
+ONM-ATTR-001 error @0:65..70 attribute "begin" is not allowed on <om-shot>
   help: remove the "begin" attribute
-ONM-ATTR-001 error @0:67..70 attribute "end" is not allowed on <shot>
+ONM-ATTR-001 error @0:76..79 attribute "end" is not allowed on <om-shot>
   help: remove the "end" attribute

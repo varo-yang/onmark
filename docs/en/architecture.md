@@ -129,7 +129,7 @@ The final AAC path trims or pads the mix to the visual frame count projected
 onto the same grid and lets the visual stream close the container through
 `-shortest`. A partition-owning track therefore cannot lengthen an independently
 rendered unit beyond its visual output.
-The checked-in audio-syntax evaluation compared semantic `<music>`/`<sfx>`
+The checked-in audio-syntax evaluation compared semantic `<om-music>`/`<om-sfx>`
 elements with a generic `<audio kind="...">` spelling across forty model
 outputs. Both retained 20/20 generation reliability. Gate four therefore
 admits the semantic elements: their kinds encode role and legal containment
@@ -216,12 +216,13 @@ presentation entry. The browser derives that relative location from the frozen
 identity already present in `BrowserPlan`; native paths and browser URLs
 therefore need no second wire protocol. The unit retains worker-local source
 paths only until assembly has verified or linked the exact bytes into that root.
-The normal bundle installs a neutral semantic DOM projection for solved video
-and overlay facts; it contributes no layout, style, animation, or full-screen
-assumption. An explicitly selected custom presentation instead owns DOM shape
-and runtime installation. Both paths consume the same deterministic clock,
-readiness, and media primitives. The public rules for author-owned browser code
-live in the [presentation contract](presentation-contract.md).
+The bundle preserves the authored HTML DOM and installs infrastructure that
+binds solved facts to its semantic custom elements. Inline CSS and the optional
+motion module own presentation; the infrastructure contributes no template,
+layout, style, animation, or full-screen assumption. Every document consumes
+the same deterministic clock, readiness, and media primitives. The public rules
+for author-owned browser code live in the
+[presentation contract](presentation-contract.md).
 
 Each Gate-three capture worker executes one state machine:
 
@@ -450,7 +451,7 @@ onmark/
 
 The completed Gate-one milestone contains `onmark-core`, `onmark-media`,
 `onmark-render`, `@onmark/runtime`'s browser session, `@onmark/authoring`'s
-semantic DOM bindings, `@onmark/bundler`'s presentation artifact boundary, and
+authored-DOM bindings, `@onmark/bundler`'s presentation artifact boundary, and
 the first `onmark-cli` whole-film composition root. Media is a separate crate
 because server-side compile/lint loops need probing and standalone-subtitle
 normalization without Chromium; this is both a distinct dependency budget and a
@@ -543,12 +544,17 @@ semantics.
 
 ### Product commands and language evidence
 
-Gate one's native command is deliberately narrow: `onmark render <screenplay>`.
-It bundles a neutral semantic DOM presentation plus optional same-stem
-`film.css` and `film.motion.ts` files unless `--presentation` explicitly selects
-custom browser code. The motion module exports one declarative `motion` value;
-the generated entry owns runtime installation. It
-derives the stable no-clobber output `renders/<screenplay-stem>.mp4`
+Gate one's native command is deliberately narrow: `onmark render <film.html>`.
+The authored HTML contains both screenplay custom elements and presentation
+DOM/CSS. At most one inline module marked `type="module" data-om-motion`
+exports the declarative `motion` value; the generated infrastructure entry owns
+runtime installation. There is no parallel stylesheet, motion file, or custom
+entry path. The CLI reads the bounded HTML once, compiles those owned bytes,
+and gives the bundler a private snapshot of the same bytes. Relative module
+imports still resolve from the authored document's original directory; source
+mutation cannot make Timeline facts and browser DOM describe different
+revisions. The command derives the stable no-clobber output
+`renders/<screenplay-stem>.mp4`
 unless `--output` is supplied, and exposes only exact frame rate and viewport
 dimensions as ordinary render controls. Process paths are execution overrides,
 not screenplay facts. Authored diagnostics are emitted before executable
@@ -606,16 +612,19 @@ with `syn`. This cooperative guard covers ordinary paths, imports, aliases, and
 re-exports, but not paths generated inside macros or full rustc name resolution;
 review remains responsible for those edges.
 
-`onmark-core` uses `xmlparser` only inside `syntax` for pure, span-preserving
-XML-compatible fragment tokenization. Onmark owns tree construction, nesting
-checks, duplicate-attribute checks, reference decoding, and all authored
-semantics. Parser errors are translated at the syntax boundary and the
-dependency performs no IO. Test targets may use `proptest` for time algebra and
-`syn` for the cooperative module dependency-law check; neither development
-dependency is linked into library consumers or runtime artifacts.
+`onmark-core` uses `html5gum` only inside `syntax` for pure, span-preserving HTML
+tokenization. Onmark owns strict authored-tree construction, nesting checks,
+duplicate-attribute checks, resource bounds, and all authored semantics;
+browser recovery never decides screenplay ownership. Tokenizer errors are
+translated at the syntax boundary and the dependency performs no IO.
+`@onmark/bundler` uses `parse5` only to locate the one admitted inline motion
+module while preserving every other authored byte. Test targets may use
+`proptest` for time algebra and `syn` for the cooperative module dependency-law
+check; neither development dependency is linked into library consumers or
+runtime artifacts.
 
 `@onmark/runtime` remains vendor-free and owns exact frame-effect and resource
-lifecycles. `@onmark/authoring` owns the semantic DOM and the vendor-neutral
+lifecycles. `@onmark/authoring` owns authored-DOM binding and the vendor-neutral
 `PresentationExtension` contract; its `/types` subpath exports declarations
 only, so optional adapters cannot acquire authoring runtime behavior through
 that dependency edge. The internal `@onmark/motion-gsap` package backs the
@@ -623,7 +632,7 @@ workspace `onmark/motion/gsap` facade. It alone owns the pinned GSAP dependency,
 converts exact Rust-owned intervals to local browser seconds, suppresses
 callback dispatch while seeking, and kills every playhead on terminal disposal.
 It may depend only on `@onmark/authoring` and GSAP, and is consumed by authored
-motion modules or custom presentations. Other engines implement the same
+motion modules. Other engines implement the same
 extension contract; neither bundler nor runtime selects vendors. Three.js
 remains a repository development dependency until an equally narrow production
 adapter is admitted.
@@ -633,9 +642,9 @@ Timeline IR. Every projected node has a compiler-owned identity stable across
 whole-film and Render Unit projections, an optional authored ID, and a solved
 interval where applicable. Videos and authored overlays name their owning shot;
 imported captions remain film-level. The wire remains a flat relational plan so
-native validation and partition projection stay bounded, while the default
-authoring adapter builds one nested semantic DOM tree. TypeScript never
-reconstructs source structure or resolves timing from array order.
+native validation and partition projection stay bounded. The authoring adapter
+uses whole-film stable node identity to bind a unit projection back onto the
+unchanged authored DOM. TypeScript never resolves timing or derives partitions.
 
 The `protocol` module uses `serde` for stable browser and bundle-manifest JSON
 boundaries. Its optional `schema` feature exposes `schemars` only to repository
@@ -652,7 +661,8 @@ on it. The Lambda dependency exists solely to publish that deployment
 boundary's schemas, not to smuggle AWS into core. The adjacent Node generator
 may use the pinned schema-to-TypeScript and validation toolchain. `cargo xtask
 schema` writes every versioned schema, then invokes that generator. `cargo
-xtask eval audio` independently regrades the frozen audio-language experiment.
+xtask eval audio` and `cargo xtask eval html` independently regrade the frozen
+audio-language and native-HTML authoring experiments.
 The adjacent release scripts assemble the public npm package and admitted media;
 `cargo xtask release sidecar` assembles only the native platform payload. None
 of these tools installs or publishes product artifacts.
@@ -1193,10 +1203,9 @@ order during `Seek(frame)`, and finish before `FrameStaged(frame)`. Disposal is
 terminal, releases effects in reverse ownership order, and attempts every owned
 effect even after one cleanup failure. The
 current bundle manifest binds the closed capability into content identity.
-The CLI derives capability from the presentation surface it owns: semantic DOM
-without authored CSS or motion is admitted for random access. Any stylesheet,
-motion, or custom presentation remains sequential. Explicit capability input exists only at the
-low-level conformance bundler boundary. The pinned Linux exit conformance
+The CLI conservatively declares authored HTML sequential. Stronger capability
+input exists only at the low-level conformance bundler boundary after dedicated
+evidence. The pinned Linux exit conformance
 bundles that effect-bearing presentation, renders the same media, audio, and
 caption facts as one whole-film
 unit and two independent units, and compares their canonical raw-RGBA frame

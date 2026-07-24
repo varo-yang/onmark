@@ -25,7 +25,7 @@ use sha2::{Digest as _, Sha256};
 use super::aws::RemoteEnvironment;
 use super::media;
 
-const SOURCE: &str = include_str!("../../../../conformance/cli/gate-two.onmark");
+const SOURCE: &str = include_str!("../../../../conformance/cli/gate-two.html");
 const WIDTH: u32 = 320;
 const HEIGHT: u32 = 180;
 const FRAME_RATE: u32 = 30;

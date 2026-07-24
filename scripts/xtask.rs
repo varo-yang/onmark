@@ -16,6 +16,7 @@ use schemars::{JsonSchema, schema_for};
 use serde_json::Value;
 
 mod audio_eval;
+mod html_eval;
 mod release;
 
 fn main() -> ExitCode {
@@ -37,6 +38,7 @@ fn run() -> Result<(), Box<dyn Error>> {
     match command {
         Command::Schema(mode) => generate_schemas(repository, mode),
         Command::AudioEvaluation => audio_eval::grade(repository),
+        Command::HtmlEvaluation => html_eval::grade(repository),
         Command::ReleaseSidecar(arguments) => {
             release::run_sidecar(repository, arguments.into_iter()).map_err(Into::into)
         }
@@ -96,6 +98,7 @@ fn generate_typescript(repository: &Path, mode: GenerationMode) -> Result<(), Bo
 enum Command {
     Schema(GenerationMode),
     AudioEvaluation,
+    HtmlEvaluation,
     ReleaseSidecar(Vec<String>),
 }
 
@@ -109,6 +112,9 @@ impl Command {
             }
             [command, subject] if command == "eval" && subject == "audio" => {
                 Ok(Self::AudioEvaluation)
+            }
+            [command, subject] if command == "eval" && subject == "html" => {
+                Ok(Self::HtmlEvaluation)
             }
             [command, artifact, arguments @ ..]
                 if command == "release" && artifact == "sidecar" =>
@@ -133,7 +139,7 @@ impl fmt::Display for InvalidCommand {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(
             "expected `cargo xtask schema [--check]`, `cargo xtask eval audio`, \
-             or `cargo xtask release sidecar <options>`",
+             `cargo xtask eval html`, or `cargo xtask release sidecar <options>`",
         )
     }
 }

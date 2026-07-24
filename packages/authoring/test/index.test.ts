@@ -1,22 +1,18 @@
-// Public semantic DOM behavior over a deliberately small browser fake.
+// Public authored-DOM behavior over a deliberately small browser fake.
 
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
-  PRESENTATION_CLASSES,
-  createDomPresentationBindings,
-  combineMotion,
-} from "../src/index.js";
+import { combineMotion, createDomPresentationBindings } from "../src/index.js";
 import type {
   FrameEffect,
   PresentationResource,
   RuntimePlan,
 } from "@onmark/runtime/types";
 
-// ── Semantic projection ──
+// ── Authored binding ──
 
-test("projects solved structure into nested semantic nodes", () => {
+test("binds solved structure without replacing authored HTML", () => {
   const browser = new FakeDocument();
   const bindings = bindingsFor(browser);
 
@@ -26,30 +22,23 @@ test("projects solved structure into nested semantic nodes", () => {
   const video = bindings.bindVideo(PLAN.videos[0]!);
   const overlay = bindings.bindOverlay(PLAN.overlays[0]!);
 
-  assert.equal(browser.body.children[0], film.element);
+  assert.equal(browser.authored.film, film.element);
+  assert.equal(browser.authored.scene, scene.element);
+  assert.equal(browser.authored.shot, shot.element);
+  assert.equal(browser.authored.video, video.element);
+  assert.equal(browser.authored.title, overlay.element);
   assert.deepEqual(tags(browser.body), [
-    "main",
-    "section",
-    "article",
+    "om-film",
+    "om-scene",
+    "om-shot",
     "video",
-    "h1",
+    "om-title",
+    "span",
   ]);
-  assert.equal(film.element.className, PRESENTATION_CLASSES.film);
-  assert.equal(scene.element.className, PRESENTATION_CLASSES.scene);
-  assert.equal(shot.element.className, PRESENTATION_CLASSES.shot);
-  assert.equal(
-    (video.element as unknown as FakeElement).className,
-    PRESENTATION_CLASSES.video,
-  );
-  assert.equal(
-    overlay.element.className,
-    `${PRESENTATION_CLASSES.overlay} ${PRESENTATION_CLASSES.title}`,
-  );
+  assert.equal(overlay.element.className, "headline");
+  assert.equal(overlay.element.children.length, 1);
   assert.equal(shot.element.id, "hero");
-  assert.deepEqual(shot.element.dataset, {
-    onmarkId: "hero",
-    onmarkNode: "2",
-  });
+  assert.deepEqual(shot.element.dataset, { omNode: "2" });
   assert.equal(overlay.element.textContent, "Opening");
   assert.equal(video.source, `./assets/${PLAN.videos[0]!.assetId}`);
 
@@ -59,7 +48,7 @@ test("projects solved structure into nested semantic nodes", () => {
   video.setVisible(true);
   overlay.setVisible(true);
   assert.equal(
-    browser.created.every(({ hidden }) => !hidden),
+    browser.authoredNodes.every(({ hidden }) => !hidden),
     true,
   );
 
@@ -69,13 +58,40 @@ test("projects solved structure into nested semantic nodes", () => {
   scene.dispose();
   film.dispose();
   assert.equal(
-    browser.created.every(({ removed }) => removed),
+    browser.authoredNodes.every(({ removed }) => !removed),
+    true,
+  );
+  assert.equal(
+    browser.authoredNodes.every(
+      ({ dataset }) => dataset["omNode"] === undefined,
+    ),
     true,
   );
 });
 
+test("owns hidden display independently of authored display rules", () => {
+  const browser = new FakeDocument();
+  const bindings = bindingsFor(browser);
+  const film = bindings.bindFilm(PLAN.film);
+
+  const visibility = browser.head.children[0];
+  assert.equal(
+    visibility?.textContent,
+    [
+      "[data-om-node][hidden] { display: none !important; }",
+      "om-cues, om-cue, om-music, om-sfx, om-vo {",
+      "  display: none !important;",
+      "}",
+    ].join("\n"),
+  );
+
+  film.dispose();
+  assert.equal(visibility?.removed, true);
+});
+
 test("maps every overlay role to one stable semantic element", () => {
   const browser = new FakeDocument();
+  browser.authored.shot.append(new FakeElement("om-cta"));
   const bindings = bindingsFor(browser);
   bindings.bindFilm(PLAN.film);
   bindings.bindScene(PLAN.scenes[0]!);
@@ -94,14 +110,55 @@ test("maps every overlay role to one stable semantic element", () => {
     kind: "caption",
   });
 
-  assert.equal(title.element.tagName, "h1");
-  assert.equal(callToAction.element.tagName, "div");
+  assert.equal(title.element.localName, "om-title");
+  assert.equal(callToAction.element.localName, "om-cta");
   assert.equal(
-    browser.body.children[0]?.children.includes(
+    browser.authored.film.children.includes(
       caption.element as unknown as FakeElement,
     ),
     true,
   );
+});
+
+test("uses whole-film node identity when a partition omits earlier scenes", () => {
+  const browser = new FakeDocument();
+  const later = authoredScene("later", "later-shot", "Later");
+  browser.authored.film.append(later.scene);
+  const bindings = bindingsFor(browser);
+
+  bindings.bindFilm(PLAN.film);
+  const scene = bindings.bindScene({
+    node: { nodeId: 5, authoredId: "later" },
+    interval: { start: 60, end: 120 },
+  });
+  const shot = bindings.bindShot({
+    node: { nodeId: 6, authoredId: "later-shot" },
+    sceneId: 5,
+    interval: { start: 60, end: 120 },
+  });
+  const overlay = bindings.bindOverlay({
+    node: { nodeId: 7, authoredId: null },
+    shotId: 6,
+    kind: "title",
+    text: "Later",
+    interval: { start: 60, end: 120 },
+  });
+
+  assert.equal(scene.element, later.scene);
+  assert.equal(shot.element, later.shot);
+  assert.equal(overlay.element, later.title);
+});
+
+test("does not give presentation wrappers screenplay ownership", () => {
+  const browser = new FakeDocument();
+  const wrapper = new FakeElement("div");
+  wrapper.append(new FakeElement("om-film"));
+  browser.body.append(wrapper);
+  const bindings = bindingsFor(browser);
+
+  const film = bindings.bindFilm(PLAN.film);
+
+  assert.equal(film.element, browser.authored.film);
 });
 
 // ── Extension boundary ──
@@ -258,9 +315,28 @@ function bindingsFor(browser: FakeDocument) {
   });
 }
 
+function authoredScene(sceneId: string, shotId: string, title: string) {
+  const scene = new FakeElement("om-scene");
+  const shot = new FakeElement("om-shot");
+  const overlay = new FakeElement("om-title");
+  scene.id = sceneId;
+  shot.id = shotId;
+  overlay.textContent = title;
+  shot.append(overlay);
+  scene.append(shot);
+  return { scene, shot, title: overlay };
+}
+
 class FakeDocument {
   readonly body = new FakeElement("body");
+  readonly head = new FakeElement("head");
   readonly created: FakeElement[] = [];
+  readonly authored = authoredTree();
+  readonly authoredNodes = Object.values(this.authored);
+
+  constructor() {
+    this.body.append(this.authored.film);
+  }
 
   createElement(tagName: string): FakeElement {
     const element = new FakeElement(tagName);
@@ -281,16 +357,53 @@ class FakeElement {
   removed = false;
   textContent: string | null = null;
 
-  constructor(readonly tagName: string) {}
+  constructor(readonly localName: string) {}
 
-  append(element: FakeElement): void {
-    element.parent = this;
-    this.children.push(element);
+  get tagName(): string {
+    return this.localName.toUpperCase();
+  }
+
+  append(...elements: FakeElement[]): void {
+    for (const element of elements) {
+      element.parent = this;
+      this.children.push(element);
+    }
+  }
+
+  matches(selector: string): boolean {
+    return selector
+      .split(",")
+      .some((candidate) => candidate.trim() === this.localName);
   }
 
   remove(): void {
     this.removed = true;
+    if (this.parent !== undefined) {
+      const index = this.parent.children.indexOf(this);
+      if (index >= 0) {
+        this.parent.children.splice(index, 1);
+      }
+    }
   }
+}
+
+function authoredTree() {
+  const film = new FakeElement("om-film");
+  film.id = "film";
+  const scene = new FakeElement("om-scene");
+  scene.id = "opening";
+  const shot = new FakeElement("om-shot");
+  shot.id = "hero";
+  const video = new FakeElement("video");
+  const title = new FakeElement("om-title");
+  title.className = "headline";
+  title.textContent = "Opening";
+  const accent = new FakeElement("span");
+  title.append(accent);
+  shot.append(video, title);
+  scene.append(shot);
+  film.append(scene);
+  return { accent, film, scene, shot, title, video };
 }
 
 function asBrowserDocument(document: FakeDocument): Document {
@@ -300,7 +413,7 @@ function asBrowserDocument(document: FakeDocument): Document {
 function tags(root: FakeElement): string[] {
   const result: string[] = [];
   for (const child of root.children) {
-    result.push(child.tagName, ...tags(child));
+    result.push(child.localName, ...tags(child));
   }
   return result;
 }

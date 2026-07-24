@@ -37,11 +37,11 @@ impl TreeBuilder {
         let pending = self
             .pending
             .as_mut()
-            .expect("xmlparser emits attributes only after an element start");
+            .expect("HTML attributes follow an element-start event");
         let duplicate = pending
             .attributes
             .iter()
-            .find(|current| current.name().same_qualified_name(attribute.name()))
+            .find(|current| current.name().same_name(attribute.name()))
             .map(|first| duplicate_attribute(&attribute, first));
 
         pending.attributes.push(attribute);
@@ -75,7 +75,7 @@ impl TreeBuilder {
             ));
         };
 
-        if !open.name.same_qualified_name(found) {
+        if !open.name.same_name(found) {
             // Ignore the mismatched close. Keeping the opener on the stack
             // preserves the trustworthy prefix for EOF recovery.
             return Some(mismatched_closing_tag(open, found));
@@ -118,7 +118,7 @@ impl TreeBuilder {
     fn take_pending(&mut self) -> PendingElement {
         self.pending
             .take()
-            .expect("xmlparser ends only the current pending element")
+            .expect("a start-tag close finishes the pending element")
     }
 
     fn finish_top_element(&mut self, source: SourceId, end: ByteOffset) {

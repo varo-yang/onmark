@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <title>Onmark demo</title>
+    <style>
+      .accent { color: lime; }
+    </style>
+  </head>
+  <body>
+    <main aria-hidden="true"></main>
+    <om-film id="demo">
+      <om-scene id="launch">
+        <div class="background" aria-hidden="true"></div>
+        <om-shot id="hero">
+          <video class="media" src="hero.mp4"></video>
+          <om-title class="headline">
+            Write <span class="accent">native.</span>
+          </om-title>
+        </om-shot>
+      </om-scene>
+    </om-film>
+    <script type="module" data-om-motion>
+      export const motion = {};
+    </script>
+  </body>
+</html>

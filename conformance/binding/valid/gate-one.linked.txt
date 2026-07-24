@@ -6,10 +6,10 @@ film id=-
   scene id=sale
     shot id=hero
       video id=-
-      title id=-
-      cta id=-
+      om-title id=-
+      om-cta id=-
 index
-  cta -> cue @0:62..65
-  hero -> shot @0:124..128
-  offer -> cue @0:29..34
-  sale -> scene @0:103..107
+  cta -> om-cue @0:81..84
+  hero -> om-shot @0:159..163
+  offer -> om-cue @0:38..43
+  sale -> om-scene @0:135..139

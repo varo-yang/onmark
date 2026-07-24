@@ -107,7 +107,7 @@ mod tests {
 
         write_all(
             &mut output,
-            std::path::Path::new("film.onmark"),
+            std::path::Path::new("film.html"),
             "é\n  <x>",
             &[diagnostic],
         )
@@ -115,7 +115,7 @@ mod tests {
 
         assert_eq!(
             String::from_utf8(output).expect("the output is UTF-8"),
-            "error[ONM-STRUCT-001] film.onmark:2:6: unknown\n",
+            "error[ONM-STRUCT-001] film.html:2:6: unknown\n",
         );
     }
 }

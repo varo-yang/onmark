@@ -1,9 +1,9 @@
 // Process-boundary tests for the presentation bundler executable.
 
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import test from "node:test";
@@ -13,26 +13,13 @@ const COMMAND = fileURLToPath(new URL("../src/command.js", import.meta.url));
 test("publishes a bundle through the executable boundary", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "onmark-bundle-command-"));
   try {
-    const entryPoint = join(workspace, "presentation.ts");
+    const document = join(workspace, "film.html");
     const outputDirectory = join(workspace, "bundle");
-    await writeFile(
-      entryPoint,
-      `
-        import { installRuntimeHost } from "@onmark/runtime";
-        installRuntimeHost({
-          async load() {},
-          async prepare() {},
-          async seek() {},
-          async confirm() {},
-          async dispose() {},
-        });
-      `,
-      "utf8",
-    );
+    await writeFile(document, "<om-film></om-film>\n", "utf8");
 
     const result = await invoke([
-      "--entry",
-      entryPoint,
+      "--html",
+      document,
       "--output",
       outputDirectory,
       "--max-output-bytes",
@@ -56,17 +43,35 @@ test("publishes a bundle through the executable boundary", async () => {
   }
 });
 
-test("publishes the semantic DOM presentation without an entry module", async () => {
+test("resolves snapshot imports from the authored project", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "onmark-bundle-command-"));
   try {
-    const stylesheet = join(workspace, "film.css");
+    const snapshot = join(workspace, "snapshot", "film.html");
+    const authored = join(workspace, "authored");
     const outputDirectory = join(workspace, "bundle");
-    await writeFile(stylesheet, "body { background: black; }\n", "utf8");
+    await mkdir(dirname(snapshot), { recursive: true });
+    await mkdir(authored);
+    await writeFile(
+      snapshot,
+      [
+        "<om-film></om-film>",
+        '<script type="module" data-om-motion>',
+        '  export { motion } from "./motion.js";',
+        "</script>",
+      ].join("\n"),
+      "utf8",
+    );
+    await writeFile(
+      join(authored, "motion.js"),
+      "export const motion = { bind() { return { effects: [], resources: [] }; } };\n",
+      "utf8",
+    );
 
     const result = await invoke([
-      "--semantic-dom",
-      "--stylesheet",
-      stylesheet,
+      "--html",
+      snapshot,
+      "--resolve-directory",
+      authored,
       "--output",
       outputDirectory,
       "--max-output-bytes",
@@ -80,11 +85,6 @@ test("publishes the semantic DOM presentation without an entry module", async ()
     ]);
 
     assert.equal(result.code, 0, result.stderr);
-    assert.equal(result.stdout, "");
-    const manifest = JSON.parse(
-      await readFile(join(outputDirectory, "manifest.json"), "utf8"),
-    ) as unknown;
-    assert.equal(typeof manifest, "object");
   } finally {
     await rm(workspace, { force: true, recursive: true });
   }

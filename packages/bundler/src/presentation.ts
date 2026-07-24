@@ -30,6 +30,11 @@ import {
   type BundleFile as WireBundleFile,
   type BundleManifest as WireBundleManifest,
 } from "./generated/bundle-manifest.js";
+import {
+  AuthoredHtmlError,
+  readAuthoredHtml,
+  type AuthoredHtml,
+} from "./authored_html.js";
 
 // Authored files live outside the package tree, so public facades resolve from
 // Onmark's own export map rather than from the temporary source directory.
@@ -64,20 +69,12 @@ export type BundleFile = Immutable<WireBundleFile>;
 /** Immutable view of the versioned Rust-owned bundle manifest. */
 export type BundleManifest = Immutable<WireBundleManifest>;
 
-/** Explicit inputs and retained-output bound for one presentation build. */
+/** Explicit inputs for one authored HTML document. */
 export interface BundleOptions {
-  readonly entryPoint: string;
-  readonly outputDirectory: string;
-  readonly maxOutputBytes: number;
-  readonly temporalCapability: PresentationTemporalCapability;
-  readonly visualCapability: PresentationVisualCapability;
-  readonly frameBehavior: PresentationFrameBehavior;
-}
-
-/** Explicit inputs for the neutral semantic DOM presentation. */
-export interface DomBundleOptions {
-  readonly motion?: string;
-  readonly stylesheet?: string;
+  /** Authored document or a private snapshot containing its exact bytes. */
+  readonly document: string;
+  /** Base for inline-module imports when `document` is a private snapshot. */
+  readonly resolveDirectory?: string;
   readonly outputDirectory: string;
   readonly maxOutputBytes: number;
   readonly temporalCapability: PresentationTemporalCapability;
@@ -111,7 +108,7 @@ interface PendingFile {
 }
 
 interface BundleInput {
-  readonly source: PresentationSource;
+  readonly html: AuthoredHtml;
   readonly outputDirectory: string;
   readonly maxOutputBytes: number;
   readonly temporalCapability: PresentationTemporalCapability;
@@ -119,44 +116,28 @@ interface BundleInput {
   readonly frameBehavior: PresentationFrameBehavior;
 }
 
-type PresentationSource =
-  | { readonly kind: "custom"; readonly path: string }
-  | {
-      readonly kind: "semanticDom";
-      readonly motion: string | undefined;
-      readonly stylesheet: string | undefined;
-    };
-
 type NonEmpty<T> = readonly [T, ...T[]];
 
 // ── Build pipeline
 
-/** Builds one immutable presentation through a private staging directory. */
+/** Builds one HTML-authored presentation without a parallel entry file. */
 export async function bundlePresentation(
   options: BundleOptions,
 ): Promise<BundleArtifact> {
-  return bundle({
-    maxOutputBytes: options.maxOutputBytes,
-    outputDirectory: options.outputDirectory,
-    source: { kind: "custom", path: options.entryPoint },
-    temporalCapability: options.temporalCapability,
-    visualCapability: options.visualCapability,
-    frameBehavior: options.frameBehavior,
-  });
-}
+  let html;
+  try {
+    html = await readAuthoredHtml(options.document, options.resolveDirectory);
+  } catch (error) {
+    if (error instanceof AuthoredHtmlError) {
+      throw new BundleError("configuration", error.message, error);
+    }
+    throw error;
+  }
 
-/** Builds the semantic DOM presentation without an authored entry module. */
-export async function bundleDomPresentation(
-  options: DomBundleOptions,
-): Promise<BundleArtifact> {
   return bundle({
+    html,
     maxOutputBytes: options.maxOutputBytes,
     outputDirectory: options.outputDirectory,
-    source: {
-      kind: "semanticDom",
-      motion: options.motion,
-      stylesheet: options.stylesheet,
-    },
     temporalCapability: options.temporalCapability,
     visualCapability: options.visualCapability,
     frameBehavior: options.frameBehavior,
@@ -184,8 +165,8 @@ async function buildArtifact(
   input: BundleInput,
   staging: string,
 ): Promise<BundleArtifact> {
-  const generated = await compilePresentation(input.source, staging);
-  const pending = presentationFiles(generated, staging);
+  const generated = await compilePresentation(input.html, staging);
+  const pending = presentationFiles(generated, staging, input.html);
   const manifest = createManifest(
     pending,
     input.temporalCapability,
@@ -238,40 +219,11 @@ function validateInput(options: BundleInput): BundleInput {
   return Object.freeze({
     outputDirectory: resolve(options.outputDirectory),
     maxOutputBytes: options.maxOutputBytes,
-    source: validateSource(options.source),
+    html: Object.freeze({ ...options.html }),
     temporalCapability,
     visualCapability,
     frameBehavior,
   });
-}
-
-function validateSource(source: PresentationSource): PresentationSource {
-  switch (source.kind) {
-    case "custom":
-      if (source.path.length === 0) {
-        throw new BundleError("configuration", "entry point cannot be empty");
-      }
-      return Object.freeze({ kind: source.kind, path: resolve(source.path) });
-    case "semanticDom":
-      return Object.freeze({
-        kind: source.kind,
-        motion: optionalSourcePath(source.motion, "motion entry"),
-        stylesheet: optionalSourcePath(source.stylesheet, "stylesheet"),
-      });
-  }
-}
-
-function optionalSourcePath(
-  path: string | undefined,
-  role: string,
-): string | undefined {
-  if (path === undefined) {
-    return undefined;
-  }
-  if (path.length === 0) {
-    throw new BundleError("configuration", `${role} cannot be empty`);
-  }
-  return resolve(path);
 }
 
 function validateTemporalCapability(
@@ -320,7 +272,7 @@ function validateFrameBehavior(
 }
 
 async function compilePresentation(
-  source: PresentationSource,
+  html: AuthoredHtml,
   staging: string,
 ): Promise<readonly OutputFile[]> {
   try {
@@ -332,7 +284,7 @@ async function compilePresentation(
       assetNames: "resources/[hash]",
       bundle: true,
       entryNames: "presentation",
-      ...buildSource(source),
+      stdin: authoredHtmlEntry(html),
       format: "esm",
       legalComments: "none",
       loader: VISUAL_RESOURCE_LOADERS,
@@ -343,7 +295,6 @@ async function compilePresentation(
       target: "es2024",
       write: false,
     });
-    rejectUnobservedStylesheetResources(source, result.outputFiles, staging);
     return result.outputFiles;
   } catch (error) {
     if (error instanceof BundleError) {
@@ -374,64 +325,22 @@ function resolvePublicImport(args: OnResolveArgs): OnResolveResult {
   }
 }
 
-function rejectUnobservedStylesheetResources(
-  source: PresentationSource,
-  outputFiles: readonly OutputFile[],
-  staging: string,
-): void {
-  if (source.kind !== "semanticDom" || source.stylesheet === undefined) {
-    return;
-  }
-  const resourcePaths = outputFiles
-    .map((file) => artifactPath(staging, file.path))
-    .filter((path) => path.startsWith("resources/"));
-  const stylesheetReferencesResource = outputFiles
-    .filter((file) => file.path.endsWith(".css"))
-    .map((file) => new TextDecoder().decode(file.contents))
-    .some((css) => resourcePaths.some((path) => css.includes(path)));
-  if (stylesheetReferencesResource) {
-    throw new BundleError(
-      "build",
-      "semantic stylesheet resources have no explicit readiness owner",
-    );
-  }
-}
-
-function buildSource(source: PresentationSource): BuildOptions {
-  switch (source.kind) {
-    case "custom":
-      return { entryPoints: [source.path] };
-    case "semanticDom":
-      return { stdin: semanticDomEntry(source.stylesheet, source.motion) };
-  }
-}
-
-function semanticDomEntry(
-  stylesheet: string | undefined,
-  motion: string | undefined,
+function authoredHtmlEntry(
+  html: AuthoredHtml,
 ): NonNullable<BuildOptions["stdin"]> {
   return {
-    contents: semanticDomModule(stylesheet, motion),
+    contents: authoredHtmlModule(html.motion),
     loader: "ts",
-    resolveDir: dirname(AUTHORING_ENTRY),
-    sourcefile: "onmark-semantic-dom.ts",
+    resolveDir: html.resolveDirectory,
+    sourcefile: "onmark-authored-html.ts",
   };
 }
 
-function semanticDomModule(
-  stylesheet: string | undefined,
-  motion: string | undefined,
-): string {
-  const stylesheetImport =
-    stylesheet === undefined ? [] : [`import ${JSON.stringify(stylesheet)};`];
-  const motionImport =
-    motion === undefined
-      ? []
-      : [`import { motion } from ${JSON.stringify(motion)};`];
+function authoredHtmlModule(motion: string | undefined): string {
+  const motionSource = motion === undefined ? [] : [motion.trim(), ""];
   const motionOption = motion === undefined ? [] : ["  motion,"];
   return [
-    ...stylesheetImport,
-    ...motionImport,
+    ...motionSource,
     'import { createDomPresentationBindings } from "@onmark/authoring";',
     "import {",
     "  installRuntimeHost,",
@@ -454,6 +363,7 @@ function semanticDomModule(
 function presentationFiles(
   outputFiles: readonly OutputFile[],
   staging: string,
+  html: AuthoredHtml,
 ): NonEmpty<PendingFile> {
   const emitted = outputFiles.map((file) => ({
     contents: file.contents,
@@ -471,7 +381,7 @@ function presentationFiles(
     .filter((file) => file.path.endsWith(".css"))
     .map((file) => file.path)
     .sort();
-  const document = new TextEncoder().encode(entryDocument(styles));
+  const document = new TextEncoder().encode(presentationDocument(html, styles));
   const files = [
     { contents: document, path: BUNDLE_ENTRY_POINT },
     ...generated,
@@ -479,6 +389,21 @@ function presentationFiles(
   requireDistinctPaths(files);
 
   return canonicalFiles(files);
+}
+
+function presentationDocument(
+  html: AuthoredHtml,
+  styles: readonly string[],
+): string {
+  const links = styles
+    .map((path) => `<link rel="stylesheet" href="./${path}" />`)
+    .join("\n");
+  if (links.length === 0) {
+    return html.document;
+  }
+  const before = html.document.slice(0, html.runtimeOffset);
+  const after = html.document.slice(html.runtimeOffset);
+  return `${before}${links}\n${after}`;
 }
 
 function canonicalResourcePaths(files: readonly PendingFile[]): PendingFile[] {
@@ -513,23 +438,6 @@ function rewriteResourceReferences(
 
 function isGeneratedText(path: string): boolean {
   return path.endsWith(".css") || path.endsWith(".js");
-}
-
-function entryDocument(styles: readonly string[]): string {
-  const lines = [
-    "<!doctype html>",
-    '<html lang="en">',
-    "  <head>",
-    '    <meta charset="utf-8" />',
-    '    <meta name="viewport" content="width=device-width, initial-scale=1" />',
-    ...styles.map((path) => `    <link rel="stylesheet" href="./${path}" />`),
-    "  </head>",
-    "  <body>",
-    '    <script type="module" src="./presentation.js"></script>',
-    "  </body>",
-    "</html>",
-  ];
-  return `${lines.join("\n")}\n`;
 }
 
 function createManifest(

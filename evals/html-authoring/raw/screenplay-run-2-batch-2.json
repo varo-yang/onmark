@@ -1,0 +1,57 @@
+{
+  "results": [
+    {
+      "caseId": "edit-copy",
+      "files": [
+        {
+          "path": "film.onmark",
+          "content": "<film><scene><shot id=\"hero\"><video src=\"hero.mp4\"/><title>Compile what you mean.</title></shot></scene></film>"
+        },
+        {
+          "path": "film.css",
+          "content": ".onmark-title { color: #d7ff43; font-size: 80px; }\n#hero { background: #111; }\n"
+        }
+      ]
+    },
+    {
+      "caseId": "append-shot",
+      "files": [
+        {
+          "path": "film.onmark",
+          "content": "<film><scene><shot id=\"one\"><video src=\"one.mp4\"/><title>One</title></shot><shot id=\"two\"><video src=\"two.mp4\"/><title>Two</title></shot><shot id=\"three\"><video src=\"three.mp4\"/><title>Three</title></shot></scene></film>"
+        },
+        {
+          "path": "film.css",
+          "content": "#one { background: red; }\n#two { background: blue; }\n#three { background: green; }\n"
+        }
+      ]
+    },
+    {
+      "caseId": "add-cued-cta",
+      "files": [
+        {
+          "path": "film.onmark",
+          "content": "<film><cues><cue id=\"buy\" time=\"1500ms\"/></cues><scene><shot><video src=\"offer.mp4\"/><title>Offer</title><cta cue=\"buy\">Buy now</cta></shot></scene></film>"
+        }
+      ]
+    },
+    {
+      "caseId": "repair-markup",
+      "files": [
+        {
+          "path": "film.onmark",
+          "content": "<film><scene><shot><video src=\"clip.mp4\"/><title>Exact</title></shot></scene></film>"
+        }
+      ]
+    },
+    {
+      "caseId": "reject-coordinate-edit",
+      "files": [
+        {
+          "path": "film.onmark",
+          "content": "<film><cues><cue id=\"title-at-three\" time=\"3s\"/></cues><scene><shot><video src=\"clip.mp4\"/><title cue=\"title-at-three\">Later</title></shot></scene></film>"
+        }
+      ]
+    }
+  ]
+}

@@ -43,7 +43,12 @@ const AUDIO_TIMESTAMP_TOLERANCE_MICROS: u64 = 25_000;
 #[tokio::test]
 async fn rejects_units_that_do_not_match_the_partition_plan_before_launching_browser() {
     let timeline = solve_timeline(
-        r#"<film><scene><shot duration="1s" /><shot duration="1s" /></scene></film>"#,
+        concat!(
+            "<om-film><om-scene>",
+            r#"<om-shot duration="1s"></om-shot>"#,
+            r#"<om-shot duration="1s"></om-shot>"#,
+            "</om-scene></om-film>",
+        ),
         &BTreeMap::new(),
     );
     let partitions =
@@ -327,7 +332,7 @@ async fn renders_and_repeats_the_production_layered_path() {
 #[ignore = "requires ONMARK_HEADLESS_SHELL, ONMARK_FFMPEG, and ONMARK_FFPROBE"]
 async fn renders_random_access_media_equally_as_one_or_two_units() {
     let directory = tempdir().expect("the test output directory must be available");
-    let bundle = FixtureBundle::checked_in();
+    let bundle = FixtureBundle::build_gate_four(directory.path()).await;
     let fixture = GateFourFixture::materialize(directory.path(), &bundle).await;
     let whole_output = directory.path().join("whole.mp4");
     let partitioned_output = directory.path().join("partitioned.mp4");
@@ -364,7 +369,7 @@ async fn renders_random_access_media_equally_as_one_or_two_units() {
 #[ignore = "requires ONMARK_BUNDLER, ONMARK_HEADLESS_SHELL, ONMARK_FFMPEG, and ONMARK_FFPROBE"]
 async fn assembles_temporal_frame_artifacts_equivalently_to_the_whole_film() {
     let directory = tempdir().expect("the test output directory must be available");
-    let bundle = FixtureBundle::build_temporal(directory.path()).await;
+    let bundle = FixtureBundle::build_gate_four(directory.path()).await;
     let fixture = GateFourFixture::materialize(directory.path(), &bundle).await;
     let whole_artifact_path = directory.path().join("whole-film.onmark-frames");
     let assembled_output = directory.path().join("assembled-from-artifacts.mp4");
@@ -1040,7 +1045,11 @@ fn gate_one_plan() -> BrowserPlan {
 
 fn synthetic_timeline() -> onmark_core::timeline::TimelineIr {
     solve_timeline(
-        r#"<film><scene><shot duration="2.5s"><title>Opening</title></shot></scene></film>"#,
+        concat!(
+            "<om-film><om-scene>",
+            r#"<om-shot duration="2.5s"><om-title>Opening</om-title></om-shot>"#,
+            "</om-scene></om-film>",
+        ),
         &BTreeMap::new(),
     )
 }
@@ -1091,7 +1100,11 @@ fn gate_one_video_timeline(frozen: FrozenAsset) -> onmark_core::timeline::Timeli
     let asset = AssetRef::parse("source.mp4").expect("the fixture asset reference is valid");
     let assets = BTreeMap::from([(asset, frozen)]);
     solve_timeline(
-        r#"<film><scene><shot><video src="source.mp4" /></shot></scene></film>"#,
+        concat!(
+            "<om-film><om-scene><om-shot>",
+            r#"<video src="source.mp4"></video>"#,
+            "</om-shot></om-scene></om-film>",
+        ),
         &assets,
     )
 }
@@ -1129,7 +1142,7 @@ impl GateFourFixture {
             (asset_ref("music.wav"), music.clone()),
             (asset_ref("effect.wav"), effect.clone()),
         ]);
-        let source = fs::read_to_string(repository().join("conformance/cli/gate-four.onmark"))
+        let source = fs::read_to_string(repository().join("conformance/cli/gate-four.html"))
             .expect("the Gate-four screenplay fixture is readable");
         let timeline = solve_timeline(&source, &assets);
         let timeline = compiler::import_captions(timeline, [caption_track()])
@@ -1217,7 +1230,19 @@ impl FixtureBundle {
         Self::build(
             workspace,
             "temporal-bundle",
-            "temporal-experiment.ts",
+            "temporal-experiment.html",
+            "randomAccess",
+            "browserComposite",
+            "perFrame",
+        )
+        .await
+    }
+
+    async fn build_gate_four(workspace: &Path) -> Self {
+        Self::build_from(
+            workspace,
+            "gate-four-bundle",
+            &repository().join("conformance/cli/gate-four.html"),
             "randomAccess",
             "browserComposite",
             "perFrame",
@@ -1241,7 +1266,7 @@ impl FixtureBundle {
         Self::build(
             workspace,
             directory_name,
-            "layered-presentation.ts",
+            "layered-presentation.html",
             "randomAccess",
             "separableOverlay",
             frame_behavior,
@@ -1252,15 +1277,34 @@ impl FixtureBundle {
     async fn build(
         workspace: &Path,
         directory_name: &str,
-        entry_name: &str,
+        document_name: &str,
+        temporal_capability: &str,
+        visual_capability: &str,
+        frame_behavior: &str,
+    ) -> Self {
+        Self::build_from(
+            workspace,
+            directory_name,
+            &repository().join("conformance/browser").join(document_name),
+            temporal_capability,
+            visual_capability,
+            frame_behavior,
+        )
+        .await
+    }
+
+    async fn build_from(
+        workspace: &Path,
+        directory_name: &str,
+        document: &Path,
         temporal_capability: &str,
         visual_capability: &str,
         frame_behavior: &str,
     ) -> Self {
         let directory = workspace.join(directory_name);
         let bundled = Command::new(required_path("ONMARK_BUNDLER"))
-            .args(["--entry"])
-            .arg(repository().join("conformance/browser").join(entry_name))
+            .args(["--html"])
+            .arg(document)
             .args(["--output"])
             .arg(&directory)
             .args(["--max-output-bytes", "2000000"])

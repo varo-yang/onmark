@@ -27,18 +27,20 @@ impl SyntaxError {
     }
 }
 
-/// Closed reasons keep `xmlparser` types from crossing the syntax boundary.
+/// Closed reasons keep tokenizer types from crossing the syntax boundary.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum SyntaxErrorKind {
     /// Tokenization failed before a trustworthy token could be produced.
     MalformedMarkup,
+    /// HTML's trailing-solidus syntax was used on a non-void element.
+    SelfClosingNonVoid { name: Box<str> },
     /// A closing name differs from the currently open element.
     MismatchedClosingTag {
         expected: Box<str>,
         found: Box<str>,
         opened_at: SourceSpan,
     },
-    /// An element contains the same qualified attribute name twice.
+    /// An element contains the same normalized attribute name twice.
     DuplicateAttribute {
         name: Box<str>,
         first_declared_at: SourceSpan,
@@ -52,8 +54,8 @@ pub(crate) enum SyntaxErrorKind {
     },
     /// A closing tag appeared without an open element.
     UnexpectedClosingTag { found: Box<str> },
-    /// XML machinery outside the screenplay surface was authored.
-    UnsupportedDirective { directive: UnsupportedDirective },
+    /// A non-HTML document type was authored.
+    UnsupportedDocumentType,
     /// Retaining more source structure would exceed a compiler safety bound.
     ResourceLimit { resource: SyntaxResource },
 }
@@ -67,14 +69,4 @@ pub(crate) enum SyntaxResource {
     Items,
     /// Open element nesting.
     NestingDepth,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum UnsupportedDirective {
-    /// An XML processing instruction such as `<?render now?>`.
-    ProcessingInstruction,
-    /// An XML declaration such as `<?xml version="1.0"?>`.
-    XmlDeclaration,
-    /// A document type declaration, including any internal subset.
-    DocumentTypeDeclaration,
 }

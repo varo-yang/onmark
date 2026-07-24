@@ -7,7 +7,7 @@ import { nativeInvocation } from "../src/native.js";
 
 test("forwards arguments unchanged and supplies release tools through environment", () => {
   const invocation = nativeInvocation(
-    ["render", "film.onmark", "--fps", "30000/1001"],
+    ["render", "film.html", "--fps", "30000/1001"],
     {
       browserProvisioner: "/product/browser-command.js",
       bundler: "/product/bundler-command.js",
@@ -22,7 +22,7 @@ test("forwards arguments unchanged and supplies release tools through environmen
   assert.equal(invocation.command, "/tools/onmark");
   assert.deepEqual(invocation.arguments, [
     "render",
-    "film.onmark",
+    "film.html",
     "--fps",
     "30000/1001",
   ]);

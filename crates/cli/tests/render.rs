@@ -28,7 +28,7 @@ const PROCESS_DEADLINE: Duration = Duration::from_mins(3);
 #[ignore = "requires ONMARK_CLI, ONMARK_FFMPEG, ONMARK_FFPROBE, and Gate-one tools on PATH"]
 async fn renders_one_screenplay_reliably_across_real_processes() {
     let directory = tempdir().expect("the conformance workspace is available");
-    let fixture = Fixture::with_semantic_motion(directory.path(), "cli/gate-one.onmark");
+    let fixture = Fixture::materialize(directory.path(), "cli/gate-one.html");
     let first = render_fixture_twice(&fixture, SourceVideo::Solid, GATE_ONE_FRAME_COUNT, 15).await;
     assert!(
         first.inspection.has_motion_before(10),
@@ -47,7 +47,7 @@ async fn renders_one_screenplay_reliably_across_real_processes() {
 #[ignore = "requires ONMARK_CLI, ONMARK_FFMPEG, ONMARK_FFPROBE, and Gate-four tools on PATH"]
 async fn assembles_two_partitioned_units_across_real_processes() {
     let directory = tempdir().expect("the conformance workspace is available");
-    let fixture = Fixture::materialize(directory.path(), "cli/gate-four.onmark");
+    let fixture = Fixture::materialize(directory.path(), "cli/gate-four.html");
     fixture.generate_general_audio().await;
 
     render_fixture_twice(&fixture, SourceVideo::Moving, GATE_TWO_FRAME_COUNT, 0).await;
@@ -109,29 +109,13 @@ impl SourceVideo {
 impl Fixture {
     fn materialize(root: &Path, screenplay_fixture: &str) -> Self {
         let repository = repository();
-        let screenplay = root.join("film.onmark");
+        let screenplay = root.join("film.html");
         copy_fixture(&repository, screenplay_fixture, &screenplay);
 
         Self {
             root: root.to_owned(),
             screenplay,
         }
-    }
-
-    fn with_semantic_motion(root: &Path, screenplay_fixture: &str) -> Self {
-        let fixture = Self::materialize(root, screenplay_fixture);
-        let repository = repository();
-        copy_fixture(
-            &repository,
-            "browser/semantic-presentation.css",
-            &root.join("film.css"),
-        );
-        copy_fixture(
-            &repository,
-            "browser/semantic-presentation.motion.ts",
-            &root.join("film.motion.ts"),
-        );
-        fixture
     }
 
     async fn generate_source_video(&self, video: SourceVideo) {

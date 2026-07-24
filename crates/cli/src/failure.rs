@@ -38,11 +38,6 @@ pub(super) enum CliError {
         source: serde_json::Error,
     },
     WorkerTask(JoinError),
-    InspectPresentationSource {
-        path: PathBuf,
-        source: io::Error,
-    },
-    InvalidPresentationSource(PathBuf),
     CreateOutputDirectory {
         path: PathBuf,
         source: io::Error,
@@ -89,13 +84,6 @@ impl CliError {
             source,
         }
     }
-
-    pub(super) fn inspect_presentation_source(path: &Path, source: io::Error) -> Self {
-        Self::InspectPresentationSource {
-            path: path.to_owned(),
-            source,
-        }
-    }
 }
 
 impl fmt::Display for CliError {
@@ -120,20 +108,6 @@ impl fmt::Display for CliError {
                 )
             }
             Self::WorkerTask(_) => formatter.write_str("worker materialization did not finish"),
-            Self::InspectPresentationSource { path, .. } => {
-                write!(
-                    formatter,
-                    "failed to inspect presentation source {}",
-                    path.display()
-                )
-            }
-            Self::InvalidPresentationSource(path) => {
-                write!(
-                    formatter,
-                    "presentation source {} is not a file",
-                    path.display()
-                )
-            }
             Self::CreateOutputDirectory { path, .. } => {
                 write!(
                     formatter,
@@ -166,11 +140,10 @@ impl Error for CliError {
             Self::ReadScreenplay { source, .. } | Self::ReadWorkerRequest { source, .. } => {
                 Some(source)
             }
-            Self::InspectPresentationSource { source, .. }
-            | Self::CreateOutputDirectory { source, .. } => Some(source),
+            Self::CreateOutputDirectory { source, .. } => Some(source),
             Self::ParseWorkerRequest { source, .. } => Some(source),
             Self::WorkerTask(source) => Some(source),
-            Self::InvalidPresentationSource(_) | Self::OutputExists(_) => None,
+            Self::OutputExists(_) => None,
             Self::InvalidProfile(source) => Some(source),
             Self::InvalidFfmpeg(source) => Some(source),
             Self::Assets(source) => Some(source),

@@ -91,7 +91,8 @@ mod tests {
 
     #[test]
     fn withholds_later_phases_after_authored_errors() {
-        let compilation = resolve("<film><scene><unknown /></scene></film>");
+        let compilation =
+            resolve("<om-film><om-scene><om-unknown></om-unknown></om-scene></om-film>");
         let (film, diagnostics) = compilation.into_parts();
 
         assert!(film.is_none());

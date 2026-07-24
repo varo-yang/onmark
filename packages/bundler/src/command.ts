@@ -6,10 +6,8 @@ import { parseArgs } from "node:util";
 
 import {
   BundleError,
-  bundleDomPresentation,
   bundlePresentation,
   type BundleOptions,
-  type DomBundleOptions,
 } from "./presentation.js";
 import {
   BUNDLE_FRAME_BEHAVIORS,
@@ -19,7 +17,8 @@ import {
 
 const USAGE = [
   "Usage: onmark-bundle",
-  "  (--entry <path> | --semantic-dom [--stylesheet <path>] [--motion <path>])",
+  "  --html <path>",
+  "  [--resolve-directory <directory>]",
   "  --output <directory>",
   "  --max-output-bytes <bytes>",
   "  --frame-behavior <perFrame|placementBounded>",
@@ -29,8 +28,7 @@ const USAGE = [
 ].join("\n");
 
 type Command =
-  | { readonly kind: "custom"; readonly options: BundleOptions }
-  | { readonly kind: "semanticDom"; readonly options: DomBundleOptions }
+  | { readonly kind: "bundle"; readonly options: BundleOptions }
   | { readonly kind: "help" };
 
 // ── Execution ──
@@ -39,10 +37,8 @@ try {
   const command = parseArguments(process.argv.slice(2));
   if (command.kind === "help") {
     process.stdout.write(USAGE);
-  } else if (command.kind === "custom") {
-    await bundlePresentation(command.options);
   } else {
-    await bundleDomPresentation(command.options);
+    await bundlePresentation(command.options);
   }
 } catch (error) {
   const failure = commandFailure(error);
@@ -82,41 +78,14 @@ function parseArguments(arguments_: readonly string[]): Command {
     temporalCapability,
     visualCapability,
   };
-  return presentationCommand(values, controls);
-}
-
-type BundleControls = Omit<BundleOptions, "entryPoint">;
-
-function presentationCommand(
-  values: ReturnType<typeof commandValues>,
-  controls: BundleControls,
-): Exclude<Command, { readonly kind: "help" }> {
-  const entryPoint = optionalOneValue(values.entry, "--entry");
-  const semanticDom = values["semantic-dom"] === true;
-  const motion = optionalOneValue(values.motion, "--motion");
-  const stylesheet = optionalOneValue(values.stylesheet, "--stylesheet");
-
-  if (entryPoint !== undefined) {
-    if (semanticDom || stylesheet !== undefined || motion !== undefined) {
-      throw invalidPresentationSource();
-    }
-    return { kind: "custom", options: { ...controls, entryPoint } };
-  }
-  if (!semanticDom) {
-    throw invalidPresentationSource();
-  }
-  const options: DomBundleOptions = {
-    ...controls,
-    ...(motion === undefined ? {} : { motion }),
-    ...(stylesheet === undefined ? {} : { stylesheet }),
+  return {
+    kind: "bundle",
+    options: {
+      ...controls,
+      document: oneValue(values.html, "--html"),
+      ...optionalResolveDirectory(values["resolve-directory"]),
+    },
   };
-  return { kind: "semanticDom", options };
-}
-
-function invalidPresentationSource(): BundleError {
-  return configuration(
-    "use --entry alone or --semantic-dom with optional style and motion files",
-  );
 }
 
 function commandValues(arguments_: readonly string[]) {
@@ -125,14 +94,12 @@ function commandValues(arguments_: readonly string[]) {
       args: arguments_,
       allowPositionals: false,
       options: {
-        entry: { type: "string", multiple: true },
         "frame-behavior": { type: "string", multiple: true },
         help: { type: "boolean" },
+        html: { type: "string", multiple: true },
         "max-output-bytes": { type: "string", multiple: true },
-        motion: { type: "string", multiple: true },
         output: { type: "string", multiple: true },
-        "semantic-dom": { type: "boolean" },
-        stylesheet: { type: "string", multiple: true },
+        "resolve-directory": { type: "string", multiple: true },
         "temporal-capability": { type: "string", multiple: true },
         "visual-capability": { type: "string", multiple: true },
       },
@@ -141,6 +108,15 @@ function commandValues(arguments_: readonly string[]) {
   } catch (error) {
     throw configuration("arguments are invalid", error);
   }
+}
+
+function optionalResolveDirectory(
+  values: readonly string[] | undefined,
+): Pick<BundleOptions, "resolveDirectory"> {
+  if (values === undefined) {
+    return {};
+  }
+  return { resolveDirectory: oneValue(values, "--resolve-directory") };
 }
 
 function parseTemporalCapability(
@@ -190,16 +166,6 @@ function oneValue(values: readonly string[] | undefined, name: string): string {
     throw configuration(`${name} cannot be repeated`);
   }
   return value;
-}
-
-function optionalOneValue(
-  values: readonly string[] | undefined,
-  name: string,
-): string | undefined {
-  if (values !== undefined && values.length > 1) {
-    throw configuration(`${name} cannot be repeated`);
-  }
-  return values?.[0];
 }
 
 function parseByteLimit(value: string): number {

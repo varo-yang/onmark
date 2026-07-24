@@ -1,6 +1,6 @@
 # Conformance fixtures
 
-Authored `.onmark` inputs are maintained by hand. Expected `.ast.txt`,
+Authored `.html` inputs are maintained by hand. Expected `.ast.txt`,
 `.linked.txt`, `.resolved.txt`, `.timeline.txt`, and `.diagnostics.txt` files
 are generated golden artifacts and are not wire formats or protocol schemas.
 
@@ -17,17 +17,15 @@ these files as compatibility-sensitive data.
 
 `protocol/bundle-v1/` is the current self-contained random-access fixture used
 by the native Chromium-to-FFmpeg smoke. It is generated from
-`browser/video-presentation.ts` by `@onmark/bundler`, embeds the production
-authoring bindings and runtime presentation adapter, and consumes materialized
-media from the unit root. Gate six adds one licensed local font and one authored
-SVG to this same fixture; browser preparation must decode or load both before
-capture. An exact-frame effect changes the poster accent from the absolute frame
-identity, so whole-film and partition capture also prove the admitted
-random-access lifecycle. The bundler test recursively rebuilds and compares
-every byte, so source, runtime, manifest, and nested payload cannot drift
-independently. Bundle artifacts are ephemeral build products rather than user
-data; only the current manifest is accepted, and older artifacts must be
-rebuilt instead of carrying compatibility branches in the reader.
+`browser/video-presentation.html` by `@onmark/bundler`. It embeds the production
+authored-DOM bindings and runtime presentation adapter, and consumes
+materialized media from the unit root. The bundler test recursively rebuilds
+and compares every byte, so source, runtime, and manifest cannot drift
+independently. Local font, image, GSAP, and Three.js imports are covered by
+focused bundler or temporal fixtures instead of making the primary media smoke
+serve unrelated contracts. Bundle artifacts are ephemeral build products; only
+the current manifest is accepted, and older artifacts are rebuilt rather than
+supported by compatibility branches.
 
 Regenerate goldens after intentionally changing public behavior:
 
@@ -82,10 +80,10 @@ cargo test -p onmark-render --test render \
   renders_the_gate_one_plan_to_a_verified_mp4 -- --ignored
 ```
 
-`cli/gate-one.onmark` drives the outermost Gate-one contract. The CLI smoke
-copies that screenplay and the production presentation into a private
-workspace, generates its referenced video, and invokes the real `onmark`
-binary twice. It verifies each independent Chromium and `FFmpeg` session's
+`cli/gate-one.html` drives the outermost Gate-one contract. The CLI smoke
+copies that complete authored document into a private workspace, generates its
+referenced media, and invokes the real `onmark` binary twice. It verifies each
+independent Chromium and `FFmpeg` session's
 decoded frame count, motion, stream facts, and audio placement, then proves
 that a third invocation cannot replace an existing output. Canonical raw-RGBA
 equality is asserted before lossy MP4 encoding, not inferred from independently

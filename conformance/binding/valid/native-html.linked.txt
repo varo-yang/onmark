@@ -1,0 +1,10 @@
+# onmark binding test rendering; not a wire format
+film id=demo
+  scene id=launch
+    shot id=hero
+      video id=-
+      om-title id=-
+index
+  demo -> om-film @0:202..206
+  hero -> om-shot @0:317..321
+  launch -> om-scene @0:229..235

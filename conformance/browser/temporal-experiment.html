@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+        width: 100%;
+      }
+
+      body {
+        background: #10131a;
+      }
+
+      .experiment-stage {
+        height: 100%;
+        position: relative;
+        width: 100%;
+      }
+
+      .experiment-marker {
+        height: 32px;
+        left: 24px;
+        position: absolute;
+        width: 32px;
+      }
+
+      .experiment-waapi {
+        animation: experiment-travel 1s linear both paused;
+        background: #ff5d73;
+        top: 24px;
+      }
+
+      .experiment-gsap {
+        background: #55d98b;
+        top: 74px;
+      }
+
+      .experiment-webgl {
+        bottom: 8px;
+        height: 72px;
+        position: absolute;
+        right: 8px;
+        width: 96px;
+      }
+
+      @keyframes experiment-travel {
+        from {
+          transform: translateX(0) rotate(0deg);
+        }
+
+        to {
+          transform: translateX(160px) rotate(180deg);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <om-film>
+      <om-scene>
+        <om-shot duration="2.5s">
+          <om-title>Opening</om-title>
+        </om-shot>
+      </om-scene>
+    </om-film>
+    <script type="module" data-om-motion>
+      import { gsap } from "gsap";
+      import {
+        AnimationClip,
+        AnimationMixer,
+        BoxGeometry,
+        Mesh,
+        MeshBasicMaterial,
+        NumberKeyframeTrack,
+        OrthographicCamera,
+        Scene,
+        WebGLRenderer,
+      } from "three";
+
+      const ANIMATION_SECONDS = 1;
+      const MARKER_TRAVEL_PIXELS = 160;
+
+      export const motion = {
+        bind() {
+          return { effects: temporalEffects(), resources: [] };
+        },
+      };
+
+      function temporalEffects() {
+        const stage = experimentStage();
+        return [
+          waapiEffect(stage),
+          gsapEffect(stage),
+          threeEffect(stage),
+          {
+            apply(frame) {
+              stage.dataset.frame = String(frame.index);
+            },
+            dispose() {
+              stage.remove();
+            },
+          },
+        ];
+      }
+
+      function experimentStage() {
+        const stage = document.createElement("main");
+        stage.className = "experiment-stage";
+        document.body.append(stage);
+        return stage;
+      }
+
+      function marker(stage, className) {
+        const element = document.createElement("div");
+        element.className = `experiment-marker ${className}`;
+        stage.append(element);
+        return element;
+      }
+
+      function waapiEffect(stage) {
+        const element = marker(stage, "experiment-waapi");
+        const [animation] = element.getAnimations();
+        if (animation === undefined) {
+          throw new TypeError(
+            "the CSS animation did not produce a WAAPI playhead",
+          );
+        }
+        animation.pause();
+        return {
+          apply(frame) {
+            animation.currentTime = effectTime(frame) * 1_000;
+          },
+          dispose() {
+            animation.cancel();
+            element.remove();
+          },
+        };
+      }
+
+      function gsapEffect(stage) {
+        const element = marker(stage, "experiment-gsap");
+        const timeline = gsap.timeline({ paused: true });
+        timeline.to(element, {
+          duration: ANIMATION_SECONDS,
+          ease: "none",
+          rotation: 180,
+          x: MARKER_TRAVEL_PIXELS,
+        });
+        return {
+          apply(frame) {
+            timeline.seek(effectTime(frame), true);
+          },
+          dispose() {
+            timeline.kill();
+            element.remove();
+          },
+        };
+      }
+
+      function threeEffect(stage) {
+        const canvas = document.createElement("canvas");
+        canvas.className = "experiment-webgl";
+        stage.append(canvas);
+        const renderer = new WebGLRenderer({
+          alpha: true,
+          antialias: false,
+          canvas,
+        });
+        renderer.setPixelRatio(1);
+        renderer.setSize(96, 72, false);
+
+        const scene = new Scene();
+        const camera = new OrthographicCamera(
+          -1.5,
+          1.5,
+          1.125,
+          -1.125,
+          0.1,
+          10,
+        );
+        camera.position.z = 4;
+        const geometry = new BoxGeometry(1.4, 1.4, 1.4);
+        const material = new MeshBasicMaterial({ color: 0x5aa7ff });
+        const cube = new Mesh(geometry, material);
+        scene.add(cube);
+
+        const rotation = new NumberKeyframeTrack(
+          ".rotation[y]",
+          [0, ANIMATION_SECONDS],
+          [0, Math.PI * 2],
+        );
+        const clip = new AnimationClip("turn", ANIMATION_SECONDS, [rotation]);
+        const mixer = new AnimationMixer(cube);
+        mixer.clipAction(clip).play();
+
+        return {
+          apply(frame) {
+            mixer.setTime(effectTime(frame));
+            renderer.render(scene, camera);
+          },
+          dispose() {
+            mixer.stopAllAction();
+            geometry.dispose();
+            material.dispose();
+            renderer.dispose();
+            canvas.remove();
+          },
+        };
+      }
+
+      function effectTime(frame) {
+        return Math.min(frame.timeSeconds, ANIMATION_SECONDS);
+      }
+    </script>
+  </body>
+</html>

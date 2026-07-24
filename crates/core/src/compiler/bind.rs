@@ -52,26 +52,7 @@ pub fn bind(document: SourceDocument) -> BindReport {
     let mut films = Vec::new();
     let (nodes, document_span) = document.into_parts();
 
-    for node in nodes {
-        let element = match node {
-            Node::Text(text) if text.text().trim().is_empty() => continue,
-            Node::Text(text) => {
-                diagnostics.push(unexpected_top_level_text(&text));
-                continue;
-            }
-            Node::Element(element) => element,
-        };
-        let Some(kind) = element_kind(&element) else {
-            diagnostics.push(unknown_element(&element));
-            continue;
-        };
-        if kind != ElementKind::Film {
-            diagnostics.push(misplaced_element(&element, kind, None));
-            continue;
-        }
-
-        films.push(element);
-    }
+    collect_film_roots(nodes, &mut films, &mut diagnostics);
 
     let mut films = films.into_iter();
     let Some(first) = films.next() else {
@@ -97,6 +78,37 @@ pub fn bind(document: SourceDocument) -> BindReport {
     BindReport {
         film: None,
         diagnostics,
+    }
+}
+
+fn collect_film_roots(nodes: Vec<Node>, films: &mut Vec<Element>, diagnostics: &mut Diagnostics) {
+    for node in nodes {
+        let Node::Element(element) = node else {
+            continue;
+        };
+        collect_document_element(element, films, diagnostics);
+    }
+}
+
+fn collect_document_element(
+    element: Element,
+    films: &mut Vec<Element>,
+    diagnostics: &mut Diagnostics,
+) {
+    if let Some(kind) = semantic_kind(&element, diagnostics) {
+        if kind == ElementKind::Film {
+            films.push(element);
+        } else {
+            diagnostics.push(misplaced_element(&element, kind, None));
+        }
+        return;
+    }
+
+    if matches!(element.name().local(), "html" | "body") {
+        // Only the standard document shell is transparent. Presentation
+        // containers must not change screenplay ownership by nesting a film.
+        let (_, _, children, _) = element.into_parts();
+        collect_film_roots(children, films, diagnostics);
     }
 }
 
@@ -265,13 +277,27 @@ impl Binder {
         let mut text = Vec::new();
 
         for node in children {
-            match node {
-                Node::Text(node) => text.push(node),
-                Node::Element(child) => self.reject_child_element(&child, parent),
-            }
+            self.collect_text(node, parent, &mut text);
         }
 
         text
+    }
+
+    fn collect_text(&mut self, node: Node, parent: ElementKind, text: &mut Vec<TextNode>) {
+        match node {
+            Node::Text(node) => text.push(node),
+            Node::Element(element) => {
+                if let Some(kind) = self.recognize_or_report(&element) {
+                    self.reject_misplaced(&element, kind, parent);
+                    return;
+                }
+
+                let (_, _, children, _) = element.into_parts();
+                for child in children {
+                    self.collect_text(child, parent, text);
+                }
+            }
+        }
     }
 
     fn reject_child_elements_and_text(&mut self, children: Vec<Node>, parent: ElementKind) {
@@ -286,8 +312,7 @@ impl Binder {
 
     fn reject_child_element(&mut self, child: &Element, parent: ElementKind) {
         if let Some(kind) = self.recognize_or_report(child) {
-            self.diagnostics
-                .push(misplaced_element(child, kind, Some(parent)));
+            self.reject_misplaced(child, kind, parent);
         }
     }
 
@@ -303,11 +328,7 @@ impl Binder {
     }
 
     fn recognize_or_report(&mut self, element: &Element) -> Option<ElementKind> {
-        let kind = element_kind(element);
-        if kind.is_none() {
-            self.diagnostics.push(unknown_element(element));
-        }
-        kind
+        semantic_kind(element, &mut self.diagnostics)
     }
 
     fn reject_misplaced(&mut self, element: &Element, kind: ElementKind, parent: ElementKind) {
@@ -360,16 +381,17 @@ impl Binder {
     }
 }
 
-fn element_kind(element: &Element) -> Option<ElementKind> {
-    if element.name().prefix().is_some() {
-        return None;
+fn semantic_kind(element: &Element, diagnostics: &mut Diagnostics) -> Option<ElementKind> {
+    let name = element.name().local();
+    let kind = ElementKind::from_local_name(name);
+    if kind.is_none() && name.starts_with("om-") {
+        diagnostics.push(unknown_element(element));
     }
-
-    ElementKind::from_local_name(element.name().local())
+    kind
 }
 
 fn is_id_attribute(attribute: &Attribute) -> bool {
-    attribute.name().prefix().is_none() && attribute.name().local() == "id"
+    attribute.name().local() == "id"
 }
 
 fn unknown_element(element: &Element) -> Diagnostic {
@@ -390,8 +412,8 @@ fn missing_film_root(document: SourceSpan) -> Diagnostic {
     author_diagnostic(
         DiagnosticCode::MissingFilmRoot,
         primary,
-        "screenplay must contain one top-level <film> element",
-        "wrap the screenplay in one <film> element",
+        "screenplay must contain one <om-film> document root",
+        "wrap the screenplay in one <om-film> element",
     )
 }
 
@@ -399,10 +421,10 @@ fn multiple_film_roots(first: &Element, duplicate: &Element) -> Diagnostic {
     author_diagnostic(
         DiagnosticCode::MultipleFilmRoots,
         duplicate.name().span(),
-        "screenplay contains more than one top-level <film> element",
-        "keep exactly one top-level <film> element",
+        "screenplay contains more than one <om-film> document root",
+        "keep exactly one <om-film> document root",
     )
-    .with_related(first.name().span(), "the first <film> element is here")
+    .with_related(first.name().span(), "the first <om-film> element is here")
     .expect("the static related message is non-blank")
 }
 
@@ -413,7 +435,7 @@ fn misplaced_element(
 ) -> Diagnostic {
     let message = match parent {
         Some(parent) => format!("element <{kind}> is not allowed inside <{parent}>"),
-        None => format!("element <{kind}> is not allowed at the top level"),
+        None => format!("element <{kind}> is not allowed at the document root"),
     };
 
     author_diagnostic(
@@ -428,10 +450,10 @@ fn duplicate_cues(element: &Element, first: SourceSpan) -> Diagnostic {
     author_diagnostic(
         DiagnosticCode::DuplicateCues,
         element.name().span(),
-        "film contains more than one <cues> container",
-        "merge all cue declarations into one <cues> container",
+        "film contains more than one <om-cues> container",
+        "merge all cue declarations into one <om-cues> container",
     )
-    .with_related(first, "the first <cues> container is here")
+    .with_related(first, "the first <om-cues> container is here")
     .expect("the static related message is non-blank")
 }
 
@@ -463,15 +485,6 @@ fn duplicate_node_id(
     )
     .with_related(first, format!("ID \"{id}\" is first declared here"))
     .expect("a formatted related message is non-blank")
-}
-
-fn unexpected_top_level_text(text: &TextNode) -> Diagnostic {
-    author_diagnostic(
-        DiagnosticCode::UnexpectedText,
-        text.span(),
-        "text is not allowed outside the top-level <film> element",
-        "move this text into a text-bearing screenplay element or remove it",
-    )
 }
 
 fn unexpected_text(text: &TextNode, parent: ElementKind) -> Diagnostic {
@@ -521,7 +534,13 @@ mod tests {
 
     #[test]
     fn cue_ids_share_the_film_wide_namespace() {
-        let source = "<film><cues><cue id=\"shared\"/></cues><scene id=\"shared\"/></film>";
+        let source = concat!(
+            "<om-film><om-cues>",
+            r#"<om-cue id="shared"></om-cue>"#,
+            "</om-cues>",
+            r#"<om-scene id="shared"></om-scene>"#,
+            "</om-film>",
+        );
         let report = bind_source(SourceId::new(0), source);
         let duplicate = report
             .diagnostics()
@@ -530,6 +549,29 @@ mod tests {
 
         assert!(duplicate.is_some());
         assert!(report.film().is_none());
+    }
+
+    #[test]
+    fn accepts_a_film_inside_an_explicit_html_document_shell() {
+        let source = concat!(
+            "<!doctype html><html><head><title>Demo</title></head><body>",
+            "<main aria-hidden=\"true\"></main>",
+            "<om-film><om-scene></om-scene></om-film>",
+            "</body></html>",
+        );
+        let report = bind_source(SourceId::new(0), source);
+
+        assert!(report.diagnostics().is_empty());
+        assert!(report.film().is_some());
+    }
+
+    #[test]
+    fn binds_html_names_without_ascii_case_sensitivity() {
+        let source = "<OM-FILM><OM-SCENE><OM-SHOT></OM-SHOT></OM-SCENE></OM-FILM>";
+        let report = bind_source(SourceId::new(0), source);
+
+        assert!(report.diagnostics().is_empty());
+        assert!(report.film().is_some());
     }
 
     proptest! {
@@ -553,16 +595,16 @@ mod tests {
     fn screenplay_with_ids(ids: &[String]) -> String {
         format!(
             concat!(
-                "<film id=\"{}\">",
-                "<cues id=\"{}\"><cue id=\"{}\"/></cues>",
-                "<music id=\"{}\"/>",
-                "<scene id=\"{}\"><shot id=\"{}\">",
-                "<video id=\"{}\"/>",
-                "<vo id=\"{}\">voice</vo>",
-                "<sfx id=\"{}\"/>",
-                "<title id=\"{}\">title</title>",
-                "<cta id=\"{}\">action</cta>",
-                "</shot></scene></film>",
+                "<om-film id=\"{}\">",
+                "<om-cues id=\"{}\"><om-cue id=\"{}\"></om-cue></om-cues>",
+                "<om-music id=\"{}\"></om-music>",
+                "<om-scene id=\"{}\"><om-shot id=\"{}\">",
+                "<video id=\"{}\"></video>",
+                "<om-vo id=\"{}\">voice</om-vo>",
+                "<om-sfx id=\"{}\"></om-sfx>",
+                "<om-title id=\"{}\">title</om-title>",
+                "<om-cta id=\"{}\">action</om-cta>",
+                "</om-shot></om-scene></om-film>",
             ),
             ids[0], ids[1], ids[2], ids[3], ids[4], ids[5], ids[6], ids[7], ids[8], ids[9], ids[10],
         )

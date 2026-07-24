@@ -69,7 +69,7 @@ impl Element {
         }
     }
 
-    /// Returns the authored qualified element name.
+    /// Returns the normalized authored element name.
     #[must_use]
     pub const fn name(&self) -> &ElementName {
         &self.name
@@ -100,49 +100,42 @@ impl Element {
     }
 }
 
-/// Case-sensitive qualified name of an element.
+/// HTML-normalized name of an element.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct ElementName {
-    qualified: QualifiedName,
+    local: Box<str>,
+    span: SourceSpan,
 }
 
 impl ElementName {
-    pub(super) fn new(prefix: Option<Box<str>>, local: Box<str>, span: SourceSpan) -> Self {
-        Self {
-            qualified: QualifiedName::new(prefix, local, span),
-        }
+    pub(super) const fn new(local: Box<str>, span: SourceSpan) -> Self {
+        Self { local, span }
     }
 
-    /// Returns the optional authored prefix without resolving namespaces.
-    #[must_use]
-    pub fn prefix(&self) -> Option<&str> {
-        self.qualified.prefix()
-    }
-
-    /// Returns the authored local name.
+    /// Returns the ASCII-lowercase HTML name.
     #[must_use]
     pub fn local(&self) -> &str {
-        self.qualified.local()
+        &self.local
     }
 
-    /// Returns the exact qualified-name span.
+    /// Returns the exact authored-name span.
     #[must_use]
     pub const fn span(&self) -> SourceSpan {
-        self.qualified.span()
+        self.span
     }
 
-    pub(super) fn same_qualified_name(&self, other: &Self) -> bool {
-        self.qualified.same_name(&other.qualified)
+    pub(super) fn same_name(&self, other: &Self) -> bool {
+        self.local == other.local
     }
 
     pub(super) fn display_name(&self) -> Box<str> {
-        self.to_string().into_boxed_str()
+        self.local.clone()
     }
 }
 
 impl fmt::Display for ElementName {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.qualified.fmt(formatter)
+        formatter.write_str(&self.local)
     }
 }
 
@@ -170,7 +163,7 @@ impl Attribute {
         }
     }
 
-    /// Returns the authored qualified attribute name.
+    /// Returns the normalized authored attribute name.
     #[must_use]
     pub const fn name(&self) -> &AttributeName {
         &self.name
@@ -195,49 +188,42 @@ impl Attribute {
     }
 }
 
-/// Case-sensitive qualified name of an attribute.
+/// HTML-normalized name of an attribute.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct AttributeName {
-    qualified: QualifiedName,
+    local: Box<str>,
+    span: SourceSpan,
 }
 
 impl AttributeName {
-    pub(super) fn new(prefix: Option<Box<str>>, local: Box<str>, span: SourceSpan) -> Self {
-        Self {
-            qualified: QualifiedName::new(prefix, local, span),
-        }
+    pub(super) const fn new(local: Box<str>, span: SourceSpan) -> Self {
+        Self { local, span }
     }
 
-    /// Returns the optional authored prefix without resolving namespaces.
-    #[must_use]
-    pub fn prefix(&self) -> Option<&str> {
-        self.qualified.prefix()
-    }
-
-    /// Returns the authored local name.
+    /// Returns the ASCII-lowercase HTML name.
     #[must_use]
     pub fn local(&self) -> &str {
-        self.qualified.local()
+        &self.local
     }
 
-    /// Returns the exact qualified-name span.
+    /// Returns the exact authored-name span.
     #[must_use]
     pub const fn span(&self) -> SourceSpan {
-        self.qualified.span()
+        self.span
     }
 
-    pub(super) fn same_qualified_name(&self, other: &Self) -> bool {
-        self.qualified.same_name(&other.qualified)
+    pub(super) fn same_name(&self, other: &Self) -> bool {
+        self.local == other.local
     }
 
     pub(super) fn display_name(&self) -> Box<str> {
-        self.to_string().into_boxed_str()
+        self.local.clone()
     }
 }
 
 impl fmt::Display for AttributeName {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.qualified.fmt(formatter)
+        formatter.write_str(&self.local)
     }
 }
 
@@ -267,48 +253,5 @@ impl TextNode {
 
     pub(crate) fn into_parts(self) -> (Box<str>, SourceSpan) {
         (self.text, self.span)
-    }
-}
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-struct QualifiedName {
-    prefix: Option<Box<str>>,
-    local: Box<str>,
-    span: SourceSpan,
-}
-
-impl QualifiedName {
-    fn new(prefix: Option<Box<str>>, local: Box<str>, span: SourceSpan) -> Self {
-        Self {
-            prefix,
-            local,
-            span,
-        }
-    }
-
-    fn prefix(&self) -> Option<&str> {
-        self.prefix.as_deref()
-    }
-
-    fn local(&self) -> &str {
-        &self.local
-    }
-
-    const fn span(&self) -> SourceSpan {
-        self.span
-    }
-
-    fn same_name(&self, other: &Self) -> bool {
-        self.prefix == other.prefix && self.local == other.local
-    }
-}
-
-impl fmt::Display for QualifiedName {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Some(prefix) = &self.prefix {
-            write!(formatter, "{prefix}:")?;
-        }
-
-        formatter.write_str(&self.local)
     }
 }

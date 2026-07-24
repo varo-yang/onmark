@@ -13,14 +13,14 @@ publish = false
 schema = ["dep:schemars"]
 
 [dependencies]
+html5gum = { version = "0.8.4", default-features = false }
 schemars = { version = "1.2.0", optional = true }
 serde = { version = "1.0", features = ["derive"] }
-xmlparser = { version = "0.13.6", default-features = false }
-
-[lints]
-workspace = true
 
 [dev-dependencies]
 proptest = { version = "1.11.0", default-features = false, features = ["std"] }
 serde_json = "1.0"
 syn = { version = "2.0.118", default-features = false, features = ["full", "parsing", "visit"] }
+
+[lints]
+workspace = true

@@ -44,18 +44,19 @@ impl<'a> FrameArtifactFingerprintSequence<'a> {
         &mut self,
     ) -> Result<Option<RawRgbaHash>, FrameArtifactError> {
         loop {
-            if let Some(reader) = self.reader.as_mut() {
-                if let Some(fingerprint) = reader.next_verified_fingerprint().await? {
-                    return Ok(Some(fingerprint));
-                }
+            let Some(reader) = self.reader.as_mut() else {
+                let Some(artifact) = self.artifacts.next() else {
+                    return Ok(None);
+                };
+                self.reader = Some(artifact.reader().await?);
+                continue;
+            };
+            let Some(fingerprint) = reader.next_verified_fingerprint().await? else {
                 self.reader = None;
                 continue;
-            }
-
-            let Some(artifact) = self.artifacts.next() else {
-                return Ok(None);
             };
-            self.reader = Some(artifact.reader().await?);
+
+            return Ok(Some(fingerprint));
         }
     }
 }

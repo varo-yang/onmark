@@ -219,14 +219,16 @@ impl<'a> Solver<'a> {
 
         for content in content {
             let is_primary = is_primary_content(&content);
-            if let Some(content) = self.prepare_content(content)? {
-                if let Some(end) = content.primary_end() {
-                    primary.include(end);
+            let Some(content) = self.prepare_content(content)? else {
+                if is_primary {
+                    primary.reject();
                 }
-                prepared.push(content);
-            } else if is_primary {
-                primary.reject();
+                continue;
+            };
+            if let Some(end) = content.primary_end() {
+                primary.include(end);
             }
+            prepared.push(content);
         }
 
         Ok(PreparedShot {

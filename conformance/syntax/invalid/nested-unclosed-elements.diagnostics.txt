@@ -1,10 +1,10 @@
 # onmark diagnostic test rendering; not a wire format
-ONM-SYNTAX-005 error @0:1..5 element <film> is not closed before the screenplay ends
-  help: add a closing </film> tag
-  related @0:20..20 the screenplay ends before this element is closed
-ONM-SYNTAX-005 error @0:7..12 element <scene> is not closed before the screenplay ends
-  help: add a closing </scene> tag
-  related @0:20..20 the screenplay ends before this element is closed
-ONM-SYNTAX-005 error @0:14..18 element <shot> is not closed before the screenplay ends
-  help: add a closing </shot> tag
-  related @0:20..20 the screenplay ends before this element is closed
+ONM-SYNTAX-005 error @0:1..8 element <om-film> is not closed before the screenplay ends
+  help: add a closing </om-film> tag
+  related @0:29..29 the screenplay ends before this element is closed
+ONM-SYNTAX-005 error @0:10..18 element <om-scene> is not closed before the screenplay ends
+  help: add a closing </om-scene> tag
+  related @0:29..29 the screenplay ends before this element is closed
+ONM-SYNTAX-005 error @0:20..27 element <om-shot> is not closed before the screenplay ends
+  help: add a closing </om-shot> tag
+  related @0:29..29 the screenplay ends before this element is closed

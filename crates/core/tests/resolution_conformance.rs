@@ -31,8 +31,13 @@ fn authored_general_audio_matches_canonical_resolution() {
 }
 
 #[test]
+fn native_html_attributes_and_nested_text_resolve_without_duplication() {
+    assert_valid_fixture("native-html");
+}
+
+#[test]
 fn attribute_and_reference_errors_match_stable_diagnostics() {
-    let source_path = fixture("resolution", "invalid/attribute-errors.onmark");
+    let source_path = fixture("resolution", "invalid/attribute-errors.html");
     let expected_path = fixture("resolution", "invalid/attribute-errors.diagnostics.txt");
     let report = resolve_fixture(&source_path);
 
@@ -42,7 +47,7 @@ fn attribute_and_reference_errors_match_stable_diagnostics() {
 
 #[test]
 fn authored_audio_errors_match_stable_diagnostics() {
-    let source_path = fixture("resolution", "invalid/audio-errors.onmark");
+    let source_path = fixture("resolution", "invalid/audio-errors.html");
     let expected_path = fixture("resolution", "invalid/audio-errors.diagnostics.txt");
     let report = resolve_fixture(&source_path);
 
@@ -52,7 +57,7 @@ fn authored_audio_errors_match_stable_diagnostics() {
 
 #[test]
 fn deferred_timing_attributes_remain_outside_gate_one() {
-    let source_path = fixture("resolution", "invalid/deferred-timing-attributes.onmark");
+    let source_path = fixture("resolution", "invalid/deferred-timing-attributes.html");
     let expected_path = fixture(
         "resolution",
         "invalid/deferred-timing-attributes.diagnostics.txt",
@@ -64,7 +69,7 @@ fn deferred_timing_attributes_remain_outside_gate_one() {
 }
 
 fn assert_valid_fixture(name: &str) {
-    let source_path = fixture("resolution", &format!("valid/{name}.onmark"));
+    let source_path = fixture("resolution", &format!("valid/{name}.html"));
     let expected_path = fixture("resolution", &format!("valid/{name}.resolved.txt"));
     let report = resolve_fixture(&source_path);
 

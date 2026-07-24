@@ -38,6 +38,10 @@ export type BrowserCommand =
 export type WireFrame = number;
 /**
  * Stable browser identity for one Timeline element or imported caption.
+ *
+ * Authored nodes use their renderable semantic preorder in the complete film.
+ * Unit projections retain that identity when earlier nodes are omitted, so a
+ * browser can bind any partition against the unchanged authored document.
  */
 export type BrowserNodeId = number;
 /**

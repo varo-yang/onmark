@@ -1,0 +1,97 @@
+{
+  "results": [
+    {
+      "caseId": "simple-hero",
+      "files": [
+        {
+          "path": "film.onmark",
+          "content": "<film>\n  <scene>\n    <shot>\n      <video src=\"media/hero.mp4\"/>\n      <title>Compile intent.</title>\n    </shot>\n  </scene>\n</film>\n"
+        },
+        {
+          "path": "film.css",
+          "content": ".onmark-film,\n.onmark-scene,\n.onmark-shot {\n  width: 100%;\n  height: 100%;\n}\n\n.onmark-shot {\n  position: relative;\n  overflow: hidden;\n  background: #050505;\n}\n\n.onmark-video {\n  width: 100%;\n  height: 100%;\n  object-fit: cover;\n  filter: brightness(0.48);\n}\n\n.onmark-title {\n  position: absolute;\n  left: 7vw;\n  bottom: 9vh;\n  margin: 0;\n  color: #fff;\n  font: 700 clamp(3rem, 8vw, 8rem)/0.95 sans-serif;\n}\n"
+        },
+        {
+          "path": "film.motion.ts",
+          "content": "import { gsapMotion } from \"onmark/motion/gsap\";\n\nexport const motion = gsapMotion({\n  title({ element, timeline }) {\n    timeline.from(element, {\n      opacity: 0,\n      y: 36,\n      duration: 0.45,\n      ease: \"power2.out\",\n    });\n  },\n});\n"
+        }
+      ]
+    },
+    {
+      "caseId": "three-beats",
+      "files": [
+        {
+          "path": "film.onmark",
+          "content": "<film>\n  <scene>\n    <shot id=\"story\">\n      <video src=\"media/a.mp4\"/>\n      <title>Story</title>\n    </shot>\n    <shot id=\"compile\">\n      <video src=\"media/b.mp4\"/>\n      <title>Compile</title>\n    </shot>\n    <shot id=\"render\">\n      <video src=\"media/c.mp4\"/>\n      <title>Render</title>\n    </shot>\n  </scene>\n</film>\n"
+        },
+        {
+          "path": "film.css",
+          "content": ".onmark-film,\n.onmark-scene,\n.onmark-shot {\n  width: 100%;\n  height: 100%;\n}\n\n.onmark-shot {\n  position: relative;\n  overflow: hidden;\n}\n\n#story {\n  background: #ff5a5f;\n}\n\n#compile {\n  background: #635bff;\n}\n\n#render {\n  background: #00a878;\n}\n\n.onmark-video {\n  width: 100%;\n  height: 100%;\n  object-fit: cover;\n  mix-blend-mode: multiply;\n}\n\n.onmark-title {\n  position: absolute;\n  left: 7vw;\n  bottom: 8vh;\n  margin: 0;\n  color: #fff;\n  font: 700 clamp(4rem, 12vw, 11rem)/0.9 sans-serif;\n}\n"
+        },
+        {
+          "path": "film.motion.ts",
+          "content": "import { gsapMotion } from \"onmark/motion/gsap\";\n\nexport const motion = gsapMotion({\n  shot({ element, timeline }) {\n    timeline.fromTo(\n      element,\n      { clipPath: \"inset(0 100% 0 0)\" },\n      {\n        clipPath: \"inset(0 0% 0 0)\",\n        duration: 0.55,\n        ease: \"power2.inOut\",\n      },\n    );\n  },\n});\n"
+        }
+      ]
+    },
+    {
+      "caseId": "cue-cta",
+      "files": [
+        {
+          "path": "film.onmark",
+          "content": "<film>\n  <cues>\n    <cue id=\"offer\" time=\"2s\"/>\n  </cues>\n  <scene>\n    <shot>\n      <video src=\"media/offer.mp4\"/>\n      <title>30% off</title>\n      <cta cue=\"offer\">Buy now</cta>\n    </shot>\n  </scene>\n</film>\n"
+        },
+        {
+          "path": "film.css",
+          "content": ".onmark-film,\n.onmark-scene,\n.onmark-shot {\n  width: 100%;\n  height: 100%;\n}\n\n.onmark-shot {\n  position: relative;\n  overflow: hidden;\n  background: #111;\n}\n\n.onmark-video {\n  width: 100%;\n  height: 100%;\n  object-fit: cover;\n}\n\n.onmark-title {\n  position: absolute;\n  left: 7vw;\n  bottom: 22vh;\n  margin: 0;\n  color: #fff;\n  font: 800 clamp(4rem, 10vw, 9rem)/1 sans-serif;\n}\n\n.onmark-call-to-action {\n  position: absolute;\n  left: 7vw;\n  bottom: 9vh;\n  padding: 1rem 2rem;\n  border-radius: 999px;\n  background: #e32636;\n  color: #fff;\n  font: 700 1.4rem/1 sans-serif;\n}\n"
+        },
+        {
+          "path": "film.motion.ts",
+          "content": "import { gsapMotion } from \"onmark/motion/gsap\";\n\nexport const motion = gsapMotion({\n  callToAction({ element, timeline }) {\n    timeline.from(element, {\n      opacity: 0,\n      scale: 0.8,\n      duration: 0.4,\n      ease: \"back.out(1.7)\",\n    });\n  },\n});\n"
+        }
+      ]
+    },
+    {
+      "caseId": "nested-emphasis",
+      "files": [
+        {
+          "path": "film.onmark",
+          "content": "<film>\n  <scene>\n    <shot>\n      <video src=\"media/native.mp4\"/>\n    </shot>\n  </scene>\n</film>\n"
+        },
+        {
+          "path": "presentation.ts",
+          "content": "import { definePresentation } from \"@onmark/authoring\";\nimport { h } from \"@onmark/runtime\";\n\nexport const presentation = definePresentation({\n  shot() {\n    return h(\n      \"h1\",\n      { className: \"onmark-title\" },\n      \"Write \",\n      h(\"span\", { className: \"accent\" }, \"native.\"),\n      \" Render exact.\",\n    );\n  },\n});\n"
+        },
+        {
+          "path": "film.css",
+          "content": ".onmark-film,\n.onmark-scene,\n.onmark-shot {\n  width: 100%;\n  height: 100%;\n}\n\n.onmark-shot {\n  position: relative;\n  overflow: hidden;\n  background: #080808;\n}\n\n.onmark-video {\n  width: 100%;\n  height: 100%;\n  object-fit: cover;\n  filter: brightness(0.42);\n}\n\n.onmark-title {\n  position: absolute;\n  left: 7vw;\n  bottom: 9vh;\n  margin: 0;\n  color: #fff;\n  font: 700 clamp(3rem, 8vw, 8rem)/1 sans-serif;\n}\n\n.onmark-title .accent {\n  color: #b7ff3c;\n}\n"
+        },
+        {
+          "path": "film.motion.ts",
+          "content": "import { gsapMotion } from \"onmark/motion/gsap\";\n\nexport const motion = gsapMotion({\n  title({ element, timeline }) {\n    timeline.from(element, {\n      opacity: 0,\n      y: 24,\n      duration: 0.45,\n      ease: \"power2.out\",\n    });\n  },\n  selectors: {\n    \".accent\"({ element, timeline }) {\n      timeline.from(element, {\n        opacity: 0,\n        scale: 0.7,\n        duration: 0.35,\n        ease: \"back.out(1.8)\",\n      });\n    },\n  },\n});\n"
+        }
+      ]
+    },
+    {
+      "caseId": "decorative-layer",
+      "files": [
+        {
+          "path": "film.onmark",
+          "content": "<film>\n  <scene>\n    <shot>\n      <video src=\"media/grid.mp4\"/>\n      <title>No tracks</title>\n    </shot>\n  </scene>\n</film>\n"
+        },
+        {
+          "path": "presentation.ts",
+          "content": "import { definePresentation } from \"@onmark/authoring\";\nimport { h } from \"@onmark/runtime\";\n\nexport const presentation = definePresentation({\n  shot() {\n    return h(\"div\", {\n      className: \"grid\",\n      \"aria-hidden\": \"true\",\n    });\n  },\n});\n"
+        },
+        {
+          "path": "film.css",
+          "content": ".onmark-film,\n.onmark-scene,\n.onmark-shot {\n  width: 100%;\n  height: 100%;\n}\n\n.onmark-shot {\n  position: relative;\n  overflow: hidden;\n  background: #070b14;\n}\n\n.onmark-video {\n  width: 100%;\n  height: 100%;\n  object-fit: cover;\n}\n\n.grid {\n  position: absolute;\n  inset: 0;\n  z-index: 1;\n  background-image:\n    linear-gradient(rgba(94, 234, 212, 0.28) 1px, transparent 1px),\n    linear-gradient(90deg, rgba(94, 234, 212, 0.28) 1px, transparent 1px);\n  background-size: 64px 64px;\n  pointer-events: none;\n}\n\n.onmark-title {\n  position: absolute;\n  z-index: 2;\n  left: 7vw;\n  bottom: 9vh;\n  margin: 0;\n  color: #fff;\n  font: 800 clamp(4rem, 11vw, 10rem)/0.95 sans-serif;\n}\n"
+        },
+        {
+          "path": "film.motion.ts",
+          "content": "import { gsapMotion } from \"onmark/motion/gsap\";\n\nexport const motion = gsapMotion({\n  selectors: {\n    \".grid\"({ element, timeline }) {\n      timeline.from(element, {\n        opacity: 0,\n        duration: 0.7,\n        ease: \"power1.out\",\n      });\n    },\n  },\n});\n"
+        }
+      ]
+    }
+  ]
+}

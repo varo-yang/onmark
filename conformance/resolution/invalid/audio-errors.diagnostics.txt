@@ -1,11 +1,11 @@
 # onmark diagnostic test rendering; not a wire format
-ONM-ATTR-002 error @0:9..41 element <music> requires the "src" attribute
-  help: add src="..." to <music>
-ONM-ATTR-003 error @0:22..26 audio gain "125%" is invalid: audio gain must be between 0% and 100%
+ONM-ATTR-002 error @0:12..56 element <om-music> requires the "src" attribute
+  help: add src="..." to <om-music>
+ONM-ATTR-003 error @0:28..32 audio gain "125%" is invalid: audio gain must be between 0% and 100%
   help: use an exact linear gain from 0% through 100%
-ONM-ATTR-001 error @0:28..33 attribute "delay" is not allowed on <music>
+ONM-ATTR-001 error @0:34..39 attribute "delay" is not allowed on <om-music>
   help: remove the "delay" attribute
-ONM-ATTR-003 error @0:93..93 attribute "src" is invalid: asset reference cannot be empty
+ONM-ATTR-003 error @0:117..117 attribute "src" is invalid: asset reference cannot be empty
   help: provide a screenplay-relative path for "src"
-ONM-ATTR-003 error @0:101..105 audio gain "1.5%" is invalid: audio gain must use the exact spelling integer%
+ONM-ATTR-003 error @0:125..129 audio gain "1.5%" is invalid: audio gain must use the exact spelling integer%
   help: use an exact linear gain from 0% through 100%

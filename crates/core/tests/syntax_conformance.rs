@@ -13,10 +13,22 @@ use conformance::{assert_or_update, fixture, render_diagnostics, span};
 
 #[test]
 fn valid_source_matches_canonical_syntax_rendering() {
-    let source_path = fixture("syntax", "valid/minimal.onmark");
+    let source_path = fixture("syntax", "valid/minimal.html");
     let expected_path = fixture("syntax", "valid/minimal.ast.txt");
     let source =
         fs::read_to_string(&source_path).expect("the valid syntax fixture must be readable");
+    let report = compiler::parse(SourceId::new(0), &source);
+
+    assert!(report.diagnostics().is_empty());
+    assert_or_update(&expected_path, &render_document(report.document()));
+}
+
+#[test]
+fn native_html_preserves_authored_dom_and_semantic_spans() {
+    let source_path = fixture("syntax", "valid/native-html.html");
+    let expected_path = fixture("syntax", "valid/native-html.ast.txt");
+    let source =
+        fs::read_to_string(&source_path).expect("the native HTML fixture must be readable");
     let report = compiler::parse(SourceId::new(0), &source);
 
     assert!(report.diagnostics().is_empty());
@@ -34,8 +46,8 @@ fn nested_unclosed_elements_match_stable_diagnostics() {
 }
 
 #[test]
-fn a_doctype_internal_subset_produces_one_diagnostic() {
-    assert_invalid_fixture("doctype-internal-subset");
+fn a_non_html_doctype_produces_one_diagnostic() {
+    assert_invalid_fixture("unsupported-doctype");
 }
 
 #[test]
@@ -49,7 +61,7 @@ fn excessive_nesting_stops_at_the_bounded_syntax_boundary() {
 }
 
 fn assert_invalid_fixture(name: &str) {
-    let source_path = fixture("syntax", &format!("invalid/{name}.onmark"));
+    let source_path = fixture("syntax", &format!("invalid/{name}.html"));
     let expected_path = fixture("syntax", &format!("invalid/{name}.diagnostics.txt"));
     let source =
         fs::read_to_string(&source_path).expect("the invalid syntax fixture must be readable");

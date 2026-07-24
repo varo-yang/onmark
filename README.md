@@ -54,7 +54,7 @@ browser-owned video and unknown authored effects remain per-frame.
 The completed foundation includes the pure compiler and versioned wire types in
 `onmark-core`; bounded ffprobe and strict SubRip/WebVTT/ASS normalization in
 `onmark-media`; deterministic video and overlay presentation in
-`@onmark/runtime`; semantic DOM bindings in `@onmark/authoring`; immutable
+`@onmark/runtime`; authored-HTML bindings in `@onmark/authoring`; immutable
 presentation artifacts in `@onmark/bundler`; the typed Chromium-to-FFmpeg
 executor in `onmark-render`; and the `onmark-cli` composition root. A production
 deployment workflow and infrastructure definition remain deliberately absent;
@@ -62,37 +62,27 @@ there is still no queue, lease system, scheduler, or coordinator.
 
 ## Render
 
-The native command needs only the screenplay as authored input and writes a
-no-clobber `renders/<name>.mp4` by default. A same-stem stylesheet such as
-`film.css` styles the neutral semantic DOM projection, and an optional
-`film.motion.ts` exports vendor-neutral motion assembled from adapters such as
-`onmark/motion/gsap`.
-`--presentation` remains the explicit escape hatch for unrestricted custom
-browser code:
+The native command needs one authored HTML document and writes a no-clobber
+`renders/<name>.mp4` by default. Onmark custom elements carry screenplay intent;
+ordinary HTML and inline CSS carry presentation. An optional inline
+`type="module" data-om-motion` script exports vendor-neutral motion
+assembled from adapters such as `onmark/motion/gsap`:
 
 ```bash
-onmark render film.onmark
-onmark render film.onmark --presentation browser.ts --output review.mp4
-onmark render film.onmark --fps 30000/1001 --width 1920 --height 1080
-onmark render film.onmark --subtitle captions.vtt
+onmark render film.html
+onmark render film.html --output review.mp4
+onmark render film.html --fps 30000/1001 --width 1920 --height 1080
+onmark render film.html --subtitle captions.vtt
 ```
 
 `--subtitle` imports strict UTF-8 `.srt`, `.vtt`, or `.ass` files without adding
 external-format syntax to the screenplay. Invalid files produce diagnostics
 against their own path and byte spans before browser or media processes start.
 
-Presentation capabilities are not command-line assumptions. The built-in
-semantic DOM without authored CSS or motion is admitted for random access;
-stylesheets, motion, and custom presentations remain sequential. The same
-product-owned neutral presentation also permits native primary-media
-composition and proves that its browser foreground changes only at solved
-placement boundaries. Planning selects native composition only when every
-partition proves the admitted layout and color facts, and selects sparse
-browser capture only when Chromium owns no video pixels. Otherwise the
-execution plan records complete Chromium composition or per-frame capture
-before launch. Stronger authored capabilities belong to conformance-admitted
-adapters and immutable bundle metadata; neither path is inferred from source
-text or observed pixel equality.
+Presentation capabilities are not command-line assumptions. Authored HTML is
+conservatively sequential, browser-composited, and captured per frame. Stronger
+capabilities belong to conformance-admitted artifacts and immutable bundle
+metadata; they are never inferred from source text or observed pixel equality.
 
 The desktop artifact is admitted on macOS arm64, Linux x64, and Windows x64,
 although it has not yet been published to npm. It exposes one `onmark` package
@@ -163,6 +153,7 @@ pnpm typecheck
 pnpm test
 cargo xtask schema --check
 cargo xtask eval audio
+cargo xtask eval html
 ```
 
 ## Design documents

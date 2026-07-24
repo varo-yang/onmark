@@ -1,6 +1,0 @@
-<film id="short-music">
-  <music src="sting.wav" />
-  <scene>
-    <shot duration="2s" />
-  </scene>
-</film>

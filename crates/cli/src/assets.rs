@@ -295,13 +295,13 @@ mod tests {
     #[test]
     fn discovers_narrative_and_general_audio_assets() {
         let source = r#"
-            <film>
-              <music src="bed.wav" />
-              <scene><shot duration="1s">
-                <vo src="voice.wav">Read me.</vo>
-                <sfx src="hit.wav" />
-              </shot></scene>
-            </film>
+            <om-film>
+              <om-music src="bed.wav"></om-music>
+              <om-scene><om-shot duration="1s">
+                <om-vo src="voice.wav">Read me.</om-vo>
+                <om-sfx src="hit.wav"></om-sfx>
+              </om-shot></om-scene>
+            </om-film>
         "#;
         let (document, diagnostics) = compiler::parse(SourceId::new(0), source).into_parts();
         assert!(diagnostics.is_empty());

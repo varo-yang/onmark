@@ -1,0 +1,18 @@
+<om-film bogus="x">
+  <om-cues>
+    <om-cue id="used" time="1s"></om-cue>
+    <om-cue id="unused" time="2s"></om-cue>
+    <om-cue id="bad-time" time="1.0000000000s"></om-cue>
+    <om-cue id="missing-time"></om-cue>
+    <om-cue time="4s"></om-cue>
+  </om-cues>
+  <om-scene>
+    <om-shot duration="3frames">
+      <video src="" delay="1.0000001ms" mystery="x"></video>
+      <om-title cue="missing" delay="1s" strange="x">Broken</om-title>
+      <om-cta cue="used">Used</om-cta>
+      <om-cta cue="bad ref">Malformed reference</om-cta>
+    </om-shot>
+    <om-shot duration="0s"></om-shot>
+  </om-scene>
+</om-film>

@@ -1,15 +1,15 @@
 # onmark resolution test rendering; not a wire format
 film id=-
   cues id=-
-    cue id=anchor id@0:29..35 time=0s time@0:43..45
+    cue id=anchor id@0:38..44 time=0s time@0:52..54
   scene id=-
     shot id=- duration=3.25s
       video id=- src=clip.mp4 delay=0.5s
       vo id=- src=voice.mp3 delay=1.5s
-        text "Narration" @0:182..191
-      title id=- start=delay:0.25s
-        text "Later" @0:224..229
-      cta id=- start=cue:anchor
-        text "Aligned" @0:262..269
+        text "Narration" @0:216..225
+      om-title id=- start=delay:0.25s
+        text "Later" @0:264..269
+      om-cta id=- start=cue:anchor
+        text "Aligned" @0:308..315
 index
-  anchor -> cue @0:29..35
+  anchor -> om-cue @0:38..44

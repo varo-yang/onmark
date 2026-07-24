@@ -19,7 +19,7 @@ use conformance::{assert_or_update, fixture};
 
 #[test]
 fn independent_shots_form_separate_scoped_units() {
-    let source_path = fixture("render-graph", "valid/two-independent-shots.onmark");
+    let source_path = fixture("render-graph", "valid/two-independent-shots.html");
     let expected_path = fixture("render-graph", "valid/two-independent-shots.plan.txt");
     let assets = frozen_assets([
         ("opening.mp4", "1s"),

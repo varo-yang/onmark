@@ -103,7 +103,8 @@ fn grade_output(
 }
 
 fn extract_facts(arm: Arm, screenplay: &str) -> Result<FilmFacts, InvalidScreenplay> {
-    let report = compiler::parse(SourceId::new(0), screenplay);
+    let normalized = expand_empty_elements(screenplay);
+    let report = compiler::parse(SourceId::new(0), &normalized);
     let (document, diagnostics) = report.into_parts();
     if !diagnostics.is_empty() {
         return Err(InvalidScreenplay::new(
@@ -152,6 +153,25 @@ fn extract_facts(arm: Arm, screenplay: &str) -> Result<FilmFacts, InvalidScreenp
     }
 
     Ok(facts)
+}
+
+fn expand_empty_elements(source: &str) -> String {
+    let mut expanded = source.to_owned();
+    let mut search_from = 0;
+    while let Some(relative_end) = expanded[search_from..].find("/>") {
+        let end = search_from + relative_end;
+        let Some(start) = expanded[..end].rfind('<') else {
+            break;
+        };
+        let name = expanded[start + 1..end]
+            .split_ascii_whitespace()
+            .next()
+            .unwrap_or_default()
+            .to_owned();
+        expanded.replace_range(end..end + 2, &format!("></{name}>"));
+        search_from = end + name.len() + 3;
+    }
+    expanded
 }
 
 fn extract_scene(
@@ -265,12 +285,6 @@ fn elements<'a>(nodes: &'a [Node], parent: &str) -> Result<Vec<&'a Element>, Inv
     for node in nodes {
         match node {
             Node::Element(element) => {
-                if element.name().prefix().is_some() {
-                    return Err(InvalidScreenplay::new(format!(
-                        "qualified element <{}> is not part of the evaluation language",
-                        element.name(),
-                    )));
-                }
                 if element.name().local() == "cta" {
                     validate_cta(element)?;
                 }
@@ -322,7 +336,7 @@ fn only_element<'a>(nodes: &'a [Node], parent: &str) -> Result<&'a Element, Inva
 }
 
 fn require_name(element: &Element, expected: &str) -> Result<(), InvalidScreenplay> {
-    if element.name().prefix().is_none() && element.name().local() == expected {
+    if element.name().local() == expected {
         return Ok(());
     }
     Err(InvalidScreenplay::new(format!(
@@ -333,7 +347,7 @@ fn require_name(element: &Element, expected: &str) -> Result<(), InvalidScreenpl
 
 fn require_attributes(element: &Element, allowed: &[&str]) -> Result<(), InvalidScreenplay> {
     for attribute in element.attributes() {
-        if attribute.name().prefix().is_some() || !allowed.contains(&attribute.name().local()) {
+        if !allowed.contains(&attribute.name().local()) {
             return Err(InvalidScreenplay::new(format!(
                 "unexpected attribute {} on <{}>",
                 attribute.name(),
@@ -366,11 +380,11 @@ fn optional_attribute<'a>(element: &'a Element, name: &str) -> Option<&'a str> {
     element
         .attributes()
         .iter()
-        .find_map(|attribute| unqualified(attribute, name).then_some(attribute.value()))
+        .find_map(|attribute| attribute_named(attribute, name).then_some(attribute.value()))
 }
 
-fn unqualified(attribute: &Attribute, name: &str) -> bool {
-    attribute.name().prefix().is_none() && attribute.name().local() == name
+fn attribute_named(attribute: &Attribute, name: &str) -> bool {
+    attribute.name().local() == name
 }
 
 fn unexpected_element(name: &str, parent: &str) -> InvalidScreenplay {

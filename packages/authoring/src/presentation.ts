@@ -1,4 +1,4 @@
-// Semantic DOM projection for solved film, scene, shot, and content facts.
+// Authored-HTML bindings for solved film, scene, shot, and content facts.
 // Rust owns structure and timing; this module owns browser node lifetimes.
 
 import type {
@@ -24,121 +24,141 @@ import {
   type PresentationTargetKind,
 } from "./motion.js";
 
-// ── Public contract ──
-
-/** Stable semantic classes emitted by the DOM authoring surface. */
-export const PRESENTATION_CLASSES = Object.freeze({
-  film: "onmark-film",
-  scene: "onmark-scene",
-  shot: "onmark-shot",
-  video: "onmark-video",
-  overlay: "onmark-overlay",
-  title: "onmark-title",
-  callToAction: "onmark-call-to-action",
-  caption: "onmark-caption",
+const ELEMENTS = Object.freeze({
+  callToAction: "om-cta",
+  caption: "om-caption",
+  film: "om-film",
+  scene: "om-scene",
+  shot: "om-shot",
+  title: "om-title",
+  video: "video",
 });
+
+const VISIBILITY_RULE = [
+  "[data-om-node][hidden] { display: none !important; }",
+  "om-cues, om-cue, om-music, om-sfx, om-vo {",
+  "  display: none !important;",
+  "}",
+].join("\n");
+
+// ── Public contract
 
 /** Resolves one immutable video placement to its materialized browser source. */
 export type VideoSource = (placement: RuntimeVideo) => string;
 
-/** Browser effects required to project solved facts into one document. */
+/** Browser effects required to bind solved facts onto authored HTML. */
 export interface DomPresentationOptions {
   readonly document: Document;
   readonly motion?: PresentationExtension;
   readonly videoSource: VideoSource;
 }
 
-/** Creates deterministic semantic DOM bindings without owning visual design. */
+/** Binds solved facts to the semantic elements already present in the document. */
 export function createDomPresentationBindings(
   options: DomPresentationOptions,
 ): PresentationBindings {
-  const projection = new DomProjection(options.document, options.videoSource);
+  const document = new AuthoredDocument(options.document, options.videoSource);
   const motion =
     options.motion === undefined ? undefined : ownExtension(options.motion);
   const bindings: PresentationBindings = {
-    bindFilm: projection.bindFilm.bind(projection),
-    bindScene: projection.bindScene.bind(projection),
-    bindShot: projection.bindShot.bind(projection),
-    bindVideo: projection.bindVideo.bind(projection),
-    bindOverlay: projection.bindOverlay.bind(projection),
+    bindFilm: document.bindFilm.bind(document),
+    bindScene: document.bindScene.bind(document),
+    bindShot: document.bindShot.bind(document),
+    bindVideo: document.bindVideo.bind(document),
+    bindOverlay: document.bindOverlay.bind(document),
     async bindExtensions(plan) {
       if (motion === undefined) {
         return EMPTY_PRESENTATION_EXTENSIONS;
       }
-      const extensions = await motion.bind(projection.motionContext(plan));
+      const extensions = await motion.bind(document.motionContext(plan));
       return ownExtensions(extensions);
     },
   };
   return Object.freeze(bindings);
 }
 
-// ── Semantic projection ──
+// ── Binding lifecycle
 
-class DomProjection {
+/** Single mutable owner of authored-node admission and runtime decoration. */
+class AuthoredDocument {
   readonly #document: Document;
-  readonly #elements = new Map<number, HTMLElement>();
+  readonly #nodes: AuthoredNodeIndex;
   readonly #targets: PresentationTarget[] = [];
   readonly #videoSource: VideoSource;
 
   constructor(document: Document, videoSource: VideoSource) {
     this.#document = document;
+    this.#nodes = collectAuthoredNodes(document);
     this.#videoSource = videoSource;
   }
 
   bindFilm(node: RuntimeNode): ContainerPresentation {
-    const element = this.#document.createElement("main");
-    this.#bindNode(element, node, PRESENTATION_CLASSES.film);
-    this.#document.body.append(element);
+    const element = requiredNode(this.#nodes, node, "film", ELEMENTS.film);
+    const visibility = visibilityStyle(this.#document);
+    const bound = bindElement(element, node, () => visibility.remove());
     this.#record("film", element, node, { start: 0, end: 0 });
-    return presentation(element);
+    return bound;
   }
 
   bindScene(scene: RuntimeScene): ContainerPresentation {
-    const element = this.#document.createElement("section");
-    this.#bindNode(element, scene.node, PRESENTATION_CLASSES.scene);
-    this.#film().append(element);
+    const element = requiredNode(
+      this.#nodes,
+      scene.node,
+      "scene",
+      ELEMENTS.scene,
+    );
+    const bound = bindElement(element, scene.node);
     this.#record("scene", element, scene.node, scene.interval);
-    return presentation(element);
+    return bound;
   }
 
   bindShot(shot: RuntimeShot): ContainerPresentation {
-    const element = this.#document.createElement("article");
-    this.#bindNode(element, shot.node, PRESENTATION_CLASSES.shot);
-    this.#parent(shot.sceneId).append(element);
+    const element = requiredNode(this.#nodes, shot.node, "shot", ELEMENTS.shot);
+    const bound = bindElement(element, shot.node);
     this.#record("shot", element, shot.node, shot.interval);
-    return presentation(element);
+    return bound;
   }
 
   bindVideo(placement: RuntimeVideo): VideoPresentation {
-    const element = this.#document.createElement("video");
-    this.#bindNode(element, placement.node, PRESENTATION_CLASSES.video);
+    const element = requiredNode(
+      this.#nodes,
+      placement.node,
+      "video",
+      ELEMENTS.video,
+    ) as HTMLVideoElement;
+    const bound = bindElement(element, placement.node);
     element.muted = true;
     element.playsInline = true;
-    this.#parent(placement.shotId).append(element);
     this.#record("video", element, placement.node, placement.interval);
-
     return {
-      ...presentation(element),
+      ...bound,
       element,
       source: this.#videoSource(placement),
     };
   }
 
   bindOverlay(placement: RuntimeOverlay): OverlayPresentation {
-    const element = this.#document.createElement(overlayTag(placement.kind));
-    const kind = placement.kind;
-    const className = `${PRESENTATION_CLASSES.overlay} ${overlayClass(kind)}`;
-    this.#bindNode(element, placement.node, className);
-    element.textContent = placement.text;
-    this.#overlayParent(placement).append(element);
-    this.#record(kind, element, placement.node, placement.interval);
-    return presentation(element);
+    if (placement.kind === "caption") {
+      return this.#bindCaption(placement);
+    }
+
+    const expected =
+      placement.kind === "title" ? ELEMENTS.title : ELEMENTS.callToAction;
+    const element = requiredNode(
+      this.#nodes,
+      placement.node,
+      placement.kind,
+      expected,
+    );
+    const bound = bindElement(element, placement.node);
+    this.#record(placement.kind, element, placement.node, placement.interval);
+    return bound;
   }
 
   motionContext(plan: RuntimePlan): PresentationExtensionContext {
     const film = this.#targets[0];
     if (film === undefined || film.kind !== "film") {
-      throw new Error("semantic DOM motion requires a bound film root");
+      throw new Error("authored HTML motion requires a bound film root");
     }
     const targets = this.#targets.map((target) =>
       target.kind === "film"
@@ -151,15 +171,13 @@ class DomProjection {
     });
   }
 
-  #bindNode(element: HTMLElement, node: RuntimeNode, className: string): void {
-    element.className = className;
-    element.dataset["onmarkNode"] = String(node.nodeId);
-    if (node.authoredId !== undefined && node.authoredId !== null) {
-      element.id = node.authoredId;
-      element.dataset["onmarkId"] = node.authoredId;
-    }
-    element.hidden = true;
-    this.#elements.set(node.nodeId, element);
+  #bindCaption(placement: RuntimeOverlay): OverlayPresentation {
+    const element = this.#document.createElement(ELEMENTS.caption);
+    element.textContent = placement.text;
+    this.#nodes.film.append(element);
+    const bound = bindElement(element, placement.node, () => element.remove());
+    this.#record("caption", element, placement.node, placement.interval);
+    return bound;
   }
 
   #record(
@@ -170,56 +188,124 @@ class DomProjection {
   ): void {
     this.#targets.push(Object.freeze({ kind, element, interval, node }));
   }
-
-  #film(): HTMLElement {
-    const film = this.#targets[0]?.element;
-    if (film === undefined) {
-      throw new Error("semantic DOM scene requires a bound film root");
-    }
-    return film;
-  }
-
-  #parent(nodeId: number): HTMLElement {
-    const parent = this.#elements.get(nodeId);
-    if (parent === undefined) {
-      throw new Error(`semantic DOM parent ${nodeId} is not bound`);
-    }
-    return parent;
-  }
-
-  #overlayParent(placement: RuntimeOverlay): HTMLElement {
-    if (placement.shotId === undefined || placement.shotId === null) {
-      return this.#film();
-    }
-    return this.#parent(placement.shotId);
-  }
 }
 
-// ── Browser elements ──
+// ── Authored identity
 
-function presentation(element: HTMLElement): ContainerPresentation {
+interface AuthoredNodeIndex {
+  readonly film: HTMLElement;
+  readonly elements: readonly HTMLElement[];
+}
+
+/**
+ * Indexes renderable semantic elements by the compiler's stable preorder.
+ *
+ * A partition retains whole-film node identities while omitting unrelated
+ * placements. Direct lookup therefore remains correct when a worker renders a
+ * later partition from the complete authored document.
+ */
+function collectAuthoredNodes(document: Document): AuthoredNodeIndex {
+  const films = semanticChildren(document.body, ELEMENTS.film);
+  if (films.length !== 1) {
+    throw new Error("authored HTML requires exactly one om-film element");
+  }
+  const film = films[0]!;
+  const indexed = [film];
+  for (const scene of semanticChildren(film, ELEMENTS.scene)) {
+    indexed.push(scene);
+    for (const shot of semanticChildren(scene, ELEMENTS.shot)) {
+      indexed.push(shot);
+      indexed.push(
+        ...semanticChildren(
+          shot,
+          `${ELEMENTS.video}, ${ELEMENTS.title}, ${ELEMENTS.callToAction}`,
+        ),
+      );
+    }
+  }
+  return Object.freeze({ film, elements: Object.freeze(indexed) });
+}
+
+function requiredNode(
+  nodes: AuthoredNodeIndex,
+  node: RuntimeNode,
+  role: string,
+  selector: string,
+): HTMLElement {
+  const element = nodes.elements[node.nodeId];
+  if (element === undefined) {
+    throw new Error(
+      `authored HTML has no ${role} element for node ${node.nodeId}`,
+    );
+  }
+  if (!element.matches(selector)) {
+    throw new Error(
+      `authored HTML node ${node.nodeId} is not a ${role} element`,
+    );
+  }
+  return element;
+}
+
+function semanticChildren(parent: Element, selector: string): HTMLElement[] {
+  return elements(parent.children).filter((element) =>
+    element.matches(selector),
+  );
+}
+
+function elements(collection: ArrayLike<Element>): HTMLElement[] {
+  return Array.from(collection, (element) => element as HTMLElement);
+}
+
+// ── Browser decoration
+
+function bindElement(
+  element: HTMLElement,
+  node: RuntimeNode,
+  release?: () => void,
+): ContainerPresentation {
+  requireAuthoredId(element, node);
+  const previousNode = element.dataset["omNode"];
+  const previouslyHidden = element.hidden;
+  element.dataset["omNode"] = String(node.nodeId);
+  element.hidden = true;
+
   return {
     element,
     setVisible(visible): void {
       element.hidden = !visible;
     },
     dispose(): void {
-      element.remove();
+      element.hidden = previouslyHidden;
+      restoreDataset(element, "omNode", previousNode);
+      release?.();
     },
   };
 }
 
-function overlayTag(kind: RuntimeOverlay["kind"]): "div" | "h1" {
-  return kind === "title" ? "h1" : "div";
+function requireAuthoredId(element: HTMLElement, node: RuntimeNode): void {
+  const expected = node.authoredId ?? "";
+  if (element.id !== expected) {
+    throw new Error(
+      `authored HTML node identity differs: expected "${expected}", found "${element.id}"`,
+    );
+  }
 }
 
-function overlayClass(kind: RuntimeOverlay["kind"]): string {
-  switch (kind) {
-    case "title":
-      return PRESENTATION_CLASSES.title;
-    case "callToAction":
-      return PRESENTATION_CLASSES.callToAction;
-    case "caption":
-      return PRESENTATION_CLASSES.caption;
+function restoreDataset(
+  element: HTMLElement,
+  name: string,
+  value: string | undefined,
+): void {
+  if (value === undefined) {
+    delete element.dataset[name];
+    return;
   }
+  element.dataset[name] = value;
+}
+
+function visibilityStyle(document: Document): HTMLStyleElement {
+  const style = document.createElement("style");
+  style.textContent = VISIBILITY_RULE;
+  document.head.append(style);
+  return style;
 }

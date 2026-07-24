@@ -21,7 +21,7 @@ use onmark_render::{
 
 use crate::arguments::{RenderArgs, source_directory};
 use crate::assets::FrozenCatalog;
-use crate::bundler::{BundleArtifact, PresentationBundler, PresentationSource};
+use crate::bundler::{BundleArtifact, PresentationBundler};
 use crate::compilation;
 use crate::diagnostic;
 use crate::environment::Executables;
@@ -127,7 +127,6 @@ pub(super) async fn run(args: RenderArgs) -> Result<RenderOutcome, CliError> {
         None => None,
     };
 
-    let presentation = presentation_source(&args)?;
     reject_existing_output(&output)?;
     let executables = Executables::discover(&args).await?;
     create_output_directory(&output)?;
@@ -150,7 +149,7 @@ pub(super) async fn run(args: RenderArgs) -> Result<RenderOutcome, CliError> {
     let timeline = compiler::import_captions(timeline, caption_track)?;
 
     let bundle = PresentationBundler::new(executables.bundler)
-        .bundle(&presentation)
+        .bundle(&source, source_directory(&args.screenplay))
         .await?;
     let (partitions, units) = materialize_units(&timeline, profile, &bundle, frozen)?;
 
@@ -221,36 +220,6 @@ fn create_output_directory(output: &Path) -> Result<(), CliError> {
         .filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(parent).map_err(|error| CliError::create_output_directory(parent, error))
-}
-
-fn presentation_source(args: &RenderArgs) -> Result<PresentationSource, CliError> {
-    if let Some(presentation) = args.presentation() {
-        validate_presentation_file(presentation)?;
-        return Ok(PresentationSource::Custom(presentation.to_owned()));
-    }
-
-    Ok(PresentationSource::SemanticDom {
-        stylesheet: optional_presentation_file(args.stylesheet())?,
-        motion: optional_presentation_file(args.motion())?,
-    })
-}
-
-fn optional_presentation_file(path: PathBuf) -> Result<Option<PathBuf>, CliError> {
-    match fs::metadata(&path) {
-        Ok(metadata) if metadata.is_file() => Ok(Some(path)),
-        Ok(_) => Err(CliError::InvalidPresentationSource(path)),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(CliError::inspect_presentation_source(&path, error)),
-    }
-}
-
-fn validate_presentation_file(presentation: &Path) -> Result<(), CliError> {
-    let metadata = fs::metadata(presentation)
-        .map_err(|error| CliError::inspect_presentation_source(presentation, error))?;
-    if !metadata.is_file() {
-        return Err(CliError::InvalidPresentationSource(presentation.to_owned()));
-    }
-    Ok(())
 }
 
 fn ffprobe(executable: PathBuf) -> Ffprobe {

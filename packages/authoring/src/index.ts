@@ -8,7 +8,6 @@ export {
   type PresentationTargetKind,
 } from "./motion.js";
 export {
-  PRESENTATION_CLASSES,
   createDomPresentationBindings,
   type DomPresentationOptions,
   type VideoSource,

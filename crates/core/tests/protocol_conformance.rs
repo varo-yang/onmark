@@ -188,7 +188,13 @@ fn gate_one_timeline() -> (TimelineIr, FrozenAssetId, FrameRate) {
     )]);
     let parsed = compiler::parse(
         SourceId::new(0),
-        r#"<film><scene><shot><video src="opening.mp4" /><title delay="500ms">Opening</title><cta delay="1.5s">Buy now</cta></shot></scene></film>"#,
+        concat!(
+            "<om-film><om-scene><om-shot>",
+            r#"<video src="opening.mp4"></video>"#,
+            r#"<om-title delay="500ms">Opening</om-title>"#,
+            r#"<om-cta delay="1.5s">Buy now</om-cta>"#,
+            "</om-shot></om-scene></om-film>",
+        ),
     );
     let (document, diagnostics) = parsed.into_parts();
     assert!(diagnostics.is_empty());

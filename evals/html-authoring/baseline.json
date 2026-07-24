@@ -1,0 +1,23 @@
+{
+  "screenplay": {
+    "passed": 16,
+    "total": 20,
+    "files": 46,
+    "authoredBytes": 14054,
+    "failedCases": [
+      "run-1:decorative-layer",
+      "run-1:nested-emphasis",
+      "run-2:decorative-layer",
+      "run-2:nested-emphasis"
+    ]
+  },
+  "html": {
+    "passed": 20,
+    "total": 20,
+    "files": 20,
+    "authoredBytes": 13618,
+    "failedCases": []
+  },
+  "admitted": "html",
+  "reason": "HTML preserved compiler-owned screenplay facts while eliminating the advanced-presentation failure mode and reducing one generated project to one native authored file."
+}

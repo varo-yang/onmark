@@ -59,7 +59,7 @@ pub enum DiagnosticCode {
     MalformedSyntax,
     /// A closing tag does not match the currently open element.
     MismatchedClosingTag,
-    /// An element repeats the same qualified attribute name.
+    /// An element repeats the same normalized attribute name.
     DuplicateAttribute,
     /// Text or an attribute contains an invalid character reference.
     InvalidCharacterReference,
@@ -67,7 +67,7 @@ pub enum DiagnosticCode {
     UnclosedElement,
     /// A closing tag appears without an open element.
     UnexpectedClosingTag,
-    /// XML machinery outside the screenplay surface is authored.
+    /// A non-HTML document type is authored.
     UnsupportedMarkupDirective,
     /// Screenplay syntax exceeds a bounded compiler resource.
     ScreenplayResourceLimit,

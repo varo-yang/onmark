@@ -472,17 +472,44 @@ struct Attributes(Vec<Attribute>);
 
 impl Attributes {
     fn take(&mut self, name: &str) -> Option<Attribute> {
-        let index = self.0.iter().position(|attribute| {
-            attribute.name().prefix().is_none() && attribute.name().local() == name
-        })?;
+        let index = self
+            .0
+            .iter()
+            .position(|attribute| attribute.name().local() == name)?;
         Some(self.0.remove(index))
     }
 
     fn reject_unknown(self, kind: ElementKind, diagnostics: &mut Diagnostics) {
         for attribute in self.0 {
-            diagnostics.push(unknown_attribute(&attribute, kind));
+            if !is_presentation_attribute(&attribute) {
+                diagnostics.push(unknown_attribute(&attribute, kind));
+            }
         }
     }
+}
+
+fn is_presentation_attribute(attribute: &Attribute) -> bool {
+    let name = attribute.name().local();
+    name.starts_with("aria-")
+        || name.starts_with("data-")
+        || matches!(
+            name,
+            "class"
+                | "contenteditable"
+                | "dir"
+                | "draggable"
+                | "hidden"
+                | "inert"
+                | "lang"
+                | "part"
+                | "role"
+                | "slot"
+                | "spellcheck"
+                | "style"
+                | "tabindex"
+                | "title"
+                | "translate"
+        )
 }
 
 fn resolve_text(text: Vec<TextNode>) -> Vec<ResolvedText> {
@@ -614,7 +641,9 @@ mod tests {
 
     #[test]
     fn warnings_preserve_the_resolved_film() {
-        let report = resolve_source(r#"<film><cues><cue id="unused" time="1s" /></cues></film>"#);
+        let report = resolve_source(
+            r#"<om-film><om-cues><om-cue id="unused" time="1s"></om-cue></om-cues></om-film>"#,
+        );
         let codes = report
             .diagnostics()
             .iter()
@@ -628,8 +657,11 @@ mod tests {
 
     #[test]
     fn missing_media_sources_remain_valid_for_static_analysis() {
-        let report =
-            resolve_source("<film><scene><shot><video/><vo>Narration</vo></shot></scene></film>");
+        let report = resolve_source(concat!(
+            "<om-film><om-scene><om-shot>",
+            "<video></video><om-vo>Narration</om-vo>",
+            "</om-shot></om-scene></om-film>",
+        ));
 
         assert!(report.diagnostics().is_empty());
         assert!(report.film().is_some());

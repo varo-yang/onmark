@@ -109,7 +109,7 @@ mod tests {
     fn solved_timeline() -> crate::timeline::TimelineIr {
         let parsed = compiler::parse(
             SourceId::new(0),
-            r#"<film><scene><shot duration="2s" /></scene></film>"#,
+            r#"<om-film><om-scene><om-shot duration="2s"></om-shot></om-scene></om-film>"#,
         );
         let (document, diagnostics) = parsed.into_parts();
         assert!(diagnostics.is_empty());

@@ -42,16 +42,6 @@ pub(super) enum BundlerProcess {
     Node { executable: PathBuf, entry: PathBuf },
 }
 
-/// Authored custom code or Onmark's neutral semantic DOM projection.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(super) enum PresentationSource {
-    Custom(PathBuf),
-    SemanticDom {
-        stylesheet: Option<PathBuf>,
-        motion: Option<PathBuf>,
-    },
-}
-
 #[derive(Clone, Copy)]
 struct PresentationCapabilities {
     temporal: PresentationTemporalCapability,
@@ -59,39 +49,12 @@ struct PresentationCapabilities {
     frame_behavior: PresentationFrameBehavior,
 }
 
-impl PresentationSource {
-    const fn capabilities(&self) -> PresentationCapabilities {
-        match self {
-            Self::SemanticDom {
-                stylesheet: None,
-                motion: None,
-            } => PresentationCapabilities {
-                temporal: PresentationTemporalCapability::RandomAccess,
-                visual: PresentationVisualCapability::SeparableOverlay,
-                frame_behavior: PresentationFrameBehavior::PlacementBounded,
-            },
-            Self::Custom(_) | Self::SemanticDom { .. } => PresentationCapabilities {
-                temporal: PresentationTemporalCapability::Sequential,
-                visual: PresentationVisualCapability::BrowserComposite,
-                frame_behavior: PresentationFrameBehavior::PerFrame,
-            },
-        }
-    }
-
-    fn append_arguments(&self, command: &mut Command) {
-        match self {
-            Self::Custom(entry) => {
-                command.arg("--entry").arg(entry);
-            }
-            Self::SemanticDom { stylesheet, motion } => {
-                command.arg("--semantic-dom");
-                if let Some(stylesheet) = stylesheet {
-                    command.arg("--stylesheet").arg(stylesheet);
-                }
-                if let Some(motion) = motion {
-                    command.arg("--motion").arg(motion);
-                }
-            }
+impl PresentationCapabilities {
+    const fn authored_html() -> Self {
+        Self {
+            temporal: PresentationTemporalCapability::Sequential,
+            visual: PresentationVisualCapability::BrowserComposite,
+            frame_behavior: PresentationFrameBehavior::PerFrame,
         }
     }
 }
@@ -103,14 +66,19 @@ impl PresentationBundler {
 
     pub(super) async fn bundle(
         &self,
-        source: &PresentationSource,
+        document: &str,
+        resolve_directory: &Path,
     ) -> Result<BundleArtifact, BundleError> {
         let root = tempfile::Builder::new()
             .prefix("onmark-bundle-")
             .tempdir()
             .map_err(BundleError::TemporaryDirectory)?;
+        let snapshot = root.path().join("source.html");
+        tokio::fs::write(&snapshot, document)
+            .await
+            .map_err(BundleError::Snapshot)?;
         let directory = root.path().join("presentation");
-        let mut child = self.spawn(source, &directory)?;
+        let mut child = self.spawn(&snapshot, resolve_directory, &directory)?;
         let stderr = child
             .stderr
             .take()
@@ -139,13 +107,17 @@ impl PresentationBundler {
 
     fn spawn(
         &self,
-        source: &PresentationSource,
+        document: &Path,
+        resolve_directory: &Path,
         output: &Path,
     ) -> Result<tokio::process::Child, BundleError> {
         let mut command = self.process.command();
-        let capabilities = source.capabilities();
-        source.append_arguments(&mut command);
+        let capabilities = PresentationCapabilities::authored_html();
         command
+            .arg("--html")
+            .arg(document)
+            .arg("--resolve-directory")
+            .arg(resolve_directory)
             .arg("--output")
             .arg(output)
             .arg("--max-output-bytes")
@@ -205,6 +177,7 @@ impl BundleArtifact {
 #[derive(Debug)]
 pub(super) enum BundleError {
     TemporaryDirectory(io::Error),
+    Snapshot(io::Error),
     Spawn {
         executable: PathBuf,
         source: io::Error,
@@ -242,6 +215,9 @@ impl fmt::Display for BundleError {
         match self {
             Self::TemporaryDirectory(_) => {
                 formatter.write_str("failed to create a private bundle directory")
+            }
+            Self::Snapshot(_) => {
+                formatter.write_str("failed to snapshot the authored HTML for bundling")
             }
             Self::Spawn { executable, .. } => {
                 write!(
@@ -303,6 +279,7 @@ impl Error for BundleError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::TemporaryDirectory(source)
+            | Self::Snapshot(source)
             | Self::Wait(source)
             | Self::Terminate(source)
             | Self::DiagnosticRead(source)
@@ -485,7 +462,7 @@ mod tests {
     };
 
     use super::{
-        BundleError, BundlerProcess, CapturedStderr, PresentationSource, append_tail,
+        BundleError, BundlerProcess, CapturedStderr, PresentationCapabilities, append_tail,
         finish_stderr_before,
     };
 
@@ -506,45 +483,19 @@ mod tests {
 
     #[test]
     fn derives_capabilities_from_the_owned_presentation_surface() {
-        let styled_dom = PresentationSource::SemanticDom {
-            motion: None,
-            stylesheet: Some(PathBuf::from("film.css")),
-        };
-        let neutral_dom = PresentationSource::SemanticDom {
-            motion: None,
-            stylesheet: None,
-        };
-        let animated_dom = PresentationSource::SemanticDom {
-            motion: Some(PathBuf::from("film.motion.ts")),
-            stylesheet: None,
-        };
-        let custom = PresentationSource::Custom(PathBuf::from("presentation.ts"));
-
-        let neutral = neutral_dom.capabilities();
+        let capabilities = PresentationCapabilities::authored_html();
         assert_eq!(
-            neutral.temporal,
-            PresentationTemporalCapability::RandomAccess
+            capabilities.temporal,
+            PresentationTemporalCapability::Sequential
         );
         assert_eq!(
-            neutral.visual,
-            PresentationVisualCapability::SeparableOverlay
+            capabilities.visual,
+            PresentationVisualCapability::BrowserComposite
         );
         assert_eq!(
-            neutral.frame_behavior,
-            PresentationFrameBehavior::PlacementBounded,
+            capabilities.frame_behavior,
+            PresentationFrameBehavior::PerFrame,
         );
-        for source in [&styled_dom, &animated_dom, &custom] {
-            let authored = source.capabilities();
-            assert_eq!(
-                authored.temporal,
-                PresentationTemporalCapability::Sequential,
-            );
-            assert_eq!(
-                authored.visual,
-                PresentationVisualCapability::BrowserComposite,
-            );
-            assert_eq!(authored.frame_behavior, PresentationFrameBehavior::PerFrame,);
-        }
     }
 
     #[test]

@@ -12,279 +12,176 @@ import {
   BUNDLE_ENTRY_POINT,
   BUNDLE_MANIFEST_FILE,
   BundleError,
-  bundleDomPresentation,
   bundlePresentation,
   type BundleManifest,
+  type BundleOptions,
 } from "../src/index.js";
 
-const ENTRY_SOURCE = `
-  import "./presentation.css";
-  import { installRuntimeHost } from "@onmark/runtime";
-  installRuntimeHost({
-    async load() {},
-    async prepare() {},
-    async seek() {},
-    async confirm() {},
-    async dispose() {},
+// ── Authored document
+
+test("preserves authored DOM and inline styles", async () => {
+  await withWorkspace(async (workspace) => {
+    const document = await authoredDocument(
+      workspace,
+      [
+        '<om-film id="demo">',
+        "  <style>.accent { color: lime; }</style>",
+        "  <om-scene><om-shot>",
+        '    <om-title>Write <span class="accent">native.</span></om-title>',
+        "  </om-shot></om-scene>",
+        "</om-film>",
+      ].join("\n"),
+      "export const motion = { bind() { return { effects: [], resources: [] }; } };",
+    );
+    const artifact = await bundlePresentation(
+      options(document, join(workspace, "bundle")),
+    );
+    const bundled = await readFile(
+      join(artifact.directory, BUNDLE_ENTRY_POINT),
+      "utf8",
+    );
+
+    assert.match(bundled, /<span class="accent">native\.<\/span>/u);
+    assert.match(bundled, /<style>\.accent \{ color: lime; \}<\/style>/u);
+    assert.doesNotMatch(bundled, /data-om-motion/u);
+    assert.match(bundled, /src="\.\/presentation\.js"/u);
   });
-`;
-
-// ── Artifact construction ──
-
-test("builds the semantic DOM presentation without an authored entry", async () => {
-  const workspace = await mkdtemp(join(tmpdir(), "onmark-bundler-test-"));
-  try {
-    const stylesheet = join(workspace, "film.css");
-    await writeFile(stylesheet, ".onmark-title { color: #baff29; }\n", "utf8");
-
-    const artifact = await bundleDomPresentation({
-      stylesheet,
-      outputDirectory: join(workspace, "bundle"),
-      frameBehavior: "perFrame",
-      maxOutputBytes: 1_000_000,
-      temporalCapability: "sequential",
-      visualCapability: "browserComposite",
-    });
-
-    assert.deepEqual(
-      artifact.manifest.files.map((file) => file.path),
-      [BUNDLE_ENTRY_POINT, "presentation.css", "presentation.js"],
-    );
-    assert.equal(
-      await readFile(join(artifact.directory, "presentation.css"), "utf8"),
-      ".onmark-title{color:#baff29}\n",
-    );
-  } finally {
-    await rm(workspace, { force: true, recursive: true });
-  }
 });
 
-test("rejects semantic stylesheet resources even when motion is present", async () => {
-  const workspace = await mkdtemp(join(tmpdir(), "onmark-bundler-test-"));
-  try {
-    const stylesheet = join(workspace, "film.css");
-    const motion = join(workspace, "film.motion.ts");
-    await writeFile(join(workspace, "hero.png"), new Uint8Array([1, 2, 3]));
+test("injects the runtime inside an explicit document body", async () => {
+  await withWorkspace(async (workspace) => {
+    const document = join(workspace, "film.html");
     await writeFile(
-      stylesheet,
-      '.onmark-film { background: url("./hero.png"); }\n',
+      document,
+      [
+        "<!doctype html>",
+        "<html><head><title>Demo</title></head><body>",
+        film(""),
+        "</body></html>",
+      ].join("\n"),
       "utf8",
     );
-    await writeFile(
-      motion,
-      `
-        export const motion = {
-          bind() {
-            return { effects: [], resources: [] };
-          },
-        };
-      `,
+    const artifact = await bundlePresentation(
+      options(document, join(workspace, "bundle")),
+    );
+    const bundled = await readFile(
+      join(artifact.directory, BUNDLE_ENTRY_POINT),
       "utf8",
     );
 
-    for (const [index, motionEntry] of [undefined, motion].entries()) {
-      await assert.rejects(
-        bundleDomPresentation({
-          stylesheet,
-          ...(motionEntry === undefined ? {} : { motion: motionEntry }),
-          outputDirectory: join(workspace, `bundle-${index}`),
-          frameBehavior: "perFrame",
-          maxOutputBytes: 1_000_000,
-          temporalCapability: "sequential",
-          visualCapability: "browserComposite",
-        }),
-        (error: unknown) =>
-          error instanceof BundleError &&
-          error.message ===
-            "semantic stylesheet resources have no explicit readiness owner",
-      );
-    }
-  } finally {
-    await rm(workspace, { force: true, recursive: true });
-  }
+    assert.match(
+      bundled,
+      /\n[\t ]*<script type="module" src="\.\/presentation\.js"><\/script>\n[\t ]*<\/body>/u,
+    );
+    assert.doesNotMatch(
+      bundled,
+      /\n[\t ]+\n<script type="module" src="\.\/presentation\.js"/u,
+    );
+    assert.equal(bundled.trimEnd().endsWith("</html>"), true);
+  });
 });
 
-test("adds no visual defaults when the semantic DOM has no stylesheet", async () => {
-  const workspace = await mkdtemp(join(tmpdir(), "onmark-bundler-test-"));
-  try {
-    const artifact = await bundleDomPresentation({
-      outputDirectory: join(workspace, "bundle"),
-      frameBehavior: "perFrame",
-      maxOutputBytes: 1_000_000,
-      temporalCapability: "sequential",
-      visualCapability: "browserComposite",
-    });
-
-    assert.deepEqual(
-      artifact.manifest.files.map((file) => file.path),
-      [BUNDLE_ENTRY_POINT, "presentation.js"],
+test("bundles public motion adapters from the inline module", async () => {
+  await withWorkspace(async (workspace) => {
+    const document = await authoredDocument(
+      workspace,
+      film("<om-title>Motion</om-title>"),
+      [
+        'import { gsapMotion } from "onmark/motion/gsap";',
+        "export const motion = gsapMotion({",
+        "  title({ element, timeline }) {",
+        "    timeline.from(element, { opacity: 0, duration: 0.25 });",
+        "  },",
+        "});",
+      ].join("\n"),
     );
-  } finally {
-    await rm(workspace, { force: true, recursive: true });
-  }
-});
-
-test("bundles same-stem vendor-neutral motion through the semantic entry", async () => {
-  const workspace = await mkdtemp(join(tmpdir(), "onmark-bundler-test-"));
-  try {
-    const motion = join(workspace, "film.motion.ts");
-    await writeFile(
-      motion,
-      `
-        import { gsapMotion } from "onmark/motion/gsap";
-        export const motion = gsapMotion({
-          title({ element, timeline }) {
-            timeline.from(element, { opacity: 0, duration: 0.25 });
-          },
-        });
-      `,
-      "utf8",
-    );
-
-    const artifact = await bundleDomPresentation({
-      motion,
-      outputDirectory: join(workspace, "bundle"),
-      frameBehavior: "perFrame",
-      maxOutputBytes: 1_000_000,
+    const artifact = await bundlePresentation({
+      ...options(document, join(workspace, "bundle")),
       temporalCapability: "randomAccess",
-      visualCapability: "browserComposite",
     });
+
     assert.equal(artifact.manifest.temporalCapability, "randomAccess");
-  } finally {
-    await rm(workspace, { force: true, recursive: true });
-  }
+  });
 });
 
-test("builds a deterministic immutable presentation artifact", async () => {
-  const workspace = await mkdtemp(join(tmpdir(), "onmark-bundler-test-"));
-  try {
-    const entryPoint = join(workspace, "presentation.ts");
-    await writeFile(entryPoint, ENTRY_SOURCE, "utf8");
-    await writeFile(
-      join(workspace, "presentation.css"),
-      "html { background: black; }\n",
-      "utf8",
-    );
+// ── Artifact contract
 
-    const first = await bundlePresentation({
-      entryPoint,
-      outputDirectory: join(workspace, "first"),
-      frameBehavior: "perFrame",
-      maxOutputBytes: 1_000_000,
-      temporalCapability: "sequential",
-      visualCapability: "browserComposite",
-    });
-    const second = await bundlePresentation({
-      entryPoint,
-      outputDirectory: join(workspace, "second"),
-      frameBehavior: "perFrame",
-      maxOutputBytes: 1_000_000,
-      temporalCapability: "sequential",
-      visualCapability: "browserComposite",
-    });
+test("builds deterministic artifacts with capability-owned identity", async () => {
+  await withWorkspace(async (workspace) => {
+    const document = await authoredDocument(workspace, film(""));
+    const first = await bundlePresentation(
+      options(document, join(workspace, "first")),
+    );
+    const second = await bundlePresentation(
+      options(document, join(workspace, "second")),
+    );
     const randomAccess = await bundlePresentation({
-      entryPoint,
-      outputDirectory: join(workspace, "random-access"),
-      frameBehavior: "perFrame",
-      maxOutputBytes: 1_000_000,
+      ...options(document, join(workspace, "random-access")),
       temporalCapability: "randomAccess",
-      visualCapability: "browserComposite",
     });
     const separableOverlay = await bundlePresentation({
-      entryPoint,
-      outputDirectory: join(workspace, "separable-overlay"),
-      frameBehavior: "perFrame",
-      maxOutputBytes: 1_000_000,
-      temporalCapability: "sequential",
+      ...options(document, join(workspace, "separable-overlay")),
       visualCapability: "separableOverlay",
     });
     const placementBounded = await bundlePresentation({
-      entryPoint,
-      outputDirectory: join(workspace, "placement-bounded"),
+      ...options(document, join(workspace, "placement-bounded")),
       frameBehavior: "placementBounded",
-      maxOutputBytes: 1_000_000,
       temporalCapability: "randomAccess",
-      visualCapability: "browserComposite",
     });
 
     assert.deepEqual(first.manifest, second.manifest);
     assert.equal(first.manifest.bundleId, bundleIdentity(first.manifest));
     assert.deepEqual(first.manifest.files, randomAccess.manifest.files);
     assert.notEqual(first.manifest.bundleId, randomAccess.manifest.bundleId);
-    assert.equal(
-      randomAccess.manifest.bundleId,
-      bundleIdentity(randomAccess.manifest),
-    );
-    assert.deepEqual(first.manifest.files, separableOverlay.manifest.files);
     assert.notEqual(
       first.manifest.bundleId,
       separableOverlay.manifest.bundleId,
+    );
+    assert.notEqual(
+      first.manifest.bundleId,
+      placementBounded.manifest.bundleId,
+    );
+    assert.equal(
+      randomAccess.manifest.bundleId,
+      bundleIdentity(randomAccess.manifest),
     );
     assert.equal(
       separableOverlay.manifest.bundleId,
       bundleIdentity(separableOverlay.manifest),
     );
-    assert.deepEqual(first.manifest.files, placementBounded.manifest.files);
-    assert.notEqual(
-      first.manifest.bundleId,
-      placementBounded.manifest.bundleId,
-    );
     assert.equal(
       placementBounded.manifest.bundleId,
       bundleIdentity(placementBounded.manifest),
     );
-    assert.deepEqual(
-      first.manifest.files.map((file) => file.path),
-      [BUNDLE_ENTRY_POINT, "presentation.css", "presentation.js"],
-    );
-    const html = await readFile(
-      join(first.directory, BUNDLE_ENTRY_POINT),
-      "utf8",
-    );
     const savedManifest: unknown = JSON.parse(
       await readFile(join(first.directory, BUNDLE_MANIFEST_FILE), "utf8"),
     );
-    assert.match(html, /src="\.\/presentation\.js"/u);
-    assert.match(html, /href="\.\/presentation\.css"/u);
     assert.deepEqual(savedManifest, first.manifest);
-  } finally {
-    await rm(workspace, { force: true, recursive: true });
-  }
+  });
 });
 
 test("rejects placement-bounded pixels without random access", async () => {
-  const workspace = await mkdtemp(join(tmpdir(), "onmark-bundler-test-"));
-  try {
-    const entryPoint = join(workspace, "presentation.ts");
-    await writeFile(entryPoint, ENTRY_SOURCE, "utf8");
+  await withWorkspace(async (workspace) => {
+    const document = await authoredDocument(workspace, film(""));
 
     await assert.rejects(
       bundlePresentation({
-        entryPoint,
-        outputDirectory: join(workspace, "bundle"),
+        ...options(document, join(workspace, "bundle")),
         frameBehavior: "placementBounded",
-        maxOutputBytes: 1_000_000,
-        temporalCapability: "sequential",
-        visualCapability: "browserComposite",
       }),
       (error: unknown) =>
         error instanceof BundleError &&
         error.message ===
           "placement-bounded frames require random-access presentation timing",
     );
-  } finally {
-    await rm(workspace, { force: true, recursive: true });
-  }
+  });
 });
 
-test("carries local visual resources into the immutable bundle", async () => {
-  const workspace = await mkdtemp(join(tmpdir(), "onmark-bundler-test-"));
-  try {
-    const entryPoint = join(workspace, "presentation.ts");
+test("carries imported visual resources into the immutable bundle", async () => {
+  await withWorkspace(async (workspace) => {
     const fontBytes = "font fixture bytes";
     const svgBytes =
       '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1" />';
-    await writeFile(entryPoint, ENTRY_SOURCE, "utf8");
     await writeFile(
       join(workspace, "presentation.css"),
       '@font-face { font-family: "Onmark Test"; src: url("./body.woff2"); }\n' +
@@ -293,25 +190,31 @@ test("carries local visual resources into the immutable bundle", async () => {
     );
     await writeFile(join(workspace, "body.woff2"), fontBytes);
     await writeFile(join(workspace, "poster.svg"), svgBytes, "utf8");
+    const document = await authoredDocument(
+      workspace,
+      [
+        "<style>",
+        "  .sample::before {",
+        `    content: '<script type="module" src="./presentation.js"></script>';`,
+        "  }",
+        "</style>",
+        film(""),
+      ].join("\n"),
+      [
+        'import "./presentation.css";',
+        "export const motion = { bind() {",
+        "  return { effects: [], resources: [] };",
+        "} };",
+      ].join("\n"),
+    );
+    const first = await bundlePresentation(
+      options(document, join(workspace, "first")),
+    );
+    const second = await bundlePresentation(
+      options(document, join(workspace, "second")),
+    );
 
-    const first = await bundlePresentation({
-      entryPoint,
-      outputDirectory: join(workspace, "first"),
-      frameBehavior: "perFrame",
-      maxOutputBytes: 1_000_000,
-      temporalCapability: "sequential",
-      visualCapability: "browserComposite",
-    });
-    const second = await bundlePresentation({
-      entryPoint,
-      outputDirectory: join(workspace, "second"),
-      frameBehavior: "perFrame",
-      maxOutputBytes: 1_000_000,
-      temporalCapability: "sequential",
-      visualCapability: "browserComposite",
-    });
     assert.deepEqual(first.manifest, second.manifest);
-
     const resources = first.manifest.files
       .map((file) => file.path)
       .filter((path) => path.startsWith("resources/"));
@@ -333,81 +236,52 @@ test("carries local visual resources into the immutable bundle", async () => {
     for (const resource of resources) {
       assert.equal(references.includes(resource), true);
     }
-  } finally {
-    await rm(workspace, { force: true, recursive: true });
-  }
-});
-
-// ── Publication failures ──
-
-test("does not publish an oversized or pre-existing artifact", async () => {
-  const workspace = await mkdtemp(join(tmpdir(), "onmark-bundler-test-"));
-  try {
-    const entryPoint = join(workspace, "presentation.ts");
-    const outputDirectory = join(workspace, "bundle");
-    await writeFile(entryPoint, ENTRY_SOURCE, "utf8");
-    await writeFile(
-      join(workspace, "presentation.css"),
-      "html { background: black; }\n",
+    const html = await readFile(
+      join(first.directory, BUNDLE_ENTRY_POINT),
       "utf8",
     );
+    assert.match(
+      html,
+      /content: '<script type="module" src="\.\/presentation\.js"><\/script>';/u,
+    );
+    assert.ok(html.lastIndexOf("<link rel=") > html.indexOf("</style>"));
+  });
+});
+
+test("does not publish an oversized or pre-existing artifact", async () => {
+  await withWorkspace(async (workspace) => {
+    const document = await authoredDocument(workspace, film(""));
+    const outputDirectory = join(workspace, "bundle");
 
     await assert.rejects(
       bundlePresentation({
-        entryPoint,
-        outputDirectory,
-        frameBehavior: "perFrame",
+        ...options(document, outputDirectory),
         maxOutputBytes: 1,
-        temporalCapability: "sequential",
-        visualCapability: "browserComposite",
       }),
       (error: unknown) =>
         error instanceof BundleError && error.kind === "outputLimit",
     );
-    assert.deepEqual((await readdir(workspace)).sort(), [
-      "presentation.css",
-      "presentation.ts",
-    ]);
-    await bundlePresentation({
-      entryPoint,
-      outputDirectory,
-      frameBehavior: "perFrame",
-      maxOutputBytes: 1_000_000,
-      temporalCapability: "sequential",
-      visualCapability: "browserComposite",
-    });
+    assert.deepEqual(await readdir(workspace), ["film.html"]);
+    await bundlePresentation(options(document, outputDirectory));
     await assert.rejects(
-      bundlePresentation({
-        entryPoint,
-        outputDirectory,
-        frameBehavior: "perFrame",
-        maxOutputBytes: 1_000_000,
-        temporalCapability: "sequential",
-        visualCapability: "browserComposite",
-      }),
+      bundlePresentation(options(document, outputDirectory)),
       (error: unknown) =>
         error instanceof BundleError && error.kind === "output",
     );
-  } finally {
-    await rm(workspace, { force: true, recursive: true });
-  }
+  });
 });
 
-// ── Checked fixtures ──
-
-test("keeps the checked-in video presentation bundle current", async () => {
-  const workspace = await mkdtemp(join(tmpdir(), "onmark-bundler-test-"));
-  try {
+test("keeps the checked-in browser bundle current", async () => {
+  await withWorkspace(async (workspace) => {
     const repository = fileURLToPath(new URL("../../../..", import.meta.url));
     const expected = join(repository, "conformance/protocol/bundle-v1");
     const outputDirectory = join(workspace, "bundle");
     await bundlePresentation({
-      entryPoint: join(repository, "conformance/browser/video-presentation.ts"),
-      outputDirectory,
-      frameBehavior: "perFrame",
-      maxOutputBytes: 1_000_000,
+      ...options(
+        join(repository, "conformance/browser/video-presentation.html"),
+        outputDirectory,
+      ),
       temporalCapability: "randomAccess",
-      visualCapability: "browserComposite",
     });
 
     const files = await artifactFiles(expected);
@@ -419,40 +293,72 @@ test("keeps the checked-in video presentation bundle current", async () => {
         `${file} is stale`,
       );
     }
-  } finally {
-    await rm(workspace, { force: true, recursive: true });
-  }
+  });
 });
 
-test("bundles the Gate-five temporal experiment with its browser libraries", async () => {
-  const workspace = await mkdtemp(join(tmpdir(), "onmark-bundler-test-"));
-  try {
+test("bundles the temporal experiment with its browser libraries", async () => {
+  await withWorkspace(async (workspace) => {
     const repository = fileURLToPath(new URL("../../../..", import.meta.url));
     const outputDirectory = join(workspace, "bundle");
     await bundlePresentation({
-      entryPoint: join(
-        repository,
-        "conformance/browser/temporal-experiment.ts",
+      ...options(
+        join(repository, "conformance/browser/temporal-experiment.html"),
+        outputDirectory,
       ),
-      outputDirectory,
-      frameBehavior: "perFrame",
       maxOutputBytes: 2_000_000,
       temporalCapability: "randomAccess",
-      visualCapability: "browserComposite",
     });
 
     assert.deepEqual((await readdir(outputDirectory)).sort(), [
       BUNDLE_ENTRY_POINT,
       BUNDLE_MANIFEST_FILE,
-      "presentation.css",
       "presentation.js",
     ]);
-  } finally {
-    await rm(workspace, { force: true, recursive: true });
-  }
+  });
 });
 
-// ── Test support ──
+// ── Test support
+
+function options(document: string, outputDirectory: string): BundleOptions {
+  return {
+    document,
+    frameBehavior: "perFrame",
+    maxOutputBytes: 1_000_000,
+    outputDirectory,
+    temporalCapability: "sequential",
+    visualCapability: "browserComposite",
+  };
+}
+
+function film(content: string): string {
+  return [
+    "<om-film>",
+    "  <om-scene><om-shot>",
+    `    ${content}`,
+    "  </om-shot></om-scene>",
+    "</om-film>",
+  ].join("\n");
+}
+
+async function authoredDocument(
+  workspace: string,
+  markup: string,
+  motion?: string,
+): Promise<string> {
+  const document = join(workspace, "film.html");
+  const script =
+    motion === undefined
+      ? ""
+      : ['<script type="module" data-om-motion>', motion, "</script>"].join(
+          "\n",
+        );
+  await writeFile(
+    document,
+    ["<!doctype html>", markup, script, ""].join("\n"),
+    "utf8",
+  );
+  return document;
+}
 
 function bundleIdentity(manifest: BundleManifest): string {
   const identity = JSON.stringify({
@@ -486,9 +392,23 @@ async function artifactFiles(root: string, directory = ""): Promise<string[]> {
 }
 
 async function generatedText(directory: string): Promise<string> {
-  const [script, style] = await Promise.all([
-    readFile(join(directory, "presentation.js"), "utf8"),
-    readFile(join(directory, "presentation.css"), "utf8"),
-  ]);
-  return `${script}\n${style}`;
+  const files = await artifactFiles(directory);
+  const generated = files.filter(
+    (path) => path.endsWith(".css") || path.endsWith(".js"),
+  );
+  const contents = await Promise.all(
+    generated.map((path) => readFile(join(directory, path), "utf8")),
+  );
+  return contents.join("\n");
+}
+
+async function withWorkspace(
+  run: (workspace: string) => Promise<void>,
+): Promise<void> {
+  const workspace = await mkdtemp(join(tmpdir(), "onmark-bundler-test-"));
+  try {
+    await run(workspace);
+  } finally {
+    await rm(workspace, { force: true, recursive: true });
+  }
 }
