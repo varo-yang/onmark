@@ -26,6 +26,7 @@ The checked real-process suite covers the following boundaries:
 | cold CLI render followed by an unchanged render | verified artifacts are reused through the shared assembler |
 | one shot changes between CLI processes | exactly one new region artifact is published |
 | a requested cached artifact is corrupted | validation removes it, capture recreates it, and final output matches the clean revision |
+| CLI incremental report | cold, one-shot edit, and corruption repair report their verified reused regions and frames |
 
 The bundler compiles generated modules and resources once. It publishes a
 `wholeFilm` root plus one `renderRegion` root per shot, hard-linking immutable

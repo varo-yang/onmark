@@ -88,7 +88,9 @@ the admitted facts into Render Graph planning.
 The desktop command projects each shot into an isolated browser region and
 reuses verified content-addressed frame artifacts across processes. Editing one
 shot leaves unrelated region artifacts intact; final encoding and audio mixing
-still use the same assembler as a cold render.
+still use the same assembler as a cold render. Every completed command reports
+the exact reused region and frame counts plus pipeline phase timings, so
+incremental work is visible without inspecting the cache.
 
 The desktop artifact is admitted on macOS arm64, Linux x64, and Windows x64,
 although it has not yet been published to npm. It exposes one `onmark` package

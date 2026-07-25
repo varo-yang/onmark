@@ -477,6 +477,12 @@ artifact count and bytes. Once full, it keeps existing valid entries and leaves
 new misses ephemeral instead of evicting an artifact that another process may
 be reading.
 
+Every completed desktop render reports region and frame reuse derived from the
+verified cache hits observed before capture. It also reports prepare, bundle,
+plan, capture, assemble, and total wall time at the CLI boundary. These timings
+are operational evidence only: no elapsed value enters compilation, planning,
+artifact identity, or rendered output.
+
 The retained
 [incremental-rendering conformance](../../conformance/incremental-rendering-experiment.md)
 checks whole-film/partition raw-RGBA equivalence, local edit isolation,

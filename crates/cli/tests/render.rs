@@ -64,13 +64,21 @@ async fn reuses_only_unchanged_regions_across_cli_processes() {
 
     let first = fixture.render_cached("first.mp4", &cache).await;
     assert_success(&first.output, GATE_TWO_FRAME_COUNT);
+    assert_incremental_summary(&first.output, "Reused 0/2 regions and 0/60 frames");
     let first_hashes = decode_video_hashes(&first.path).await;
     let first_artifacts = cache_artifacts(&cache);
     assert_eq!(first_artifacts.len(), 2);
 
+    let warm = fixture.render_cached("warm.mp4", &cache).await;
+    assert_success(&warm.output, GATE_TWO_FRAME_COUNT);
+    assert_incremental_summary(&warm.output, "Reused 2/2 regions and 60/60 frames");
+    assert_eq!(decode_video_hashes(&warm.path).await, first_hashes);
+    assert_eq!(cache_artifacts(&cache), first_artifacts);
+
     fixture.replace_screenplay(&incremental_film("Changed"));
     let second = fixture.render_cached("second.mp4", &cache).await;
     assert_success(&second.output, GATE_TWO_FRAME_COUNT);
+    assert_incremental_summary(&second.output, "Reused 1/2 regions and 30/60 frames");
     let second_hashes = decode_video_hashes(&second.path).await;
     let second_artifacts = cache_artifacts(&cache);
     assert_eq!(second_artifacts.len(), 3);
@@ -86,6 +94,7 @@ async fn reuses_only_unchanged_regions_across_cli_processes() {
 
     let repaired = fixture.render_cached("repaired.mp4", &cache).await;
     assert_success(&repaired.output, GATE_TWO_FRAME_COUNT);
+    assert_incremental_summary(&repaired.output, "Reused 1/2 regions and 30/60 frames");
     assert_eq!(decode_video_hashes(&repaired.path).await, second_hashes);
     assert_eq!(cache_artifacts(&cache), second_artifacts);
     assert!(
@@ -524,6 +533,20 @@ fn assert_success(output: &Output, expected_frames: usize) {
         "SwiftShader"
     };
     assert!(stdout.contains(&format!("on {graphics_backend}")));
+    assert!(stdout.contains("Timing: prepare "));
+    assert!(stdout.contains(", bundle "));
+    assert!(stdout.contains(", plan "));
+    assert!(stdout.contains(", capture "));
+    assert!(stdout.contains(", assemble "));
+    assert!(stdout.contains(", total "));
+}
+
+fn assert_incremental_summary(output: &Output, expected: &str) {
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains(expected),
+        "CLI output does not contain {expected:?}:\n{stdout}",
+    );
 }
 
 fn assert_process_success(operation: &str, output: &Output) {

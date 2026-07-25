@@ -31,12 +31,64 @@ const MAX_CACHE_BYTES: u64 = 32 * 1024 * 1024 * 1024;
 /// One captured sequence whose private misses live through final assembly.
 pub(super) struct CapturedArtifacts {
     artifacts: Vec<FrameArtifact>,
+    reuse: ArtifactReuse,
     _staging: TempDir,
 }
 
 impl CapturedArtifacts {
     pub(super) fn as_slice(&self) -> &[FrameArtifact] {
         &self.artifacts
+    }
+
+    pub(super) const fn reuse(&self) -> ArtifactReuse {
+        self.reuse
+    }
+}
+
+/// Verified cache work completed before any browser capture begins.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct ArtifactReuse {
+    regions: usize,
+    reused_regions: usize,
+    reused_frames: u64,
+}
+
+/// Whether launcher-owned host identity permits cross-process artifact reuse.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum CacheAdmission {
+    Persistent,
+    Ephemeral,
+}
+
+impl ArtifactReuse {
+    fn from_hits(artifacts: &[Option<FrameArtifact>]) -> Result<Self, ArtifactCacheError> {
+        let mut reused_regions = 0;
+        let mut reused_frames = 0_u64;
+
+        for artifact in artifacts.iter().flatten() {
+            reused_regions += 1;
+            reused_frames = reused_frames
+                .checked_add(artifact.frames())
+                .ok_or(ArtifactCacheError::FrameAccounting)?;
+        }
+
+        Ok(Self {
+            regions: artifacts.len(),
+            reused_regions,
+            reused_frames,
+        })
+    }
+
+    pub(super) const fn regions(self) -> usize {
+        self.regions
+    }
+
+    pub(super) const fn reused_regions(self) -> usize {
+        self.reused_regions
+    }
+
+    pub(super) const fn reused_frames(self) -> u64 {
+        self.reused_frames
     }
 }
 
@@ -48,11 +100,11 @@ pub(super) struct ArtifactCache {
 
 impl ArtifactCache {
     pub(super) fn from_environment(
-        admit_persistent: bool,
+        admission: CacheAdmission,
         capture_mode: BrowserCaptureMode,
         graphics_backend: BrowserGraphicsBackend,
     ) -> Result<Self, ArtifactCacheError> {
-        if !admit_persistent {
+        if admission == CacheAdmission::Ephemeral {
             return Ok(Self {
                 directory: None,
                 environment: ephemeral_environment(capture_mode, graphics_backend),
@@ -97,6 +149,7 @@ impl ArtifactCache {
             Some(directory) => self.cache_hits(directory, units, limits).await?,
             None => empty_artifacts(units.len()),
         };
+        let reuse = ArtifactReuse::from_hits(&artifacts)?;
         let misses = missing_units(units, &artifacts, staging.path(), self.environment);
         let references = misses
             .iter()
@@ -131,6 +184,7 @@ impl ArtifactCache {
                 .into_iter()
                 .map(|artifact| artifact.expect("every cache miss is filled by the capture batch"))
                 .collect(),
+            reuse,
             _staging: staging,
         })
     }
@@ -493,6 +547,7 @@ pub(super) enum ArtifactCacheError {
     IncompleteEnvironment,
     NonUtf8EnvironmentSeed,
     InvalidEnvironmentSeed(InvalidCaptureEnvironmentId),
+    FrameAccounting,
     Directory { path: PathBuf, source: io::Error },
     Staging(io::Error),
     Lock { path: PathBuf, source: io::Error },
@@ -514,6 +569,9 @@ impl fmt::Display for ArtifactCacheError {
                 formatter.write_str("local capture environment identity is not UTF-8")
             }
             Self::InvalidEnvironmentSeed(source) => source.fmt(formatter),
+            Self::FrameAccounting => {
+                formatter.write_str("reused frame count exceeds its accounting domain")
+            }
             Self::Directory { path, .. } => {
                 write!(
                     formatter,
@@ -572,7 +630,9 @@ impl Error for ArtifactCacheError {
             Self::LockTask(source) => Some(source),
             Self::Artifact(source) => Some(source),
             Self::Render(source) => Some(source),
-            Self::IncompleteEnvironment | Self::NonUtf8EnvironmentSeed => None,
+            Self::IncompleteEnvironment | Self::NonUtf8EnvironmentSeed | Self::FrameAccounting => {
+                None
+            }
         }
     }
 }
