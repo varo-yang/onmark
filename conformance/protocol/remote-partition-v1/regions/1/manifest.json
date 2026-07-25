@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "bundleId": "sha256:17642499a33f13410aa0ff48e53c0a952bedf07e62daf0978b03afd532ec15d5",
+  "bundleId": "sha256:8d5784fc5a5117527f3af5655328dd424a2926b21ce3c1a41c25e9ca1f3c7485",
   "entryPoint": "index.html",
   "documentScope": "renderRegion",
   "temporalCapability": "randomAccess",
@@ -8,9 +8,9 @@
   "frameBehavior": "perFrame",
   "files": [
     {
-      "bytes": 203,
+      "bytes": 191,
       "path": "index.html",
-      "sha256": "sha256:06531bff112113b82548e5a6cb1eece12e5acd5b5e10e8f62d819b1d10a93c3e"
+      "sha256": "sha256:f7f6c34c9c2ce63d5cde1b4a2959b4499a8f8c443a468f31ced1b9b8051db1a7"
     },
     {
       "bytes": 86529,

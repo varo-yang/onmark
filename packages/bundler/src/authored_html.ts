@@ -201,12 +201,15 @@ function projectShotStructure(
     };
   }
 
-  const scenes = childElements(film, "om-scene").map((scene) =>
-    Object.freeze({
-      range: elementRange(scene),
-      shots: Object.freeze(childElements(scene, "om-shot").map(elementRange)),
-    }),
-  );
+  const scenes = childElements(film, "om-scene").map((scene) => {
+    const shots = childElements(scene, "om-shot").map((shot) =>
+      removableElementRange(source, shot),
+    );
+    return Object.freeze({
+      range: removableElementRange(source, scene),
+      shots: Object.freeze(shots),
+    });
+  });
   const regions = scenes.flatMap((scene, sceneIndex) =>
     scene.shots.map((_, shotIndex) =>
       Object.freeze({ scene: sceneIndex, shot: shotIndex }),
@@ -402,7 +405,7 @@ function collectCompilerFacts(
 ): void {
   if ("tagName" in node) {
     if (isCompilerOnlyElement(node.tagName)) {
-      ranges.push(elementRange(node));
+      ranges.push(removableElementRange(source, node));
       return;
     }
     collectCompilerAttributes(node, source, ranges);
@@ -488,6 +491,34 @@ function elementRange(element: DefaultTreeAdapterTypes.Element): SourceRange {
     );
   }
   return { end: location.endOffset, start: location.startOffset };
+}
+
+function removableElementRange(
+  source: string,
+  element: DefaultTreeAdapterTypes.Element,
+): SourceRange {
+  const range = elementRange(element);
+  // Indentation on an otherwise empty line belongs to the removed element.
+  // Retaining it creates a browser text node and invalid source artifacts.
+  const lineStart = source.lastIndexOf("\n", range.start - 1) + 1;
+  const newline = source.indexOf("\n", range.end);
+  const lineEnd = newline === -1 ? source.length : newline + 1;
+  const leading = source.slice(lineStart, range.start);
+  const trailing = source.slice(range.end, lineEnd);
+
+  if (isHtmlWhitespace(leading) && isHtmlWhitespace(trailing)) {
+    return { end: lineEnd, start: lineStart };
+  }
+  return range;
+}
+
+function isHtmlWhitespace(value: string): boolean {
+  for (const character of value) {
+    if (!isHtmlSpace(character)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 function removeRanges(source: string, ranges: readonly SourceRange[]): string {
