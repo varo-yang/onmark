@@ -21,6 +21,8 @@ import { withObservedCleanup } from "../observed-cleanup.mjs";
 const MAX_PRODUCT_BYTES = 32 * 1024 * 1024;
 const MAX_SOURCE_REVISION_BYTES = 256;
 const MANIFEST_NAME = "onmark-release.json";
+const PINNED_PACKAGE_VERSION =
+  /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/u;
 const REPOSITORY = fileURLToPath(new URL("../../..", import.meta.url));
 const SOURCE_TREES = Object.freeze([
   "packages/runtime/dist/src",
@@ -238,7 +240,8 @@ async function productPackage() {
       packageMetadata("runtime"),
       desktopRelease(),
     ]);
-  requireOneVersion([authoring, bundler, launcher, motion, runtime]);
+  const packages = [authoring, bundler, launcher, motion, runtime];
+  requireOneVersion(packages);
 
   const optionalDependencies = {};
   for (const target of Object.keys(release.targets)) {
@@ -272,13 +275,7 @@ async function productPackage() {
       "#onmark-runtime": "./packages/runtime/dist/src/index.js",
     },
     files: ["packages", "LICENSE", "README.md", MANIFEST_NAME],
-    dependencies: {
-      "@puppeteer/browsers": dependency(launcher, "@puppeteer/browsers"),
-      esbuild: dependency(bundler, "esbuild"),
-      gsap: dependency(motion, "gsap"),
-      "proxy-agent": dependency(launcher, "proxy-agent"),
-      yauzl: dependency(launcher, "yauzl"),
-    },
+    dependencies: productDependencies(packages),
     optionalDependencies: sortedObject(optionalDependencies),
   };
 }
@@ -334,12 +331,49 @@ function requireOneVersion(packages) {
   }
 }
 
-function dependency(package_, name) {
-  const value = package_.dependencies?.[name];
-  if (typeof value !== "string" || value.startsWith("workspace:")) {
-    throw new Error(`${package_.name} does not pin release dependency ${name}`);
+function productDependencies(packages) {
+  // Workspace modules are copied into `onmark`; every external production
+  // dependency remains a real npm edge owned by the assembled package.
+  const internalNames = new Set(packages.map((package_) => package_.name));
+  const selected = new Map();
+
+  for (const package_ of packages) {
+    const dependencies = package_.dependencies;
+    if (dependencies === undefined) {
+      continue;
+    }
+    if (!isObject(dependencies)) {
+      throw new Error(`${package_.name} dependencies are not an object`);
+    }
+
+    for (const [name, version] of Object.entries(dependencies)) {
+      if (typeof version !== "string") {
+        throw new Error(`${package_.name} dependency ${name} is not a string`);
+      }
+      if (version.startsWith("workspace:")) {
+        if (!internalNames.has(name)) {
+          throw new Error(
+            `${package_.name} depends on unpackaged workspace module ${name}`,
+          );
+        }
+        continue;
+      }
+      if (!PINNED_PACKAGE_VERSION.test(version)) {
+        throw new Error(
+          `${package_.name} does not pin release dependency ${name}`,
+        );
+      }
+
+      const retained = selected.get(name);
+      if (retained !== undefined && retained !== version) {
+        throw new Error(
+          `desktop product has conflicting ${name} versions ${retained} and ${version}`,
+        );
+      }
+      selected.set(name, version);
+    }
   }
-  return value;
+  return sortedObject(Object.fromEntries(selected));
 }
 
 function sortedObject(value) {
