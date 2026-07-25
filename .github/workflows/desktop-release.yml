@@ -14,41 +14,25 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  admit:
-    name: Admit ${{ matrix.target }}
+  source:
+    name: Resolve release source
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event.pull_request.merged == true &&
        startsWith(github.event.pull_request.head.ref, 'release/v'))
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 60
-    permissions:
-      contents: read
-
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: macos-15
-            target: darwin-arm64
-            native-cli: target/release/onmark
-          - runner: ubuntu-24.04
-            target: linux-x64
-            native-cli: target/release/onmark
-          - runner: windows-2025
-            target: win32-x64
-            native-cli: target/release/onmark.exe
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      revision: ${{ steps.identity.outputs.revision }}
+      version: ${{ steps.identity.outputs.version }}
 
     steps:
-      - name: Check out repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.merge_commit_sha || github.sha }}
-
-      - name: Resolve admitted source revision
+      - name: Resolve release identity
+        id: identity
         shell: bash
         env:
           EVENT_NAME: ${{ github.event_name }}
+          EVENT_REVISION: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.merge_commit_sha || github.sha }}
           RELEASE_BRANCH: ${{ github.event.pull_request.head.ref }}
         run: |
           if [[ "$EVENT_NAME" == pull_request_target ]]; then
@@ -56,20 +40,60 @@ jobs:
           else
             release_version=
           fi
-          echo "RELEASE_VERSION=$release_version" >> "$GITHUB_ENV"
-          echo "SOURCE_REVISION=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          echo "revision=$EVENT_REVISION" >> "$GITHUB_OUTPUT"
+          echo "version=$release_version" >> "$GITHUB_OUTPUT"
+
+  admit:
+    name: Admit ${{ matrix.target }}
+    needs: source
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    env:
+      SOURCE_REVISION: ${{ needs.source.outputs.revision }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            target: darwin-arm64
+            native-cli: .release/cargo-target/release/onmark
+            release-driver: .release/cargo-target/release/onmark-xtask
+          - runner: ubuntu-24.04
+            target: linux-x64
+            native-cli: .release/cargo-target/release/onmark
+            release-driver: .release/cargo-target/release/onmark-xtask
+          - runner: windows-2025
+            target: win32-x64
+            native-cli: .release/cargo-target/release/onmark.exe
+            release-driver: .release/cargo-target/release/onmark-xtask.exe
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ needs.source.outputs.revision }}
+
+      - name: Cache release media tools
+        id: media-cache
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: .release/media
+          key: desktop-media-${{ matrix.target }}-${{ hashFiles('scripts/release/media-toolchain/*') }}
+
+      - name: Cache release Cargo artifacts
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            .release/cargo-target
+          key: desktop-cargo-${{ matrix.target }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
 
       - name: Install pinned Rust toolchain
         run: rustup show active-toolchain
-
-      - name: Verify product version
-        shell: bash
-        run: |
-          if [[ -n "$RELEASE_VERSION" ]]; then
-            cargo xtask release verify "$RELEASE_VERSION"
-          else
-            cargo xtask release verify
-          fi
 
       - name: Install pinned pnpm
         uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
@@ -83,17 +107,17 @@ jobs:
           cache: pnpm
 
       - name: Install Linux media build tools
-        if: runner.os == 'Linux'
+        if: steps.media-cache.outputs.cache-hit != 'true' && runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install --no-install-recommends nasm pkg-config
 
       - name: Install macOS media build tools
-        if: runner.os == 'macOS'
+        if: steps.media-cache.outputs.cache-hit != 'true' && runner.os == 'macOS'
         run: brew install pkgconf
 
       - name: Install Windows media build tools
-        if: runner.os == 'Windows'
+        if: steps.media-cache.outputs.cache-hit != 'true' && runner.os == 'Windows'
         uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2.32.0
         with:
           install: >-
@@ -125,14 +149,15 @@ jobs:
           sudo apparmor_parser --replace "$profile"
 
       - name: Fetch admitted media sources
+        if: steps.media-cache.outputs.cache-hit != 'true'
         run: node scripts/release/media-toolchain/fetch.mjs .release/sources
 
       - name: Build release media tools
-        if: runner.os != 'Windows'
+        if: steps.media-cache.outputs.cache-hit != 'true' && runner.os != 'Windows'
         run: scripts/release/media-toolchain/build.sh .release/sources .release/media
 
       - name: Build Windows release media tools
-        if: runner.os == 'Windows'
+        if: steps.media-cache.outputs.cache-hit != 'true' && runner.os == 'Windows'
         shell: msys2 {0}
         run: scripts/release/media-toolchain/build.sh .release/sources .release/media
 
@@ -144,13 +169,27 @@ jobs:
           pnpm --filter @onmark/bundler build
           pnpm --filter @onmark/launcher build
 
-      - name: Build native release CLI
-        run: cargo build --locked --release -p onmark-cli
+      - name: Build native release tools
+        env:
+          CARGO_TARGET_DIR: .release/cargo-target
+        run: cargo build --locked --release -p onmark-cli -p onmark-xtask
+
+      - name: Verify product version
+        if: matrix.target == 'linux-x64'
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ needs.source.outputs.version }}
+        run: |
+          if [[ -n "$RELEASE_VERSION" ]]; then
+            "${{ matrix.release-driver }}" release verify "$RELEASE_VERSION"
+          else
+            "${{ matrix.release-driver }}" release verify
+          fi
 
       - name: Assemble release packages
         shell: bash
         run: |
-          cargo xtask release sidecar \
+          "${{ matrix.release-driver }}" release sidecar \
             --target "${{ matrix.target }}" \
             --onmark "${{ matrix.native-cli }}" \
             --media .release/media \
@@ -203,7 +242,7 @@ jobs:
     if: >-
       github.event.pull_request.merged == true &&
       startsWith(github.event.pull_request.head.ref, 'release/v')
-    needs: admit
+    needs: [source, admit]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     environment: npm-release
@@ -215,15 +254,7 @@ jobs:
       - name: Check out released source
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: ${{ github.event.pull_request.merge_commit_sha }}
-
-      - name: Resolve release identity
-        shell: bash
-        env:
-          RELEASE_BRANCH: ${{ github.event.pull_request.head.ref }}
-        run: |
-          release_version="${RELEASE_BRANCH#release/v}"
-          echo "RELEASE_TAG=v$release_version" >> "$GITHUB_ENV"
+          ref: ${{ needs.source.outputs.revision }}
 
       - name: Install pinned Node.js
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
@@ -241,6 +272,8 @@ jobs:
 
       - name: Publish admitted packages
         shell: bash
+        env:
+          RELEASE_TAG: v${{ needs.source.outputs.version }}
         run: |
           npm_root="$(npm root --global)"
           npm_cli="$(node -e 'process.stdout.write(require("node:path").join(process.argv[1], "npm/bin/npm-cli.js"))' "$npm_root")"
@@ -255,6 +288,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: v${{ needs.source.outputs.version }}
         run: |
           revision="$(git rev-parse HEAD)"
           remote_tag="$(git ls-remote --tags origin "refs/tags/$RELEASE_TAG")"
