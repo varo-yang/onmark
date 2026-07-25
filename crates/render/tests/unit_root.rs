@@ -7,8 +7,8 @@ use std::path::{Path, PathBuf};
 use onmark_core::compiler;
 use onmark_core::model::{
     AssetMetadata, AssetRef, Duration, FrameRate, FrozenAsset, FrozenAssetId,
-    PresentationFrameBehavior, PresentationTemporalCapability, PresentationVisualCapability,
-    SourceId, Timebase, VideoDimensions, VideoMetadata, VideoTiming,
+    PresentationDocumentScope, PresentationFrameBehavior, PresentationTemporalCapability,
+    PresentationVisualCapability, SourceId, Timebase, VideoDimensions, VideoMetadata, VideoTiming,
 };
 use onmark_core::protocol::{BundleFile, BundleManifest};
 use onmark_render::{
@@ -149,6 +149,7 @@ fn rejects_payload_or_bundle_identity_drift() {
     assert_eq!(error.kind(), UnitRootErrorKind::DigestMismatch);
 
     let invalid = BundleManifest::new(
+        PresentationDocumentScope::WholeFilm,
         PresentationTemporalCapability::Sequential,
         PresentationVisualCapability::BrowserComposite,
         PresentationFrameBehavior::PerFrame,
@@ -225,6 +226,7 @@ fn rejects_file_limits_before_bundle_identity_work() {
         BundleFile::new("presentation.js", 1, digest(b"script")).expect("script is valid"),
     ];
     let manifest = BundleManifest::new(
+        PresentationDocumentScope::WholeFilm,
         PresentationTemporalCapability::Sequential,
         PresentationVisualCapability::BrowserComposite,
         PresentationFrameBehavior::PerFrame,
@@ -303,6 +305,7 @@ impl Fixture {
 struct BundleIdentity<'a> {
     version: u16,
     entry_point: &'a str,
+    document_scope: &'a str,
     temporal_capability: &'a str,
     visual_capability: &'a str,
     frame_behavior: &'a str,
@@ -313,6 +316,7 @@ fn manifest(files: Vec<BundleFile>) -> BundleManifest {
     let identity = BundleIdentity {
         version: 1,
         entry_point: "index.html",
+        document_scope: PresentationDocumentScope::WholeFilm.as_str(),
         temporal_capability: PresentationTemporalCapability::Sequential.as_str(),
         visual_capability: PresentationVisualCapability::BrowserComposite.as_str(),
         frame_behavior: PresentationFrameBehavior::PerFrame.as_str(),
@@ -320,6 +324,7 @@ fn manifest(files: Vec<BundleFile>) -> BundleManifest {
     };
     let identity = serde_json::to_vec(&identity).expect("the fixture identity serializes");
     BundleManifest::new(
+        PresentationDocumentScope::WholeFilm,
         PresentationTemporalCapability::Sequential,
         PresentationVisualCapability::BrowserComposite,
         PresentationFrameBehavior::PerFrame,

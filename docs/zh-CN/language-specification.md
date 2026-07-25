@@ -336,8 +336,22 @@ type 的内部子集拆成多个 token，整段声明也只产生一条诊断。
 Rust-owned `BrowserPlan`，通过 runtime 的 `Load(plan)` 到达浏览器。
 
 Browser Plan 还会保留 film、scene、shot 与 content ownership。compiler 为每个投影 node
-分配稳定 identity，并且只携带已准入的 authored ID、语义角色、text、ownership 与 solved
-interval。这既不是通用 screenplay props channel，也不是第二条 presentation timeline。
+分配 dense unit-local identity，并且只携带已准入的 authored ID、语义角色、text、ownership
+与 solved interval。跨 projection 的语义身份由 authored ID 承担。这既不是通用 screenplay
+props channel，也不是第二条 presentation timeline。
+
+compiler attribute 不是 presentation prop。编译完成后，browser projection 会移除 cue
+declaration、native audio element，以及 `src`、`duration`、`delay`、`cue`、`gain`
+这些 authored spelling。presentation code 只在适用时消费 Browser Plan 中的 solved
+fact，不能根据 compiler spelling 选择 CSS 或 motion behavior。ID、class、普通 HTML
+attribute、嵌套 markup、inline style 与 authored overlay text 仍是 presentation input。
+
+独立 Render Graph region 的 browser document 只包含 selected shot 及其 owning scene/film
+shell；presentation-global style、motion 与 imported resource 仍是每个 region 的输入。
+authored ID 在 projection 后保持不变；protocol node ID 是 dense unit-local binding key。
+presentation code 不得把 semantic sibling 的存在当作隐式 cross-region communication。
+shot 内的 style 只属于该 region；scene 内、shot 外的 style 属于该 scene 的每个 region；
+位于所有 scene 之外的 film/document style 属于全部 region。
 
 这是语言边界，不是未写下来的实现细节。未来的 screenplay-selected
 presentation 或 props feature 必须一起定义其 spelling、typed

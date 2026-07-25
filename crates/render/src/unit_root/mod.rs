@@ -18,7 +18,10 @@ use url::Url;
 pub use error::{UnitRootError, UnitRootErrorKind};
 
 use crate::encoder::AudioInput;
-use crate::{AudioPlan, MaterializedAsset, RenderProfile, RenderUnit, VisualExecutionPlan};
+use crate::{
+    AudioPlan, CaptureEnvironmentId, FrameArtifactId, MaterializedAsset, RenderProfile, RenderUnit,
+    VisualExecutionPlan,
+};
 
 const MAX_FILES: usize = BundleManifest::MAX_FILES + 1;
 const MAX_BYTES: u64 = 1 << 40;
@@ -206,6 +209,17 @@ impl ExecutableUnit {
     #[must_use]
     pub const fn visual_execution(&self) -> &VisualExecutionPlan {
         &self.visual_execution
+    }
+
+    /// Returns the content address of a capture in one locked environment.
+    #[must_use]
+    pub fn frame_artifact_id(&self, capture_environment: CaptureEnvironmentId) -> FrameArtifactId {
+        FrameArtifactId::from_facts(
+            &self.browser_plan,
+            &self.bundle_id,
+            self.profile,
+            capture_environment,
+        )
     }
 
     pub(crate) fn layered_media_path(&self) -> Option<PathBuf> {

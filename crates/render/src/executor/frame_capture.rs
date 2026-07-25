@@ -9,11 +9,19 @@ use super::capture::{
 };
 use super::{RenderError, invalid_plan, layered_job};
 use crate::encoder::{LayeredCompletion, LayeredOutput};
+use crate::frame_artifact::FrameArtifactWriter;
 use crate::{
     BrowserCaptureMode, BrowserGraphicsBackend, BrowserLaunchPolicy, BrowserLimits, BrowserSession,
     BrowserSessionOptions, CaptureEnvironmentId, ExecutableUnit, Ffmpeg, FrameArtifact,
     FrameArtifactErrorKind, FrameArtifactLimits,
 };
+
+struct PendingArtifact<'a> {
+    unit: &'a ExecutableUnit,
+    output: &'a Path,
+    requests: RequestSequence,
+    writer: FrameArtifactWriter,
+}
 
 /// Aggregate wall-time attribution for one browser capture session.
 ///
@@ -274,16 +282,77 @@ impl FrameCaptureExecutor {
         })
     }
 
+    /// Captures several independent units through one Chromium lifetime.
+    ///
+    /// Every destination must be absent. This batch boundary is intended for a
+    /// cache owner that already resolved hits and assigned private destinations
+    /// to misses.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RenderError`] when inputs disagree, a destination exists, or
+    /// any browser, compositor, or artifact operation fails.
+    pub async fn capture_frame_artifacts(
+        &self,
+        units: &[&ExecutableUnit],
+        capture_environment: CaptureEnvironmentId,
+        artifacts: &[PathBuf],
+        limits: FrameArtifactLimits,
+    ) -> Result<Vec<FrameArtifact>, RenderError> {
+        if units.is_empty() && artifacts.is_empty() {
+            return Ok(Vec::new());
+        }
+        let (profile, output) = validate_capture_batch(units, artifacts)?;
+        let mut pending = prepare_artifacts(units, artifacts, capture_environment, limits).await?;
+        let mut session = self.start_session(profile, output).await?;
+        let capture = self.capture_pending(&mut session, &mut pending).await;
+        session.finish(capture, output).await?;
+        finish_artifacts(pending).await
+    }
+
+    async fn capture_pending(
+        &self,
+        session: &mut FrameCaptureSession,
+        artifacts: &mut [PendingArtifact<'_>],
+    ) -> Result<(), RenderError> {
+        for artifact in artifacts {
+            self.capture_artifact_frames_in_session(
+                session,
+                artifact.unit,
+                &mut artifact.writer,
+                artifact.requests,
+                artifact.output,
+            )
+            .await?;
+        }
+        Ok(())
+    }
+
     async fn capture_artifact_frames(
         &self,
+        unit: &ExecutableUnit,
+        writer: &mut FrameArtifactWriter,
+        requests: RequestSequence,
+        output: &Path,
+    ) -> Result<FrameCaptureMetrics, RenderError> {
+        let mut session = self.start_session(unit.profile(), output).await?;
+        let capture = self
+            .capture_artifact_frames_in_session(&mut session, unit, writer, requests, output)
+            .await;
+        session.finish(capture, output).await
+    }
+
+    async fn capture_artifact_frames_in_session(
+        &self,
+        session: &mut FrameCaptureSession,
         unit: &ExecutableUnit,
         writer: &mut crate::frame_artifact::FrameArtifactWriter,
         requests: RequestSequence,
         output: &Path,
-    ) -> Result<FrameCaptureMetrics, RenderError> {
+    ) -> Result<(), RenderError> {
         if unit.visual_execution().layered_media().is_none() {
             let mut frames = FrameSink::Artifact(writer);
-            return self.capture_unit(unit, &mut frames, requests, output).await;
+            return session.capture(unit, &mut frames, requests, output).await;
         }
 
         let job = layered_job(std::slice::from_ref(unit), LayeredOutput::Frames, output)?;
@@ -295,14 +364,12 @@ impl FrameCaptureExecutor {
             compositor: &mut compositor,
             artifact: writer,
         };
-        let capture = self.capture_unit(unit, &mut frames, requests, output).await;
-        let mut metrics = match capture {
-            Ok(metrics) => metrics,
+        match session.capture(unit, &mut frames, requests, output).await {
+            Ok(()) => {}
             Err(capture) => {
                 return Err(super::abort_compositor(compositor, capture, output).await);
             }
-        };
-        let started = Instant::now();
+        }
         let completion = compositor
             .finish()
             .await
@@ -313,9 +380,10 @@ impl FrameCaptureExecutor {
                 "layered worker composition unexpectedly produced encoded video",
             ));
         };
+        let started = Instant::now();
         write_canonical_artifact(writer, unit.profile(), final_frame, output).await?;
-        metrics.write += started.elapsed();
-        Ok(metrics)
+        session.metrics.write += started.elapsed();
+        Ok(())
     }
 
     async fn reuse_artifact(
@@ -355,18 +423,73 @@ impl FrameCaptureExecutor {
 
         Ok(FrameCaptureSession { browser, metrics })
     }
+}
 
-    pub(super) async fn capture_unit(
-        &self,
-        unit: &ExecutableUnit,
-        frames: &mut FrameSink<'_>,
-        requests: RequestSequence,
-        output: &Path,
-    ) -> Result<FrameCaptureMetrics, RenderError> {
-        let mut session = self.start_session(unit.profile(), output).await?;
-        let capture = session.capture(unit, frames, requests, output).await;
-        session.finish(capture, output).await
+fn validate_capture_batch<'a>(
+    units: &[&ExecutableUnit],
+    artifacts: &'a [PathBuf],
+) -> Result<(crate::RenderProfile, &'a Path), RenderError> {
+    let output = artifacts
+        .first()
+        .map_or_else(|| Path::new("frame-artifacts"), PathBuf::as_path);
+    let Some(first) = units.first() else {
+        return Err(invalid_plan(
+            output,
+            "capture units do not match frame artifact destinations",
+        ));
+    };
+    if units.len() != artifacts.len() {
+        return Err(invalid_plan(
+            output,
+            "capture units do not match frame artifact destinations",
+        ));
     }
+    let profile = first.profile();
+    if units.iter().any(|unit| unit.profile() != profile) {
+        return Err(invalid_plan(
+            output,
+            "one browser capture batch requires one render profile",
+        ));
+    }
+    Ok((profile, output))
+}
+
+async fn prepare_artifacts<'a>(
+    units: &[&'a ExecutableUnit],
+    artifacts: &'a [PathBuf],
+    capture_environment: CaptureEnvironmentId,
+    limits: FrameArtifactLimits,
+) -> Result<Vec<PendingArtifact<'a>>, RenderError> {
+    let mut pending = Vec::with_capacity(units.len());
+    for (unit, output) in units.iter().zip(artifacts) {
+        let requests = validate_plan(unit.browser_plan(), limits.max_frames(), output)?;
+        let writer = FrameArtifact::writer_for_capture(unit, capture_environment, output, limits)
+            .await
+            .map_err(|source| RenderError::artifact(output, source))?;
+        pending.push(PendingArtifact {
+            unit,
+            output,
+            requests,
+            writer,
+        });
+    }
+    Ok(pending)
+}
+
+async fn finish_artifacts(
+    artifacts: Vec<PendingArtifact<'_>>,
+) -> Result<Vec<FrameArtifact>, RenderError> {
+    let mut completed = Vec::with_capacity(artifacts.len());
+    for artifact in artifacts {
+        completed.push(
+            artifact
+                .writer
+                .finish()
+                .await
+                .map_err(|source| RenderError::artifact(artifact.output, source))?,
+        );
+    }
+    Ok(completed)
 }
 
 impl FrameCaptureSession {

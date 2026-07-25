@@ -23,6 +23,8 @@ const AUDIO_START_TOLERANCE_MICROS: u64 = 25_000;
 const GATE_ONE_FRAME_COUNT: usize = 45;
 const GATE_TWO_FRAME_COUNT: usize = 60;
 const PROCESS_DEADLINE: Duration = Duration::from_mins(3);
+const CACHE_ENVIRONMENT: &str =
+    "sha256:1111111111111111111111111111111111111111111111111111111111111111";
 
 #[tokio::test]
 #[ignore = "requires ONMARK_CLI, ONMARK_FFMPEG, ONMARK_FFPROBE, and Gate-one tools on PATH"]
@@ -51,6 +53,48 @@ async fn assembles_two_partitioned_units_across_real_processes() {
     fixture.generate_general_audio().await;
 
     render_fixture_twice(&fixture, SourceVideo::Moving, GATE_TWO_FRAME_COUNT, 0).await;
+}
+
+#[tokio::test]
+#[ignore = "requires ONMARK_CLI, ONMARK_BUNDLER, ONMARK_FFMPEG, and a discoverable browser"]
+async fn reuses_only_unchanged_regions_across_cli_processes() {
+    let directory = tempdir().expect("the conformance workspace is available");
+    let fixture = Fixture::write(directory.path(), &incremental_film("Closing"));
+    let cache = directory.path().join("frame-cache");
+
+    let first = fixture.render_cached("first.mp4", &cache).await;
+    assert_success(&first.output, GATE_TWO_FRAME_COUNT);
+    let first_hashes = decode_video_hashes(&first.path).await;
+    let first_artifacts = cache_artifacts(&cache);
+    assert_eq!(first_artifacts.len(), 2);
+
+    fixture.replace_screenplay(&incremental_film("Changed"));
+    let second = fixture.render_cached("second.mp4", &cache).await;
+    assert_success(&second.output, GATE_TWO_FRAME_COUNT);
+    let second_hashes = decode_video_hashes(&second.path).await;
+    let second_artifacts = cache_artifacts(&cache);
+    assert_eq!(second_artifacts.len(), 3);
+    assert_eq!(first_hashes.len(), GATE_TWO_FRAME_COUNT);
+    assert_eq!(second_hashes.len(), GATE_TWO_FRAME_COUNT);
+    assert_ne!(first_hashes, second_hashes);
+
+    let new_artifact = second_artifacts
+        .iter()
+        .find(|path| !first_artifacts.contains(path))
+        .expect("the edited region contributes one new artifact");
+    fs::write(new_artifact, b"corrupt").expect("the cache fixture can be corrupted");
+
+    let repaired = fixture.render_cached("repaired.mp4", &cache).await;
+    assert_success(&repaired.output, GATE_TWO_FRAME_COUNT);
+    assert_eq!(decode_video_hashes(&repaired.path).await, second_hashes);
+    assert_eq!(cache_artifacts(&cache), second_artifacts);
+    assert!(
+        new_artifact
+            .metadata()
+            .expect("the repaired artifact has metadata")
+            .len()
+            > b"corrupt".len() as u64,
+    );
 }
 
 async fn render_fixture_twice(
@@ -116,6 +160,19 @@ impl Fixture {
             root: root.to_owned(),
             screenplay,
         }
+    }
+
+    fn write(root: &Path, source: &str) -> Self {
+        let screenplay = root.join("film.html");
+        fs::write(&screenplay, source).expect("the screenplay fixture is writable");
+        Self {
+            root: root.to_owned(),
+            screenplay,
+        }
+    }
+
+    fn replace_screenplay(&self, source: &str) {
+        fs::write(&self.screenplay, source).expect("the screenplay fixture is writable");
     }
 
     async fn generate_source_video(&self, video: SourceVideo) {
@@ -190,16 +247,7 @@ impl Fixture {
     }
 
     async fn render_to(&self, output: &Path) -> Output {
-        let mut command = Command::new(required_path("ONMARK_CLI"));
-        command
-            .arg("render")
-            .arg(&self.screenplay)
-            .arg("--output")
-            .arg(output)
-            .arg("--width")
-            .arg(WIDTH.to_string())
-            .arg("--height")
-            .arg(HEIGHT.to_string());
+        let mut command = self.render_command(output);
         for (flag, variable) in [
             ("--browser", "ONMARK_HEADLESS_SHELL"),
             ("--bundler", "ONMARK_BUNDLER"),
@@ -211,6 +259,39 @@ impl Fixture {
             }
         }
         run_process(&mut command).await
+    }
+
+    async fn render_cached(&self, name: &str, cache: &Path) -> RenderAttempt {
+        let path = self.root.join(name);
+        let mut command = self.render_command(&path);
+        command
+            .env("ONMARK_FRAME_CACHE", cache)
+            .env("ONMARK_CAPTURE_ENVIRONMENT_SEED", CACHE_ENVIRONMENT);
+        for (flag, variable) in [
+            ("--bundler", "ONMARK_BUNDLER"),
+            ("--ffmpeg", "ONMARK_FFMPEG"),
+            ("--ffprobe", "ONMARK_FFPROBE"),
+        ] {
+            if let Some(path) = env::var_os(variable) {
+                command.arg(flag).arg(path);
+            }
+        }
+        let output = run_process(&mut command).await;
+        RenderAttempt { path, output }
+    }
+
+    fn render_command(&self, output: &Path) -> Command {
+        let mut command = Command::new(required_path("ONMARK_CLI"));
+        command
+            .arg("render")
+            .arg(&self.screenplay)
+            .arg("--output")
+            .arg(output)
+            .arg("--width")
+            .arg(WIDTH.to_string())
+            .arg("--height")
+            .arg(HEIGHT.to_string());
+        command
     }
 }
 
@@ -456,6 +537,47 @@ fn assert_process_success(operation: &str, output: &Output) {
 fn file_digest(path: &Path) -> [u8; 32] {
     let bytes = fs::read(path).expect("the bounded conformance output is readable");
     Sha256::digest(bytes).into()
+}
+
+fn cache_artifacts(directory: &Path) -> Vec<PathBuf> {
+    let mut artifacts = fs::read_dir(directory)
+        .expect("the frame cache is readable")
+        .map(|entry| entry.expect("the cache entry is readable").path())
+        .filter(|path| {
+            path.extension()
+                .is_some_and(|extension| extension == "onmark-frames")
+        })
+        .collect::<Vec<_>>();
+    artifacts.sort();
+    artifacts
+}
+
+fn incremental_film(closing: &str) -> String {
+    format!(
+        r#"<!doctype html>
+<om-film>
+  <style>
+    html, body, om-film, om-scene, om-shot {{
+      height: 100%;
+      margin: 0;
+      width: 100%;
+    }}
+    body {{ background: black; color: white; }}
+    om-title {{
+      display: grid;
+      font: 700 42px sans-serif;
+      inset: 0;
+      place-items: center;
+      position: fixed;
+    }}
+  </style>
+  <om-scene>
+    <om-shot duration="1s"><om-title>Opening</om-title></om-shot>
+    <om-shot duration="1s"><om-title>{closing}</om-title></om-shot>
+  </om-scene>
+</om-film>
+"#,
+    )
 }
 
 fn copy_fixture(repository: &Path, source: &str, destination: &Path) {

@@ -48,6 +48,193 @@ test("preserves authored DOM and inline styles", async () => {
   });
 });
 
+test("excludes compiler-only facts from presentation identity", async () => {
+  await withWorkspace(async (workspace) => {
+    const firstDocument = await authoredDocument(
+      workspace,
+      [
+        '<om-film id="demo">',
+        '  <om-cues><om-cue id="reveal" time="1s"></om-cue></om-cues>',
+        '  <om-music src="first.mp3" gain="50%"></om-music>',
+        '  <om-scene><om-shot duration="2s">',
+        '    <om-sfx src="first.wav" delay="250ms"></om-sfx>',
+        '    <om-vo src="first-voice.mp3">Narration</om-vo>',
+        '    <video id="hero" class="media" src="first.mp4" delay="100ms"></video>',
+        '    <om-title id="headline" data-delay="authored" cue="reveal">',
+        '      Keep <img src="texture.png" alt="texture"> me',
+        "    </om-title>",
+        '    <om-cta id="action" delay="500ms">Act now</om-cta>',
+        "  </om-shot></om-scene>",
+        "</om-film>",
+      ].join("\n"),
+    );
+    const first = await bundlePresentation(
+      options(firstDocument, join(workspace, "first")),
+    );
+
+    const secondDocument = await authoredDocument(
+      workspace,
+      [
+        '<om-film id="demo">',
+        '  <om-cues><om-cue id="later" time="1500ms"></om-cue></om-cues>',
+        '  <om-music src="second.mp3" gain="25%"></om-music>',
+        '  <om-scene><om-shot duration="3s">',
+        '    <om-sfx src="second.wav" delay="750ms"></om-sfx>',
+        '    <om-vo src="second-voice.mp3">Narration</om-vo>',
+        '    <video id="hero" class="media" src="second.mp4" delay="200ms"></video>',
+        '    <om-title id="headline" data-delay="authored" delay="1s">',
+        '      Keep <img src="texture.png" alt="texture"> me',
+        "    </om-title>",
+        '    <om-cta id="action" cue="later">Act now</om-cta>',
+        "  </om-shot></om-scene>",
+        "</om-film>",
+      ].join("\n"),
+    );
+    const second = await bundlePresentation(
+      options(secondDocument, join(workspace, "second")),
+    );
+
+    assert.deepEqual(first.manifest, second.manifest);
+    const html = await readFile(
+      join(first.directory, BUNDLE_ENTRY_POINT),
+      "utf8",
+    );
+    assert.doesNotMatch(html, /om-cues|om-cue|om-music|om-sfx|om-vo/u);
+    assert.doesNotMatch(
+      html,
+      /first\.mp3|first\.mp4|\s(?:cue|delay|duration|gain)="[^"]*"/u,
+    );
+    assert.match(html, /<video id="hero" class="media"\s*><\/video>/u);
+    assert.match(html, /<om-title id="headline" data-delay="authored"\s*>/u);
+    assert.match(html, /<img src="texture\.png" alt="texture">/u);
+  });
+});
+
+test("publishes one independently identified browser bundle per shot", async () => {
+  await withWorkspace(async (workspace) => {
+    const baseline = await authoredDocument(
+      workspace,
+      [
+        "<om-film><om-scene>",
+        '  <om-shot duration="1s"><om-title>Opening</om-title></om-shot>',
+        '  <om-shot duration="1s"><om-title>Closing</om-title></om-shot>',
+        "</om-scene></om-film>",
+      ].join("\n"),
+    );
+    const first = await bundlePresentation({
+      ...options(baseline, join(workspace, "baseline-regions")),
+      temporalCapability: "randomAccess",
+    });
+    const edited = await authoredDocument(
+      workspace,
+      [
+        "<om-film><om-scene>",
+        '  <om-shot duration="1s"><om-title>Opening</om-title></om-shot>',
+        '  <om-shot duration="1s"><om-title>Edited closing</om-title></om-shot>',
+        "</om-scene></om-film>",
+      ].join("\n"),
+    );
+    const second = await bundlePresentation({
+      ...options(edited, join(workspace, "edited-regions")),
+      temporalCapability: "randomAccess",
+    });
+
+    assert.equal(first.regions.length, 2);
+    assert.equal(second.regions.length, 2);
+    assert.equal(
+      first.regions[0]?.manifest.bundleId,
+      second.regions[0]?.manifest.bundleId,
+    );
+    assert.notEqual(
+      first.regions[1]?.manifest.bundleId,
+      second.regions[1]?.manifest.bundleId,
+    );
+
+    const opening = await readFile(
+      join(first.regions[0]!.directory, BUNDLE_ENTRY_POINT),
+      "utf8",
+    );
+    assert.match(opening, /Opening/u);
+    assert.doesNotMatch(opening, /Closing/u);
+  });
+});
+
+test("scopes presentation styles to their semantic owner", async () => {
+  await withWorkspace(async (workspace) => {
+    const baseline = await regionIdentities(
+      workspace,
+      "baseline-scope",
+      styledScenes("#111111", "#ff0000"),
+    );
+    const sceneEdit = await regionIdentities(
+      workspace,
+      "scene-scope",
+      styledScenes("#111111", "#0000ff"),
+    );
+    const filmEdit = await regionIdentities(
+      workspace,
+      "film-scope",
+      styledScenes("#222222", "#ff0000"),
+    );
+
+    assert.equal(sceneEdit[0], baseline[0]);
+    assert.notEqual(sceneEdit[1], baseline[1]);
+    assert.notEqual(filmEdit[0], baseline[0]);
+    assert.notEqual(filmEdit[1], baseline[1]);
+  });
+});
+
+test("invalidates identity for every presentation-owned input", async () => {
+  await withWorkspace(async (workspace) => {
+    const baselineMarkup = [
+      "<style>om-title { color: #152238; }</style>",
+      film("<om-title><span>Opening</span></om-title>"),
+    ].join("\n");
+    const styleEdit = [
+      "<style>om-title { color: #d02020; }</style>",
+      film("<om-title><span>Opening</span></om-title>"),
+    ].join("\n");
+    const structureEdit = [
+      "<style>om-title { color: #152238; }</style>",
+      film("<om-title><em>Opening</em></om-title>"),
+    ].join("\n");
+
+    const baseline = await presentationIdentity(
+      workspace,
+      "baseline",
+      baselineMarkup,
+      markingMotion("baseline"),
+    );
+    const styleIdentity = await presentationIdentity(
+      workspace,
+      "style-edit",
+      styleEdit,
+      markingMotion("baseline"),
+    );
+    const structureIdentity = await presentationIdentity(
+      workspace,
+      "structure-edit",
+      structureEdit,
+      markingMotion("baseline"),
+    );
+    const motionIdentity = await presentationIdentity(
+      workspace,
+      "motion-edit",
+      baselineMarkup,
+      markingMotion("edited"),
+    );
+    const edits = [
+      ["global style", styleIdentity],
+      ["semantic structure", structureIdentity],
+      ["motion module", motionIdentity],
+    ] as const;
+
+    for (const [kind, identity] of edits) {
+      assert.notEqual(identity, baseline, `${kind} must invalidate the bundle`);
+    }
+  });
+});
+
 test("injects the runtime inside an explicit document body", async () => {
   await withWorkspace(async (workspace) => {
     const document = join(workspace, "film.html");
@@ -78,6 +265,39 @@ test("injects the runtime inside an explicit document body", async () => {
       /\n[\t ]+\n<script type="module" src="\.\/presentation\.js"/u,
     );
     assert.equal(bundled.trimEnd().endsWith("</html>"), true);
+  });
+});
+
+test("keeps runtime infrastructure outside every projected shot", async () => {
+  await withWorkspace(async (workspace) => {
+    const document = join(workspace, "film.html");
+    await writeFile(
+      document,
+      [
+        "<!doctype html>",
+        "<html><body><om-film><om-scene>",
+        "<om-shot>",
+        '<script type="module" data-om-motion>',
+        "export const motion = { bind() { return { effects: [], resources: [] }; } };",
+        "</script>",
+        "<om-title>Opening</om-title></om-shot>",
+        "<om-shot><om-title>Closing</om-title></om-shot>",
+        "</om-scene></om-film></body></html>",
+      ].join("\n"),
+      "utf8",
+    );
+    const artifact = await bundlePresentation({
+      ...options(document, join(workspace, "bundle")),
+      temporalCapability: "randomAccess",
+    });
+    const closing = await readFile(
+      join(artifact.regions[1]!.directory, BUNDLE_ENTRY_POINT),
+      "utf8",
+    );
+
+    assert.match(closing, /src="\.\/presentation\.js"/u);
+    assert.doesNotMatch(closing, /data-om-motion|Opening/u);
+    assert.match(closing, /Closing/u);
   });
 });
 
@@ -245,6 +465,16 @@ test("carries imported visual resources into the immutable bundle", async () => 
       /content: '<script type="module" src="\.\/presentation\.js"><\/script>';/u,
     );
     assert.ok(html.lastIndexOf("<link rel=") > html.indexOf("</style>"));
+
+    await writeFile(
+      join(workspace, "poster.svg"),
+      svgBytes.replace('width="1"', 'width="2"'),
+      "utf8",
+    );
+    const changed = await bundlePresentation(
+      options(document, join(workspace, "changed-resource")),
+    );
+    assert.notEqual(changed.manifest.bundleId, first.manifest.bundleId);
   });
 });
 
@@ -313,6 +543,7 @@ test("bundles the temporal experiment with its browser libraries", async () => {
       BUNDLE_ENTRY_POINT,
       BUNDLE_MANIFEST_FILE,
       "presentation.js",
+      "regions",
     ]);
   });
 });
@@ -360,10 +591,67 @@ async function authoredDocument(
   return document;
 }
 
+async function presentationIdentity(
+  workspace: string,
+  label: string,
+  markup: string,
+  motion: string,
+): Promise<string> {
+  const document = await authoredDocument(workspace, markup, motion);
+  const artifact = await bundlePresentation(
+    options(document, join(workspace, label)),
+  );
+  return artifact.manifest.bundleId;
+}
+
+async function regionIdentities(
+  workspace: string,
+  label: string,
+  markup: string,
+): Promise<readonly string[]> {
+  const document = await authoredDocument(workspace, markup);
+  const artifact = await bundlePresentation({
+    ...options(document, join(workspace, label)),
+    temporalCapability: "randomAccess",
+  });
+  return artifact.regions.map((region) => region.manifest.bundleId);
+}
+
+function styledScenes(filmColor: string, closingColor: string): string {
+  return [
+    "<om-film>",
+    `  <style>body { background: ${filmColor}; }</style>`,
+    "  <om-scene>",
+    "    <style>om-title { color: white; }</style>",
+    "    <om-shot><om-title>Opening</om-title></om-shot>",
+    "  </om-scene>",
+    "  <om-scene>",
+    `    <style>om-title { color: ${closingColor}; }</style>`,
+    "    <om-shot><om-title>Closing</om-title></om-shot>",
+    "  </om-scene>",
+    "</om-film>",
+  ].join("\n");
+}
+
+function markingMotion(value: string): string {
+  return `export const motion = {
+  bind() {
+    return {
+      effects: [{
+        apply() { document.body.dataset.motion = ${JSON.stringify(value)}; },
+        dispose() { delete document.body.dataset.motion; },
+      }],
+      resources: [],
+    };
+  },
+};`;
+}
+
 function bundleIdentity(manifest: BundleManifest): string {
   const identity = JSON.stringify({
     version: manifest.version,
     entryPoint: manifest.entryPoint,
+    documentScope: manifest.documentScope,
     temporalCapability: manifest.temporalCapability,
     visualCapability: manifest.visualCapability,
     frameBehavior: manifest.frameBehavior,

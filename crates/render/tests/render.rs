@@ -21,8 +21,9 @@ use onmark_media::{Ffprobe, SubtitleLimits, parse_webvtt};
 use onmark_render::{
     BrowserCaptureMode, BrowserErrorKind, BrowserGraphicsBackend, BrowserLaunchPolicy,
     BrowserLimits, BrowserSession, BrowserSessionOptions, CaptureEnvironmentId, EncodeLimits,
-    EncodedPng, ExecutableUnit, Ffmpeg, FrameArtifact, FrameArtifactLimits, MaterializedAsset,
-    RawRgbaHash, RenderErrorKind, RenderExecutor, RenderProfile, RenderUnit, UnitRootLimits,
+    EncodedPng, ExecutableUnit, Ffmpeg, FrameArtifact, FrameArtifactErrorKind, FrameArtifactLimits,
+    MaterializedAsset, RawRgbaHash, RenderErrorKind, RenderExecutor, RenderProfile, RenderUnit,
+    UnitRootLimits,
 };
 use serde::Deserialize;
 use sha2::{Digest as _, Sha256};
@@ -420,6 +421,121 @@ async fn assembles_temporal_frame_artifacts_equivalently_to_the_whole_film() {
     inspect_gate_four_output(&assembled_output).await;
 }
 
+#[tokio::test]
+#[ignore = "requires ONMARK_BUNDLER, ONMARK_HEADLESS_SHELL, and ONMARK_FFMPEG"]
+async fn isolates_one_authored_html_edit_to_its_render_partition() {
+    let directory = tempdir().expect("the experiment workspace must be available");
+    let baseline_source = directory.path().join("baseline.html");
+    let edited_source = directory.path().join("edited.html");
+    fs::write(&baseline_source, isolation_source("Before edit"))
+        .expect("the baseline presentation source must be writable");
+    fs::write(&edited_source, isolation_source("After edit"))
+        .expect("the edited presentation source must be writable");
+
+    let baseline_bundle = FixtureBundle::build_from(
+        directory.path(),
+        "baseline-bundle",
+        &baseline_source,
+        "randomAccess",
+        "browserComposite",
+        "placementBounded",
+    )
+    .await;
+    let edited_bundle = FixtureBundle::build_from(
+        directory.path(),
+        "edited-bundle",
+        &edited_source,
+        "randomAccess",
+        "browserComposite",
+        "placementBounded",
+    )
+    .await;
+    let baseline = StaticPartitionFixture::materialize(&baseline_source, &baseline_bundle);
+    let edited = StaticPartitionFixture::materialize(&edited_source, &edited_bundle);
+    let executor = real_executor(TWO_UNIT_FRAME_COUNT);
+
+    let baseline = capture_static_fixture(&executor, directory.path(), "baseline", &baseline).await;
+    let edited = capture_static_fixture(&executor, directory.path(), "edited", &edited).await;
+
+    FrameArtifact::verify_raw_rgba_equivalence(
+        std::slice::from_ref(&baseline.whole),
+        &baseline.partitions,
+    )
+    .await
+    .expect("the baseline partitions must reproduce their whole film");
+    FrameArtifact::verify_raw_rgba_equivalence(
+        std::slice::from_ref(&edited.whole),
+        &edited.partitions,
+    )
+    .await
+    .expect("the edited partitions must reproduce their whole film");
+    FrameArtifact::verify_raw_rgba_equivalence(
+        std::slice::from_ref(&baseline.partitions[0]),
+        std::slice::from_ref(&edited.partitions[0]),
+    )
+    .await
+    .expect("editing the closing shot must preserve opening pixels");
+
+    let error = FrameArtifact::verify_raw_rgba_equivalence(
+        std::slice::from_ref(&baseline.partitions[1]),
+        std::slice::from_ref(&edited.partitions[1]),
+    )
+    .await
+    .expect_err("the edited closing title must change closing pixels");
+    assert_eq!(error.kind(), FrameArtifactErrorKind::RawRgbaMismatch);
+}
+
+#[tokio::test]
+#[ignore = "requires ONMARK_BUNDLER, ONMARK_HEADLESS_SHELL, and ONMARK_FFMPEG"]
+async fn shot_projection_blocks_cross_partition_css_observation() {
+    let directory = tempdir().expect("the experiment workspace must be available");
+    let baseline_source = directory.path().join("dependency-baseline.html");
+    let edited_source = directory.path().join("dependency-edited.html");
+    fs::write(&baseline_source, dependency_source("ordinary", "Closing"))
+        .expect("the dependency baseline must be writable");
+    fs::write(&edited_source, dependency_source("trigger", "Closing"))
+        .expect("the dependency edit must be writable");
+
+    let baseline_bundle = FixtureBundle::build_from(
+        directory.path(),
+        "dependency-baseline-bundle",
+        &baseline_source,
+        "randomAccess",
+        "browserComposite",
+        "placementBounded",
+    )
+    .await;
+    let edited_bundle = FixtureBundle::build_from(
+        directory.path(),
+        "dependency-edited-bundle",
+        &edited_source,
+        "randomAccess",
+        "browserComposite",
+        "placementBounded",
+    )
+    .await;
+    let baseline = StaticPartitionFixture::materialize(&baseline_source, &baseline_bundle);
+    let edited = StaticPartitionFixture::materialize(&edited_source, &edited_bundle);
+    let executor = real_executor(TWO_UNIT_FRAME_COUNT);
+
+    let baseline = capture_static_partitions(
+        &executor,
+        directory.path(),
+        "dependency-baseline",
+        &baseline,
+    )
+    .await;
+    let edited =
+        capture_static_partitions(&executor, directory.path(), "dependency-edited", &edited).await;
+
+    FrameArtifact::verify_raw_rgba_equivalence(
+        std::slice::from_ref(&baseline[0]),
+        std::slice::from_ref(&edited[0]),
+    )
+    .await
+    .expect("an omitted closing shot cannot affect opening pixels through :has()");
+}
+
 async fn inspect_gate_four_output(output: &Path) -> DecodedOutput {
     assert_video_stream(output, TWO_UNIT_FRAME_COUNT).await;
     let output = inspect_output(output).await;
@@ -433,6 +549,40 @@ async fn inspect_gate_four_output(output: &Path) -> DecodedOutput {
     );
     assert_audio_starts_at(&output, 0);
     output
+}
+
+fn isolation_source(closing: &str) -> String {
+    static_partition_source("", "", closing)
+}
+
+fn dependency_source(closing_class: &str, closing: &str) -> String {
+    static_partition_source(
+        "om-scene:has(> om-shot.trigger) > om-shot:first-child om-title { color: #d02020; }\n",
+        closing_class,
+        closing,
+    )
+}
+
+fn static_partition_source(extra_style: &str, closing_class: &str, closing: &str) -> String {
+    format!(
+        r#"<!doctype html>
+<html><head><style>
+html, body, om-film, om-scene, om-shot {{
+  display: block; height: 100%; margin: 0; width: 100%;
+}}
+body {{ background: #f5f0e8; overflow: hidden; }}
+om-shot {{
+  align-items: center; display: flex; justify-content: center;
+}}
+om-title {{ color: #152238; font: 700 28px sans-serif; }}
+{extra_style}</style></head><body>
+<om-film><om-scene>
+  <om-shot duration="1s"><om-title>Stable opening</om-title></om-shot>
+  <om-shot class="{closing_class}" duration="1s"><om-title>{closing}</om-title></om-shot>
+</om-scene></om-film>
+</body></html>
+"#,
+    )
 }
 
 async fn generate_source_video(output: &Path, duration_seconds: &str) {
@@ -1175,16 +1325,18 @@ impl GateFourFixture {
         )
         .expect("the complete fixture forms one whole-film unit");
         let whole_film = bundle.materialize(whole_film);
-        let partitioned_units: Vec<_> = RenderUnit::from_partition_plan(
+        let region_manifests = bundle.region_manifests(partition_plan.units().len());
+        let partitioned_units: Vec<_> = RenderUnit::from_partitioned_bundles(
             &timeline,
             &partition_plan,
-            &bundle.manifest,
+            region_manifests,
             render_profile(),
             materialized_assets,
         )
         .expect("the graph partitions form one local sequence")
         .into_iter()
-        .map(|unit| bundle.materialize(unit))
+        .enumerate()
+        .map(|(index, unit)| bundle.materialize_region(index, unit))
         .collect();
         assert!(partitioned_units.iter().all(|unit| {
             unit.browser_plan()
@@ -1199,6 +1351,109 @@ impl GateFourFixture {
             partitioned_units,
         }
     }
+}
+
+struct StaticPartitionFixture {
+    whole_film: ExecutableUnit,
+    partitioned_units: Vec<ExecutableUnit>,
+}
+
+impl StaticPartitionFixture {
+    fn materialize(source: &Path, bundle: &FixtureBundle) -> Self {
+        let source =
+            fs::read_to_string(source).expect("the static presentation source must be readable");
+        let timeline = solve_timeline(&source, &BTreeMap::new());
+        let partitions =
+            RenderGraph::from_timeline(&timeline, bundle.manifest.temporal_capability())
+                .expect("the static fixture has complete render ownership")
+                .into_partition();
+        assert_eq!(
+            partitions.units().len(),
+            2,
+            "the static fixture must produce two independent units",
+        );
+
+        let whole_film =
+            RenderUnit::whole_film(&timeline, bundle.manifest.clone(), render_profile(), [])
+                .expect("the static fixture forms one whole-film unit");
+        let region_manifests = bundle.region_manifests(partitions.units().len());
+        let partitioned_units = RenderUnit::from_partitioned_bundles(
+            &timeline,
+            &partitions,
+            region_manifests,
+            render_profile(),
+            [],
+        )
+        .expect("the static fixture forms two partition units")
+        .into_iter()
+        .enumerate()
+        .map(|(index, unit)| bundle.materialize_region(index, unit))
+        .collect();
+
+        Self {
+            whole_film: bundle.materialize(whole_film),
+            partitioned_units,
+        }
+    }
+}
+
+struct CapturedStaticFixture {
+    whole: FrameArtifact,
+    partitions: Vec<FrameArtifact>,
+}
+
+async fn capture_static_fixture(
+    executor: &RenderExecutor,
+    workspace: &Path,
+    label: &str,
+    fixture: &StaticPartitionFixture,
+) -> CapturedStaticFixture {
+    let whole_path = workspace.join(format!("{label}-whole.onmark-frames"));
+    let whole = capture_and_reuse_static(executor, &fixture.whole_film, &whole_path).await;
+    let partitions = capture_static_partitions(executor, workspace, label, fixture).await;
+
+    CapturedStaticFixture { whole, partitions }
+}
+
+async fn capture_static_partitions(
+    executor: &RenderExecutor,
+    workspace: &Path,
+    label: &str,
+    fixture: &StaticPartitionFixture,
+) -> Vec<FrameArtifact> {
+    let mut partitions = Vec::with_capacity(fixture.partitioned_units.len());
+    for (index, unit) in fixture.partitioned_units.iter().enumerate() {
+        let path = workspace.join(format!("{label}-partition-{index}.onmark-frames"));
+        let artifact = capture_and_reuse_static(executor, unit, &path).await;
+        partitions.push(artifact);
+    }
+    partitions
+}
+
+async fn capture_and_reuse_static(
+    executor: &RenderExecutor,
+    unit: &ExecutableUnit,
+    path: &Path,
+) -> FrameArtifact {
+    let cold = executor
+        .capture_frame_artifact_report(unit, capture_environment(), path, frame_artifact_limits())
+        .await
+        .expect("the static artifact must capture");
+    assert!(
+        cold.metrics().is_some(),
+        "a missing artifact must execute its browser capture",
+    );
+
+    let warm = executor
+        .capture_frame_artifact_report(unit, capture_environment(), path, frame_artifact_limits())
+        .await
+        .expect("the completed static artifact must be reusable");
+    assert!(
+        warm.metrics().is_none(),
+        "a verified artifact must not launch another browser capture",
+    );
+    assert_eq!(warm.artifact().id(), cold.artifact().id());
+    warm.into_artifact()
 }
 
 fn asset_ref(value: &str) -> AssetRef {
@@ -1342,10 +1597,37 @@ impl FixtureBundle {
     }
 
     fn materialize(&self, unit: RenderUnit) -> ExecutableUnit {
+        self.materialize_from(&self.directory, unit)
+    }
+
+    fn region_manifests(&self, count: usize) -> Vec<BundleManifest> {
+        (0..count)
+            .map(|index| self.region_manifest(index))
+            .collect()
+    }
+
+    fn region_manifest(&self, index: usize) -> BundleManifest {
+        let path = self.region_directory(index).join(BundleManifest::FILE_NAME);
+        let manifest =
+            fs::read_to_string(path).expect("the shot-scoped bundle manifest is readable");
+        serde_json::from_str(&manifest).expect("the shot-scoped bundle manifest is valid")
+    }
+
+    fn materialize_region(&self, index: usize, unit: RenderUnit) -> ExecutableUnit {
+        self.materialize_from(&self.region_directory(index), unit)
+    }
+
+    fn region_directory(&self, index: usize) -> PathBuf {
+        self.directory
+            .join(BundleManifest::REGION_DIRECTORY)
+            .join(index.to_string())
+    }
+
+    fn materialize_from(&self, directory: &Path, unit: RenderUnit) -> ExecutableUnit {
         let limits = UnitRootLimits::new(UNIT_ROOT_FILE_LIMIT, 64 * 1024 * 1024)
             .expect("the fixture materialization limits are bounded");
 
-        ExecutableUnit::materialize(unit, &self.directory, limits)
+        ExecutableUnit::materialize(unit, directory, limits)
             .expect("the fixture bundle must become one executable unit")
     }
 }

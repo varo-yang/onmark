@@ -436,7 +436,19 @@ function planViolation(plan: BrowserPlan): string | undefined {
       return "plan overlay interval falls outside evaluation";
     }
   }
+  if (!hasDenseNodeIdentity(nodeIds)) {
+    return "plan node identity is not dense";
+  }
   return undefined;
+}
+
+function hasDenseNodeIdentity(identities: ReadonlySet<number>): boolean {
+  for (let expected = 0; expected < identities.size; expected += 1) {
+    if (!identities.has(expected)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 function hasCanonicalNodeOrder(

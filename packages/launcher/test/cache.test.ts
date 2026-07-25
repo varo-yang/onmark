@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { browserCacheDirectory } from "../src/cache.js";
+import { browserCacheDirectory, frameCacheDirectory } from "../src/cache.js";
 
 test("uses native cache roots on release platforms", () => {
   assert.equal(
@@ -13,6 +13,14 @@ test("uses native cache roots on release platforms", () => {
       {},
     ),
     "/Users/author/Library/Caches/onmark/browser",
+  );
+  assert.equal(
+    frameCacheDirectory(
+      { arch: "arm64", platform: "darwin" },
+      "/Users/author",
+      {},
+    ),
+    "/Users/author/Library/Caches/onmark/frames",
   );
   assert.equal(
     browserCacheDirectory({ arch: "x64", platform: "linux" }, "/home/author", {

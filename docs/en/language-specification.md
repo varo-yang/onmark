@@ -290,9 +290,27 @@ channel. Solved facts reach the document only as the Rust-owned `BrowserPlan`
 delivered through `Load(plan)`.
 
 The Browser Plan also retains film, scene, shot, and content ownership. The
-compiler assigns every projected node a stable identity and carries only the
-admitted authored ID, semantic role, text, ownership, and solved interval. This
-is not a general screenplay props channel or a second presentation timeline.
+compiler assigns every projected node a dense unit-local identity and carries
+only the admitted authored ID, semantic role, text, ownership, and solved
+interval. Authored IDs provide semantic identity across projections. This is
+not a general screenplay props channel or a second presentation timeline.
+
+Compiler attributes are not presentation props. The browser projection removes
+cue declarations, native audio elements, and the `src`, `duration`, `delay`,
+`cue`, and `gain` spellings after compilation. Presentation code consumes their
+solved Browser Plan facts where applicable; it must not select CSS or motion
+behavior from the authored compiler spelling. IDs, classes, ordinary HTML
+attributes, nested markup, inline styles, and authored overlay text remain
+presentation inputs.
+
+For independent Render Graph regions, the browser document contains only the
+selected shot and its owning scene and film shells. Presentation-global style,
+motion, and imported resources remain inputs to every region. Authored IDs
+survive this projection; protocol node IDs are dense unit-local binding keys.
+Code must not use the presence of semantic siblings as an implicit cross-region
+communication channel. A style inside one shot belongs to that region; a style
+inside a scene but outside its shots belongs to every region in that scene; a
+film- or document-level style outside all scenes belongs to every region.
 
 This is a language boundary, not an undocumented implementation detail. A future
 screenplay-selected presentation or props feature must define its spelling,

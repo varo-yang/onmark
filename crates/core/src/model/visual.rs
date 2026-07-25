@@ -1,7 +1,60 @@
-//! Closed presentation-visual capabilities used by render execution.
+//! Closed presentation-artifact facts used by render execution.
 
 use std::fmt;
 use std::str::FromStr;
+
+/// Semantic DOM extent present in one immutable browser artifact.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", schemars(rename_all = "camelCase"))]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum PresentationDocumentScope {
+    /// The browser document contains the complete authored film.
+    #[default]
+    WholeFilm,
+    /// The browser document contains exactly one independently planned region.
+    RenderRegion,
+}
+
+impl PresentationDocumentScope {
+    /// Returns the canonical wire spelling.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::WholeFilm => "wholeFilm",
+            Self::RenderRegion => "renderRegion",
+        }
+    }
+}
+
+impl fmt::Display for PresentationDocumentScope {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+impl FromStr for PresentationDocumentScope {
+    type Err = InvalidPresentationDocumentScope;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "wholeFilm" => Ok(Self::WholeFilm),
+            "renderRegion" => Ok(Self::RenderRegion),
+            _ => Err(InvalidPresentationDocumentScope),
+        }
+    }
+}
+
+/// Reason a presentation document-scope spelling was rejected.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct InvalidPresentationDocumentScope;
+
+impl fmt::Display for InvalidPresentationDocumentScope {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("expected wholeFilm or renderRegion")
+    }
+}
+
+impl std::error::Error for InvalidPresentationDocumentScope {}
 
 /// Proven relationship between browser presentation pixels and primary media.
 ///
@@ -119,7 +172,19 @@ impl std::error::Error for InvalidPresentationFrameBehavior {}
 
 #[cfg(test)]
 mod tests {
-    use super::{PresentationFrameBehavior, PresentationVisualCapability};
+    use super::{
+        PresentationDocumentScope, PresentationFrameBehavior, PresentationVisualCapability,
+    };
+
+    #[test]
+    fn document_scope_spellings_round_trip() {
+        for scope in [
+            PresentationDocumentScope::WholeFilm,
+            PresentationDocumentScope::RenderRegion,
+        ] {
+            assert_eq!(scope.as_str().parse(), Ok(scope));
+        }
+    }
 
     #[test]
     fn canonical_spellings_round_trip() {

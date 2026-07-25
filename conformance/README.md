@@ -134,3 +134,10 @@ The test prints every raw timing/RSS sample, the two medians, the frozen source
 digest, and the capture-environment identity. The reviewed admission and
 production-exit evidence is recorded in
 [`layered-media-admission.md`](layered-media-admission.md).
+
+The incremental-rendering conformance keeps temporal seekability, DOM scope,
+and artifact identity separate. It proves whole-versus-region raw-RGBA
+equivalence, isolates a local title edit, prevents `:has()` from observing an
+omitted sibling, and exercises persistent CLI reuse plus corruption repair
+through the shared assembler. The evidence and exact commands live in
+[`incremental-rendering-experiment.md`](incremental-rendering-experiment.md).

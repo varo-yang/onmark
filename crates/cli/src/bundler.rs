@@ -52,7 +52,7 @@ struct PresentationCapabilities {
 impl PresentationCapabilities {
     const fn authored_html() -> Self {
         Self {
-            temporal: PresentationTemporalCapability::Sequential,
+            temporal: PresentationTemporalCapability::RandomAccess,
             visual: PresentationVisualCapability::BrowserComposite,
             frame_behavior: PresentationFrameBehavior::PerFrame,
         }
@@ -171,6 +171,29 @@ impl BundleArtifact {
 
     pub(super) const fn manifest(&self) -> &BundleManifest {
         &self.manifest
+    }
+
+    pub(super) fn region(&self, index: usize) -> Result<BundleRegion, BundleError> {
+        let directory = self
+            .directory()
+            .join(BundleManifest::REGION_DIRECTORY)
+            .join(index.to_string());
+        let manifest = read_manifest(&directory.join(BundleManifest::FILE_NAME))?;
+        Ok(BundleRegion {
+            directory,
+            manifest,
+        })
+    }
+}
+
+pub(super) struct BundleRegion {
+    directory: PathBuf,
+    manifest: BundleManifest,
+}
+
+impl BundleRegion {
+    pub(super) fn into_parts(self) -> (PathBuf, BundleManifest) {
+        (self.directory, self.manifest)
     }
 }
 
@@ -486,7 +509,7 @@ mod tests {
         let capabilities = PresentationCapabilities::authored_html();
         assert_eq!(
             capabilities.temporal,
-            PresentationTemporalCapability::Sequential
+            PresentationTemporalCapability::RandomAccess
         );
         assert_eq!(
             capabilities.visual,

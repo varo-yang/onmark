@@ -12,7 +12,8 @@ use std::sync::Arc;
 
 use onmark_core::model::{
     AudioChannelLayout, AudioGain, AudioSampleConversionOverflow, AudioSampleCount, FrameInterval,
-    FrameRate, FrozenAsset, FrozenAssetId, Rounding, VideoColorProfile, VideoDimensions,
+    FrameRate, FrozenAsset, FrozenAssetId, PresentationDocumentScope, Rounding, VideoColorProfile,
+    VideoDimensions,
 };
 use onmark_core::protocol::{BrowserPlan, BundleManifest, InvalidBrowserPlan};
 use onmark_core::render_graph::{PartitionPlan, RenderPartition};
@@ -223,6 +224,7 @@ impl RenderUnit {
         profile: RenderProfile,
         assets: impl IntoIterator<Item = MaterializedAsset>,
     ) -> Result<Self, InvalidRenderUnit> {
+        require_document_scope(&bundle_manifest, PresentationDocumentScope::WholeFilm)?;
         let interval = timeline.interval();
         Self::compose(
             timeline,
@@ -277,6 +279,7 @@ impl RenderUnit {
         profile: RenderProfile,
         assets: impl IntoIterator<Item = MaterializedAsset>,
     ) -> Result<Vec<Self>, InvalidRenderUnit> {
+        require_document_scope(bundle_manifest, PresentationDocumentScope::WholeFilm)?;
         let available = materialized_catalog(assets)?;
         let bundle_manifest = Arc::new(bundle_manifest.clone());
         let mut units = Vec::with_capacity(partitions.units().len());
@@ -287,6 +290,42 @@ impl RenderUnit {
                 partition.evaluation(),
                 partition.output(),
                 Arc::clone(&bundle_manifest),
+                profile,
+                &available,
+            )?);
+        }
+        normalize_visual_execution(&mut units);
+        Ok(units)
+    }
+
+    /// Composes every partition with its own shot-scoped presentation bundle.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InvalidRenderUnit`] when the bundle count differs from the
+    /// partition count or any partition fails the ordinary unit checks.
+    pub fn from_partitioned_bundles(
+        timeline: &TimelineIr,
+        partitions: &PartitionPlan,
+        bundle_manifests: Vec<BundleManifest>,
+        profile: RenderProfile,
+        assets: impl IntoIterator<Item = MaterializedAsset>,
+    ) -> Result<Vec<Self>, InvalidRenderUnit> {
+        if bundle_manifests.len() != partitions.units().len() {
+            return Err(InvalidRenderUnit::BundleCount);
+        }
+        for manifest in &bundle_manifests {
+            require_document_scope(manifest, PresentationDocumentScope::RenderRegion)?;
+        }
+        let available = materialized_catalog(assets)?;
+        let mut units = Vec::with_capacity(partitions.units().len());
+
+        for (partition, manifest) in partitions.units().iter().zip(bundle_manifests) {
+            units.push(Self::compose_from_catalog(
+                timeline,
+                partition.evaluation(),
+                partition.output(),
+                Arc::new(manifest),
                 profile,
                 &available,
             )?);
@@ -438,6 +477,15 @@ fn normalize_visual_execution(units: &mut [RenderUnit]) {
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum InvalidRenderUnit {
+    /// Shot-scoped presentation bundles do not cover the partition plan.
+    BundleCount,
+    /// A browser artifact contains the wrong semantic DOM extent.
+    DocumentScope {
+        /// Scope required by the selected composition path.
+        expected: PresentationDocumentScope,
+        /// Scope declared by the immutable presentation artifact.
+        actual: PresentationDocumentScope,
+    },
     /// Two materialized inputs claim the same frozen identity.
     DuplicateAsset(FrozenAssetId),
     /// Timeline IR references bytes absent from materialization.
@@ -469,6 +517,15 @@ pub enum InvalidRenderUnit {
 impl fmt::Display for InvalidRenderUnit {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::BundleCount => {
+                formatter.write_str("presentation bundles do not match the partition plan")
+            }
+            Self::DocumentScope { expected, actual } => {
+                write!(
+                    formatter,
+                    "presentation document scope is {actual}; expected {expected}"
+                )
+            }
             Self::DuplicateAsset(id) => write!(formatter, "materialized asset {id} is duplicated"),
             Self::MissingAsset(id) => write!(formatter, "materialized asset {id} is missing"),
             Self::UnsupportedVideo { id, source } => {
@@ -509,9 +566,26 @@ impl Error for InvalidRenderUnit {
             Self::UnsupportedVideo { source, .. } => Some(source),
             Self::AudioSampleConversion { source, .. } => Some(source),
             Self::BrowserPlan(source) => Some(source),
-            _ => None,
+            Self::BundleCount
+            | Self::DocumentScope { .. }
+            | Self::DuplicateAsset(_)
+            | Self::MissingAsset(_)
+            | Self::AudioTrackLimit
+            | Self::AudioOutsideTimeline(_)
+            | Self::MissingAudioStream(_) => None,
         }
     }
+}
+
+fn require_document_scope(
+    manifest: &BundleManifest,
+    expected: PresentationDocumentScope,
+) -> Result<(), InvalidRenderUnit> {
+    let actual = manifest.document_scope();
+    if actual == expected {
+        return Ok(());
+    }
+    Err(InvalidRenderUnit::DocumentScope { expected, actual })
 }
 
 fn materialized_catalog(
@@ -641,9 +715,9 @@ mod tests {
     use onmark_core::compiler;
     use onmark_core::model::{
         AssetMetadata, AssetRef, AudioChannelLayout, AudioGain, AudioSampleRate, Duration,
-        FrameRate, FrozenAsset, FrozenAssetId, PresentationFrameBehavior,
-        PresentationTemporalCapability, PresentationVisualCapability, SourceId, Timebase,
-        VideoColorProfile, VideoDimensions, VideoMetadata, VideoTiming,
+        FrameRate, FrozenAsset, FrozenAssetId, PresentationDocumentScope,
+        PresentationFrameBehavior, PresentationTemporalCapability, PresentationVisualCapability,
+        SourceId, Timebase, VideoColorProfile, VideoDimensions, VideoMetadata, VideoTiming,
     };
     use onmark_core::protocol::BundleFile;
     use onmark_core::render_graph::RenderGraph;
@@ -651,7 +725,7 @@ mod tests {
 
     use super::{
         BundleManifest, CaptureEnvironmentId, InvalidRenderUnit, MAX_AUDIO_TRACKS,
-        MaterializedAsset, RenderProfile, RenderUnit, WorkerCaptureRequest,
+        MaterializedAsset, RenderAudio, RenderProfile, RenderUnit, WorkerCaptureRequest,
     };
     use crate::BrowserCaptureCadence;
 
@@ -734,6 +808,70 @@ mod tests {
             ))
             .artifact_id()
         );
+    }
+
+    #[test]
+    fn scopes_compiler_timing_identity_to_one_random_access_partition() {
+        let before = concat!(
+            "<om-film><om-scene>",
+            r#"<om-shot duration="1s"><om-title>Opening</om-title></om-shot>"#,
+            r#"<om-shot duration="1s"><om-title>Closing</om-title></om-shot>"#,
+            "</om-scene></om-film>",
+        );
+        let after = concat!(
+            "<om-film><om-scene>",
+            r#"<om-shot duration="1s"><om-title>Opening</om-title></om-shot>"#,
+            r#"<om-shot duration="2s"><om-title>Closing</om-title></om-shot>"#,
+            "</om-scene></om-film>",
+        );
+        let before = partition_artifact_ids(before);
+        let after = partition_artifact_ids(after);
+
+        assert_eq!(before[0], after[0]);
+        assert_ne!(before[1], after[1]);
+    }
+
+    #[test]
+    fn scopes_media_identity_to_its_random_access_partition() {
+        let before = concat!(
+            "<om-film><om-scene>",
+            r#"<om-shot><video src="opening.mp4"></video></om-shot>"#,
+            r#"<om-shot><video src="closing.mp4"></video></om-shot>"#,
+            "</om-scene></om-film>",
+        );
+        let after = concat!(
+            "<om-film><om-scene>",
+            r#"<om-shot><video src="opening.mp4"></video></om-shot>"#,
+            r#"<om-shot><video src="replacement.mp4"></video></om-shot>"#,
+            "</om-scene></om-film>",
+        );
+        let opening = video_asset_with_identity(1);
+        let closing = video_asset_with_identity(2);
+        let replacement = video_asset_with_identity(3);
+
+        let before = video_partition_artifact_ids(
+            before,
+            [("opening.mp4", opening.clone()), ("closing.mp4", closing)],
+        );
+        let after = video_partition_artifact_ids(
+            after,
+            [("opening.mp4", opening), ("replacement.mp4", replacement)],
+        );
+
+        assert_eq!(before[0], after[0]);
+        assert_ne!(before[1], after[1]);
+    }
+
+    #[test]
+    fn excludes_native_audio_from_visual_artifact_identity() {
+        let first = voice_over_unit("first.mp3", audio_asset(1));
+        let second = voice_over_unit("other.mp3", audio_asset(2));
+
+        assert_ne!(
+            only_audio(&first).asset().id(),
+            only_audio(&second).asset().id()
+        );
+        assert_eq!(artifact_id(&first), artifact_id(&second));
     }
 
     #[test]
@@ -1023,6 +1161,44 @@ mod tests {
     }
 
     #[test]
+    fn rejects_whole_film_artifacts_at_the_region_bundle_boundary() {
+        let timeline = solve_with_assets(
+            concat!(
+                "<om-film><om-scene>",
+                r#"<om-shot duration="1s"><om-title>Opening</om-title></om-shot>"#,
+                "</om-scene></om-film>",
+            ),
+            &BTreeMap::new(),
+        );
+        let partitions =
+            RenderGraph::from_timeline(&timeline, PresentationTemporalCapability::RandomAccess)
+                .expect("the fixture has complete render ownership")
+                .into_partition();
+        let manifest = bundle_manifest_for(
+            PresentationTemporalCapability::RandomAccess,
+            PresentationVisualCapability::BrowserComposite,
+            PresentationFrameBehavior::PerFrame,
+        );
+
+        let error = RenderUnit::from_partitioned_bundles(
+            &timeline,
+            &partitions,
+            vec![manifest],
+            render_profile(),
+            [],
+        )
+        .expect_err("one whole-film DOM cannot stand in for a shot projection");
+
+        assert_eq!(
+            error,
+            InvalidRenderUnit::DocumentScope {
+                expected: PresentationDocumentScope::RenderRegion,
+                actual: PresentationDocumentScope::WholeFilm,
+            },
+        );
+    }
+
+    #[test]
     fn composes_voice_over_into_the_audio_plan() {
         let id = FrozenAssetId::from_sha256([1; 32]);
         let voice = FrozenAsset::new(
@@ -1158,9 +1334,57 @@ mod tests {
         AudioSampleRate::new(48_000).expect("48 kHz is valid")
     }
 
+    fn audio_asset(identity: u8) -> FrozenAsset {
+        FrozenAsset::new(
+            FrozenAssetId::from_sha256([identity; 32]),
+            AssetMetadata::audio(
+                Duration::from_nanos(1_000_000_000),
+                audio_sample_rate(),
+                AudioChannelLayout::Mono,
+            ),
+        )
+    }
+
+    fn voice_over_unit(source: &str, frozen: FrozenAsset) -> RenderUnit {
+        let screenplay = format!(
+            r#"<om-film>
+  <om-scene>
+    <om-shot><om-vo src="{source}">Read me</om-vo></om-shot>
+  </om-scene>
+</om-film>"#
+        );
+        let timeline = solve(&screenplay, source, frozen.clone());
+        let materialized = MaterializedAsset::new(frozen, format!("/tmp/{source}"))
+            .expect("the fixture path is present");
+        RenderUnit::whole_film(
+            &timeline,
+            bundle_manifest(),
+            render_profile(),
+            [materialized],
+        )
+        .expect("voice-over forms one visual capture contract")
+    }
+
+    fn only_audio(unit: &RenderUnit) -> &RenderAudio {
+        let mut audio = unit.audio_tracks();
+        let track = audio.next().expect("the fixture owns one audio track");
+        assert!(audio.next().is_none());
+        track
+    }
+
     fn video_asset(timing: VideoTiming) -> FrozenAsset {
         video_asset_with(
+            1,
             timing,
+            VideoDimensions::new(1_920, 1_080).expect("fixture dimensions are positive"),
+            None,
+        )
+    }
+
+    fn video_asset_with_identity(identity: u8) -> FrozenAsset {
+        video_asset_with(
+            identity,
+            VideoTiming::Constant(frame_rate()),
             VideoDimensions::new(1_920, 1_080).expect("fixture dimensions are positive"),
             None,
         )
@@ -1169,6 +1393,7 @@ mod tests {
     fn layered_video_asset(dimensions: VideoDimensions, color: bool) -> FrozenAsset {
         let color_profile = color.then_some(VideoColorProfile::Bt709Limited);
         video_asset_with(
+            1,
             VideoTiming::Constant(frame_rate()),
             dimensions,
             color_profile,
@@ -1176,6 +1401,7 @@ mod tests {
     }
 
     fn video_asset_with(
+        identity: u8,
         timing: VideoTiming,
         dimensions: VideoDimensions,
         color_profile: Option<VideoColorProfile>,
@@ -1188,7 +1414,7 @@ mod tests {
             None => metadata,
         };
         FrozenAsset::new(
-            FrozenAssetId::from_sha256([1; 32]),
+            FrozenAssetId::from_sha256([identity; 32]),
             AssetMetadata::video(duration, metadata),
         )
     }
@@ -1196,6 +1422,10 @@ mod tests {
     fn solve(source: &str, asset: &str, frozen: FrozenAsset) -> TimelineIr {
         let asset = AssetRef::parse(asset).expect("the fixture asset reference is valid");
         let assets = BTreeMap::from([(asset, frozen)]);
+        solve_with_assets(source, &assets)
+    }
+
+    fn solve_with_assets(source: &str, assets: &BTreeMap<AssetRef, FrozenAsset>) -> TimelineIr {
         let (document, diagnostics) = compiler::parse(SourceId::new(0), source).into_parts();
         assert!(diagnostics.is_empty());
         let (film, diagnostics) = compiler::bind(document).into_parts();
@@ -1204,7 +1434,7 @@ mod tests {
         assert!(diagnostics.is_empty());
         let report = compiler::solve(
             film.expect("the fixture resolves"),
-            &assets,
+            assets,
             Timebase::new(frame_rate()),
         )
         .expect("the fixture has frozen metadata");
@@ -1230,19 +1460,25 @@ mod tests {
     }
 
     fn bundle_manifest_with(visual_capability: PresentationVisualCapability) -> BundleManifest {
-        bundle_manifest_for(visual_capability, PresentationFrameBehavior::PerFrame)
+        bundle_manifest_for(
+            PresentationTemporalCapability::Sequential,
+            visual_capability,
+            PresentationFrameBehavior::PerFrame,
+        )
     }
 
     fn placement_bounded_manifest(
         visual_capability: PresentationVisualCapability,
     ) -> BundleManifest {
         bundle_manifest_for(
+            PresentationTemporalCapability::RandomAccess,
             visual_capability,
             PresentationFrameBehavior::PlacementBounded,
         )
     }
 
     fn bundle_manifest_for(
+        temporal_capability: PresentationTemporalCapability,
         visual_capability: PresentationVisualCapability,
         frame_behavior: PresentationFrameBehavior,
     ) -> BundleManifest {
@@ -1250,13 +1486,8 @@ mod tests {
             "sha256:0101010101010101010101010101010101010101010101010101010101010101";
         let entry = BundleFile::new(BundleManifest::ENTRY_POINT, 1, DIGEST)
             .expect("the fixture entry is valid");
-        let temporal_capability = match frame_behavior {
-            PresentationFrameBehavior::PerFrame => PresentationTemporalCapability::Sequential,
-            PresentationFrameBehavior::PlacementBounded => {
-                PresentationTemporalCapability::RandomAccess
-            }
-        };
         BundleManifest::new(
+            PresentationDocumentScope::WholeFilm,
             temporal_capability,
             visual_capability,
             frame_behavior,
@@ -1264,6 +1495,60 @@ mod tests {
             vec![entry],
         )
         .expect("the fixture manifest is valid")
+    }
+
+    fn partition_artifact_ids(source: &str) -> Vec<crate::FrameArtifactId> {
+        let timeline = solve_with_assets(source, &BTreeMap::new());
+        random_access_artifact_ids(&timeline, [])
+    }
+
+    fn video_partition_artifact_ids<const N: usize>(
+        source: &str,
+        assets: [(&str, FrozenAsset); N],
+    ) -> Vec<crate::FrameArtifactId> {
+        let catalog: BTreeMap<_, _> = assets
+            .iter()
+            .map(|(reference, asset)| {
+                let reference =
+                    AssetRef::parse(*reference).expect("the fixture asset reference is valid");
+                (reference, asset.clone())
+            })
+            .collect();
+        let timeline = solve_with_assets(source, &catalog);
+        let materialized = assets.map(|(reference, asset)| {
+            MaterializedAsset::new(asset, format!("/tmp/{reference}"))
+                .expect("the fixture path is present")
+        });
+        random_access_artifact_ids(&timeline, materialized)
+    }
+
+    fn random_access_artifact_ids(
+        timeline: &TimelineIr,
+        assets: impl IntoIterator<Item = MaterializedAsset>,
+    ) -> Vec<crate::FrameArtifactId> {
+        let manifest = bundle_manifest_for(
+            PresentationTemporalCapability::RandomAccess,
+            PresentationVisualCapability::BrowserComposite,
+            PresentationFrameBehavior::PerFrame,
+        );
+        let partitions = RenderGraph::from_timeline(timeline, manifest.temporal_capability())
+            .expect("the fixture has complete render ownership")
+            .into_partition();
+
+        RenderUnit::from_partition_plan(timeline, &partitions, &manifest, render_profile(), assets)
+            .expect("each fixture shot forms one render unit")
+            .into_iter()
+            .map(|unit| artifact_id(&unit))
+            .collect()
+    }
+
+    fn artifact_id(unit: &RenderUnit) -> crate::FrameArtifactId {
+        unit.worker_capture_request(capture_environment())
+            .artifact_id()
+    }
+
+    fn capture_environment() -> CaptureEnvironmentId {
+        CaptureEnvironmentId::from_sha256([7; CaptureEnvironmentId::BYTE_LENGTH])
     }
 
     fn assert_browser_composition(frozen: FrozenAsset) {

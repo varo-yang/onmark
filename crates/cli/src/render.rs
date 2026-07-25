@@ -20,8 +20,9 @@ use onmark_render::{
 };
 
 use crate::arguments::{RenderArgs, source_directory};
+use crate::artifact_cache::ArtifactCache;
 use crate::assets::FrozenCatalog;
-use crate::bundler::{BundleArtifact, PresentationBundler};
+use crate::bundler::{BundleArtifact, BundleRegion, PresentationBundler};
 use crate::compilation;
 use crate::diagnostic;
 use crate::environment::Executables;
@@ -97,6 +98,7 @@ impl RenderOutcome {
 
 pub(super) async fn run(args: RenderArgs) -> Result<RenderOutcome, CliError> {
     let output = args.output();
+    let admit_persistent_cache = args.browser.is_none();
     let profile = RenderProfile::new(args.width, args.height)?;
     let source = input::read_utf8(
         &args.screenplay,
@@ -165,8 +167,19 @@ pub(super) async fn run(args: RenderArgs) -> Result<RenderOutcome, CliError> {
     .into_executor();
     let capture_mode = executor.capture_mode();
     let graphics_backend = executor.graphics_backend();
+    let cache =
+        ArtifactCache::from_environment(admit_persistent_cache, capture_mode, graphics_backend)?;
+    let artifacts = cache
+        .capture(&executor, &units, execution::frame_artifact_limits())
+        .await?;
     let video = executor
-        .render_partitioned(&partitions, units, &output)
+        .assemble_frame_artifacts(
+            &partitions,
+            &units,
+            artifacts.as_slice(),
+            cache.environment(),
+            &output,
+        )
         .await?;
     Ok(RenderOutcome::Completed {
         screenplay: AuthoredReport {
@@ -187,20 +200,25 @@ fn materialize_units(
     frozen: FrozenCatalog,
 ) -> Result<(PartitionPlan, Vec<ExecutableUnit>), CliError> {
     let materialized = frozen.into_materialized()?;
-    let bundle_directory = bundle.directory();
     let partitions = RenderGraph::from_timeline(timeline, bundle.manifest().temporal_capability())?
         .into_partition();
-    let planned = RenderUnit::from_partition_plan(
+    let regions = (0..partitions.units().len())
+        .map(|index| bundle.region(index))
+        .collect::<Result<Vec<_>, _>>()?;
+    let (directories, manifests): (Vec<_>, Vec<_>) =
+        regions.into_iter().map(BundleRegion::into_parts).unzip();
+    let planned = RenderUnit::from_partitioned_bundles(
         timeline,
         &partitions,
-        bundle.manifest(),
+        manifests,
         profile,
         materialized.assets().iter().cloned(),
     )?;
     let units = planned
         .into_iter()
-        .map(|unit| {
-            ExecutableUnit::materialize(unit, &bundle_directory, execution::unit_root_limits())
+        .zip(&directories)
+        .map(|(unit, directory)| {
+            ExecutableUnit::materialize(unit, directory, execution::unit_root_limits())
         })
         .collect::<Result<Vec<_>, _>>()?;
 

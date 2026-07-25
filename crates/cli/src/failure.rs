@@ -16,6 +16,7 @@ use onmark_render::{
 };
 use tokio::task::JoinError;
 
+use crate::artifact_cache::ArtifactCacheError;
 use crate::assets::AssetError;
 use crate::bundler::BundleError;
 use crate::environment::EnvironmentError;
@@ -45,6 +46,7 @@ pub(super) enum CliError {
     OutputExists(PathBuf),
     InvalidProfile(InvalidRenderProfile),
     InvalidFfmpeg(InvalidFfmpeg),
+    ArtifactCache(ArtifactCacheError),
     Assets(AssetError),
     Solve(SolveError),
     Subtitle(SubtitleLoadError),
@@ -120,6 +122,7 @@ impl fmt::Display for CliError {
             }
             Self::InvalidProfile(source) => source.fmt(formatter),
             Self::InvalidFfmpeg(source) => source.fmt(formatter),
+            Self::ArtifactCache(source) => source.fmt(formatter),
             Self::Assets(source) => source.fmt(formatter),
             Self::Solve(source) => source.fmt(formatter),
             Self::Subtitle(source) => source.fmt(formatter),
@@ -146,6 +149,7 @@ impl Error for CliError {
             Self::OutputExists(_) => None,
             Self::InvalidProfile(source) => Some(source),
             Self::InvalidFfmpeg(source) => Some(source),
+            Self::ArtifactCache(source) => Some(source),
             Self::Assets(source) => Some(source),
             Self::Solve(source) => Some(source),
             Self::Subtitle(source) => Some(source),
@@ -174,6 +178,12 @@ impl From<InvalidRenderProfile> for CliError {
 impl From<InvalidFfmpeg> for CliError {
     fn from(source: InvalidFfmpeg) -> Self {
         Self::InvalidFfmpeg(source)
+    }
+}
+
+impl From<ArtifactCacheError> for CliError {
+    fn from(source: ArtifactCacheError) -> Self {
+        Self::ArtifactCache(source)
     }
 }
 

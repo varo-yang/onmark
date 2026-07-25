@@ -1,8 +1,8 @@
 {
   "version": 1,
-  "bundleId": "sha256:42f9e7c5b9c383a67837eecbbcc0cd537dc472dc96b1194d3611a535f4715968",
+  "bundleId": "sha256:b3c4302c6033fd1d6c797092ffd65b02592af71e00a266fe1e5d2d396b581872",
   "entryPoint": "index.html",
-  "documentScope": "wholeFilm",
+  "documentScope": "renderRegion",
   "temporalCapability": "randomAccess",
   "visualCapability": "browserComposite",
   "frameBehavior": "perFrame",

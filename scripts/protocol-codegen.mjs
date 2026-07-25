@@ -180,6 +180,10 @@ function bundleContractSource(schema, types) {
     schema["x-onmark-asset-directory"],
     "asset directory",
   );
+  const regionDirectory = schemaString(
+    schema["x-onmark-region-directory"],
+    "region directory",
+  );
   const temporalCapabilityTuple = typescriptTuple(temporalCapabilities);
   const visualCapabilityTuple = typescriptTuple(visualCapabilities);
   const frameBehaviorTuple = typescriptTuple(frameBehaviors);
@@ -191,6 +195,7 @@ export const BUNDLE_FRAME_BEHAVIORS = Object.freeze(${frameBehaviorTuple} as con
 export const BUNDLE_ENTRY_POINT = ${JSON.stringify(entryPoint)} as const;
 export const BUNDLE_MANIFEST_FILE = ${JSON.stringify(manifestFile)} as const;
 export const BUNDLE_ASSET_DIRECTORY = ${JSON.stringify(assetDirectory)} as const;
+export const BUNDLE_REGION_DIRECTORY = ${JSON.stringify(regionDirectory)} as const;
 `;
 }
 

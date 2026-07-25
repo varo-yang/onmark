@@ -35,6 +35,21 @@
       "minimum": 0,
       "type": "integer"
     },
+    "PresentationDocumentScope": {
+      "description": "Semantic DOM extent present in one immutable browser artifact.",
+      "oneOf": [
+        {
+          "const": "wholeFilm",
+          "description": "The browser document contains the complete authored film.",
+          "type": "string"
+        },
+        {
+          "const": "renderRegion",
+          "description": "The browser document contains exactly one independently planned region.",
+          "type": "string"
+        }
+      ]
+    },
     "PresentationFrameBehavior": {
       "description": "Proven cadence at which browser-owned pixels may change.\n\nUnknown presentation code requires `PerFrame`. Placement-bounded pixels may\nchange only when the browser plan changes its active structural placements,\nso execution may reuse one exact capture between those boundaries.",
       "oneOf": [
@@ -90,6 +105,9 @@
       "pattern": "^sha256:[0-9a-f]{64}$",
       "type": "string"
     },
+    "documentScope": {
+      "$ref": "#/$defs/PresentationDocumentScope"
+    },
     "entryPoint": {
       "const": "index.html",
       "type": "string"
@@ -119,6 +137,7 @@
     "version",
     "bundleId",
     "entryPoint",
+    "documentScope",
     "temporalCapability",
     "visualCapability",
     "frameBehavior",
@@ -127,5 +146,6 @@
   "title": "BundleManifest",
   "type": "object",
   "x-onmark-asset-directory": "assets/sha256",
-  "x-onmark-manifest-file": "manifest.json"
+  "x-onmark-manifest-file": "manifest.json",
+  "x-onmark-region-directory": "regions"
 }

@@ -13,12 +13,13 @@ use serde::ser::SerializeStruct as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::model::{
-    FrozenAssetId, PresentationFrameBehavior, PresentationTemporalCapability,
-    PresentationVisualCapability,
+    FrozenAssetId, PresentationDocumentScope, PresentationFrameBehavior,
+    PresentationTemporalCapability, PresentationVisualCapability,
 };
 
 const ENTRY_DOCUMENT: &str = "index.html";
 const MANIFEST_FILE: &str = "manifest.json";
+const REGION_ROOT: &str = "regions";
 const ASSET_ROOT: &str = "assets";
 const ASSET_SHA256_DIRECTORY: &str = "assets/sha256";
 const MAX_BUNDLE_FILES: usize = 99_999;
@@ -66,7 +67,8 @@ impl<'de> Deserialize<'de> for BundleVersion {
         rename_all = "camelCase",
         deny_unknown_fields,
         extend("x-onmark-manifest-file" = MANIFEST_FILE),
-        extend("x-onmark-asset-directory" = ASSET_SHA256_DIRECTORY)
+        extend("x-onmark-asset-directory" = ASSET_SHA256_DIRECTORY),
+        extend("x-onmark-region-directory" = REGION_ROOT)
     )
 )]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -79,6 +81,7 @@ pub struct BundleManifest {
     bundle_id: Box<str>,
     #[cfg_attr(feature = "schema", schemars(extend("const" = ENTRY_DOCUMENT)))]
     entry_point: Box<str>,
+    document_scope: PresentationDocumentScope,
     temporal_capability: PresentationTemporalCapability,
     visual_capability: PresentationVisualCapability,
     frame_behavior: PresentationFrameBehavior,
@@ -94,6 +97,8 @@ impl BundleManifest {
     pub const ENTRY_POINT: &'static str = ENTRY_DOCUMENT;
     /// Reserved manifest filename beneath every unit root.
     pub const FILE_NAME: &'static str = MANIFEST_FILE;
+    /// Build-artifact directory containing shot-scoped bundle roots.
+    pub const REGION_DIRECTORY: &'static str = REGION_ROOT;
     /// Deterministic directory containing frozen SHA-256 assets.
     pub const ASSET_DIRECTORY: &'static str = ASSET_SHA256_DIRECTORY;
     /// Maximum payload files representable by the current wire contract.
@@ -117,6 +122,7 @@ impl BundleManifest {
     /// Returns [`InvalidBundleManifest`] when the identity, file count,
     /// canonical path tree, or fixed entry document violates the contract.
     pub fn new(
+        document_scope: PresentationDocumentScope,
         temporal_capability: PresentationTemporalCapability,
         visual_capability: PresentationVisualCapability,
         frame_behavior: PresentationFrameBehavior,
@@ -124,6 +130,7 @@ impl BundleManifest {
         files: Vec<BundleFile>,
     ) -> Result<Self, InvalidBundleManifest> {
         Self::from_parts(
+            document_scope,
             temporal_capability,
             visual_capability,
             frame_behavior,
@@ -133,6 +140,7 @@ impl BundleManifest {
     }
 
     fn from_parts(
+        document_scope: PresentationDocumentScope,
         temporal_capability: PresentationTemporalCapability,
         visual_capability: PresentationVisualCapability,
         frame_behavior: PresentationFrameBehavior,
@@ -163,6 +171,7 @@ impl BundleManifest {
             version: BundleVersion::CURRENT,
             bundle_id,
             entry_point: ENTRY_DOCUMENT.into(),
+            document_scope,
             temporal_capability,
             visual_capability,
             frame_behavior,
@@ -186,6 +195,12 @@ impl BundleManifest {
     #[must_use]
     pub fn entry_point(&self) -> &str {
         &self.entry_point
+    }
+
+    /// Returns the semantic DOM extent contained by this artifact.
+    #[must_use]
+    pub const fn document_scope(&self) -> PresentationDocumentScope {
+        self.document_scope
     }
 
     /// Returns the proven temporal behavior used by render planning.
@@ -233,9 +248,10 @@ impl Serialize for BundleIdentity<'_> {
         S: Serializer,
     {
         let manifest = self.manifest;
-        let mut identity = serializer.serialize_struct("BundleIdentity", 6)?;
+        let mut identity = serializer.serialize_struct("BundleIdentity", 7)?;
         identity.serialize_field("version", &manifest.version)?;
         identity.serialize_field("entryPoint", &manifest.entry_point)?;
+        identity.serialize_field("documentScope", manifest.document_scope.as_str())?;
         identity.serialize_field("temporalCapability", manifest.temporal_capability.as_str())?;
         identity.serialize_field("visualCapability", manifest.visual_capability.as_str())?;
         identity.serialize_field("frameBehavior", manifest.frame_behavior.as_str())?;
@@ -249,10 +265,11 @@ impl Serialize for BundleManifest {
     where
         S: Serializer,
     {
-        let mut manifest = serializer.serialize_struct("BundleManifest", 7)?;
+        let mut manifest = serializer.serialize_struct("BundleManifest", 8)?;
         manifest.serialize_field("version", &self.version)?;
         manifest.serialize_field("bundleId", &self.bundle_id)?;
         manifest.serialize_field("entryPoint", &self.entry_point)?;
+        manifest.serialize_field("documentScope", self.document_scope.as_str())?;
         manifest.serialize_field("temporalCapability", self.temporal_capability.as_str())?;
         manifest.serialize_field("visualCapability", self.visual_capability.as_str())?;
         manifest.serialize_field("frameBehavior", self.frame_behavior.as_str())?;
@@ -270,6 +287,7 @@ impl<'de> Deserialize<'de> for BundleManifest {
             version: _version,
             bundle_id,
             entry_point,
+            document_scope,
             temporal_capability,
             visual_capability,
             frame_behavior,
@@ -278,6 +296,9 @@ impl<'de> Deserialize<'de> for BundleManifest {
         if entry_point.as_ref() != ENTRY_DOCUMENT {
             return Err(D::Error::custom("unsupported bundle entry point"));
         }
+        let document_scope = document_scope
+            .parse()
+            .map_err(|_| D::Error::custom("invalid bundle document scope"))?;
         let temporal_capability = temporal_capability
             .parse()
             .map_err(|_| D::Error::custom("invalid bundle temporal capability"))?;
@@ -288,6 +309,7 @@ impl<'de> Deserialize<'de> for BundleManifest {
             .parse()
             .map_err(|_| D::Error::custom("invalid bundle frame behavior"))?;
         Self::from_parts(
+            document_scope,
             temporal_capability,
             visual_capability,
             frame_behavior,
@@ -304,6 +326,7 @@ struct BundleManifestWire {
     version: BundleVersion,
     bundle_id: Box<str>,
     entry_point: Box<str>,
+    document_scope: Box<str>,
     temporal_capability: Box<str>,
     visual_capability: Box<str>,
     frame_behavior: Box<str>,
@@ -546,7 +569,8 @@ fn is_sha256(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use crate::model::{
-        PresentationFrameBehavior, PresentationTemporalCapability, PresentationVisualCapability,
+        PresentationDocumentScope, PresentationFrameBehavior, PresentationTemporalCapability,
+        PresentationVisualCapability,
     };
 
     use super::{BundleFile, BundleManifest, InvalidBundleFile, InvalidBundleManifest};
@@ -557,6 +581,7 @@ mod tests {
     fn accepts_one_canonical_entry_document() {
         let file = BundleFile::new("index.html", 12, DIGEST).expect("the fixture file is valid");
         let manifest = BundleManifest::new(
+            PresentationDocumentScope::WholeFilm,
             PresentationTemporalCapability::Sequential,
             PresentationVisualCapability::BrowserComposite,
             PresentationFrameBehavior::PerFrame,
@@ -610,6 +635,7 @@ mod tests {
 
         assert_eq!(
             BundleManifest::new(
+                PresentationDocumentScope::WholeFilm,
                 PresentationTemporalCapability::Sequential,
                 PresentationVisualCapability::BrowserComposite,
                 PresentationFrameBehavior::PerFrame,
@@ -620,6 +646,7 @@ mod tests {
         );
         assert_eq!(
             BundleManifest::new(
+                PresentationDocumentScope::WholeFilm,
                 PresentationTemporalCapability::Sequential,
                 PresentationVisualCapability::BrowserComposite,
                 PresentationFrameBehavior::PerFrame,
@@ -630,6 +657,7 @@ mod tests {
         );
         assert!(
             BundleManifest::new(
+                PresentationDocumentScope::WholeFilm,
                 PresentationTemporalCapability::Sequential,
                 PresentationVisualCapability::BrowserComposite,
                 PresentationFrameBehavior::PerFrame,
@@ -650,6 +678,7 @@ mod tests {
 
         assert_eq!(
             BundleManifest::new(
+                PresentationDocumentScope::WholeFilm,
                 PresentationTemporalCapability::Sequential,
                 PresentationVisualCapability::BrowserComposite,
                 PresentationFrameBehavior::PerFrame,
@@ -681,6 +710,7 @@ mod tests {
     fn current_identity_records_all_presentation_declarations() {
         let file = BundleFile::new("index.html", 1, DIGEST).expect("index is valid");
         let manifest = BundleManifest::new(
+            PresentationDocumentScope::RenderRegion,
             PresentationTemporalCapability::RandomAccess,
             PresentationVisualCapability::SeparableOverlay,
             PresentationFrameBehavior::PlacementBounded,
@@ -693,7 +723,7 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&manifest.identity()).expect("identity serializes"),
             format!(
-                r#"{{"version":1,"entryPoint":"index.html","temporalCapability":"randomAccess","visualCapability":"separableOverlay","frameBehavior":"placementBounded","files":[{{"bytes":1,"path":"index.html","sha256":"{DIGEST}"}}]}}"#,
+                r#"{{"version":1,"entryPoint":"index.html","documentScope":"renderRegion","temporalCapability":"randomAccess","visualCapability":"separableOverlay","frameBehavior":"placementBounded","files":[{{"bytes":1,"path":"index.html","sha256":"{DIGEST}"}}]}}"#,
             ),
         );
     }
@@ -704,6 +734,7 @@ mod tests {
 
         assert_eq!(
             BundleManifest::new(
+                PresentationDocumentScope::WholeFilm,
                 PresentationTemporalCapability::Sequential,
                 PresentationVisualCapability::BrowserComposite,
                 PresentationFrameBehavior::PlacementBounded,

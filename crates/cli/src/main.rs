@@ -5,6 +5,7 @@
 //! Onmark command-line composition root.
 
 mod arguments;
+mod artifact_cache;
 mod assets;
 mod browser_install;
 mod bundler;

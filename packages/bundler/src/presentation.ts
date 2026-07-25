@@ -2,7 +2,15 @@
 // It owns esbuild and filesystem effects; runtime code remains browser-only.
 
 import { createHash } from "node:crypto";
-import { lstat, mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
+import {
+  link,
+  lstat,
+  mkdir,
+  mkdtemp,
+  rename,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
@@ -24,14 +32,17 @@ import {
   BUNDLE_ENTRY_POINT,
   BUNDLE_FRAME_BEHAVIORS,
   BUNDLE_MANIFEST_FILE,
+  BUNDLE_REGION_DIRECTORY,
   BUNDLE_TEMPORAL_CAPABILITIES,
   BUNDLE_VISUAL_CAPABILITIES,
   BUNDLE_VERSION,
   type BundleFile as WireBundleFile,
   type BundleManifest as WireBundleManifest,
+  type PresentationDocumentScope,
 } from "./generated/bundle-manifest.js";
 import {
   AuthoredHtmlError,
+  projectShotDocument,
   readAuthoredHtml,
   type AuthoredHtml,
 } from "./authored_html.js";
@@ -56,6 +67,8 @@ const VISUAL_RESOURCE_LOADERS = {
   ".woff": "file",
   ".woff2": "file",
 } as const;
+const MAX_REGION_ARTIFACTS = 10_000;
+const MAX_REGION_LINKS = 100_000;
 
 // ── Public contract
 
@@ -86,6 +99,13 @@ export interface BundleOptions {
 export interface BundleArtifact {
   readonly directory: string;
   readonly manifest: BundleManifest;
+  readonly regions: readonly BundleRegionArtifact[];
+}
+
+/** One shot-scoped immutable browser artifact within a random-access build. */
+export interface BundleRegionArtifact {
+  readonly directory: string;
+  readonly manifest: BundleManifest;
 }
 
 export type BundleErrorKind =
@@ -105,6 +125,11 @@ export class BundleError extends Error {
 interface PendingFile {
   readonly contents: Uint8Array;
   readonly path: string;
+}
+
+interface PendingRegion {
+  readonly directory: string;
+  readonly manifest: BundleManifest;
 }
 
 interface BundleInput {
@@ -165,25 +190,41 @@ async function buildArtifact(
   input: BundleInput,
   staging: string,
 ): Promise<BundleArtifact> {
-  const generated = await compilePresentation(input.html, staging);
-  const pending = presentationFiles(generated, staging, input.html);
+  const outputFiles = await compilePresentation(input.html, staging);
+  const generated = generatedPresentationFiles(outputFiles, staging);
+  const pending = presentationFiles(generated, input.html);
   const manifest = createManifest(
     pending,
+    "wholeFilm",
     input.temporalCapability,
     input.visualCapability,
     input.frameBehavior,
   );
   const manifestBytes = encodeManifest(manifest);
-  enforceOutputLimit(pending, manifestBytes, input.maxOutputBytes);
+  const remaining = consumeFiles(input.maxOutputBytes, pending, manifestBytes);
 
   await writePendingFiles(staging, pending);
   await writeFile(join(staging, BUNDLE_MANIFEST_FILE), manifestBytes);
+  const regions = await writeRegionArtifacts(
+    staging,
+    input,
+    generated,
+    remaining,
+  );
   await requireAbsent(input.outputDirectory);
   await rename(staging, input.outputDirectory);
 
   return Object.freeze({
     directory: input.outputDirectory,
     manifest,
+    regions: Object.freeze(
+      regions.map((region) =>
+        Object.freeze({
+          directory: join(input.outputDirectory, region.directory),
+          manifest: region.manifest,
+        }),
+      ),
+    ),
   });
 }
 
@@ -360,11 +401,10 @@ function authoredHtmlModule(motion: string | undefined): string {
 
 // ── Artifact assembly
 
-function presentationFiles(
+function generatedPresentationFiles(
   outputFiles: readonly OutputFile[],
   staging: string,
-  html: AuthoredHtml,
-): NonEmpty<PendingFile> {
+): PendingFile[] {
   const emitted = outputFiles.map((file) => ({
     contents: file.contents,
     path: artifactPath(staging, file.path),
@@ -377,6 +417,13 @@ function presentationFiles(
       "presentation must produce one JavaScript entry",
     );
   }
+  return generated;
+}
+
+function presentationFiles(
+  generated: readonly PendingFile[],
+  html: Pick<AuthoredHtml, "document" | "runtimeOffset">,
+): NonEmpty<PendingFile> {
   const styles = generated
     .filter((file) => file.path.endsWith(".css"))
     .map((file) => file.path)
@@ -392,7 +439,7 @@ function presentationFiles(
 }
 
 function presentationDocument(
-  html: AuthoredHtml,
+  html: Pick<AuthoredHtml, "document" | "runtimeOffset">,
   styles: readonly string[],
 ): string {
   const links = styles
@@ -442,6 +489,7 @@ function isGeneratedText(path: string): boolean {
 
 function createManifest(
   files: NonEmpty<PendingFile>,
+  documentScope: PresentationDocumentScope,
   temporalCapability: PresentationTemporalCapability,
   visualCapability: PresentationVisualCapability,
   frameBehavior: PresentationFrameBehavior,
@@ -450,6 +498,7 @@ function createManifest(
   const identity = JSON.stringify({
     version: BUNDLE_VERSION,
     entryPoint: BUNDLE_ENTRY_POINT,
+    documentScope,
     temporalCapability,
     visualCapability,
     frameBehavior,
@@ -460,11 +509,16 @@ function createManifest(
     version: BUNDLE_VERSION,
     bundleId: sha256(new TextEncoder().encode(identity)),
     entryPoint: BUNDLE_ENTRY_POINT,
+    documentScope,
     temporalCapability,
     visualCapability,
     frameBehavior,
     files: entries,
   });
+}
+
+function regionDirectory(index: number): string {
+  return `${BUNDLE_REGION_DIRECTORY}/${index}`;
 }
 
 function manifestFiles(files: NonEmpty<PendingFile>): NonEmpty<BundleFile> {
@@ -484,16 +538,17 @@ function encodeManifest(manifest: BundleManifest): Uint8Array {
   return new TextEncoder().encode(`${JSON.stringify(manifest, null, 2)}\n`);
 }
 
-function enforceOutputLimit(
+function consumeFiles(
+  limit: number,
   files: readonly PendingFile[],
   manifest: Uint8Array,
-  limit: number,
-): void {
+): number {
   let remaining = limit;
   for (const file of files) {
     remaining = consumeOutputBudget(remaining, file.contents.byteLength);
   }
-  consumeOutputBudget(remaining, manifest.byteLength);
+  remaining = consumeOutputBudget(remaining, manifest.byteLength);
+  return remaining;
 }
 
 function consumeOutputBudget(remaining: number, bytes: number): number {
@@ -516,6 +571,80 @@ async function writePendingFiles(
     const output = join(staging, file.path);
     await mkdir(dirname(output), { recursive: true });
     await writeFile(output, file.contents);
+  }
+}
+
+async function writeRegionArtifacts(
+  staging: string,
+  input: BundleInput,
+  generated: readonly PendingFile[],
+  initialBudget: number,
+): Promise<readonly PendingRegion[]> {
+  if (input.temporalCapability !== "randomAccess") {
+    return [];
+  }
+  validateRegionCount(input.html.regions.length, generated.length);
+
+  let remaining = initialBudget;
+  const regions: PendingRegion[] = [];
+  for (const [index, region] of input.html.regions.entries()) {
+    const files = presentationFiles(
+      generated,
+      projectShotDocument(input.html, region),
+    );
+    const manifest = createManifest(
+      files,
+      "renderRegion",
+      input.temporalCapability,
+      input.visualCapability,
+      input.frameBehavior,
+    );
+    const manifestBytes = encodeManifest(manifest);
+    const entry = files.find((file) => file.path === BUNDLE_ENTRY_POINT);
+    if (entry === undefined) {
+      throw new BundleError("build", "shot-scoped bundle has no entry point");
+    }
+    remaining = consumeOutputBudget(remaining, entry.contents.byteLength);
+    remaining = consumeOutputBudget(remaining, manifestBytes.byteLength);
+
+    const relativeDirectory = regionDirectory(index);
+    const directory = join(staging, relativeDirectory);
+    await writeRegionFiles(staging, directory, files);
+    await writeFile(join(directory, BUNDLE_MANIFEST_FILE), manifestBytes);
+    regions.push(Object.freeze({ directory: relativeDirectory, manifest }));
+  }
+  return Object.freeze(regions);
+}
+
+async function writeRegionFiles(
+  staging: string,
+  directory: string,
+  files: readonly PendingFile[],
+): Promise<void> {
+  for (const file of files) {
+    const output = join(directory, file.path);
+    await mkdir(dirname(output), { recursive: true });
+    if (file.path === BUNDLE_ENTRY_POINT) {
+      await writeFile(output, file.contents);
+      continue;
+    }
+    await link(join(staging, file.path), output);
+  }
+}
+
+function validateRegionCount(regions: number, generated: number): void {
+  if (regions > MAX_REGION_ARTIFACTS) {
+    throw new BundleError(
+      "outputLimit",
+      "presentation exceeds the shot-scoped bundle limit",
+    );
+  }
+  const links = regions * generated;
+  if (!Number.isSafeInteger(links) || links > MAX_REGION_LINKS) {
+    throw new BundleError(
+      "outputLimit",
+      "presentation exceeds the shot-scoped bundle file limit",
+    );
   }
 }
 

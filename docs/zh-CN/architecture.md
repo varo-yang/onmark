@@ -276,10 +276,15 @@ manifest 的偶然表现。bundle 是可重建的临时产物，reader 只接受
 file；path 只能使用小写 portable ASCII，最长 1,024 bytes，不能进入 unit-owned
 namespace，也不能让一个 file 成为另一个 file 的目录祖先。其余字段只在 authoring 或 execution 真正消费时加入。
 
-bundle 保留 authored HTML DOM，并安装把已求解 fact 绑定到 semantic custom element 的
-infrastructure。inline CSS 与可选 motion module 拥有 presentation；infrastructure 不提供
-template、layout、style、animation 或 full-screen assumption。所有文档共用同一套确定性
-时钟、readiness 和媒体原语。作者侧浏览器代码的公开规则写在
+bundle 保留 presentation-owned HTML，并安装把已求解 fact 绑定到 semantic custom
+element 的 infrastructure。在计算 bundle identity 前，Node boundary 会移除已由
+Timeline IR 或 Browser Plan 表示的 cue/audio element，以及 `src`、`duration`、`delay`
+和 `cue` attribute；ID、class、普通 attribute、嵌套标记、inline style 与 overlay 文本
+仍是精确 browser 输入。这样，只修改既有 audio 或 compiler timing fact 的值或内容不会
+改变视觉 presentation bytes；这并不声称任意 source restructuring 或 presentation edit
+都能局部失效。inline CSS 与可选 motion module 拥有 presentation；infrastructure 不提供
+template、layout、style、animation 或 full-screen assumption。所有文档共用同一套
+确定性时钟、readiness 和媒体原语。作者侧浏览器代码的公开规则写在
 [presentation contract](presentation-contract.md)。
 
 Gate 一组装一个 content-addressed unit root：所需素材位于 presentation
@@ -602,6 +607,44 @@ interval。
 
 Onmark 支持依赖驱动的增量渲染，但不承诺“每个 shot 永远独立”。正确性优先于缓存粒度。
 
+增量执行复用经过验证的 `FrameArtifact`，而不是散落的 PNG 或独立编码 MP4 segment。
+候选 artifact 必须与该 unit 的 Browser Plan projection、实际消费的 presentation bytes、
+Render Profile、capture backend 和 locked capture-environment identity 完全一致。reader
+在复用前验证 payload checksum；assembly 把 PNG 交给 encoder 时会逐帧重算 canonical
+raw-RGBA fingerprint。命中、新 capture 的 miss、本地执行和 worker 结果都进入同一条
+artifact assembler，因此 warm execution 不会长出第二套编码或 audio path。
+
+production authored-HTML artifact 已由 presentation contract 准入 random access，并按
+Render Graph region 分别投影。region document 只保留 selected shot、其 owning scene/film
+shell 与已编译 motion resource，不保留 semantic sibling。presentation byte 按 semantic
+ownership 进入 region：shot 内的 byte 只属于该 shot；scene 内、shot 外的 byte 属于该
+scene 的所有 region；scene 外的 film/document byte 属于全部 region。因此 `:has()` 等
+selector 无法观察 region 外的 shot，而更宽层级的 style、motion 或 resource edit 会正确
+改变所有消费这些 byte 的 region。每个 region 都有独立的 `renderRegion` manifest、dense
+unit-local Browser Plan node identity 和 content-derived `bundleId`。whole-film
+`wholeFilm` artifact 仍用于 conformance 与低层执行，但不是 desktop partition 的 cache key。
+
+compiler-only cue/audio element 以及素材引用和 timing attribute 会在计算 presentation
+identity 前移除。修改既有 audio 或 compiler timing fact 不会使 visual artifact
+失效，除非它改变 solved Browser Plan fact 或 Render Graph boundary。media byte、profile、
+presentation-global byte、selected semantic subtree 与其他真实 browser input 仍全部进入
+对应 identity。
+
+desktop launcher 用 pinned browser artifact、OS/architecture 与有界 system-font inventory
+命名保守 host seed；native 再加入 capture mode、graphics backend 与 composition version。
+显式 custom browser 不属于 launcher-owned browser identity，因此关闭 persistent reuse。
+cache publication 是 content-addressed 且原子完成的；immutable valid entry 无需全局 lease
+即可读取，唯一的跨进程锁只拥有损坏修复与 publication。损坏或 identity 不符的 artifact
+会被删除并重新 capture。store 同时受 artifact 数与 byte 上限约束；满额后保留既有有效
+entry，让新 miss 保持 ephemeral，不会驱逐另一个进程可能正在读取的 artifact。
+
+仓库保留的
+[incremental-rendering conformance](../../conformance/incremental-rendering-experiment.md)
+验证 whole-film/partition raw-RGBA 等价、局部 edit isolation、跨 region selector isolation、
+cold/warm CLI reuse、损坏修复与共享 final assembly。temporal capability 与 DOM scope 仍是
+两个独立 manifest fact：random access 允许独立求值，`documentScope` 说明 artifact 实际
+包含哪些 semantic DOM byte。
+
 ## 9. 目标仓库边界
 
 ### 先模块，后 crate
@@ -826,12 +869,12 @@ disposal 时 kill 每条 playhead。其他引擎实现同一 extension contract�
 bundler 与 runtime 都不选择 vendor。Three.js 在出现同样窄且通过准入的 production
 adapter 前，仍只是 repository development dependency。
 
-browser projection 从 Timeline IR 保留 film、scene、shot 与 content ownership。每个投影
-node 都携带在 whole-film 与 Render Unit 之间稳定的 compiler-owned identity、可选 authored
-ID，以及适用时的 solved interval。video 与 authored overlay 指向 owning shot；导入 caption
-保持 film-level。wire 继续使用 flat relational plan，让 native validation 与 partition
-projection 保持有界；authoring adapter 用 whole-film stable node identity 把 unit projection
-绑定回 unchanged authored DOM。TypeScript 不得重新求时或推导分片。
+browser projection 从 Timeline IR 保留 film、scene、shot 与 content ownership。node
+identity 在每个 Browser Plan 内 dense 且 canonical；authored ID 保留跨 projection 的语义
+身份。每个 node 还携带适用的 solved interval。video 与 authored overlay 指向 owning
+shot；导入 caption 保持 film-level。wire 继续使用 flat relational plan，让 native
+validation 与 region projection 保持有界；authoring adapter 把每份 plan 绑定到对应的
+whole-film 或 region DOM。TypeScript 不得重新求时或推导分片。
 
 `protocol` 模块使用 `serde` 定义稳定的 browser 与 bundle-manifest
 JSON 边界。其可选的 `schema` feature 只为仓库生成工作暴露
@@ -1186,9 +1229,9 @@ types，不再从 schema 反向生成第二套 Rust 类型。
 
 `BrowserPlan` 现在携带 production presentation adapter 已真实消费的 output frame
 rate、evaluation/output interval、film/scene/shot structure、primary-video
-placement，以及 title、call-to-action 或导入 caption overlay。每个投影 node 都记录跨 unit
-projection 稳定的 compiler-owned identity 与可选 authored identity，content 显式指向其
-structural parent。video placement 另记录 immutable asset identity 与验证 decoded-frame
+placement，以及 title、call-to-action 或导入 caption overlay。每个投影 node 都记录 dense
+unit-local compiler-owned identity 与可选 authored identity；跨 projection 的语义身份由
+authored identity 承担，content 显式指向其 structural parent。video placement 另记录 immutable asset identity 与验证 decoded-frame
 selection 所需的 admitted CFR source rate；overlay placement 记录封闭的语义角色与 decoded
 text。materialized URL 仍是 render-owned
 fact，DOM 结构与 CSS 则始终是 presentation-owned effect。这是一条 Render
@@ -1275,8 +1318,9 @@ Unit，经既有 executor 捕获并总装。native 一致性测试会在编码�
 canonical raw-RGBA sequence；release
 CLI 一致性测试则分别验证总装后的 H.264/AAC 输出帧数、画面运动、stream
 facts 与首个音频 packet 落点。它实现 Render Graph 与 `evaluation/output`
-区间。转场预卷、持久 unit
-cache 和依赖闭包失效要等真实依赖或缓存消费者出现后再实现；不提前搭它们的空架子。
+区间。该关最初延后了转场预卷与持久复用；后续 incremental-rendering milestone 已经复用
+经过验证的 `FrameArtifact`，并把当前 production adapter 的失效范围收窄到已证明独立的
+shot region。转场预卷与更宽的依赖分类仍要等对应语法和 pixel dependency 出现后实现。
 
 ### 第三关（已完成）：离开本机仍然成立
 
@@ -1330,8 +1374,10 @@ Gate 五不增加 screenplay animation 拼写，不从 source inspection 猜 cap
 checked WAAPI、GSAP 与 Three.js playhead 全部通过标准
 `PresentationRuntimeAdapter`：effect 在 `Load` 时绑定一次，在 `Seek(frame)` 内按声明顺序 apply，
 并在 `FrameStaged(frame)` 前完成。dispose 是 terminal 的，单个 cleanup 失败后仍会尝试释放全部
-owned effect。当前 bundle manifest 把封闭 capability 纳入 content identity。CLI 对 authored
-HTML 保守声明 sequential；只有底层 conformance bundler 能为已有专门证据的 artifact 接受更强
+owned effect。当前 bundle manifest 把封闭 capability 纳入 content identity。production
+authored-HTML surface 已准入 random access：其 contract 禁止隐藏时钟，并要求每个 frame
+effect 只根据 immutable input 与请求 frame 推导状态。未知的未来 browser component 仍默认
+sequential，直至单独准入；低层 bundler 因为还要构造 conformance artifact，仍要求显式
 capability。固定 Linux
 退出 conformance 会 bundle 这条带 effect 的 presentation，让同一组 media、audio 与 caption fact
 分别作为 whole-film unit 和两个独立 unit 渲染，在通过 canonical raw-RGBA frame sequence
@@ -1350,8 +1396,9 @@ native browser adapter 会通过 CDP request interception 执行这条约束，�
 `blob:` URL；ambient network scheme 和逃出该 root 的 file path 都会在解析前被拒绝。本地与 worker
 执行共用同一条策略。
 
-Presentation binding 同时获得由 Rust 分配、跨 unit projection 稳定的 semantic node identity
-与 parent relationship，以及通过 protocol 校验的封闭 properties、solved interval 与 frozen asset reference。Rust 继续独占 timing 与 resource fact；TypeScript 只决定这些
+Presentation binding 同时获得由 Rust 分配的 unit-local node identity、authored semantic
+identity 与 parent relationship，以及通过 protocol 校验的封闭 properties、solved interval
+与 frozen asset reference。Rust 继续独占 timing 与 resource fact；TypeScript 只决定这些
 fact 如何成为 DOM、CSS、Canvas 或 WebGL。本关不引入自由 `start`/`end`、第二个 scheduler、任意网络访问，
 也不通过扫描 source code 推断 temporal capability。image、component selection 或 properties 的任何新
 screenplay 拼写，都必须先提交语言准入所需的 cases、prompts、grader、raw output 与保留 baseline。

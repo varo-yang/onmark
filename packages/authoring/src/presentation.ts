@@ -34,8 +34,8 @@ const ELEMENTS = Object.freeze({
   video: "video",
 });
 
-// A unit keeps the complete authored document. Unbound semantic siblings must
-// not leak pixels into its partition, even through authored display rules.
+// Whole-film artifacts may contain semantic nodes absent from a projected
+// plan. Authored display rules cannot make those unbound nodes visible.
 const VISIBILITY_RULE = [
   "[data-om-node][hidden],",
   "om-film > om-scene:not([data-om-node]),",
@@ -205,11 +205,10 @@ interface AuthoredNodeIndex {
 }
 
 /**
- * Indexes renderable semantic elements by the compiler's stable preorder.
+ * Indexes renderable semantic elements by the accepted plan's dense preorder.
  *
- * A partition retains whole-film node identities while omitting unrelated
- * placements. Direct lookup therefore remains correct when a worker renders a
- * later partition from the complete authored document.
+ * Whole-film and region documents each receive the matching Browser Plan.
+ * Authored IDs, rather than protocol node IDs, carry cross-build identity.
  */
 function collectAuthoredNodes(document: Document): AuthoredNodeIndex {
   const films = semanticChildren(document.body, ELEMENTS.film);

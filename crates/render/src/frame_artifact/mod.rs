@@ -244,7 +244,7 @@ impl FrameArtifact {
     /// fails its declared checksum.
     pub async fn verify(&self) -> Result<(), FrameArtifactError> {
         let mut reader = self.reader().await?;
-        while reader.next_fingerprint().await?.is_some() {}
+        while reader.next_recorded_fingerprint().await?.is_some() {}
         Ok(())
     }
 
@@ -569,12 +569,13 @@ mod tests {
     async fn preserves_the_captured_raw_rgba_hash_with_each_frame() {
         let directory = tempdir().expect("the fixture directory is available");
         let path = directory.path().join("worker.onmark-frames");
-        let expected = RawRgbaHash::from_bytes([7; RawRgbaHash::BYTE_LENGTH]);
+        let captured = captured_frame();
+        let expected = captured.raw_rgba_hash();
         let mut writer = FrameArtifactWriter::create(&path, descriptor(), limits())
             .await
             .expect("the artifact writer can stage one frame");
         writer
-            .write_frame(&CapturedFrame::recorded(EncodedPng::new(vec![1]), expected))
+            .write_frame(&captured)
             .await
             .expect("the frame fits the artifact limits");
         let artifact = writer
@@ -696,6 +697,16 @@ mod tests {
             .finish()
             .await
             .expect("the forged artifact has a self-consistent payload checksum");
+
+        let mut reader = artifact
+            .reader()
+            .await
+            .expect("the self-consistent artifact opens for streaming");
+        let stream = reader
+            .next_frame()
+            .await
+            .expect_err("assembly streaming must reject a forged pixel fingerprint");
+        assert_eq!(stream.kind(), FrameArtifactErrorKind::InvalidArtifact);
 
         let error = FrameArtifact::verify_raw_rgba_equivalence(
             std::slice::from_ref(&artifact),

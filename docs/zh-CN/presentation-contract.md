@@ -7,9 +7,13 @@
 `<script type="module" data-om-motion>` 导出 browser effect。没有平行 stylesheet、
 motion 文件、generated DOM、template 或 custom-entry mode。
 
-browser 收到作者未被替换的 DOM。Rust 仍然拥有所有 interval；HTML、CSS、Canvas、WebGL、
-GSAP、Three.js 等 browser library 可以渲染已求解事实，但不能解析 cue、推导 shot 时长、
-规划分片或选择帧区间。
+browser 收到投影掉 compiler-only fact 后的 presentation-owned DOM。Bundler 会移除已由
+Timeline IR 或 Browser Plan 持有的 cue、audio、素材引用与 timing 事实；ID、class、普通
+属性、嵌套标记、inline style 与作者文本保持为精确 browser 输入。因此只修改既有 music、
+sfx、vo、cue declaration 或 compiler timing attribute 的值或内容不会改变 presentation
+identity；source restructuring 仍可能改变 presentation whitespace。Rust 仍然拥有所有
+interval；HTML、CSS、Canvas、WebGL、GSAP、Three.js 等 browser library 可以渲染已求解
+事实，但不能解析 cue、推导 shot 时长、规划分片或选择帧区间。
 
 ## 最小入口
 
@@ -57,8 +61,11 @@ CSS 直接写在普通 HTML 中：
 转场；它的窗口与相邻依赖必须先成为 Rust-owned Render Graph fact，不能在
 TypeScript 中再造一套 timing policy。
 
-bundler 提取这一个可选 module、编译其 import、在原位置安装 runtime script，并保留其余
-authored HTML bytes。作者不构造 runtime adapter、不注册 global timeline、也不拥有
+bundler 提取这一个可选 module、编译其 import，并在 browser body 末尾安装 generated
+runtime script。infrastructure 始终位于 semantic shot 之外，因此 region projection
+不会误删它。projection 保留 presentation-owned HTML，同时移除已由 Timeline IR 或 Browser
+Plan 表示的 compiler-only cue、audio、素材引用和 timing fact。作者不构造 runtime
+adapter、不注册 global timeline、也不拥有
 infrastructure cleanup。产物仍是不可变 browser artifact，其 capability 与 identity 由
 Rust-owned manifest fact 决定。
 
@@ -105,10 +112,9 @@ interface RuntimeFrame {
 presentation 必须用 `installRuntimeHost` 安装一个 runtime host。`Load`
 会创建 plan 中的每个 video 与 overlay node。导入字幕是 caption role 的
 overlay，与其他 overlay 共用已求解 visibility path，不另造 browser timing
-engine。inactive node 保留稳定的 binding
-identity，但在其 solved
-interval 使其可见之前不进入 layout 与 compositor；这样 Render
-Unit 之外的 placement 不会改变当前像素。 `Prepare` 之后，native
+engine。当前 region 内的 node 在其 solved interval 使其可见之前不进入 layout 与
+compositor；region 外的 semantic sibling 根本不进入 document，因此 selector 与 authored
+effect 无法观察它们。`Prepare` 之后，native
 renderer 会在固定的 pre-baseline timestamp 发送并等待一次 visual、non-capture
 BeginFrame，以初始化 page surface。真实 capture 使用更晚的固定正 compositor
 baseline：
@@ -173,10 +179,12 @@ presentation 收到的 placement 已经包含绝对帧区间。它可以决定 t
 - `<om-film>`、`<om-scene>`、`<om-shot>`、`<video>`、
   `<om-title>` 与 `<om-cta>` 始终是作者写下的原始 element；
 - bound node 临时携带 `data-om-node`；authored ID 保持普通 HTML ID；
-- compiler node identity 是完整 film 的 renderable-semantic preorder。unit projection
-  即使省略更早 node 仍保留该 identity，因此 later partition 能在完整 HTML 中绑定正确元素；
-- 当前 unit 的 plan 未包含的直属 semantic child 始终隐藏，即使 authored CSS
-  显式设置了其 display；
+- whole-film plan 对完整 film 使用 dense renderable-semantic preorder；每个 region plan
+  则对 selected film、scene、shot 与 content 独立生成 dense preorder；
+- authored ID 在 projection 间保持稳定，是 presentation 需要跨 build 语义身份时使用的
+  selector；protocol `nodeId` 只是 unit-local binding key，不是持久 whole-film address；
+- region 外的 semantic sibling 会被省略而不是仅仅隐藏，因此 selector 无法制造未声明的
+  cross-region dependency；
 - 导入 caption 是 facade 唯一创建的 DOM node，因为它不在 authored document 中；
 - runtime 根据已求解 interval 切换 container 与 content visibility，CSS 独占 layout
   与视觉设计。
@@ -185,8 +193,9 @@ presentation 收到的 placement 已经包含绝对帧区间。它可以决定 t
 调用 `bindVideo(placement)`、`bindOverlay(placement)` 与异步的
 `bindExtensions(plan)`。extension 返回其待准备 resource 和拥有的精确逐帧 effect。video binding 提供浏览器 element、已 materialize 的 source、visibility effect
 和终止性 cleanup；overlay binding 提供 visibility 与终止性 cleanup。compiler-owned
-node identity 在更早元素未进入某个 partition 时仍保持不变。每次 `seek` 时，runtime 先隐藏
-video，再根据权威 output frame 选择已准入的 source frame、呈现 ready video，最后应用已求解 overlay 的 visibility。
+node identity 在每个 projection 内形成独立的 dense unit-local 顺序；跨 projection 的语义身份由
+authored ID 承担。每次 `seek` 时，runtime 先隐藏 video，再根据权威 output frame 选择已准入的
+source frame、呈现 ready video，最后应用已求解 overlay 的 visibility。
 binding 拥有效果，不拥有 interval arithmetic。
 
 ## Plan facts、组件选择与 props
@@ -198,8 +207,8 @@ Rust-owned `BrowserPlan`：帧率、evaluation/output interval、semantic struct
 stylesheet rule 与 inline module 静态 import 的值都是 presentation code，不是
 screenplay props。
 
-这些既有 fact 构成封闭的内建 component contract：`nodeId` 是稳定的投影身份，可选
-`authoredId` 用于 semantic selection，`kind` 只选择 title、CTA 或 caption，`text` 是该 component
+这些既有 fact 构成封闭的内建 component contract：`nodeId` 是 unit-local binding key，可选
+`authoredId` 用于跨 projection 的 semantic selection，`kind` 只选择 title、CTA 或 caption，`text` 是该 component
 唯一的 authored property。这不会创建通用 props 通道，也不允许 presentation
 重新解释 screenplay 结构。
 
@@ -214,9 +223,13 @@ parameter、可变 side channel 或自造的 `presents` attribute 读取作者�
 
 Bundle contract 携带由 `@onmark/runtime` 拥有的封闭
 `PresentationTemporalCapability`。当前只接纳 `sequential` 与
-`randomAccess`；`warmup(n)` 及更宽的依赖分类仍只是架构设想。它不是用户 CLI
-选项：authored HTML 在 conformance 准入更强 artifact 前保守为 sequential；只有底层
-conformance bundler 为已证明产物显式传值。
+`randomAccess`；`warmup(n)` 及更宽的依赖分类仍只是架构设想。它不是用户 CLI 选项。
+production authored-HTML surface 已准入 `randomAccess`：唯一动态输入是 immutable
+Browser Plan fact、已准备 resource 与精确请求的 `RuntimeFrame`；motion contract 要求
+effect 为该 frame 直接设置状态，不能依赖之前调用逐步推进。ambient clock、隐藏 queue 与
+stateful frame accumulation 都违反 contract。未知的未来 browser component 仍为
+`sequential`，直到独立 conformance 接纳更强行为。低层 bundler 因为还负责构造已证明的
+conformance artifact，仍要求显式 capability。
 
 低层 `FrameEffect` 与 `PresentationResource` boundary 由 `@onmark/runtime` 拥有。
 `@onmark/authoring` 暴露 vendor-neutral 的 `PresentationExtension` contract。单个 adapter
@@ -230,10 +243,30 @@ duration，以及一条由 adapter 拥有、以局部秒计量的 paused timelin
 前完成。effect 只获得精确 immutable `RuntimeFrame`，不会得到 scheduler 或 mutable
 timeline。effect 按所有权逆序释放；单个 cleanup 失败后仍会尝试 dispose 全部 effect。
 
-这条 lifecycle 本身不是 random-access 声明。只有 conformance 证明任意请求帧只依赖
-immutable input 与该精确帧后，adapter 才能取得更强能力。能力是 immutable build
-metadata，不从 source 或 screenplay spelling 猜测。当前 bundle manifest 把它纳入
-canonical identity，Rust 在 Render Graph 分片前消费它。
+实现这条 lifecycle 并不会让任意 component 自动取得 random access。production adapter
+另有 WAAPI、GSAP、Three.js 乱序 playhead 与 whole-film/partition raw-RGBA 等价
+conformance；未来 adapter 也必须提供同等级证据。能力是 immutable build metadata，不从
+source token 或 screenplay spelling 猜测。当前 bundle manifest 把它纳入 canonical
+identity，Rust 在 Render Graph 分片前消费它。
+
+## Document scope 与 region projection
+
+`PresentationDocumentScope` 记录 immutable bundle 的 DOM 范围：
+
+- `wholeFilm` 包含完整 presentation-owned film，用于 whole-film execution 与 conformance；
+- `renderRegion` 包含一个 selected shot、其 owning scene/film shell，以及
+  presentation-global style、motion 与 imported resource byte。
+
+production bundler 从一次 compilation 同时产出两者。generated module 与 resource 会
+hard-link 到 region root；每个 region 拥有独立 projected `index.html`、manifest 与
+`bundleId`。因此局部 shot edit 只改变该 region，除非它同时改变 presentation-global byte
+或 Rust-owned dependency fact。`documentScope` 与 temporal capability 相互独立：前者说明
+DOM 中有什么，后者说明 artifact 能否独立求值任意请求 frame。
+
+shot 内的 `<style>` 是该 shot 的局部输入。scene 内、shot 外的 style 属于该 scene 的所有
+region；位于所有 scene 之外的 film/document rule 属于全部 region。presentation code
+必须把 rule 放在覆盖全部 consumer 的最窄 semantic owner 下，也不得通过 relational
+selector 等方式把已省略的 semantic sibling 当作未声明的共享状态。
 
 ## Visual capability
 

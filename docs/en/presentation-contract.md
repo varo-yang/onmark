@@ -9,7 +9,8 @@ inline module marked `type="module" data-om-motion` exports browser effects.
 There is no parallel stylesheet, motion file, generated DOM, template, or
 custom-entry mode.
 
-The browser receives the author's unchanged DOM. Rust still owns every
+The browser receives the author's presentation-owned DOM after compiler-only
+facts have been projected out as described below. Rust still owns every
 interval: HTML, CSS, Canvas, WebGL, GSAP, Three.js, and other browser libraries
 may render solved facts, but they must not resolve cues, infer shot durations,
 partition work, or choose frame ranges.
@@ -62,11 +63,20 @@ target. Cross-shot transitions are not admitted: their windows and neighbor
 dependencies must first become Rust-owned Render Graph facts rather than a
 second timing policy in TypeScript.
 
-The bundler extracts that one optional module, compiles its imports, restores
-the runtime script at the same source position, and otherwise preserves the
-authored HTML bytes. Authors do not construct a runtime adapter, register a
-global timeline, or own infrastructure cleanup. The immutable artifact and its
-capabilities remain Rust-owned manifest facts.
+The bundler extracts that one optional module, compiles its imports, and
+installs the generated runtime script at the end of the browser body. Keeping
+infrastructure outside every semantic shot prevents a region projection from
+accidentally deleting it. The browser projection
+preserves presentation-owned HTML while removing compiler-only cue, audio,
+asset-reference, and timing facts already carried by Timeline IR or the Browser
+Plan. In particular, changing the values or contents of existing music, sound
+effects, voice-over, cue declarations, or solved timing attributes cannot
+change presentation identity. Source restructuring can still change
+presentation whitespace. IDs, classes, ordinary attributes, nested markup,
+inline styles, and authored text remain exact browser inputs. Authors do not
+construct a runtime adapter, register a global timeline, or own infrastructure
+cleanup. The immutable artifact and its capabilities remain Rust-owned manifest
+facts.
 
 ## Public adapter lifecycle
 
@@ -114,9 +124,10 @@ The presentation must install exactly one runtime host with
 `installRuntimeHost`. `Load` creates every video and overlay node in the plan.
 Imported captions are caption-role overlays; they use the same solved visibility
 path rather than a second browser timing engine.
-Inactive nodes retain their stable binding identity but remain outside layout
-and compositing until their solved interval makes them visible. This prevents
-placements outside a Render Unit from changing its pixels. After `Prepare`,
+Nodes in the current region remain outside layout and compositing until their
+solved interval makes them visible. Semantic siblings outside that region are
+absent from the document, so selectors and authored effects cannot observe
+them. After `Prepare`,
 native rendering sends one awaited, visual, non-capturing BeginFrame at a fixed
 pre-baseline timestamp to initialize the page surface. Real captures use a later
 fixed positive compositor baseline:
@@ -189,11 +200,14 @@ or derive a new media duration from the DOM.
   `<om-title>`, and `<om-cta>` remain the exact authored elements.
 - Every bound node temporarily carries `data-om-node`; authored IDs remain
   ordinary HTML IDs.
-- Compiler node identity is whole-film renderable-semantic preorder. Unit
-  projections retain that identity, so a later partition binds the correct
-  elements in the unchanged complete document.
-- During that unit, direct semantic children omitted from its plan remain
-  hidden even when authored CSS gives them an explicit display value.
+- A whole-film plan uses dense renderable-semantic preorder for the complete
+  film. Every region plan independently uses dense preorder for the selected
+  film, scene, shot, and content nodes.
+- Authored IDs remain stable across projections and are the semantic selector
+  when presentation code needs cross-build identity. Protocol `nodeId` is a
+  unit-local binding key, not a persistent whole-film address.
+- Semantic siblings outside a region are omitted rather than merely hidden, so
+  selectors cannot create an undeclared cross-region dependency.
 - Imported captions are the only DOM nodes created by the facade because they
   do not exist in the authored document.
 - The runtime toggles container and content visibility from solved intervals;
@@ -205,9 +219,8 @@ the asynchronous `bindExtensions(plan)` once during `load`. An extension returns
 the resources it needs prepared and the exact-frame effects it owns. A video
 binding supplies the browser element, its materialized source, visibility
 effect, and terminal cleanup. An overlay binding supplies visibility and
-terminal cleanup. The compiler-owned node identity remains stable when an
-earlier element is absent from a partition. On every
-`seek`, the runtime first hides videos, selects an admitted source frame from
+terminal cleanup. Node identity is complete and canonical within each accepted
+plan. On every `seek`, the runtime first hides videos, selects an admitted source frame from
 the authoritative output frame, presents ready videos, then applies solved
 overlay visibility. Bindings own those effects, not interval arithmetic.
 
@@ -222,10 +235,10 @@ overlay placements. Stylesheet
 rules and static values imported by the inline module are presentation code,
 not screenplay props.
 
-Those existing facts are the closed built-in component contract: `nodeId` is
-stable projection identity, optional `authoredId` supports semantic selection,
-`kind` selects title, CTA, or caption, and `text` is that component's only
-authored property. This does not create a
+Those existing facts are the closed built-in component contract: `nodeId` is a
+dense unit-local binding key, optional `authoredId` supports semantic selection
+across projections, `kind` selects title, CTA, or caption, and `text` is that
+component's only authored property. This does not create a
 generic props channel or allow presentation code to reinterpret screenplay
 structure.
 
@@ -242,10 +255,15 @@ parameters, a mutable side channel, or an invented `presents` attribute.
 The bundle contract carries the closed `PresentationTemporalCapability`, owned
 by `@onmark/runtime`. It currently admits `sequential` and `randomAccess`;
 `warmup(n)` and wider dependency categories remain architectural ideas rather
-than public values. It is not a user CLI option. Authored HTML is conservatively
-sequential until conformance admits a stronger presentation artifact. The
-low-level conformance bundler requires an explicit value when constructing an
-already-proved artifact.
+than public values. It is not a user CLI option. The production authored-HTML
+surface is admitted as `randomAccess`: its only dynamic inputs are immutable
+Browser Plan facts, prepared resources, and the exact requested
+`RuntimeFrame`; its motion contract requires effects to set state for that
+frame rather than advance from prior calls. Ambient clocks, hidden queues, and
+stateful frame accumulation violate this contract. Unknown future browser
+components remain `sequential` until their own conformance admits stronger
+behavior. The low-level bundler requires an explicit value because it also
+constructs already-proved conformance artifacts.
 
 The low-level `FrameEffect` and `PresentationResource` boundaries are owned by
 `@onmark/runtime`. `@onmark/authoring` exposes the vendor-neutral
@@ -267,12 +285,37 @@ immutable `RuntimeFrame`; they do not receive a scheduler or a mutable timeline.
 Disposal releases effects in reverse ownership order and attempts every effect
 even when one cleanup operation fails.
 
-This lifecycle is not itself a random-access declaration. Only conformance may
-admit a stronger adapter capability after proving that every requested frame
-depends solely on immutable inputs and that exact frame. Capability is immutable
-build metadata, never inferred from source or screenplay spelling. The bundle
-manifest includes it in canonical identity, and Rust consumes it before Render
-Graph partitioning.
+Implementing the lifecycle does not let an arbitrary component claim random
+access. The production adapter has separate conformance for out-of-order WAAPI,
+GSAP, and Three.js playheads and whole-film/partition raw-RGBA equality. Future
+adapters require equivalent evidence. Capability is immutable build metadata,
+never inferred from source tokens or screenplay spelling. The bundle manifest
+includes it in canonical identity, and Rust consumes it before Render Graph
+partitioning.
+
+## Document scope and region projection
+
+`PresentationDocumentScope` records the DOM extent of an immutable bundle:
+
+- `wholeFilm` contains the complete presentation-owned film and exists for
+  whole-film execution and conformance;
+- `renderRegion` contains one selected shot, its owning scene and film shells,
+  and presentation-global style, motion, and imported resource bytes.
+
+The production bundler emits both from one compilation. Generated modules and
+resources are hard-linked into region roots, while each region receives its own
+projected `index.html`, manifest, and `bundleId`. A local shot edit therefore
+changes only that region unless it also changes presentation-global bytes or
+Rust-owned dependency facts. `documentScope` and temporal capability are
+independent: the former states what DOM is present; the latter states whether
+that artifact can evaluate an arbitrary requested frame.
+
+A `<style>` inside a shot is shot-local input. A style inside a scene but
+outside its shots belongs to every region in that scene. Film- or
+document-level rules outside all scenes belong to every region. Presentation
+code must place a rule at the narrowest semantic owner that contains all of its
+consumers, and must not use an omitted sibling, including through relational
+selectors, as undeclared shared state.
 
 ## Visual capabilities
 

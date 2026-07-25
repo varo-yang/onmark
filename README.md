@@ -29,11 +29,11 @@ presentation code remains sequential. Deployment work remains frozen.
 
 Gate six carries content-addressed local image, SVG, and font resources through
 bounded browser readiness that names the resource still pending. It also gives
-film, scene, shot, and content facts Rust-owned node identity and ownership that
-remain stable across unit projections. Its Linux exit conformance proves equal
-pixels across cold browsers and whole-film versus partitioned execution without
-adding a general props channel, new screenplay spelling, or a second timing
-system.
+film, scene, shot, and content facts Rust-owned node identity and ownership.
+Authored IDs retain semantic identity across unit projections. Its Linux exit
+conformance proves equal pixels across cold browsers and whole-film versus
+partitioned execution without adding a general props channel, new screenplay
+spelling, or a second timing system.
 
 Gate seven admits transparent browser presentation over persistent native media
 decode and composition for an explicitly separable visual capability. Its
@@ -79,10 +79,16 @@ onmark render film.html --subtitle captions.vtt
 external-format syntax to the screenplay. Invalid files produce diagnostics
 against their own path and byte spans before browser or media processes start.
 
-Presentation capabilities are not command-line assumptions. Authored HTML is
-conservatively sequential, browser-composited, and captured per frame. Stronger
-capabilities belong to conformance-admitted artifacts and immutable bundle
-metadata; they are never inferred from source text or observed pixel equality.
+Presentation capabilities are not inferred from source text or observed pixel
+equality. The production authored-HTML adapter is admitted as random-access,
+browser-composited, and per-frame; unknown future components remain sequential
+until their own conformance proves otherwise. Immutable bundle metadata carries
+the admitted facts into Render Graph planning.
+
+The desktop command projects each shot into an isolated browser region and
+reuses verified content-addressed frame artifacts across processes. Editing one
+shot leaves unrelated region artifacts intact; final encoding and audio mixing
+still use the same assembler as a cold render.
 
 The desktop artifact is admitted on macOS arm64, Linux x64, and Windows x64,
 although it has not yet been published to npm. It exposes one `onmark` package

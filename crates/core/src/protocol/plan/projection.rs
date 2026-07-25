@@ -72,17 +72,18 @@ impl<'a> ProjectionBuilder<'a> {
     }
 
     fn project_scene(&mut self, scene: &TimelineScene) -> Result<(), InvalidBrowserPlan> {
+        let Some(interval) = intersection(scene.timing().interval(), self.evaluation) else {
+            return Ok(());
+        };
         let node = self.node(scene.element())?;
         let scene_id = node.id();
-        if let Some(interval) = intersection(scene.timing().interval(), self.evaluation) {
-            if self.scenes.len() >= MAX_BROWSER_SCENES {
-                return Err(InvalidBrowserPlan::TooManyScenes);
-            }
-            self.scenes.push(BrowserScene {
-                node,
-                interval: WireInterval::try_from(interval)?,
-            });
+        if self.scenes.len() >= MAX_BROWSER_SCENES {
+            return Err(InvalidBrowserPlan::TooManyScenes);
         }
+        self.scenes.push(BrowserScene {
+            node,
+            interval: WireInterval::try_from(interval)?,
+        });
         for shot in scene.shots() {
             self.project_shot(shot, scene_id)?;
         }
@@ -94,18 +95,19 @@ impl<'a> ProjectionBuilder<'a> {
         shot: &TimelineShot,
         scene_id: BrowserNodeId,
     ) -> Result<(), InvalidBrowserPlan> {
+        let Some(interval) = intersection(shot.timing().interval(), self.evaluation) else {
+            return Ok(());
+        };
         let node = self.node(shot.element())?;
         let shot_id = node.id();
-        if let Some(interval) = intersection(shot.timing().interval(), self.evaluation) {
-            if self.shots.len() >= MAX_BROWSER_SHOTS {
-                return Err(InvalidBrowserPlan::TooManyShots);
-            }
-            self.shots.push(BrowserShot {
-                node,
-                scene_id,
-                interval: WireInterval::try_from(interval)?,
-            });
+        if self.shots.len() >= MAX_BROWSER_SHOTS {
+            return Err(InvalidBrowserPlan::TooManyShots);
         }
+        self.shots.push(BrowserShot {
+            node,
+            scene_id,
+            interval: WireInterval::try_from(interval)?,
+        });
         for content in shot.content() {
             self.project_content(content, shot_id)?;
         }
@@ -129,7 +131,6 @@ impl<'a> ProjectionBuilder<'a> {
         video: &TimelineVideo,
         shot_id: BrowserNodeId,
     ) -> Result<(), InvalidBrowserPlan> {
-        let node = self.node(video.element())?;
         let interval = video.timing().interval();
         if !interval.intersects(self.evaluation) {
             return Ok(());
@@ -140,6 +141,7 @@ impl<'a> ProjectionBuilder<'a> {
         if self.videos.len() >= MAX_BROWSER_VIDEOS {
             return Err(InvalidBrowserPlan::TooManyVideos);
         }
+        let node = self.node(video.element())?;
         self.videos.push(browser_video(
             video,
             node,
@@ -154,7 +156,6 @@ impl<'a> ProjectionBuilder<'a> {
         overlay: &TimelineOverlay,
         shot_id: BrowserNodeId,
     ) -> Result<(), InvalidBrowserPlan> {
-        let node = self.node(overlay.element())?;
         let interval = overlay.timing().interval();
         if !interval.intersects(self.evaluation) {
             return Ok(());
@@ -162,15 +163,16 @@ impl<'a> ProjectionBuilder<'a> {
         if !self.evaluation.contains_interval(interval) {
             return Err(InvalidBrowserPlan::OverlayCrossesEvaluation);
         }
+        let node = self.node(overlay.element())?;
         let overlay = browser_overlay(overlay, node, shot_id)?;
         push_browser_overlay(&mut self.overlays, &mut self.overlay_text_bytes, overlay)
     }
 
     fn project_caption(&mut self, caption: &TimelineCaption) -> Result<(), InvalidBrowserPlan> {
-        let node = self.synthetic_node()?;
         let Some(interval) = intersection(caption.interval(), self.evaluation) else {
             return Ok(());
         };
+        let node = self.synthetic_node()?;
         let caption = browser_caption(caption, node, interval)?;
         push_browser_overlay(&mut self.overlays, &mut self.overlay_text_bytes, caption)
     }

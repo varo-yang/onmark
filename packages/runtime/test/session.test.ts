@@ -393,6 +393,20 @@ test("rejects invalid or duplicate authored node identity", async () => {
   }
 });
 
+test("rejects a sparse unit-local node identity", async () => {
+  const sparse = structuredClone(plan);
+  firstOverlay(sparse).node.nodeId = 9;
+  const adapter = new RecordingAdapter();
+  const session = new RuntimeSession(adapter);
+
+  const rejected = await session.dispatch(
+    request(1, { type: "load", plan: sparse }),
+  );
+
+  assertFailure(rejected, "invalidRequest");
+  assert.deepEqual(adapter.operations, []);
+});
+
 test("rejects invalid browser video facts before adapter loading", async () => {
   const emptyVideo = structuredClone(plan);
   firstVideo(emptyVideo).interval = { start: 12, end: 12 };

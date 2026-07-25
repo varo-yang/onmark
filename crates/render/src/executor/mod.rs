@@ -113,7 +113,7 @@ impl RenderExecutor {
     /// # Errors
     ///
     /// Returns [`RenderError`] when units do not form one contiguous film, do
-    /// not share a bundle, profile, and frame rate, or an execution boundary
+    /// not share a profile, frame rate, and visual path, or an execution boundary
     /// rejects the resulting render.
     pub async fn render_partitioned(
         &self,
@@ -166,6 +166,24 @@ impl RenderExecutor {
     ) -> Result<FrameCaptureReport, RenderError> {
         self.capture
             .capture_frame_artifact_report(unit, capture_environment, artifact, limits)
+            .await
+    }
+
+    /// Captures cache misses through one shared Chromium lifetime.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RenderError`] under the same conditions as
+    /// [`Self::capture_frame_artifact`], or when units and destinations differ.
+    pub async fn capture_frame_artifacts(
+        &self,
+        units: &[&ExecutableUnit],
+        capture_environment: CaptureEnvironmentId,
+        artifacts: &[PathBuf],
+        limits: FrameArtifactLimits,
+    ) -> Result<Vec<FrameArtifact>, RenderError> {
+        self.capture
+            .capture_frame_artifacts(units, capture_environment, artifacts, limits)
             .await
     }
 
@@ -428,7 +446,7 @@ impl RenderExecutor {
 
         for unit in units {
             let plan = unit.browser_plan();
-            validate_unit_identity(first, unit, output)?;
+            validate_unit_compatibility(first, unit, output)?;
             if plan.output().start().get() != expected_start {
                 return Err(invalid_plan(
                     output,
@@ -541,17 +559,11 @@ impl CaptureDestination<'_> {
     }
 }
 
-fn validate_unit_identity(
+fn validate_unit_compatibility(
     expected: &ExecutableUnit,
     actual: &ExecutableUnit,
     output: &Path,
 ) -> Result<(), RenderError> {
-    if actual.bundle_id() != expected.bundle_id() {
-        return Err(invalid_plan(
-            output,
-            "render units do not share one presentation bundle",
-        ));
-    }
     if actual.profile() != expected.profile() {
         return Err(invalid_plan(
             output,

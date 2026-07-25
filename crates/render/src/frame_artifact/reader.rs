@@ -51,12 +51,12 @@ impl<'a> FrameArtifactFingerprintSequence<'a> {
                 self.reader = Some(artifact.reader().await?);
                 continue;
             };
-            let Some(fingerprint) = reader.next_verified_fingerprint().await? else {
+            let Some(frame) = reader.next_frame().await? else {
                 self.reader = None;
                 continue;
             };
 
-            return Ok(Some(fingerprint));
+            return Ok(Some(frame.raw_rgba_hash()));
         }
     }
 }
@@ -74,7 +74,7 @@ impl FrameArtifactReader {
         }
     }
 
-    /// Reads exactly one retained frame and verifies the final record on EOF.
+    /// Reads one retained frame and verifies its pixels and final record.
     pub(crate) async fn next_frame(&mut self) -> Result<Option<CapturedFrame>, FrameArtifactError> {
         let Some(record) = self.next_record().await? else {
             return Ok(None);
@@ -82,12 +82,14 @@ impl FrameArtifactReader {
         let png = self.read_png(record.frame_len).await?;
         let fingerprint = self.read_fingerprint().await?;
         self.finish_record(&record)?;
+        let frame = CapturedFrame::recorded(png, fingerprint);
+        self.verify_pixels(&frame)?;
 
-        Ok(Some(CapturedFrame::recorded(png, fingerprint)))
+        Ok(Some(frame))
     }
 
-    /// Reads one fingerprint while hashing its PNG payload without retaining it.
-    pub(super) async fn next_fingerprint(
+    /// Reads one recorded fingerprint while verifying the payload checksum.
+    pub(super) async fn next_recorded_fingerprint(
         &mut self,
     ) -> Result<Option<RawRgbaHash>, FrameArtifactError> {
         let Some(record) = self.next_record().await? else {
@@ -100,24 +102,19 @@ impl FrameArtifactReader {
         Ok(Some(fingerprint))
     }
 
-    async fn next_verified_fingerprint(
-        &mut self,
-    ) -> Result<Option<RawRgbaHash>, FrameArtifactError> {
-        let Some(frame) = self.next_frame().await? else {
-            return Ok(None);
-        };
-        let fingerprint = frame
+    fn verify_pixels(&self, frame: &CapturedFrame) -> Result<(), FrameArtifactError> {
+        let actual = frame
             .png()
             .decode_rgba(self.header.descriptor.profile)
             .map_err(|source| FrameArtifactError::pixels(&self.path, source))?
             .fingerprint();
-        if fingerprint != frame.raw_rgba_hash() {
+        if actual != frame.raw_rgba_hash() {
             return Err(FrameArtifactError::invalid(
                 &self.path,
                 "frame artifact raw-RGBA fingerprint does not match its PNG pixels",
             ));
         }
-        Ok(Some(fingerprint))
+        Ok(())
     }
 
     async fn next_record(&mut self) -> Result<Option<FrameRecord>, FrameArtifactError> {

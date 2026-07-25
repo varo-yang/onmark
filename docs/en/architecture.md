@@ -216,12 +216,19 @@ presentation entry. The browser derives that relative location from the frozen
 identity already present in `BrowserPlan`; native paths and browser URLs
 therefore need no second wire protocol. The unit retains worker-local source
 paths only until assembly has verified or linked the exact bytes into that root.
-The bundle preserves the authored HTML DOM and installs infrastructure that
-binds solved facts to its semantic custom elements. Inline CSS and the optional
-motion module own presentation; the infrastructure contributes no template,
-layout, style, animation, or full-screen assumption. Every document consumes
-the same deterministic clock, readiness, and media primitives. The public rules
-for author-owned browser code live in the
+The bundle preserves presentation-owned HTML and installs infrastructure that
+binds solved facts to its semantic custom elements. Before bundle identity is
+computed, the Node boundary removes compiler-only cue and audio elements plus
+the `src`, `duration`, `delay`, and `cue` attributes already represented by
+Timeline IR or the Browser Plan. IDs, classes, ordinary attributes, nested
+markup, inline styles, and authored overlay text remain exact browser inputs.
+This projection keeps edits to the values or contents of existing audio and
+compiler-timing facts out of visual presentation bytes; it does not claim that
+arbitrary source restructuring or presentation edits are partition-local.
+Inline CSS and the optional motion module own presentation; the infrastructure
+contributes no template, layout, style, animation, or full-screen assumption.
+Every document consumes the same deterministic clock, readiness, and media
+primitives. The public rules for author-owned browser code live in the
 [presentation contract](presentation-contract.md).
 
 Each Gate-three capture worker executes one state machine:
@@ -427,6 +434,56 @@ filters, transitions, and shaders expand invalidation. Layered alpha
 intermediates can improve reuse at an encoding, color, and composition cost.
 Correctness outranks cache granularity; Onmark does not promise that every shot
 is always independent.
+
+Incremental execution reuses verified `FrameArtifact` values rather than loose
+PNG files or encoded MP4 segments. A candidate must match the exact Browser
+Plan projection, presentation bytes consumed by that unit, render profile,
+capture backend, and locked capture-environment identity. The reader verifies
+the payload checksum before reuse and recomputes each canonical raw-RGBA
+fingerprint while assembly streams PNG payloads to the encoder. Hits, newly
+captured misses, local execution, and worker results all enter the same artifact
+assembler, so warm execution cannot acquire a second encoding or audio path.
+
+The production authored-HTML artifact is admitted as random access by the
+presentation contract and is projected once per Render Graph region. A region
+document contains the selected shot, its owning scene and film shells, and the
+compiled motion resources. It does not retain semantic siblings. Presentation
+bytes follow semantic ownership: bytes inside a shot belong to that shot;
+scene-level bytes outside shots belong to every region in that scene; film or
+document-level bytes outside scenes belong to every region. Selectors such as
+`:has()` therefore cannot observe a shot outside the region, while a wider
+style, motion, or resource edit correctly changes every region that consumes
+those bytes. Each region has its own `renderRegion` manifest, dense unit-local
+Browser Plan node identities, and content-derived `bundleId`. The whole-film
+`wholeFilm` artifact remains a conformance and low-level execution product, not
+the desktop cache key for each partition.
+
+Compiler-only cue and audio elements plus asset-reference and timing attributes
+are removed before presentation identity is computed. Editing an existing
+audio or compiler-timing fact therefore preserves visual artifacts unless it
+changes solved Browser Plan facts or Render Graph boundaries. Media bytes,
+profile, presentation-global bytes, the selected semantic subtree, and every
+other actual browser input remain in the relevant identity.
+
+The desktop launcher names a conservative host seed from the pinned browser
+artifact, OS and architecture, and bounded system-font inventory. Native code
+adds its capture mode, graphics backend, and composition version. An explicit
+custom browser disables persistent reuse because it is not covered by the
+launcher-owned browser identity. Cache publication is content-addressed and
+atomic. Immutable valid entries are read without a global lease; one
+cross-process lock owns only corruption repair and publication. Corrupt or
+mismatched artifacts are removed and recaptured. The store is bounded by
+artifact count and bytes. Once full, it keeps existing valid entries and leaves
+new misses ephemeral instead of evicting an artifact that another process may
+be reading.
+
+The retained
+[incremental-rendering conformance](../../conformance/incremental-rendering-experiment.md)
+checks whole-film/partition raw-RGBA equivalence, local edit isolation,
+cross-region selector isolation, cold/warm CLI reuse, corruption repair, and
+shared final assembly. Temporal capability and DOM scope remain separate
+manifest facts: random access permits independent evaluation; `documentScope`
+states which semantic DOM bytes the artifact actually contains.
 
 ## Target repository shape
 
@@ -638,13 +695,13 @@ remains a repository development dependency until an equally narrow production
 adapter is admitted.
 
 The browser projection preserves film, scene, shot, and content ownership from
-Timeline IR. Every projected node has a compiler-owned identity stable across
-whole-film and Render Unit projections, an optional authored ID, and a solved
-interval where applicable. Videos and authored overlays name their owning shot;
-imported captions remain film-level. The wire remains a flat relational plan so
-native validation and partition projection stay bounded. The authoring adapter
-uses whole-film stable node identity to bind a unit projection back onto the
-unchanged authored DOM. TypeScript never resolves timing or derives partitions.
+Timeline IR. Node identity is dense and canonical inside each Browser Plan;
+authored IDs retain cross-projection semantic identity. Every node also carries
+its solved interval where applicable. Videos and authored overlays name their
+owning shot; imported captions remain film-level. The wire remains a flat
+relational plan so native validation and region projection stay bounded. The
+authoring adapter binds each plan to the matching whole-film or region DOM.
+TypeScript never resolves timing or derives partitions.
 
 The `protocol` module uses `serde` for stable browser and bundle-manifest JSON
 boundaries. Its optional `schema` feature exposes `schemars` only to repository
@@ -979,9 +1036,10 @@ publication, an incompatible wire change requires a new protocol version and
 migration fixture. The `BrowserPlan` carries the output frame rate,
 evaluation/output intervals, film, scene, and shot structure, primary-video
 placements, and title, call-to-action, or imported-caption overlays consumed by
-the production presentation adapter. Every projected node has a compiler-owned
-identity stable across unit projections and an optional authored identity;
-content names its structural parent. Video placements additionally identify
+the production presentation adapter. Every projected node has a dense
+compiler-owned unit-local identity and an optional authored identity; content
+names its structural parent. Authored IDs retain semantic identity across unit
+projections. Video placements additionally identify
 immutable bytes and the admitted CFR source rate needed to verify decoded frame
 selection, while overlays carry their closed semantic role and decoded text.
 Materialized URLs remain render-owned facts, while DOM structure and CSS remain
@@ -1116,9 +1174,11 @@ executor. Native conformance compares the whole-film and partitioned canonical
 raw-RGBA sequences before encoding. Release-CLI conformance separately validates
 the assembled H.264/AAC output's frame count, motion, stream facts, and
 first-audio-packet placement. It introduces the Render Graph and
-evaluation/output intervals. Preroll, persistent unit caching, and
-dependency-based invalidation remain deferred until a real dependency or cache
-consumer requires them.
+evaluation/output intervals. That gate originally deferred preroll and
+persistent reuse. The later incremental rendering milestone now reuses verified
+`FrameArtifact` values and scopes the current production adapter's invalidation
+to proved shot regions. Transition preroll and wider dependency classes remain
+deferred until their syntax and pixel dependencies exist.
 
 **Gate three (complete): leave the machine.** The completed data-plane slice
 projects the same deterministic, versioned worker requests used locally into a
@@ -1203,9 +1263,12 @@ order during `Seek(frame)`, and finish before `FrameStaged(frame)`. Disposal is
 terminal, releases effects in reverse ownership order, and attempts every owned
 effect even after one cleanup failure. The
 current bundle manifest binds the closed capability into content identity.
-The CLI conservatively declares authored HTML sequential. Stronger capability
-input exists only at the low-level conformance bundler boundary after dedicated
-evidence. The pinned Linux exit conformance
+The production authored-HTML surface is now admitted as random access: its
+contract forbids hidden clocks and requires every frame effect to derive state
+from immutable inputs and the requested frame. Unknown future browser
+components remain sequential until separately admitted. The low-level bundler
+still requires an explicit capability because it also constructs conformance
+artifacts. The pinned Linux exit conformance
 bundles that effect-bearing presentation, renders the same media, audio, and
 caption facts as one whole-film
 unit and two independent units, and compares their canonical raw-RGBA frame
@@ -1226,8 +1289,8 @@ the materialized private Unit Root plus in-memory `data:` and `blob:` URLs;
 ambient network schemes and file paths outside that root are rejected before
 resolution. The same policy runs in local and worker execution.
 
-Presentation bindings also receive Rust-assigned semantic node identities and
-parent relationships that remain stable across unit projections, alongside
+Presentation bindings also receive Rust-assigned unit-local node identities,
+authored semantic identities, and parent relationships, alongside
 protocol-validated closed properties, solved intervals, and frozen asset
 references.
 Rust continues to own timing and resource facts; TypeScript decides only how

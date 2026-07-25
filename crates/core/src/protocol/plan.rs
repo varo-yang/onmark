@@ -318,6 +318,16 @@ fn validate_structure(wire: &BrowserPlanWire) -> Result<(), InvalidBrowserPlan> 
             _ => return Err(InvalidBrowserPlan::UnknownParentNode),
         }
     }
+    validate_dense_node_ids(&node_ids)?;
+    Ok(())
+}
+
+fn validate_dense_node_ids(node_ids: &BTreeSet<BrowserNodeId>) -> Result<(), InvalidBrowserPlan> {
+    for (expected, actual) in node_ids.iter().enumerate() {
+        if usize::try_from(actual.get()) != Ok(expected) {
+            return Err(InvalidBrowserPlan::NonDenseNodeIdentity);
+        }
+    }
     Ok(())
 }
 
@@ -404,11 +414,12 @@ struct BrowserPlanWire {
     overlays: Vec<BrowserOverlay>,
 }
 
-/// Stable browser identity for one Timeline element or imported caption.
+/// Browser identity for one Timeline element or imported caption.
 ///
-/// Authored nodes use their renderable semantic preorder in the complete film.
-/// Unit projections retain that identity when earlier nodes are omitted, so a
-/// browser can bind any partition against the unchanged authored document.
+/// IDs form dense renderable-semantic preorder within one Browser Plan.
+///
+/// Authored IDs, rather than this unit-local key, retain cross-projection
+/// semantic identity.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(transparent)]
@@ -419,7 +430,7 @@ impl BrowserNodeId {
         Self(value)
     }
 
-    /// Returns the stable integer representation.
+    /// Returns the unit-local wire representation.
     #[must_use]
     pub const fn get(self) -> u32 {
         self.0
@@ -443,7 +454,7 @@ impl BrowserNode {
         }
     }
 
-    /// Returns the compiler-assigned identity stable across unit projections.
+    /// Returns the compiler-assigned unit-local binding identity.
     #[must_use]
     pub const fn id(&self) -> BrowserNodeId {
         self.node_id
@@ -737,7 +748,7 @@ pub enum InvalidBrowserPlan {
     TooManyOverlays,
     /// Browser node identity overflowed the current wire domain.
     TooManyNodes,
-    /// Two projected nodes claim the same compiler-owned identity.
+    /// Two projected nodes claim the same unit-local identity.
     DuplicateNodeId,
     /// One projected node carries an invalid authored identity.
     InvalidAuthoredId,
@@ -745,6 +756,8 @@ pub enum InvalidBrowserPlan {
     DuplicateAuthoredId,
     /// A browser collection does not retain compiler projection order.
     NonCanonicalNodeOrder,
+    /// Browser node identities do not form one dense zero-based domain.
+    NonDenseNodeIdentity,
     /// One projected node names an absent or invalid structural parent.
     UnknownParentNode,
     /// One projected node escapes its structural parent interval.
@@ -813,6 +826,7 @@ impl fmt::Display for InvalidBrowserPlan {
             Self::NonCanonicalNodeOrder => {
                 formatter.write_str("browser nodes are not in canonical order")
             }
+            Self::NonDenseNodeIdentity => formatter.write_str("browser node identity is not dense"),
             Self::UnknownParentNode => {
                 formatter.write_str("browser node names an unknown structural parent")
             }
@@ -865,6 +879,7 @@ impl Error for InvalidBrowserPlan {
             | Self::InvalidAuthoredId
             | Self::DuplicateAuthoredId
             | Self::NonCanonicalNodeOrder
+            | Self::NonDenseNodeIdentity
             | Self::UnknownParentNode
             | Self::ChildCrossesParent
             | Self::InvalidOverlayKind(_)
@@ -949,6 +964,28 @@ mod tests {
         }"#;
 
         assert!(serde_json::from_str::<BrowserPlan>(plan).is_err());
+    }
+
+    #[test]
+    fn rejects_non_dense_node_identity_at_the_wire_boundary() {
+        let plan = r#"{
+            "timelineVersion":1,
+            "frameRate":{"numerator":30,"denominator":1},
+            "evaluation":{"start":0,"end":1},
+            "output":{"start":0,"end":1},
+            "film":{"nodeId":0,"authoredId":null},
+            "scenes":[{"node":{"nodeId":1,"authoredId":null},"interval":{"start":0,"end":1}}],
+            "shots":[{"node":{"nodeId":2,"authoredId":null},"sceneId":1,"interval":{"start":0,"end":1}}],
+            "videos":[],
+            "overlays":[
+                {"node":{"nodeId":4,"authoredId":null},"shotId":2,"kind":"title","text":"A","interval":{"start":0,"end":1}}
+            ]
+        }"#;
+
+        let error = serde_json::from_str::<BrowserPlan>(plan)
+            .expect_err("browser node identity must remain dense");
+
+        assert!(error.to_string().contains("not dense"));
     }
 
     #[test]
@@ -1102,21 +1139,36 @@ mod tests {
     }
 
     #[test]
-    fn retains_node_identity_when_a_partition_omits_earlier_overlays() {
-        let timeline = timeline_with_content_in(
-            vec![
-                overlay(ElementKind::Title, interval(0, 2), "Opening"),
-                overlay(ElementKind::CallToAction, interval(2, 4), "Buy now"),
-            ],
-            interval(0, 4),
-        );
+    fn gives_each_unit_a_dense_local_node_identity() {
+        let mut timeline = timeline_with_shots(vec![
+            shot_with_content(
+                vec![overlay(ElementKind::Title, interval(0, 2), "Opening")],
+                interval(0, 2),
+            ),
+            shot_with_content(
+                vec![overlay(
+                    ElementKind::CallToAction,
+                    interval(2, 4),
+                    "Buy now",
+                )],
+                interval(2, 4),
+            ),
+        ]);
+        timeline.replace_captions(vec![
+            caption(interval(0, 1), "Earlier"),
+            caption(interval(2, 3), "Visible"),
+        ]);
         let unit = interval(2, 4);
 
         let plan = BrowserPlan::from_timeline_for_unit(&timeline, &BTreeMap::new(), unit, unit)
             .expect("the second overlay fits its partition");
 
-        assert_eq!(plan.overlays().len(), 1);
-        assert_eq!(plan.overlays()[0].node().id().get(), 4);
+        assert_eq!(plan.film().id().get(), 0);
+        assert_eq!(plan.scenes()[0].node().id().get(), 1);
+        assert_eq!(plan.shots()[0].node().id().get(), 2);
+        assert_eq!(plan.overlays().len(), 2);
+        assert_eq!(plan.overlays()[0].node().id().get(), 3);
+        assert_eq!(plan.overlays()[1].node().id().get(), 4);
     }
 
     #[test]
@@ -1224,18 +1276,41 @@ mod tests {
         content: Vec<TimelineContent>,
         interval: FrameInterval,
     ) -> TimelineIr {
+        timeline_with_shots(vec![shot_with_content(content, interval)])
+    }
+
+    fn shot_with_content(content: Vec<TimelineContent>, interval: FrameInterval) -> TimelineShot {
         let span = SourceSpan::new(SourceId::new(0), ByteOffset::ZERO, ByteOffset::ZERO)
             .expect("equal source bounds form a valid span");
         let timing = TimelineTiming::new(interval, TimingReason::ShotStart, TimingReason::ShotEnd);
-        let shot = TimelineShot::new(
+        TimelineShot::new(
             TimelineElement::new(ElementKind::Shot, None, span),
-            timing.clone(),
+            timing,
             content,
-        );
+        )
+    }
+
+    fn timeline_with_shots(shots: Vec<TimelineShot>) -> TimelineIr {
+        let span = SourceSpan::new(SourceId::new(0), ByteOffset::ZERO, ByteOffset::ZERO)
+            .expect("equal source bounds form a valid span");
+        let start = shots
+            .first()
+            .expect("the fixture owns at least one shot")
+            .timing()
+            .interval()
+            .start();
+        let end = shots
+            .last()
+            .expect("the fixture owns at least one shot")
+            .timing()
+            .interval()
+            .end();
+        let interval = FrameInterval::new(start, end).expect("fixture shots remain ordered");
+        let timing = TimelineTiming::new(interval, TimingReason::ShotStart, TimingReason::ShotEnd);
         let scene = TimelineScene::new(
             TimelineElement::new(ElementKind::Scene, None, span),
             timing,
-            vec![shot],
+            shots,
         );
         let frame_rate = FrameRate::new(30, 1).expect("the fixture frame rate is valid");
 

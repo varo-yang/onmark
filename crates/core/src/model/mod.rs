@@ -38,6 +38,7 @@ pub use time::{
     InvalidFrameInterval, InvalidFrameRate, Rounding, Timebase,
 };
 pub use visual::{
-    InvalidPresentationFrameBehavior, InvalidPresentationVisualCapability,
-    PresentationFrameBehavior, PresentationVisualCapability,
+    InvalidPresentationDocumentScope, InvalidPresentationFrameBehavior,
+    InvalidPresentationVisualCapability, PresentationDocumentScope, PresentationFrameBehavior,
+    PresentationVisualCapability,
 };

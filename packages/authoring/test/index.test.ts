@@ -125,25 +125,26 @@ test("maps every overlay role to one stable semantic element", () => {
   );
 });
 
-test("uses whole-film node identity when a partition omits earlier scenes", () => {
+test("binds dense local node identity in a projected region document", () => {
   const browser = new FakeDocument();
+  browser.authored.scene.remove();
   const later = authoredScene("later", "later-shot", "Later");
   browser.authored.film.append(later.scene);
   const bindings = bindingsFor(browser);
 
   bindings.bindFilm(PLAN.film);
   const scene = bindings.bindScene({
-    node: { nodeId: 5, authoredId: "later" },
+    node: { nodeId: 1, authoredId: "later" },
     interval: { start: 60, end: 120 },
   });
   const shot = bindings.bindShot({
-    node: { nodeId: 6, authoredId: "later-shot" },
-    sceneId: 5,
+    node: { nodeId: 2, authoredId: "later-shot" },
+    sceneId: 1,
     interval: { start: 60, end: 120 },
   });
   const overlay = bindings.bindOverlay({
-    node: { nodeId: 7, authoredId: null },
-    shotId: 6,
+    node: { nodeId: 3, authoredId: null },
+    shotId: 2,
     kind: "title",
     text: "Later",
     interval: { start: 60, end: 120 },
