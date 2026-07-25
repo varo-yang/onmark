@@ -574,9 +574,11 @@ coordination is necessary.
 
 ### Desktop release artifact
 
-The desktop product exposes one `onmark` package, one `onmark` command, and the
-`onmark/authoring` and `onmark/motion/gsap` facades. Internal workspace packages
-are implementation modules, not installation steps.
+The desktop product exposes one `@onmark/cli` package, one `onmark` command, and
+the `@onmark/cli/authoring` and `onmark/motion/gsap` facades. The latter is an
+authored-module specifier resolved by the product bundler, not a second npm
+package. Internal workspace packages are implementation modules, not
+installation steps.
 
 The private launcher is a thin npm boundary rather than a second CLI. It selects
 one optional platform package and passes explicit Node, bundler, browser
@@ -638,10 +640,10 @@ admitted archives.
 
 The bootstrap order is fixed:
 
-1. reserve the unscoped `onmark` name and the `@onmark` organization;
+1. create the `@onmark` organization;
 2. run the manual admission workflow at the intended product revision;
 3. publish the three admitted `@onmark/cli-*` archives, then the admitted
-   `onmark` archive, using an interactive npm identity with 2FA;
+   `@onmark/cli` archive, using an interactive npm identity with 2FA;
 4. configure all four packages to trust `desktop-release.yml` in
    `varo-yang/onmark`, restricted to the `npm-release` environment and
    `npm publish`; and

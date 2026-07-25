@@ -16,7 +16,7 @@ test("admits one complete version with the public package last", () => {
       "@onmark/cli-darwin-arm64",
       "@onmark/cli-linux-x64",
       "@onmark/cli-win32-x64",
-      "onmark",
+      "@onmark/cli",
     ],
   );
   assert.equal(release.distributionTag, "latest");
@@ -114,7 +114,7 @@ function archives() {
     "@onmark/cli-darwin-arm64",
     "@onmark/cli-linux-x64",
     "@onmark/cli-win32-x64",
-    "onmark",
+    "@onmark/cli",
   ].map((name) =>
     Object.freeze({
       integrity: `sha512-${name}`,

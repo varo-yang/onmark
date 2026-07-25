@@ -723,9 +723,10 @@ root：
 
 ### 桌面发布产物
 
-桌面产品只暴露一个 `onmark` package、一条 `onmark` 命令，以及
-`onmark/authoring` 与 `onmark/motion/gsap` facade。内部 workspace package
-是实现模块，不是用户需要拼装的安装步骤。
+桌面产品只暴露一个 `@onmark/cli` package、一条 `onmark` 命令，以及
+`@onmark/cli/authoring` 与 `onmark/motion/gsap` facade。后者是由产品 bundler
+解析的 authored-module specifier，不是第二个 npm package。内部 workspace
+package 是实现模块，不是用户需要拼装的安装步骤。
 
 私有 launcher 是很薄的 npm 边界，而不是第二套 CLI。它选择一个 optional 平台
 package，并把明确的 Node、bundler、browser provisioner、FFmpeg 与 ffprobe 路径传给
@@ -775,10 +776,10 @@ Trusted Publishing，因此第一个公开版本仍需 operator 使用同一组 
 
 bootstrap 顺序固定：
 
-1. 保留 unscoped `onmark` 名称并创建 `@onmark` organization；
+1. 创建 `@onmark` organization；
 2. 在目标 product revision 手动运行 admission workflow；
 3. 使用带 2FA 的交互式 npm identity，先发布三份 admitted
-   `@onmark/cli-*` archive，再发布 admitted `onmark` archive；
+   `@onmark/cli-*` archive，再发布 admitted `@onmark/cli` archive；
 4. 让四个 package 都信任 `varo-yang/onmark` 的 `desktop-release.yml`，并限制为
    `npm-release` environment 与 `npm publish`；以及
 5. 在后续合并 release pull request 前保护该 GitHub environment。

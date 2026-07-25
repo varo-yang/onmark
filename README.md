@@ -70,6 +70,7 @@ ordinary HTML and inline CSS carry presentation. An optional inline
 assembled from adapters such as `onmark/motion/gsap`:
 
 ```bash
+npm install --global @onmark/cli
 onmark render film.html
 onmark render film.html --output review.mp4
 onmark render film.html --fps 30000/1001 --width 1920 --height 1080
@@ -99,18 +100,18 @@ is conditionally repaired through the ordinary worker path. This closes
 distributed incremental reuse without adding a coordinator or durable progress
 service.
 
-The desktop artifact is admitted on macOS arm64, Linux x64, and Windows x64,
-although its initial npm publication has not yet been bootstrapped. It exposes
-one `onmark` package and command, carries the native CLI, `ffmpeg`, and `ffprobe`
-in a platform sidecar, and installs the pinned browser into a verified private
-cache. Linux uses Chrome for Testing's `chrome-headless-shell` with CDP
-BeginFrameControl; macOS and Windows use ordinary Chrome's portable screenshot
-backend. macOS selects Metal and verifies the active renderer through CDP;
-Linux and Windows retain `SwiftShader`. Every target renders the same admitted
-screenplay twice in an empty consumer before release artifacts are retained.
-After the initial package bootstrap, merging a `release/vX.Y.Z` pull request
-admits and publishes the same archives through npm Trusted Publishing, then
-creates the matching GitHub Release. Execution overrides remain explicit:
+The desktop artifact is admitted on macOS arm64, Linux x64, and Windows x64. It
+exposes one `@onmark/cli` package and `onmark` command, carries the native CLI,
+`ffmpeg`, and `ffprobe` in a platform sidecar, and installs the pinned browser
+into a verified private cache. Linux uses Chrome for Testing's
+`chrome-headless-shell` with CDP BeginFrameControl; macOS and Windows use
+ordinary Chrome's portable screenshot backend. macOS selects Metal and verifies
+the active renderer through CDP; Linux and Windows retain `SwiftShader`. Every
+target renders the same admitted screenplay twice in an empty consumer before
+release artifacts are retained. After the initial package bootstrap, merging a
+`release/vX.Y.Z` pull request admits and publishes the same archives through npm
+Trusted Publishing, then creates the matching GitHub Release. Execution
+overrides remain explicit:
 `--graphics software` selects the canonical software control, and
 `--video-encoder-threads` can replace the stable four-thread local default with
 a bounded value from 1 through 64.

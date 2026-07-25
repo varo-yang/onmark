@@ -138,7 +138,8 @@ function releaseTools(consumer) {
         join(
           consumer,
           "node_modules",
-          "onmark",
+          "@onmark",
+          "cli",
           "packages",
           "launcher",
           "dist",
