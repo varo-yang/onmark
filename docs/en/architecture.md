@@ -615,14 +615,17 @@ cannot publish cache bytes or refresh or remove its successor's lock.
 
 The desktop-release workflow can be dispatched for admission only. Its
 publication path runs only after a `release/vX.Y.Z` pull request is merged into
-`main`. In both modes it admits macOS arm64, Linux x64, and Windows x64 only
-after installing the two produced npm tarballs into an empty consumer and
-rendering the same screenplay in two independent browser sessions. It checks
-exact frame count, decoded audio, canonical raw-RGBA identity, product-import
-bundling, and no-clobber output. Each target artifact also retains the two real
-CLI render durations with its fixed profile; shared runner timings are evidence
-samples, not release thresholds. Cross-compilation and binary format inspection
-alone never establish target support.
+`main`. The merged path runs from the protected base context and explicitly
+checks out the pull request's merge commit, so admission, npm provenance, and
+the GitHub tag all identify the same reviewed `main` revision. In both modes it
+admits macOS arm64, Linux x64, and Windows x64 only after installing the two
+produced npm tarballs into an empty consumer and rendering the same screenplay
+in two independent browser sessions. It checks exact frame count, decoded
+audio, canonical raw-RGBA identity, product-import bundling, and no-clobber
+output. Each target artifact also retains the two real CLI render durations with
+its fixed profile; shared runner timings are evidence samples, not release
+thresholds. Cross-compilation and binary format inspection alone never
+establish target support.
 
 Only the merged release-PR path may cross the npm publication boundary. A
 protected `npm-release` environment and npm Trusted Publishing bind that job to
