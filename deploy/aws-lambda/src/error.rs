@@ -87,10 +87,60 @@ pub(crate) enum DeploymentError {
         bucket: Box<str>,
         key: Box<str>,
     },
+    ArtifactRepair(ArtifactRepairError),
     MultipartAbort {
         failure: Box<DeploymentError>,
         abort: Box<DeploymentError>,
     },
+}
+
+#[derive(Debug)]
+pub(crate) enum ArtifactRepairError {
+    ObjectResponse {
+        bucket: Box<str>,
+        key: Box<str>,
+        message: &'static str,
+    },
+    Conflicts {
+        bucket: Box<str>,
+        key: Box<str>,
+    },
+    Cleanup {
+        invalid: Box<DeploymentError>,
+        cleanup: Box<DeploymentError>,
+    },
+}
+
+impl fmt::Display for ArtifactRepairError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ObjectResponse {
+                bucket,
+                key,
+                message,
+            } => write!(
+                formatter,
+                "frame artifact s3://{bucket}/{key} returned no {message}"
+            ),
+            Self::Conflicts { bucket, key } => write!(
+                formatter,
+                "conditional artifact repair repeatedly conflicted for s3://{bucket}/{key}"
+            ),
+            Self::Cleanup { invalid, cleanup } => write!(
+                formatter,
+                "frame artifact is invalid ({invalid}); conditional repair also failed ({cleanup})"
+            ),
+        }
+    }
+}
+
+impl Error for ArtifactRepairError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Cleanup { invalid, .. } => Some(invalid),
+            Self::ObjectResponse { .. } | Self::Conflicts { .. } => None,
+        }
+    }
 }
 
 /// Deployment failure rendered with its retained cause chain for Lambda.
@@ -280,6 +330,28 @@ impl DeploymentError {
             abort: Box::new(abort),
         }
     }
+
+    pub(crate) fn artifact_object_response(bucket: &str, key: &str, message: &'static str) -> Self {
+        Self::ArtifactRepair(ArtifactRepairError::ObjectResponse {
+            bucket: bucket.into(),
+            key: key.into(),
+            message,
+        })
+    }
+
+    pub(crate) fn artifact_repair_conflicts(bucket: &str, key: &str) -> Self {
+        Self::ArtifactRepair(ArtifactRepairError::Conflicts {
+            bucket: bucket.into(),
+            key: key.into(),
+        })
+    }
+
+    pub(crate) fn artifact_repair(invalid: Self, cleanup: Self) -> Self {
+        Self::ArtifactRepair(ArtifactRepairError::Cleanup {
+            invalid: Box::new(invalid),
+            cleanup: Box::new(cleanup),
+        })
+    }
 }
 
 impl fmt::Display for DeploymentError {
@@ -368,6 +440,7 @@ impl fmt::Display for DeploymentError {
                 formatter,
                 "conditional publication repeatedly conflicted for s3://{bucket}/{key}"
             ),
+            Self::ArtifactRepair(source) => source.fmt(formatter),
             Self::MultipartAbort { failure, abort } => write!(
                 formatter,
                 "multipart publication failed ({failure}); abort also failed ({abort})"
@@ -388,6 +461,7 @@ impl Error for DeploymentError {
             Self::Materialize(source) => Some(source),
             Self::Render(source) => Some(source),
             Self::Artifact(source) => Some(source),
+            Self::ArtifactRepair(source) => Some(source),
             Self::MultipartAbort { failure, .. } => Some(failure),
             Self::DownloadLimit { .. }
             | Self::S3IdleTimeout { .. }
@@ -464,5 +538,16 @@ mod tests {
         assert!(matches!(error, DeploymentError::MultipartAbort { .. }));
         assert!(error.source().is_some());
         assert!(error.to_string().contains("abort also failed"));
+    }
+
+    #[test]
+    fn preserves_invalid_artifact_and_repair_failures_together() {
+        let invalid = DeploymentError::invocation_timeout(Duration::from_secs(1));
+        let cleanup = DeploymentError::invocation_timeout(Duration::from_secs(2));
+        let error = DeploymentError::artifact_repair(invalid, cleanup);
+
+        assert!(matches!(error, DeploymentError::ArtifactRepair(_)));
+        assert!(error.source().is_some());
+        assert!(error.to_string().contains("conditional repair also failed"));
     }
 }

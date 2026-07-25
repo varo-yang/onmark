@@ -63,7 +63,7 @@ impl RenderGraph {
 
     /// Produces one local unit candidate for each independently renderable region.
     ///
-    /// The initial Gate-two graph contains only regions whose evaluation and
+    /// The initial render graph contains only regions whose evaluation and
     /// output intervals are equal. Future graph edges may merge regions or
     /// widen evaluation before this operation produces a partition plan.
     #[must_use]

@@ -1,4 +1,4 @@
-//! Immutable S3 publication with collision verification and explicit cleanup.
+//! Immutable S3 artifact admission, publication, and collision repair.
 //!
 //! A conditional multipart completion elects one artifact. Losing writers
 //! verify raw-frame equivalence before reusing the winner rather than trusting
@@ -10,17 +10,18 @@ use aws_sdk_s3::Client;
 use aws_sdk_s3::error::ProvideErrorMetadata;
 use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart};
-use onmark_render::{FrameArtifact, FrameArtifactLimits};
+use onmark_render::{FrameArtifact, FrameArtifactId, FrameArtifactLimits};
 use tokio::io::{AsyncRead, AsyncReadExt as _};
 
 use crate::deadline::InvocationDeadline;
 use crate::download::{DownloadBudget, S3Object};
 use crate::error::{DeploymentError, S3ObjectRole};
-use crate::invocation::{ArtifactLocation, ObjectPrefix, Publication, artifact_key};
+use crate::invocation::{ArtifactLocation, ObjectPrefix, artifact_key};
 use crate::storage::S3Storage;
 
 const MULTIPART_PART_BYTES: usize = 16 * 1024 * 1024;
 const MAX_MULTIPART_PARTS: usize = 10_000;
+const MAX_ARTIFACT_LOOKUP_ATTEMPTS: usize = 3;
 const MAX_PUBLICATION_ATTEMPTS: usize = 3;
 
 /// Inputs and verification bounds for one immutable artifact publication.
@@ -31,6 +32,31 @@ pub(crate) struct ArtifactPublication<'artifact> {
     pub(crate) workspace: &'artifact Path,
     pub(crate) max_download_bytes: u64,
     pub(crate) deadline: InvocationDeadline,
+}
+
+/// Bounds and identity required to admit one artifact before browser work.
+pub(crate) struct ArtifactLookup<'artifact> {
+    pub(crate) destination: &'artifact ObjectPrefix,
+    pub(crate) expected: FrameArtifactId,
+    pub(crate) artifact_limits: FrameArtifactLimits,
+    pub(crate) workspace: &'artifact Path,
+    pub(crate) max_download_bytes: u64,
+    pub(crate) deadline: InvocationDeadline,
+}
+
+impl ArtifactLookup<'_> {
+    fn location(&self, key: &str, artifact: &FrameArtifact) -> ArtifactLocation {
+        ArtifactLocation::new(
+            self.destination.bucket(),
+            key,
+            artifact.id(),
+            artifact.frames(),
+        )
+    }
+
+    fn conflicts(&self, key: &str) -> DeploymentError {
+        DeploymentError::artifact_repair_conflicts(self.destination.bucket(), key)
+    }
 }
 
 impl ArtifactPublication<'_> {
@@ -58,6 +84,109 @@ impl ArtifactPublication<'_> {
 }
 
 impl S3Storage {
+    pub(crate) async fn lookup_artifact(
+        &self,
+        input: ArtifactLookup<'_>,
+    ) -> Result<Option<ArtifactLocation>, DeploymentError> {
+        let key = artifact_key(input.destination, input.expected);
+        let path = input.workspace.join("reused.onmark-frames");
+
+        for _ in 0..MAX_ARTIFACT_LOOKUP_ATTEMPTS {
+            match self.lookup_once(&input, &key, &path).await? {
+                LookupAttempt::Missing => return Ok(None),
+                LookupAttempt::Verified(artifact) => {
+                    return Ok(Some(input.location(&key, &artifact)));
+                }
+                LookupAttempt::Retry => {}
+            }
+        }
+
+        Err(input.conflicts(&key))
+    }
+
+    async fn lookup_once(
+        &self,
+        input: &ArtifactLookup<'_>,
+        key: &str,
+        path: &Path,
+    ) -> Result<LookupAttempt, DeploymentError> {
+        let mut budget =
+            DownloadBudget::new(S3ObjectRole::ExistingArtifact, input.max_download_bytes);
+        let object = S3Object::new(input.destination.bucket(), key);
+        let downloaded = input
+            .deadline
+            .run(self.download_optional_file(object, path, &mut budget))
+            .await?;
+        let Some(downloaded) = downloaded else {
+            return Ok(LookupAttempt::Missing);
+        };
+
+        let artifact = input
+            .deadline
+            .run(open_verified_artifact(
+                path,
+                input.expected,
+                input.artifact_limits,
+            ))
+            .await;
+        let invalid = match artifact {
+            Ok(artifact) => return Ok(LookupAttempt::Verified(artifact)),
+            Err(invalid) => invalid,
+        };
+        let repair = self
+            .repair_invalid(
+                input.destination.bucket(),
+                key,
+                downloaded.e_tag(),
+                input.deadline,
+            )
+            .await
+            .map_err(|cleanup| DeploymentError::artifact_repair(invalid, cleanup))?;
+        Ok(match repair {
+            RepairAttempt::Deleted => LookupAttempt::Missing,
+            RepairAttempt::Retry => LookupAttempt::Retry,
+        })
+    }
+
+    async fn repair_invalid(
+        &self,
+        bucket: &str,
+        key: &str,
+        e_tag: Option<&str>,
+        deadline: InvocationDeadline,
+    ) -> Result<RepairAttempt, DeploymentError> {
+        let e_tag = e_tag.ok_or_else(|| {
+            DeploymentError::artifact_object_response(bucket, key, "ETag for conditional repair")
+        })?;
+        deadline
+            .run(async {
+                let result = self
+                    .client
+                    .delete_object()
+                    .bucket(bucket)
+                    .key(key)
+                    .if_match(e_tag)
+                    .send()
+                    .await;
+                match result {
+                    Ok(_) => Ok(RepairAttempt::Deleted),
+                    Err(source) if service_code(&source) == Some("PreconditionFailed") => {
+                        Ok(RepairAttempt::Retry)
+                    }
+                    Err(source) if service_code(&source) == Some("NoSuchKey") => {
+                        Ok(RepairAttempt::Deleted)
+                    }
+                    Err(source) => Err(DeploymentError::s3(
+                        "delete invalid frame artifact",
+                        bucket,
+                        key,
+                        source,
+                    )),
+                }
+            })
+            .await
+    }
+
     pub(crate) async fn publish(
         &self,
         input: ArtifactPublication<'_>,
@@ -127,16 +256,29 @@ impl S3Storage {
         );
         let object = S3Object::new(publication.destination.bucket(), key);
         Box::pin(self.download_file(object, &path, None, &mut budget)).await?;
-        let artifact = FrameArtifact::open(&path, publication.artifact_limits).await?;
-        if artifact.id() != publication.artifact.id() {
-            return Err(DeploymentError::ArtifactIdentity {
-                expected: publication.artifact.id(),
-                actual: artifact.id(),
-            });
-        }
-        artifact.verify().await?;
-        Ok(artifact)
+        open_verified_artifact(
+            &path,
+            publication.artifact.id(),
+            publication.artifact_limits,
+        )
+        .await
     }
+}
+
+async fn open_verified_artifact(
+    path: &Path,
+    expected: FrameArtifactId,
+    limits: FrameArtifactLimits,
+) -> Result<FrameArtifact, DeploymentError> {
+    let artifact = FrameArtifact::open(path, limits).await?;
+    if artifact.id() != expected {
+        return Err(DeploymentError::ArtifactIdentity {
+            expected,
+            actual: artifact.id(),
+        });
+    }
+    artifact.verify().await?;
+    Ok(artifact)
 }
 
 /// Result of one conditional completion, before bounded conflict retry policy.
@@ -144,6 +286,25 @@ impl S3Storage {
 enum PublicationAttempt {
     Published,
     Existing,
+    Retry,
+}
+
+/// Result of publishing a captured artifact into its immutable namespace.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum Publication {
+    Published,
+    Reused,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RepairAttempt {
+    Deleted,
+    Retry,
+}
+
+enum LookupAttempt {
+    Missing,
+    Verified(FrameArtifact),
     Retry,
 }
 

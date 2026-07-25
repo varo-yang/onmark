@@ -6,6 +6,7 @@
 use std::path::Path;
 use std::time::Duration;
 
+use aws_sdk_s3::operation::get_object::{GetObjectError, GetObjectOutput};
 use aws_sdk_s3::primitives::ByteStream;
 use onmark_core::protocol::BundleManifest;
 use onmark_render::WorkerCaptureRequest;
@@ -32,6 +33,17 @@ pub(crate) struct InputMaterialization<'input> {
 pub(super) struct S3Object<'object> {
     bucket: &'object str,
     key: &'object str,
+}
+
+/// Identity retained from one downloaded object for conditional repair.
+pub(super) struct DownloadedObject {
+    e_tag: Option<Box<str>>,
+}
+
+impl DownloadedObject {
+    pub(super) fn e_tag(&self) -> Option<&str> {
+        self.e_tag.as_deref()
+    }
 }
 
 impl<'object> S3Object<'object> {
@@ -113,14 +125,63 @@ impl S3Storage {
     }
 
     async fn get_body(&self, object: S3Object<'_>) -> Result<ByteStream, DeploymentError> {
+        self.get_object(object).await.map(|response| response.body)
+    }
+
+    async fn get_object(&self, object: S3Object<'_>) -> Result<GetObjectOutput, DeploymentError> {
         self.client
             .get_object()
             .bucket(object.bucket)
             .key(object.key)
             .send()
             .await
-            .map(|response| response.body)
             .map_err(|source| DeploymentError::s3("read", object.bucket, object.key, source))
+    }
+
+    async fn get_optional_object(
+        &self,
+        object: S3Object<'_>,
+    ) -> Result<Option<GetObjectOutput>, DeploymentError> {
+        let result = self
+            .client
+            .get_object()
+            .bucket(object.bucket)
+            .key(object.key)
+            .send()
+            .await;
+        match result {
+            Ok(response) => Ok(Some(response)),
+            Err(source)
+                if source
+                    .as_service_error()
+                    .is_some_and(GetObjectError::is_no_such_key) =>
+            {
+                Ok(None)
+            }
+            Err(source) => Err(DeploymentError::s3(
+                "read",
+                object.bucket,
+                object.key,
+                source,
+            )),
+        }
+    }
+
+    pub(super) async fn download_optional_file(
+        &self,
+        object: S3Object<'_>,
+        target: &Path,
+        budget: &mut DownloadBudget,
+    ) -> Result<Option<DownloadedObject>, DeploymentError> {
+        let Some(response) = self.get_optional_object(object).await? else {
+            return Ok(None);
+        };
+        let downloaded = DownloadedObject {
+            e_tag: response.e_tag().map(Into::into),
+        };
+        self.write_object(response.body, object, target, None, budget)
+            .await?;
+        Ok(Some(downloaded))
     }
 
     pub(super) async fn download_file(
@@ -131,6 +192,18 @@ impl S3Storage {
         budget: &mut DownloadBudget,
     ) -> Result<(), DeploymentError> {
         let body = self.get_body(object).await?;
+        self.write_object(body, object, target, expected_bytes, budget)
+            .await
+    }
+
+    async fn write_object(
+        &self,
+        body: ByteStream,
+        object: S3Object<'_>,
+        target: &Path,
+        expected_bytes: Option<u64>,
+        budget: &mut DownloadBudget,
+    ) -> Result<(), DeploymentError> {
         let parent = target
             .parent()
             .filter(|parent| !parent.as_os_str().is_empty())

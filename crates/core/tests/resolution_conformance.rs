@@ -16,8 +16,8 @@ use onmark_core::model::{AssetRef, Duration, EventRef, SourceId};
 use conformance::{assert_or_update, fixture, render_diagnostics, span};
 
 #[test]
-fn the_gate_one_example_matches_canonical_resolution() {
-    assert_valid_fixture("gate-one");
+fn the_canonical_screenplay_matches_canonical_resolution() {
+    assert_valid_fixture("screenplay");
 }
 
 #[test]
@@ -37,8 +37,11 @@ fn native_html_attributes_and_nested_text_resolve_without_duplication() {
 
 #[test]
 fn attribute_and_reference_errors_match_stable_diagnostics() {
-    let source_path = fixture("resolution", "invalid/attribute-errors.html");
-    let expected_path = fixture("resolution", "invalid/attribute-errors.diagnostics.txt");
+    let source_path = fixture("compiler/resolution", "invalid/attribute-errors.html");
+    let expected_path = fixture(
+        "compiler/resolution",
+        "invalid/attribute-errors.diagnostics.txt",
+    );
     let report = resolve_fixture(&source_path);
 
     assert!(report.film().is_none());
@@ -47,8 +50,11 @@ fn attribute_and_reference_errors_match_stable_diagnostics() {
 
 #[test]
 fn authored_audio_errors_match_stable_diagnostics() {
-    let source_path = fixture("resolution", "invalid/audio-errors.html");
-    let expected_path = fixture("resolution", "invalid/audio-errors.diagnostics.txt");
+    let source_path = fixture("compiler/resolution", "invalid/audio-errors.html");
+    let expected_path = fixture(
+        "compiler/resolution",
+        "invalid/audio-errors.diagnostics.txt",
+    );
     let report = resolve_fixture(&source_path);
 
     assert!(report.film().is_none());
@@ -56,10 +62,13 @@ fn authored_audio_errors_match_stable_diagnostics() {
 }
 
 #[test]
-fn deferred_timing_attributes_remain_outside_gate_one() {
-    let source_path = fixture("resolution", "invalid/deferred-timing-attributes.html");
+fn deferred_timing_attributes_remain_unsupported() {
+    let source_path = fixture(
+        "compiler/resolution",
+        "invalid/deferred-timing-attributes.html",
+    );
     let expected_path = fixture(
-        "resolution",
+        "compiler/resolution",
         "invalid/deferred-timing-attributes.diagnostics.txt",
     );
     let report = resolve_fixture(&source_path);
@@ -69,8 +78,8 @@ fn deferred_timing_attributes_remain_outside_gate_one() {
 }
 
 fn assert_valid_fixture(name: &str) {
-    let source_path = fixture("resolution", &format!("valid/{name}.html"));
-    let expected_path = fixture("resolution", &format!("valid/{name}.resolved.txt"));
+    let source_path = fixture("compiler/resolution", &format!("valid/{name}.html"));
+    let expected_path = fixture("compiler/resolution", &format!("valid/{name}.resolved.txt"));
     let report = resolve_fixture(&source_path);
 
     assert!(report.diagnostics().is_empty());

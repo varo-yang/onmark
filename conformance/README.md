@@ -1,12 +1,24 @@
-# Conformance fixtures
+# Conformance
+
+This directory contains executable product evidence, organized by its owner:
+
+- `compiler/` contains source and golden artifacts for each pure compiler phase;
+- `media/` contains standalone media-normalization fixtures;
+- `browser/` and `cli/` contain handwritten real-process inputs;
+- `protocol/` contains versioned wire examples and self-contained bundles; and
+- `evidence/` records the measurements and commands that admitted production
+  behavior.
 
 Authored `.html` inputs are maintained by hand. Expected `.ast.txt`,
 `.linked.txt`, `.resolved.txt`, `.timeline.txt`, and `.diagnostics.txt` files
 are generated golden artifacts and are not wire formats or protocol schemas.
+Each compiler phase owns a self-contained input/golden pair; identical authored
+inputs may therefore appear in more than one phase without sharing mutable test
+state.
 
-`subtitle/` fixtures exercise standalone subtitle normalization independently
-of screenplay syntax. Their `.captions.txt` and `.errors.txt` files are test
-renderings, not Timeline IR or a public caption wire format.
+`media/subtitle/` fixtures exercise standalone subtitle normalization
+independently of screenplay syntax. Their `.captions.txt` and `.errors.txt`
+files are test renderings, not Timeline IR or a public caption wire format.
 
 Files under `protocol/` are different: they are checked-in wire examples and
 therefore part of versioned cross-process contracts. Browser request/response
@@ -34,15 +46,16 @@ ONMARK_UPDATE_GOLDENS=1 cargo test -p onmark-core --test syntax_conformance
 ONMARK_UPDATE_GOLDENS=1 cargo test -p onmark-core --test binding_conformance
 ONMARK_UPDATE_GOLDENS=1 cargo test -p onmark-core --test resolution_conformance
 ONMARK_UPDATE_GOLDENS=1 cargo test -p onmark-core --test timeline_conformance
+ONMARK_UPDATE_GOLDENS=1 cargo test -p onmark-core --test render_graph_conformance
 ONMARK_UPDATE_GOLDENS=1 cargo test -p onmark-core --test protocol_conformance
 ```
 
 Review the resulting diff before committing it. Normal test runs compare
 current behavior with the checked-in artifacts and never rewrite them.
 
-`browser/gate-one.html` is a real Chromium fixture, not a golden file. Build
-`@onmark/runtime`, set `ONMARK_HEADLESS_SHELL` to the pinned headless-shell
-executable, and run:
+`browser/runtime-protocol.html` is a real Chromium fixture, not a golden file.
+Build `@onmark/runtime`, set `ONMARK_HEADLESS_SHELL` to the pinned
+headless-shell executable, and run:
 
 ```bash
 ONMARK_HEADLESS_SHELL=/path/to/chrome-headless-shell \
@@ -77,17 +90,16 @@ ONMARK_HEADLESS_SHELL=/path/to/chrome-headless-shell \
 ONMARK_FFMPEG=/path/to/ffmpeg \
 ONMARK_FFPROBE=/path/to/ffprobe \
 cargo test -p onmark-render --test render \
-  renders_the_gate_one_plan_to_a_verified_mp4 -- --ignored
+  renders_the_browser_plan_to_a_verified_mp4 -- --ignored
 ```
 
-`cli/gate-one.html` drives the outermost Gate-one contract. The CLI smoke
-copies that complete authored document into a private workspace, generates its
-referenced media, and invokes the real `onmark` binary twice. It verifies each
-independent Chromium and `FFmpeg` session's
-decoded frame count, motion, stream facts, and audio placement, then proves
-that a third invocation cannot replace an existing output. Canonical raw-RGBA
-equality is asserted before lossy MP4 encoding, not inferred from independently
-encoded output:
+`cli/desktop-release.html` drives the installed desktop contract. The release
+smoke copies that complete authored document into a private workspace,
+generates its referenced media, and invokes the real `onmark` binary twice. It
+verifies each independent Chromium and `FFmpeg` session's decoded frame count,
+motion, stream facts, and audio placement, then proves that a third invocation
+cannot replace an existing output. Canonical raw-RGBA equality is asserted
+before lossy MP4 encoding, not inferred from independently encoded output:
 
 ```bash
 ONMARK_HEADLESS_SHELL=/path/to/chrome-headless-shell \
@@ -133,11 +145,11 @@ cargo test -p onmark-render --test media_seek \
 The test prints every raw timing/RSS sample, the two medians, the frozen source
 digest, and the capture-environment identity. The reviewed admission and
 production-exit evidence is recorded in
-[`layered-media-admission.md`](layered-media-admission.md).
+[`evidence/layered-media-admission.md`](evidence/layered-media-admission.md).
 
 The incremental-rendering conformance keeps temporal seekability, DOM scope,
 and artifact identity separate. It proves whole-versus-region raw-RGBA
 equivalence, isolates a local title edit, prevents `:has()` from observing an
 omitted sibling, and exercises persistent CLI reuse plus corruption repair
 through the shared assembler. The evidence and exact commands live in
-[`incremental-rendering-experiment.md`](incremental-rendering-experiment.md).
+[`evidence/incremental-rendering.md`](evidence/incremental-rendering.md).

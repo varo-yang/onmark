@@ -1,6 +1,9 @@
-name: Desktop release admission
+name: Desktop release
 
 on:
+  pull_request:
+    branches: [main]
+    types: [closed]
   workflow_dispatch:
 
 permissions:
@@ -13,8 +16,14 @@ concurrency:
 jobs:
   admit:
     name: Admit ${{ matrix.target }}
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.merged == true &&
+       startsWith(github.event.pull_request.head.ref, 'release/v'))
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
+    permissions:
+      contents: read
 
     strategy:
       fail-fast: false
@@ -33,9 +42,34 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Resolve admitted source revision
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: |
+          if [[ "$EVENT_NAME" == pull_request ]]; then
+            release_version="${RELEASE_BRANCH#release/v}"
+          else
+            release_version=
+          fi
+          echo "RELEASE_VERSION=$release_version" >> "$GITHUB_ENV"
+          echo "SOURCE_REVISION=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
 
       - name: Install pinned Rust toolchain
         run: rustup show active-toolchain
+
+      - name: Verify product version
+        shell: bash
+        run: |
+          if [[ -n "$RELEASE_VERSION" ]]; then
+            cargo xtask release verify "$RELEASE_VERSION"
+          else
+            cargo xtask release verify
+          fi
 
       - name: Install pinned pnpm
         uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
@@ -91,16 +125,16 @@ jobs:
           sudo apparmor_parser --replace "$profile"
 
       - name: Fetch admitted media sources
-        run: node scripts/release/fetch-media.mjs .release/sources
+        run: node scripts/release/media-toolchain/fetch.mjs .release/sources
 
       - name: Build release media tools
         if: runner.os != 'Windows'
-        run: scripts/release/build-media.sh .release/sources .release/media
+        run: scripts/release/media-toolchain/build.sh .release/sources .release/media
 
       - name: Build Windows release media tools
         if: runner.os == 'Windows'
         shell: msys2 {0}
-        run: scripts/release/build-media.sh .release/sources .release/media
+        run: scripts/release/media-toolchain/build.sh .release/sources .release/media
 
       - name: Build public package modules
         run: |
@@ -120,10 +154,10 @@ jobs:
             --target "${{ matrix.target }}" \
             --onmark "${{ matrix.native-cli }}" \
             --media .release/media \
-            --source-revision "$GITHUB_SHA" \
+            --source-revision "$SOURCE_REVISION" \
             --output .release/sidecar
-          node scripts/release/assemble-package.mjs \
-            --source-revision "$GITHUB_SHA" \
+          node scripts/release/npm/assemble-package.mjs \
+            --source-revision "$SOURCE_REVISION" \
             --output .release/product
 
       - name: Admit installed product
@@ -136,7 +170,7 @@ jobs:
           fi
           npm_cli="$(node -e 'process.stdout.write(require("node:path").join(process.argv[1], "npm/bin/npm-cli.js"))' "$npm_root")"
           test -f "$npm_cli"
-          node scripts/release/admit.mjs \
+          node scripts/release/npm/admit.mjs \
             "$npm_cli" \
             .release/product \
             .release/sidecar \
@@ -148,15 +182,97 @@ jobs:
         run: |
           mkdir -p .release/artifacts
           npm pack .release/sidecar --pack-destination .release/artifacts --silent
-          npm pack .release/product --pack-destination .release/artifacts --silent
+          if [[ "${{ matrix.target }}" == linux-x64 ]]; then
+            npm pack .release/product --pack-destination .release/artifacts --silent
+          fi
+          cp \
+            .release/performance.json \
+            ".release/artifacts/performance-${{ matrix.target }}.json"
 
       - name: Retain admitted artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: desktop-${{ matrix.target }}
-          path: |
-            .release/artifacts/*.tgz
-            .release/performance.json
+          path: .release/artifacts/*
           if-no-files-found: error
           include-hidden-files: true
           retention-days: 7
+
+  publish:
+    name: Publish npm release
+    if: >-
+      github.event.pull_request.merged == true &&
+      startsWith(github.event.pull_request.head.ref, 'release/v')
+    needs: admit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: npm-release
+    permissions:
+      contents: write
+      id-token: write
+
+    steps:
+      - name: Check out released source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Resolve release identity
+        shell: bash
+        env:
+          RELEASE_BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: |
+          release_version="${RELEASE_BRANCH#release/v}"
+          echo "RELEASE_TAG=v$release_version" >> "$GITHUB_ENV"
+
+      - name: Install pinned Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: 26.4.0
+          package-manager-cache: false
+          registry-url: https://registry.npmjs.org
+
+      - name: Download admitted packages
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: desktop-*
+          path: .release/publication
+          merge-multiple: true
+
+      - name: Publish admitted packages
+        shell: bash
+        run: |
+          npm_root="$(npm root --global)"
+          npm_cli="$(node -e 'process.stdout.write(require("node:path").join(process.argv[1], "npm/bin/npm-cli.js"))' "$npm_root")"
+          test -f "$npm_cli"
+          node scripts/release/npm/publish.mjs \
+            --npm-cli "$npm_cli" \
+            --tag "$RELEASE_TAG" \
+            --directory .release/publication \
+            --mode publish
+
+      - name: Publish GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          revision="$(git rev-parse HEAD)"
+          remote_tag="$(git ls-remote --tags origin "refs/tags/$RELEASE_TAG")"
+          release_args=(--title "$RELEASE_TAG" --generate-notes)
+
+          if [[ -n "$remote_tag" ]]; then
+            git fetch --no-tags origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+            if [[ "$(git rev-list -n 1 "$RELEASE_TAG")" != "$revision" ]]; then
+              echo "$RELEASE_TAG does not identify the admitted revision" >&2
+              exit 1
+            fi
+            release_args+=(--verify-tag)
+          else
+            release_args+=(--target "$revision")
+          fi
+
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "$RELEASE_TAG already has a GitHub release"
+          else
+            gh release create "$RELEASE_TAG" "${release_args[@]}"
+          fi

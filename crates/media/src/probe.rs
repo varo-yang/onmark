@@ -17,8 +17,8 @@ use crate::response::parse_metadata;
 /// Configured boundary for probing local artifacts with ffprobe.
 ///
 /// The executable must be ffprobe itself, or a wrapper that replaces its own
-/// process without leaving descendants that inherit the output pipes. Gate one
-/// deliberately does not own arbitrary process-tree cleanup.
+/// process without leaving descendants that inherit the output pipes. This
+/// boundary deliberately does not own arbitrary process-tree cleanup.
 ///
 /// # Examples
 ///

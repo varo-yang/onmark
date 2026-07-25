@@ -40,7 +40,7 @@ Run the frozen offline grader from the repository root:
 cargo xtask eval html
 ```
 
-This evaluation admits a language direction, not the temporary converter used
-by the feasibility prototype. Production migration must parse the strict HTML
-profile directly into Source AST and must preserve Rust as the sole timing
-authority.
+This evaluation admitted the current language direction rather than the
+temporary converter used by the feasibility prototype. Production now parses
+the strict HTML profile directly into Source AST, with Rust remaining the sole
+timing authority.

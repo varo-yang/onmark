@@ -7,10 +7,11 @@ agents.
 screenplay → deterministic Timeline IR → browser frames + audio plan → MP4
 ```
 
-Delivery gates one through seven are complete. No later delivery gate is
-currently active. Gate one renders and independently verifies one real
-screenplay through the compiler, browser protocol, Chromium, and FFmpeg. Gate
-two partitions one media-bearing two-shot film into two local Render Units and
+Delivery gates one through seven and distributed incremental reuse are
+complete. No later delivery gate is currently active. Gate one renders and
+independently verifies one real screenplay through the compiler, browser
+protocol, Chromium, and FFmpeg. Gate two partitions one media-bearing two-shot
+film into two local Render Units and
 proves that their assembled decoded video and audio match the whole-film
 baseline. Gate three sends those
 same portable units to two concurrent arm64 Lambda workers, verifies their
@@ -86,24 +87,33 @@ until their own conformance proves otherwise. Immutable bundle metadata carries
 the admitted facts into Render Graph planning.
 
 The desktop command projects each shot into an isolated browser region and
-reuses verified content-addressed frame artifacts across processes. Editing one
+reuses verified contract-addressed frame artifacts across processes. Editing one
 shot leaves unrelated region artifacts intact; final encoding and audio mixing
 still use the same assembler as a cold render. Every completed command reports
 the exact reused region and frame counts plus pipeline phase timings, so
 incremental work is visible without inspecting the cache.
 
+The Lambda adapter applies the same artifact identity before materializing
+inputs or preparing Chromium. A verified S3 hit skips capture; a corrupt object
+is conditionally repaired through the ordinary worker path. This closes
+distributed incremental reuse without adding a coordinator or durable progress
+service.
+
 The desktop artifact is admitted on macOS arm64, Linux x64, and Windows x64,
-although it has not yet been published to npm. It exposes one `onmark` package
-and command, carries the native CLI, `ffmpeg`, and `ffprobe` in a platform
-sidecar, and installs the pinned browser into a verified private cache. Linux
-uses Chrome for Testing's `chrome-headless-shell` with CDP BeginFrameControl;
-macOS and Windows use ordinary Chrome's portable screenshot backend. macOS
-selects Metal and verifies the active renderer through CDP; Linux and Windows
-retain `SwiftShader`. Every target renders the same admitted screenplay twice
-in an empty consumer before release artifacts are retained. Execution overrides
-remain explicit: `--graphics software` selects the canonical software control,
-and `--video-encoder-threads` can replace the stable four-thread local default
-with a bounded value from 1 through 64.
+although its initial npm publication has not yet been bootstrapped. It exposes
+one `onmark` package and command, carries the native CLI, `ffmpeg`, and `ffprobe`
+in a platform sidecar, and installs the pinned browser into a verified private
+cache. Linux uses Chrome for Testing's `chrome-headless-shell` with CDP
+BeginFrameControl; macOS and Windows use ordinary Chrome's portable screenshot
+backend. macOS selects Metal and verifies the active renderer through CDP;
+Linux and Windows retain `SwiftShader`. Every target renders the same admitted
+screenplay twice in an empty consumer before release artifacts are retained.
+After the initial package bootstrap, merging a `release/vX.Y.Z` pull request
+admits and publishes the same archives through npm Trusted Publishing, then
+creates the matching GitHub Release. Execution overrides remain explicit:
+`--graphics software` selects the canonical software control, and
+`--video-encoder-threads` can replace the stable four-thread local default with
+a bounded value from 1 through 64.
 Deterministic comparisons apply within the same locked browser environment,
 capture mode, and graphics backend.
 
@@ -134,16 +144,19 @@ checked in under `schemas/`; its required environment, IAM scope, limits, and
 intentional non-goals are documented in
 [its deployment README](deploy/aws-lambda/README.md). The real arm64 Lambda ZIP
 experiment and deterministic package command are recorded there. Infrastructure
-provisioning and a published release workflow remain outside this gate.
+provisioning remains outside this gate; desktop npm publication is a separate
+release boundary.
 
 ## Repository map
 
 - `crates/` contains Rust product code.
 - `packages/` contains browser and Node product packages.
-- `conformance/` contains behavior examples shared across implementations.
+- `conformance/` groups compiler, media, browser, CLI, wire, and admission evidence.
 - `evals/` contains frozen language-admission experiments and raw model output.
-- `schemas/` contains generated, versioned wire contracts.
-- `scripts/` contains repository-only generation and quality checks.
+- `schemas/` contains the five generated, versioned wire contracts.
+- `scripts/` contains the `xtask` entry point plus evaluation, schema,
+  TypeScript-quality, and release tooling; release npm and media toolchains have
+  separate process-owned subdirectories.
 
 ## Development
 

@@ -1,4 +1,4 @@
-//! Narrow S3 transport owner shared by download and publication policies.
+//! Narrow S3 transport owner shared by input and artifact policies.
 
 use std::time::Duration;
 
@@ -6,10 +6,10 @@ use aws_sdk_s3::Client;
 
 use crate::config::S3TransportLimits;
 
-/// S3 boundary shared by input download and immutable artifact publication.
+/// S3 boundary shared by input download and immutable artifact operations.
 ///
 /// This is deliberately not a generic object-store abstraction. The sibling
-/// modules own S3-specific download and multipart publication semantics.
+/// modules own S3-specific input, admission, repair, and publication semantics.
 #[derive(Clone)]
 pub(crate) struct S3Storage {
     pub(super) client: Client,

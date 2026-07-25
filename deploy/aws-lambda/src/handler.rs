@@ -10,13 +10,13 @@ use std::time::Instant;
 use onmark_render::{Ffmpeg, FrameCaptureMetrics, WorkerCaptureRequest};
 use tempfile::TempDir;
 
+use crate::artifact::{ArtifactLookup, ArtifactPublication, Publication};
 use crate::browser::BrowserRuntime;
 use crate::config::Configuration;
 use crate::deadline::InvocationDeadline;
 use crate::download::InputMaterialization;
 use crate::error::DeploymentError;
-use crate::invocation::{CaptureInvocation, CaptureResult};
-use crate::publication::ArtifactPublication;
+use crate::invocation::{CaptureInvocation, CaptureOutcome, CaptureResult};
 use crate::storage::S3Storage;
 
 const PACKAGED_FFMPEG: &str = "/var/task/ffmpeg";
@@ -67,6 +67,21 @@ impl CaptureHandler {
             .await?;
         self.require_capture_environment(&request)?;
         let expected_artifact = request.artifact_id();
+        let lookup = ArtifactLookup {
+            destination: self.configuration.artifact_destination(),
+            expected: expected_artifact,
+            artifact_limits: Configuration::frame_artifact_limits(),
+            workspace: workspace.path(),
+            max_download_bytes: Configuration::max_frame_artifact_file_bytes(),
+            deadline,
+        };
+        if let Some(location) = InvocationPhase::ReuseArtifact
+            .measure(self.storage.lookup_artifact(lookup))
+            .await?
+        {
+            return Ok(CaptureResult::new(location, CaptureOutcome::Reused));
+        }
+
         let materialization = InputMaterialization {
             source: invocation.input(),
             request: &request,
@@ -114,7 +129,11 @@ impl CaptureHandler {
             .measure(self.storage.publish(publication))
             .await?;
 
-        Ok(CaptureResult::new(location, status))
+        let outcome = match status {
+            Publication::Published => CaptureOutcome::CapturedAndPublished,
+            Publication::Reused => CaptureOutcome::CapturedAndReused,
+        };
+        Ok(CaptureResult::new(location, outcome))
     }
 
     fn require_capture_environment(
@@ -177,6 +196,7 @@ fn log_capture_metrics(metrics: FrameCaptureMetrics) {
 #[derive(Clone, Copy, Debug)]
 enum InvocationPhase {
     ReadRequest,
+    ReuseArtifact,
     MaterializeInputs,
     MaterializeUnit,
     PrepareBrowser,
@@ -202,6 +222,7 @@ impl InvocationPhase {
     const fn name(self) -> &'static str {
         match self {
             Self::ReadRequest => "read_request",
+            Self::ReuseArtifact => "reuse_artifact",
             Self::MaterializeInputs => "materialize_inputs",
             Self::MaterializeUnit => "materialize_unit",
             Self::PrepareBrowser => "prepare_browser",

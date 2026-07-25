@@ -15,6 +15,8 @@ use serde::Deserialize;
 const EVALUATION: &str = "evals/html-authoring";
 const ADMITTED_ARM: &str = "html";
 
+// ── Grading pipeline
+
 pub(super) fn grade(repository: &Path) -> Result<(), Box<dyn Error>> {
     let evaluation = repository.join(EVALUATION);
     let cases: CaseSet = read_json(&evaluation.join("cases.json"))?;
@@ -101,6 +103,8 @@ fn grade_output(
         ));
     }
 }
+
+// ── Case semantics
 
 fn project_is_valid(arm: Arm, case: &str, files: &[AuthoredFile]) -> bool {
     let Some(project) = Project::new(arm, files) else {
@@ -239,6 +243,8 @@ fn valid_advanced_presentation(project: &Project<'_>) -> bool {
         && presentation.contains("installRuntimeHost")
 }
 
+// ── Markup validation
+
 fn language_is_valid(source: &str, arm: Arm) -> bool {
     let normalized = normalized_markup(source, arm);
     let report = compiler::parse(SourceId::new(0), &normalized);
@@ -341,6 +347,8 @@ fn lacks_native_html_spelling(markup: &str) -> bool {
     markup.contains("/>") || !markup.contains("</video>")
 }
 
+// ── Baseline contract
+
 fn compare_baseline(
     scores: &BTreeMap<&str, Score>,
     baseline: &Baseline,
@@ -373,6 +381,8 @@ fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T, Box<dyn Err
     let source = fs::read_to_string(path)?;
     Ok(serde_json::from_str(&source)?)
 }
+
+// ── Evaluation model
 
 struct Project<'a> {
     all: String,
@@ -499,6 +509,8 @@ struct Score {
     authored_bytes: usize,
     failed_cases: BTreeSet<String>,
 }
+
+// ── Failures
 
 #[derive(Debug)]
 struct GradingFailed(Vec<String>);

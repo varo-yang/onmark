@@ -15,6 +15,8 @@ const PE_DOS_HEADER_BYTES: usize = 64;
 const PE_SIGNATURE_BYTES: usize = 6;
 const RELEASE_CONTRACT: &str = "packages/launcher/desktop-release.json";
 
+// ── Supported targets
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub(super) enum ReleaseTarget {
@@ -148,6 +150,8 @@ struct DesktopReleaseContract {
     targets: BTreeMap<String, serde_json::Value>,
 }
 
+// ── Executable admission
+
 fn executable_metadata(path: &Path, role: ExecutableRole) -> Result<fs::Metadata, PackageError> {
     let metadata = fs::symlink_metadata(path)
         .map_err(|source| PackageError::io("inspect release input", path, source))?;
@@ -224,6 +228,8 @@ fn has_executable_bit(metadata: &fs::Metadata) -> bool {
 fn has_executable_bit(_metadata: &fs::Metadata) -> bool {
     true
 }
+
+// ── Tests
 
 #[cfg(test)]
 mod tests {

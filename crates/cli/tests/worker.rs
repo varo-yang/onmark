@@ -309,7 +309,7 @@ fn static_request_in(capture_environment: CaptureEnvironmentId) -> WorkerCapture
 fn one_shot_timeline() -> TimelineIr {
     solve_timeline(concat!(
         "<om-film><om-scene>",
-        r#"<om-shot duration="1s"><om-title>Gate three</om-title></om-shot>"#,
+        r#"<om-shot duration="1s"><om-title>Remote worker</om-title></om-shot>"#,
         "</om-scene></om-film>",
     ))
 }

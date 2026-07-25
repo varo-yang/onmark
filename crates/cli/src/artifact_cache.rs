@@ -1,4 +1,4 @@
-//! Bounded desktop reuse of verified, content-addressed frame artifacts.
+//! Bounded desktop reuse of verified, contract-addressed frame artifacts.
 //!
 //! The release launcher supplies host facts; this module adds native capture
 //! policy, owns cache locking, and keeps cache hits and misses on one assembler

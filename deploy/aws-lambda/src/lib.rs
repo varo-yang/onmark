@@ -12,6 +12,8 @@
 use std::sync::Arc;
 
 #[cfg(feature = "runtime")]
+mod artifact;
+#[cfg(feature = "runtime")]
 mod browser;
 #[cfg(feature = "runtime")]
 mod config;
@@ -26,8 +28,6 @@ mod handler;
 #[cfg(any(feature = "runtime", feature = "schema"))]
 mod invocation;
 #[cfg(feature = "runtime")]
-mod publication;
-#[cfg(feature = "runtime")]
 mod storage;
 
 #[cfg(feature = "runtime")]
@@ -35,8 +35,8 @@ use error::ReportedDeploymentError;
 
 #[cfg(any(feature = "runtime", feature = "schema"))]
 pub use invocation::{
-    ArtifactLocation, CaptureInvocation, CaptureInvocationVersion, CaptureResult,
-    InvalidObjectPrefix, ObjectPrefix, Publication,
+    ArtifactLocation, CaptureInvocation, CaptureInvocationVersion, CaptureOutcome, CaptureResult,
+    InvalidObjectPrefix, ObjectPrefix,
 };
 
 /// Canonical executable name at the root of a Lambda browser archive.

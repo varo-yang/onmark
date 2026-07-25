@@ -62,8 +62,8 @@ ONMARK_HEADLESS_SHELL=/path/to/chrome-headless-shell \
 ONMARK_FFMPEG=/path/to/ffmpeg \
 ONMARK_FFPROBE=/path/to/ffprobe \
 cargo test -p onmark-render --test render \
-  authored_html_edit \
-  -- --ignored --nocapture
+  isolates_one_authored_html_edit_to_its_render_partition \
+  -- --exact --ignored --nocapture
 ```
 
 Run the CSS isolation case separately:

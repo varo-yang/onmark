@@ -20,18 +20,18 @@ const AUDIO_SAMPLE_RATE: u64 = 48_000;
 const AUDIBLE_SAMPLE_THRESHOLD: u16 = 256;
 // AAC can spread a transient across one 1024-sample coding frame.
 const AUDIO_START_TOLERANCE_MICROS: u64 = 25_000;
-const GATE_ONE_FRAME_COUNT: usize = 45;
-const GATE_TWO_FRAME_COUNT: usize = 60;
+const DESKTOP_FRAME_COUNT: usize = 45;
+const PARTITIONED_FRAME_COUNT: usize = 60;
 const PROCESS_DEADLINE: Duration = Duration::from_mins(3);
 const CACHE_ENVIRONMENT: &str =
     "sha256:1111111111111111111111111111111111111111111111111111111111111111";
 
 #[tokio::test]
-#[ignore = "requires ONMARK_CLI, ONMARK_FFMPEG, ONMARK_FFPROBE, and Gate-one tools on PATH"]
+#[ignore = "requires ONMARK_CLI, ONMARK_FFMPEG, ONMARK_FFPROBE, and browser tools on PATH"]
 async fn renders_one_screenplay_reliably_across_real_processes() {
     let directory = tempdir().expect("the conformance workspace is available");
-    let fixture = Fixture::materialize(directory.path(), "cli/gate-one.html");
-    let first = render_fixture_twice(&fixture, SourceVideo::Solid, GATE_ONE_FRAME_COUNT, 15).await;
+    let fixture = Fixture::materialize(directory.path(), "cli/desktop-release.html");
+    let first = render_fixture_twice(&fixture, SourceVideo::Solid, DESKTOP_FRAME_COUNT, 15).await;
     assert!(
         first.inspection.has_motion_before(10),
         "the static source must expose exact-frame GSAP motion before the CTA boundary",
@@ -46,13 +46,13 @@ async fn renders_one_screenplay_reliably_across_real_processes() {
 }
 
 #[tokio::test]
-#[ignore = "requires ONMARK_CLI, ONMARK_FFMPEG, ONMARK_FFPROBE, and Gate-four tools on PATH"]
+#[ignore = "requires ONMARK_CLI, ONMARK_FFMPEG, ONMARK_FFPROBE, and browser tools on PATH"]
 async fn assembles_two_partitioned_units_across_real_processes() {
     let directory = tempdir().expect("the conformance workspace is available");
-    let fixture = Fixture::materialize(directory.path(), "cli/gate-four.html");
+    let fixture = Fixture::materialize(directory.path(), "cli/audio-subtitle.html");
     fixture.generate_general_audio().await;
 
-    render_fixture_twice(&fixture, SourceVideo::Moving, GATE_TWO_FRAME_COUNT, 0).await;
+    render_fixture_twice(&fixture, SourceVideo::Moving, PARTITIONED_FRAME_COUNT, 0).await;
 }
 
 #[tokio::test]
@@ -63,27 +63,27 @@ async fn reuses_only_unchanged_regions_across_cli_processes() {
     let cache = directory.path().join("frame-cache");
 
     let first = fixture.render_cached("first.mp4", &cache).await;
-    assert_success(&first.output, GATE_TWO_FRAME_COUNT);
+    assert_success(&first.output, PARTITIONED_FRAME_COUNT);
     assert_incremental_summary(&first.output, "Reused 0/2 regions and 0/60 frames");
     let first_hashes = decode_video_hashes(&first.path).await;
     let first_artifacts = cache_artifacts(&cache);
     assert_eq!(first_artifacts.len(), 2);
 
     let warm = fixture.render_cached("warm.mp4", &cache).await;
-    assert_success(&warm.output, GATE_TWO_FRAME_COUNT);
+    assert_success(&warm.output, PARTITIONED_FRAME_COUNT);
     assert_incremental_summary(&warm.output, "Reused 2/2 regions and 60/60 frames");
     assert_eq!(decode_video_hashes(&warm.path).await, first_hashes);
     assert_eq!(cache_artifacts(&cache), first_artifacts);
 
     fixture.replace_screenplay(&incremental_film("Changed"));
     let second = fixture.render_cached("second.mp4", &cache).await;
-    assert_success(&second.output, GATE_TWO_FRAME_COUNT);
+    assert_success(&second.output, PARTITIONED_FRAME_COUNT);
     assert_incremental_summary(&second.output, "Reused 1/2 regions and 30/60 frames");
     let second_hashes = decode_video_hashes(&second.path).await;
     let second_artifacts = cache_artifacts(&cache);
     assert_eq!(second_artifacts.len(), 3);
-    assert_eq!(first_hashes.len(), GATE_TWO_FRAME_COUNT);
-    assert_eq!(second_hashes.len(), GATE_TWO_FRAME_COUNT);
+    assert_eq!(first_hashes.len(), PARTITIONED_FRAME_COUNT);
+    assert_eq!(second_hashes.len(), PARTITIONED_FRAME_COUNT);
     assert_ne!(first_hashes, second_hashes);
 
     let new_artifact = second_artifacts
@@ -93,7 +93,7 @@ async fn reuses_only_unchanged_regions_across_cli_processes() {
     fs::write(new_artifact, b"corrupt").expect("the cache fixture can be corrupted");
 
     let repaired = fixture.render_cached("repaired.mp4", &cache).await;
-    assert_success(&repaired.output, GATE_TWO_FRAME_COUNT);
+    assert_success(&repaired.output, PARTITIONED_FRAME_COUNT);
     assert_incremental_summary(&repaired.output, "Reused 1/2 regions and 30/60 frames");
     assert_eq!(decode_video_hashes(&repaired.path).await, second_hashes);
     assert_eq!(cache_artifacts(&cache), second_artifacts);

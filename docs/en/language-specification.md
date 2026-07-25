@@ -1,9 +1,9 @@
 # Onmark Language Specification
 
-> Status: current screenplay language. Gate four admitted the present authored
-> audio and subtitle surface; later completed gates changed presentation and
-> execution behavior without adding screenplay spelling. Deferred language
-> capabilities are listed explicitly.
+> Status: current screenplay language through Gate seven and distributed
+> incremental rendering. Gate four was the last completed gate to add authored
+> spelling; later work changed presentation and execution only. Deferred
+> language capabilities are listed explicitly.
 
 ## Purpose
 
@@ -61,7 +61,7 @@ Illustrative syntax:
 </om-film>
 ```
 
-`cue="offer"` is the Gate-one spelling for aligning an overlay to a named cue.
+`cue="offer"` aligns an overlay to a named cue.
 Free-form `begin`, `end`, and `until` expressions are not part of the language.
 
 ## HTML syntax
@@ -115,14 +115,14 @@ are not part of the language.
 The compiler maps exact nanosecond values onto a rational frame grid with
 integer arithmetic. Every conversion names either floor or ceiling rounding at
 its call site; no implicit cast or ambient default may choose a frame boundary.
-Gate-one authored starts, delays, cue times, and durations select the first
+Authored starts, delays, cue times, and durations select the first
 frame boundary that is not earlier than the exact value (`Ceil`), so a positive
 sub-frame value never silently becomes zero frames. `Floor` remains available
 only for rules that explicitly require attribution to an earlier boundary.
 
 A shot obtains duration from probed media, probed voice-over, or a restricted
 explicit duration when content provides none. Multiple primary content sources
-extend the shot to the longest source. Gate one does not allow a shot to end at
+extend the shot to the longest source. The current language does not allow a shot to end at
 a cue. Overlay elements do not silently extend their shot.
 
 The current language has two explicit relationships:
@@ -131,12 +131,12 @@ The current language has two explicit relationships:
 - a named cue aligns an overlay to an authored absolute film event.
 
 An overlay starts at its resolved relationship, or at the owning shot's start
-when none is authored, and remains active until that shot's exclusive end. Gate
-one gives overlays no independent default duration. An overlay therefore cannot
+when none is authored, and remains active until that shot's exclusive end. The
+current language gives overlays no independent default duration. An overlay therefore cannot
 extend its shot, and a resolved start outside the owning shot is an authored
 timing error.
 
-Gate-one cues use authored absolute film time. No other cue source is part of
+Current cues use authored absolute film time. No other cue source is part of
 the current language.
 
 All resolutions preserve provenance in `TimingReason`, allowing the compiler to
@@ -151,7 +151,7 @@ measured duration. The reference is a screenplay-relative portable path: it uses
 backslashes, or a platform prefix. The referenced artifact must expose an audio
 stream; otherwise solving reports `ONM-ASSET-002` at `src`. TTS belongs
 upstream. The compiler is offline and deterministic, and content hashes detect
-stale text/artifact pairs. Gate one materializes each solved voice-over into the
+stale text/artifact pairs. The renderer materializes each solved voice-over into the
 private render root and mixes it outside browser capture at its solved frame
 interval. The presentation does not play, delay, or mix voice-over audio.
 
@@ -327,7 +327,7 @@ Free `begin/end/until` expressions, shots ending at cues, screenplay-selected
 presentations or props, generated cues from media analysis or typed semantic
 boundaries, negative offsets, general flex constraints, runtime branches, speed
 ramps, reverse playback, audio-reactive behavior, cross-scene persistence,
-content-aware transitions, and online media generation remain outside Gate one
+content-aware transitions, and online media generation remain unsupported
 until their semantics and generation reliability are tested. A future typed
 semantic boundary must still produce a named event; it does not reintroduce free
 timing attributes.
@@ -340,7 +340,7 @@ maintain generation reliability in controlled tests, and support local
 actionable diagnostics. Paper elegance is insufficient.
 
 Language evaluations are repository data rather than an informal result. A
-syntax proposal cannot change the Gate-one surface until its cases, prompts,
+syntax proposal cannot change the current language surface until its cases, prompts,
 grader, raw outputs, model settings, and comparison baseline are checked in and
 reproducible. CI may validate and rescore those frozen assets without calling a
 live model.

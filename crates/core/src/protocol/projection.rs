@@ -8,10 +8,11 @@ use crate::timeline::{
     TimelineShot, TimelineText, TimelineVideo,
 };
 
-use super::{
+use super::frame::WireInterval;
+use super::plan::{
     BrowserNode, BrowserNodeId, BrowserOverlay, BrowserOverlayKind, BrowserScene, BrowserShot,
     BrowserVideo, InvalidBrowserPlan, MAX_BROWSER_OVERLAY_TEXT_BYTES, MAX_BROWSER_OVERLAYS,
-    MAX_BROWSER_SCENES, MAX_BROWSER_SHOTS, MAX_BROWSER_VIDEOS, WireInterval, text_exceeds_limit,
+    MAX_BROWSER_SCENES, MAX_BROWSER_SHOTS, MAX_BROWSER_VIDEOS, text_exceeds_limit,
 };
 
 pub(super) struct BrowserProjection {
@@ -80,10 +81,8 @@ impl<'a> ProjectionBuilder<'a> {
         if self.scenes.len() >= MAX_BROWSER_SCENES {
             return Err(InvalidBrowserPlan::TooManyScenes);
         }
-        self.scenes.push(BrowserScene {
-            node,
-            interval: WireInterval::try_from(interval)?,
-        });
+        self.scenes
+            .push(BrowserScene::new(node, WireInterval::try_from(interval)?));
         for shot in scene.shots() {
             self.project_shot(shot, scene_id)?;
         }
@@ -103,11 +102,11 @@ impl<'a> ProjectionBuilder<'a> {
         if self.shots.len() >= MAX_BROWSER_SHOTS {
             return Err(InvalidBrowserPlan::TooManyShots);
         }
-        self.shots.push(BrowserShot {
+        self.shots.push(BrowserShot::new(
             node,
             scene_id,
-            interval: WireInterval::try_from(interval)?,
-        });
+            WireInterval::try_from(interval)?,
+        ));
         for content in shot.content() {
             self.project_content(content, shot_id)?;
         }
@@ -234,14 +233,13 @@ fn browser_video(
         .get(&asset_id)
         .copied()
         .ok_or(InvalidBrowserPlan::MissingSourceFrameRate(asset_id))?;
-    Ok(BrowserVideo {
+    Ok(BrowserVideo::new(
         node,
         shot_id,
-        asset_id: asset_id.to_string().into_boxed_str(),
-        asset_identity: asset_id,
-        interval: WireInterval::try_from(video.timing().interval())?,
-        source_frame_rate: rate.into(),
-    })
+        asset_id,
+        WireInterval::try_from(video.timing().interval())?,
+        rate.into(),
+    ))
 }
 
 fn browser_overlay(
@@ -263,13 +261,13 @@ fn browser_overlay(
     if text_exceeds_limit(&text) {
         return Err(InvalidBrowserPlan::OverlayTextTooLong(element_kind));
     }
-    Ok(BrowserOverlay {
+    Ok(BrowserOverlay::new(
         node,
-        shot_id: Some(shot_id),
+        Some(shot_id),
         kind,
-        text: text.into_boxed_str(),
-        interval: WireInterval::try_from(overlay.timing().interval())?,
-    })
+        text.into_boxed_str(),
+        WireInterval::try_from(overlay.timing().interval())?,
+    ))
 }
 
 fn browser_caption(
@@ -280,11 +278,11 @@ fn browser_caption(
     if text_exceeds_limit(caption.text()) {
         return Err(InvalidBrowserPlan::CaptionTextTooLong);
     }
-    Ok(BrowserOverlay {
+    Ok(BrowserOverlay::new(
         node,
-        shot_id: None,
-        kind: BrowserOverlayKind::Caption,
-        text: caption.text().into(),
-        interval: WireInterval::try_from(interval)?,
-    })
+        None,
+        BrowserOverlayKind::Caption,
+        caption.text().into(),
+        WireInterval::try_from(interval)?,
+    ))
 }

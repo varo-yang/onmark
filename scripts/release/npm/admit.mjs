@@ -16,9 +16,10 @@ import { basename, join, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
-import { withObservedCleanup } from "./observed-cleanup.mjs";
+import { withObservedCleanup } from "../observed-cleanup.mjs";
 
 const MAX_CAPTURED_BYTES = 1024 * 1024;
+const PROCESS_TERMINATION_GRACE_MILLISECONDS = 5_000;
 const RENDER_TIMEOUT_MILLISECONDS = 10 * 60_000;
 const TOOL_TIMEOUT_MILLISECONDS = 2 * 60_000;
 const FRAME_RATE = 24;
@@ -49,7 +50,7 @@ function parseArguments(argv) {
     argv.length !== 6
   ) {
     throw new Error(
-      "expected `node scripts/release/admit.mjs <npm-cli.js> <product-directory> <sidecar-directory> <report.json>`",
+      "expected `node scripts/release/npm/admit.mjs <npm-cli.js> <product-directory> <sidecar-directory> <report.json>`",
     );
   }
   return Object.freeze({
@@ -165,9 +166,9 @@ function releaseTarget() {
 // ── Real render admission
 
 async function materializeFilm(directory) {
-  const repository = fileURLToPath(new URL("../../", import.meta.url));
+  const repository = fileURLToPath(new URL("../../..", import.meta.url));
   await copyFile(
-    join(repository, "conformance/cli/gate-one.html"),
+    join(repository, "conformance/cli/desktop-release.html"),
     join(directory, "film.html"),
   );
 }
@@ -400,10 +401,12 @@ async function decodedHash(ffmpeg, input, outputArguments, directory, kind) {
     bytes += chunk.byteLength;
     digest.update(chunk);
   });
-  const stderr = retainBounded(child.stderr, () => child.kill());
-  const status = await waitForChild(child, TOOL_TIMEOUT_MILLISECONDS);
+  const [status, stderr] = await Promise.all([
+    waitForChild(child, TOOL_TIMEOUT_MILLISECONDS),
+    retainBounded(child.stderr, () => child.kill()),
+  ]);
   if (status !== 0) {
-    throw new Error(`cannot decode release ${kind}: ${await stderr}`);
+    throw new Error(`cannot decode release ${kind}: ${stderr}`);
   }
   if (bytes === 0) {
     throw new Error(`release ${kind} decodes to no samples`);
@@ -491,10 +494,12 @@ async function runInvocationStatus(invocation, cwd, timeout) {
 
 async function capture(command, arguments_, cwd, timeout) {
   const child = spawnProcess(command, arguments_, cwd);
-  const stdout = retainBounded(child.stdout, () => child.kill());
-  const stderr = retainBounded(child.stderr, () => child.kill());
-  const status = await waitForChild(child, timeout);
-  const result = { stderr: await stderr, stdout: await stdout };
+  const [status, stdout, stderr] = await Promise.all([
+    waitForChild(child, timeout),
+    retainBounded(child.stdout, () => child.kill()),
+    retainBounded(child.stderr, () => child.kill()),
+  ]);
+  const result = { stderr, stdout };
   if (status !== 0) {
     throw new Error(
       `${basename(command)} exited with status ${status}: ${result.stderr}`,
@@ -538,9 +543,14 @@ function retainBounded(stream, abort = () => {}) {
 
 async function waitForChild(child, timeout) {
   let timedOut = false;
+  let forceTermination;
   const timer = setTimeout(() => {
     timedOut = true;
     child.kill();
+    // Admission must finish even when a failed tool ignores graceful shutdown.
+    forceTermination = setTimeout(() => {
+      child.kill("SIGKILL");
+    }, PROCESS_TERMINATION_GRACE_MILLISECONDS);
   }, timeout);
   try {
     return await new Promise((resolvePromise, reject) => {
@@ -559,6 +569,7 @@ async function waitForChild(child, timeout) {
     });
   } finally {
     clearTimeout(timer);
+    clearTimeout(forceTermination);
   }
 }
 

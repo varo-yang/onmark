@@ -25,7 +25,7 @@ use sha2::{Digest as _, Sha256};
 use super::aws::RemoteEnvironment;
 use super::media;
 
-const SOURCE: &str = include_str!("../../../../conformance/cli/gate-two.html");
+const SOURCE: &str = include_str!("../../../../conformance/cli/partitioned.html");
 const WIDTH: u32 = 320;
 const HEIGHT: u32 = 180;
 const FRAME_RATE: u32 = 30;
@@ -36,6 +36,7 @@ const UNIT_BYTES: u64 = 64 * 1024 * 1024;
 
 pub(super) struct ConformanceFilm {
     bundle: PathBuf,
+    partition_bundles: [PathBuf; 2],
     assets: BTreeMap<FrozenAssetId, PathBuf>,
     partitions: PartitionPlan,
     partition_units: Vec<RenderUnit>,
@@ -61,15 +62,28 @@ impl ConformanceFilm {
 
         let bundle = bundle_directory();
         let manifest = bundle_manifest(&bundle);
+        let partition_bundles = [
+            bundle.join(BundleManifest::REGION_DIRECTORY).join("0"),
+            bundle.join(BundleManifest::REGION_DIRECTORY).join("1"),
+        ];
+        let partition_manifests = partition_bundles
+            .each_ref()
+            .map(|path| bundle_manifest(path));
         let profile = RenderProfile::new(WIDTH, HEIGHT).expect("the fixture profile is valid");
         let materialized = materialized_assets(&catalog);
-        let partition_units =
-            render_units(&timeline, &partitions, &manifest, profile, &materialized);
+        let partition_units = render_units(
+            &timeline,
+            &partitions,
+            partition_manifests,
+            profile,
+            &materialized,
+        );
         let whole_unit = RenderUnit::whole_film(&timeline, manifest, profile, materialized)
             .expect("the complete fixture forms one render unit");
 
         Self {
             bundle,
+            partition_bundles,
             assets: catalog.paths,
             partitions,
             partition_units,
@@ -81,6 +95,7 @@ impl ConformanceFilm {
         let [first, second] = self.partition_units.as_slice() else {
             panic!("the conformance film must contain exactly two partitions");
         };
+        let [first_bundle, second_bundle] = &self.partition_bundles;
         let whole = CaptureCase::stage(
             "whole",
             self.whole_unit.worker_capture_request(capture_environment),
@@ -91,13 +106,13 @@ impl ConformanceFilm {
             CaptureCase::stage(
                 "partition-0",
                 first.worker_capture_request(capture_environment),
-                &self.bundle,
+                first_bundle,
                 &self.assets,
             ),
             CaptureCase::stage(
                 "partition-1",
                 second.worker_capture_request(capture_environment),
-                &self.bundle,
+                second_bundle,
                 &self.assets,
             ),
         ];
@@ -115,8 +130,9 @@ impl ConformanceFilm {
             .partition_units
             .iter()
             .cloned()
-            .map(|unit| {
-                ExecutableUnit::materialize(unit, &self.bundle, unit_root_limits())
+            .zip(&self.partition_bundles)
+            .map(|(unit, bundle)| {
+                ExecutableUnit::materialize(unit, bundle, unit_root_limits())
                     .expect("the assembler materializes each verified partition")
             })
             .collect();
@@ -256,12 +272,18 @@ fn materialized_assets(catalog: &FrozenCatalog) -> Vec<MaterializedAsset> {
 fn render_units(
     timeline: &TimelineIr,
     partitions: &PartitionPlan,
-    manifest: &BundleManifest,
+    manifests: [BundleManifest; 2],
     profile: RenderProfile,
     assets: &[MaterializedAsset],
 ) -> Vec<RenderUnit> {
-    RenderUnit::from_partition_plan(timeline, partitions, manifest, profile, assets.to_vec())
-        .expect("the graph partitions form one render sequence")
+    RenderUnit::from_partitioned_bundles(
+        timeline,
+        partitions,
+        manifests.into(),
+        profile,
+        assets.iter().cloned(),
+    )
+    .expect("the graph partitions and region bundles form one render sequence")
 }
 
 fn freeze_catalog(media: &media::GeneratedMedia, probe: &Ffprobe) -> FrozenCatalog {
@@ -326,7 +348,7 @@ fn bundle_manifest(directory: &Path) -> BundleManifest {
 fn bundle_directory() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
-        .join("conformance/protocol/bundle-v1")
+        .join("conformance/protocol/remote-partition-v1")
 }
 
 fn unit_root_limits() -> UnitRootLimits {

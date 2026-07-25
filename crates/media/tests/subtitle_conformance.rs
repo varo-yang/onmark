@@ -164,7 +164,7 @@ fn read(relative: &str) -> String {
 
 fn fixture(relative: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../conformance/subtitle")
+        .join("../../conformance/media/subtitle")
         .join(relative)
 }
 

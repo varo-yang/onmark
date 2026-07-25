@@ -14,8 +14,8 @@ use onmark_core::model::SourceId;
 use conformance::{assert_or_update, fixture, render_diagnostics, span};
 
 #[test]
-fn the_gate_one_example_matches_canonical_binding() {
-    assert_valid_fixture("gate-one");
+fn the_canonical_screenplay_matches_canonical_binding() {
+    assert_valid_fixture("screenplay");
 }
 
 #[test]
@@ -39,8 +39,11 @@ fn root_errors_match_stable_diagnostics() {
 }
 
 fn assert_invalid_fixture(name: &str) {
-    let source_path = fixture("binding", &format!("invalid/{name}.html"));
-    let expected_path = fixture("binding", &format!("invalid/{name}.diagnostics.txt"));
+    let source_path = fixture("compiler/binding", &format!("invalid/{name}.html"));
+    let expected_path = fixture(
+        "compiler/binding",
+        &format!("invalid/{name}.diagnostics.txt"),
+    );
     let source = fs::read_to_string(&source_path).expect("the binding fixture must be readable");
     let parsed = compiler::parse(SourceId::new(0), &source);
     let (document, syntax_diagnostics) = parsed.into_parts();
@@ -53,8 +56,8 @@ fn assert_invalid_fixture(name: &str) {
 }
 
 fn assert_valid_fixture(name: &str) {
-    let source_path = fixture("binding", &format!("valid/{name}.html"));
-    let expected_path = fixture("binding", &format!("valid/{name}.linked.txt"));
+    let source_path = fixture("compiler/binding", &format!("valid/{name}.html"));
+    let expected_path = fixture("compiler/binding", &format!("valid/{name}.linked.txt"));
     let source = fs::read_to_string(&source_path).expect("the binding fixture must be readable");
     let (document, diagnostics) = compiler::parse(SourceId::new(0), &source).into_parts();
     assert!(diagnostics.is_empty());

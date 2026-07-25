@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { withObservedCleanup } from "./observed-cleanup.mjs";
+import { withObservedCleanup } from "../../observed-cleanup.mjs";
 
 test("returns the action value after successful cleanup", async () => {
   const value = await withObservedCleanup(

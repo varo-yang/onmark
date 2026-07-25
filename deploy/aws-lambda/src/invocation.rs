@@ -265,14 +265,17 @@ impl ArtifactLocation {
     }
 }
 
-/// Whether this invocation committed a new object or reused a verified one.
+/// Observable outcome of one immutable capture request.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[non_exhaustive]
 #[serde(rename_all = "camelCase")]
-pub enum Publication {
-    /// This invocation conditionally committed a new immutable artifact.
-    Published,
-    /// A concurrent or prior invocation had already committed the same artifact.
+pub enum CaptureOutcome {
+    /// Browser capture completed and this invocation published the artifact.
+    CapturedAndPublished,
+    /// Browser capture completed, but a concurrent winner was verified and reused.
+    CapturedAndReused,
+    /// A prior artifact was verified before browser capture became necessary.
     Reused,
 }
 
@@ -283,16 +286,16 @@ pub enum Publication {
 pub struct CaptureResult {
     version: CaptureInvocationVersion,
     artifact: ArtifactLocation,
-    publication: Publication,
+    outcome: CaptureOutcome,
 }
 
 impl CaptureResult {
     #[cfg(feature = "runtime")]
-    pub(crate) fn new(artifact: ArtifactLocation, publication: Publication) -> Self {
+    pub(crate) fn new(artifact: ArtifactLocation, outcome: CaptureOutcome) -> Self {
         Self {
             version: CaptureInvocationVersion::CURRENT,
             artifact,
-            publication,
+            outcome,
         }
     }
 
@@ -308,10 +311,10 @@ impl CaptureResult {
         &self.artifact
     }
 
-    /// Returns whether this invocation published or reused the object.
+    /// Returns the capture and publication outcome.
     #[must_use]
-    pub const fn publication(&self) -> Publication {
-        self.publication
+    pub const fn outcome(&self) -> CaptureOutcome {
+        self.outcome
     }
 }
 
@@ -354,8 +357,8 @@ mod tests {
     use onmark_render::FrameArtifactId;
 
     use super::{
-        ArtifactLocation, CaptureInvocation, CaptureInvocationVersion, CaptureResult, ObjectPrefix,
-        Publication, artifact_key,
+        ArtifactLocation, CaptureInvocation, CaptureInvocationVersion, CaptureOutcome,
+        CaptureResult, ObjectPrefix, artifact_key,
     };
 
     #[test]
@@ -406,7 +409,7 @@ mod tests {
                 artifact_id,
                 30,
             ),
-            Publication::Published,
+            CaptureOutcome::CapturedAndPublished,
         );
         let encoded = serde_json::to_vec(&result).expect("the capture result serializes");
 
@@ -414,6 +417,7 @@ mod tests {
             serde_json::from_slice(&encoded).expect("the capture result decodes");
 
         assert_eq!(decoded, result);
+        assert_eq!(decoded.outcome(), CaptureOutcome::CapturedAndPublished);
     }
 
     #[test]
@@ -426,7 +430,7 @@ mod tests {
                 "artifactId":"sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
                 "frames":30
             },
-            "publication":"published"
+            "outcome":"capturedAndPublished"
         }"#;
 
         for invalid in [
@@ -435,6 +439,10 @@ mod tests {
             canonical.replace("captures/unit.onmark-frames", ""),
             canonical.replace("captures/unit.onmark-frames", "   "),
             canonical.replace("\"frames\":30", "\"frames\":0"),
+            canonical.replace(
+                "\"outcome\":\"capturedAndPublished\"",
+                "\"outcome\":\"unknown\"",
+            ),
         ] {
             assert!(serde_json::from_str::<CaptureResult>(&invalid).is_err());
         }

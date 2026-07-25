@@ -1,5 +1,5 @@
 // Generates runtime types and standalone validators from Rust-owned schemas.
-// The Rust xtask invokes this file after publishing deterministic JSON Schema.
+// The schema xtask invokes this file after publishing deterministic JSON Schema.
 
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -10,7 +10,7 @@ import standaloneCode from "ajv/dist/standalone/index.js";
 import { compile } from "json-schema-to-typescript";
 import { format } from "prettier";
 
-const repository = resolve(fileURLToPath(new URL("..", import.meta.url)));
+const repository = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const runtimeGenerated = resolve(repository, "packages/runtime/src/generated");
 const bundlerGenerated = resolve(repository, "packages/bundler/src/generated");
 
@@ -87,7 +87,7 @@ function generationMode(arguments_) {
   if (arguments_.length === 1 && arguments_[0] === "--check") {
     return "check";
   }
-  throw new Error("usage: node scripts/protocol-codegen.mjs [--check]");
+  throw new Error("usage: node scripts/schema/typescript.mjs [--check]");
 }
 
 function typeOptions() {

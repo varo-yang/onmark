@@ -14,6 +14,8 @@ use serde::Deserialize;
 const EVALUATION: &str = "evals/audio-syntax";
 const ADMITTED_ARM: &str = "semantic-elements";
 
+// ── Grading pipeline
+
 pub(super) fn grade(repository: &Path) -> Result<(), Box<dyn Error>> {
     let evaluation = repository.join(EVALUATION);
     let cases: CaseSet = read_json(&evaluation.join("cases.json"))?;
@@ -45,7 +47,7 @@ pub(super) fn grade(repository: &Path) -> Result<(), Box<dyn Error>> {
             }
         }
         compare_occurrences(arm, &expected, &occurrences, &mut failures);
-        scores.insert(arm.baseline_key(), score);
+        scores.insert(arm.filename(), score);
     }
 
     compare_baseline(&scores, &baseline, &mut failures);
@@ -102,6 +104,8 @@ fn grade_output(
     }
 }
 
+// ── Screenplay facts
+
 fn extract_facts(arm: Arm, screenplay: &str) -> Result<FilmFacts, InvalidScreenplay> {
     let normalized = expand_empty_elements(screenplay);
     let report = compiler::parse(SourceId::new(0), &normalized);
@@ -115,44 +119,7 @@ fn extract_facts(arm: Arm, screenplay: &str) -> Result<FilmFacts, InvalidScreenp
     require_name(root, "film")?;
     require_attributes(root, &[])?;
 
-    let mut facts = FilmFacts::default();
-    let mut scene_index = 0;
-    let mut cta_seen = false;
-    for child in elements(root.children(), "film")? {
-        match child.name().local() {
-            "scene" => {
-                facts.scenes.push(extract_scene(
-                    arm,
-                    child,
-                    scene_index,
-                    &mut facts.effects,
-                    &mut cta_seen,
-                )?);
-                scene_index += 1;
-            }
-            "cues" => {
-                if facts.cue.replace(extract_cues(child)?).is_some() {
-                    return Err(InvalidScreenplay::new(
-                        "screenplay contains more than one cues container",
-                    ));
-                }
-            }
-            _ if arm.is_music(child) => {
-                facts
-                    .music
-                    .push(extract_audio(arm, child, AudioRole::Music)?)
-            }
-            name => return Err(unexpected_element(name, "film")),
-        }
-    }
-
-    if facts.cue.is_some() != cta_seen {
-        return Err(InvalidScreenplay::new(
-            "cue declaration and call-to-action must appear together",
-        ));
-    }
-
-    Ok(facts)
+    FactExtractor::new(arm).extract(root)
 }
 
 fn expand_empty_elements(source: &str) -> String {
@@ -174,71 +141,102 @@ fn expand_empty_elements(source: &str) -> String {
     expanded
 }
 
-fn extract_scene(
+struct FactExtractor {
     arm: Arm,
-    scene: &Element,
-    scene_index: usize,
-    effects: &mut Vec<EffectExpectation>,
-    cta_seen: &mut bool,
-) -> Result<Vec<String>, InvalidScreenplay> {
-    require_attributes(scene, &[])?;
-    let mut videos = Vec::new();
-
-    for (shot_index, shot) in elements(scene.children(), "scene")?.into_iter().enumerate() {
-        require_name(shot, "shot")?;
-        require_attributes(shot, &[])?;
-        extract_shot(
-            arm,
-            shot,
-            scene_index,
-            shot_index,
-            &mut videos,
-            effects,
-            cta_seen,
-        )?;
-    }
-
-    Ok(videos)
+    facts: FilmFacts,
+    cta_seen: bool,
 }
 
-fn extract_shot(
-    arm: Arm,
-    shot: &Element,
-    scene: usize,
-    shot_index: usize,
-    videos: &mut Vec<String>,
-    effects: &mut Vec<EffectExpectation>,
-    cta_seen: &mut bool,
-) -> Result<(), InvalidScreenplay> {
-    for child in elements(shot.children(), "shot")? {
-        match child.name().local() {
-            "video" => {
-                require_attributes(child, &["src"])?;
-                require_empty(child)?;
-                videos.push(attribute(child, "src")?.to_owned());
-            }
-            "cta" => {
-                if *cta_seen {
-                    return Err(InvalidScreenplay::new(
-                        "screenplay contains more than one call-to-action",
-                    ));
-                }
-                *cta_seen = true;
-            }
-            _ if arm.is_effect(child) => {
-                let audio = extract_audio(arm, child, AudioRole::SoundEffect)?;
-                effects.push(EffectExpectation {
-                    scene,
-                    shot: shot_index,
-                    src: audio.src,
-                    delay: audio.delay,
-                    gain: audio.gain,
-                });
-            }
-            name => return Err(unexpected_element(name, "shot")),
+impl FactExtractor {
+    fn new(arm: Arm) -> Self {
+        Self {
+            arm,
+            facts: FilmFacts::default(),
+            cta_seen: false,
         }
     }
-    Ok(())
+
+    fn extract(mut self, root: &Element) -> Result<FilmFacts, InvalidScreenplay> {
+        for child in elements(root.children(), "film")? {
+            match child.name().local() {
+                "scene" => {
+                    let scene = self.extract_scene(child)?;
+                    self.facts.scenes.push(scene);
+                }
+                "cues" => {
+                    if self.facts.cue.replace(extract_cues(child)?).is_some() {
+                        return Err(InvalidScreenplay::new(
+                            "screenplay contains more than one cues container",
+                        ));
+                    }
+                }
+                _ if self.arm.is_music(child) => {
+                    self.facts
+                        .music
+                        .push(extract_audio(self.arm, child, AudioRole::Music)?)
+                }
+                name => return Err(unexpected_element(name, "film")),
+            }
+        }
+
+        if self.facts.cue.is_some() != self.cta_seen {
+            return Err(InvalidScreenplay::new(
+                "cue declaration and call-to-action must appear together",
+            ));
+        }
+        Ok(self.facts)
+    }
+
+    fn extract_scene(&mut self, scene: &Element) -> Result<Vec<String>, InvalidScreenplay> {
+        require_attributes(scene, &[])?;
+        let scene_index = self.facts.scenes.len();
+        let mut videos = Vec::new();
+
+        for (shot_index, shot) in elements(scene.children(), "scene")?.into_iter().enumerate() {
+            require_name(shot, "shot")?;
+            require_attributes(shot, &[])?;
+            self.extract_shot(shot, scene_index, shot_index, &mut videos)?;
+        }
+        Ok(videos)
+    }
+
+    fn extract_shot(
+        &mut self,
+        shot: &Element,
+        scene: usize,
+        shot_index: usize,
+        videos: &mut Vec<String>,
+    ) -> Result<(), InvalidScreenplay> {
+        for child in elements(shot.children(), "shot")? {
+            match child.name().local() {
+                "video" => {
+                    require_attributes(child, &["src"])?;
+                    require_empty(child)?;
+                    videos.push(attribute(child, "src")?.to_owned());
+                }
+                "cta" => {
+                    if self.cta_seen {
+                        return Err(InvalidScreenplay::new(
+                            "screenplay contains more than one call-to-action",
+                        ));
+                    }
+                    self.cta_seen = true;
+                }
+                _ if self.arm.is_effect(child) => {
+                    let audio = extract_audio(self.arm, child, AudioRole::SoundEffect)?;
+                    self.facts.effects.push(EffectExpectation {
+                        scene,
+                        shot: shot_index,
+                        src: audio.src,
+                        delay: audio.delay,
+                        gain: audio.gain,
+                    });
+                }
+                name => return Err(unexpected_element(name, "shot")),
+            }
+        }
+        Ok(())
+    }
 }
 
 fn extract_audio(
@@ -279,6 +277,8 @@ fn extract_cues(element: &Element) -> Result<CueExpectation, InvalidScreenplay> 
         text: String::from("Buy now"),
     })
 }
+
+// ── Markup queries
 
 fn elements<'a>(nodes: &'a [Node], parent: &str) -> Result<Vec<&'a Element>, InvalidScreenplay> {
     let mut elements = Vec::new();
@@ -391,6 +391,8 @@ fn unexpected_element(name: &str, parent: &str) -> InvalidScreenplay {
     InvalidScreenplay::new(format!("unexpected <{name}> inside <{parent}>"))
 }
 
+// ── Baseline contract
+
 fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T, Box<dyn Error>> {
     let source = fs::read_to_string(path)?;
     Ok(serde_json::from_str(&source)?)
@@ -444,6 +446,8 @@ fn compare_occurrences(
     }
 }
 
+// ── Evaluation model
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Arm {
     SemanticElements,
@@ -473,10 +477,6 @@ impl Arm {
             Self::SemanticElements => "semantic-elements",
             Self::GenericAudio => "generic-audio",
         }
-    }
-
-    const fn baseline_key(self) -> &'static str {
-        self.filename()
     }
 
     fn is_music(self, element: &Element) -> bool {
@@ -585,6 +585,8 @@ struct Score {
     passed: usize,
     total: usize,
 }
+
+// ── Failures
 
 #[derive(Debug)]
 struct InvalidScreenplay(String);

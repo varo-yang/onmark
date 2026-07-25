@@ -12,7 +12,10 @@ use super::target::{ExecutableRole, ReleaseTarget};
 const MAX_BUILD_RECORD_BYTES: u64 = 128 * 1024;
 const MAX_LICENSE_BYTES: u64 = 1024 * 1024;
 const MAX_SOURCE_BYTES: u64 = 16 * 1024 * 1024;
-const SOURCE_MANIFEST: &str = "scripts/release/media-sources.json";
+const SOURCE_MANIFEST: &str = "scripts/release/media-toolchain/sources.json";
+const BUILD_SCRIPT: &str = "scripts/release/media-toolchain/build.sh";
+
+// ── Admitted media
 
 pub(super) struct MediaBundle {
     manifest: MediaSources,
@@ -37,7 +40,7 @@ impl MediaBundle {
             &supplied_manifest,
             "media source manifest differs from the repository contract",
         )?;
-        let canonical_build = repository.join("scripts/release/build-media.sh");
+        let canonical_build = repository.join(BUILD_SCRIPT);
         let supplied_build = root.join("sources/build-media.sh");
         require_regular_file(
             &supplied_build,
@@ -120,6 +123,8 @@ pub(super) enum MediaFileKind {
     Executable,
 }
 
+// ── Source contract
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct MediaSources {
@@ -200,6 +205,8 @@ impl Source {
         Ok(())
     }
 }
+
+// ── Filesystem admission
 
 fn require_equal_files(
     expected: &Path,

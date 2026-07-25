@@ -7,6 +7,7 @@ mod fixture;
 #[path = "remote_partition/media.rs"]
 mod media;
 
+use onmark_aws_lambda::CaptureOutcome;
 use onmark_render::FrameArtifact;
 use tempfile::tempdir;
 
@@ -40,4 +41,11 @@ async fn assembles_two_concurrent_remote_partitions_equivalently_to_one_remote_f
     let output = workspace.path().join("assembled.mp4");
     film.assemble(&partitions, &environment, &output).await;
     media::verify_output(&output, &environment).await;
+
+    let warm = remote.capture_again(workspace.path(), &first_case).await;
+    assert_eq!(warm.outcome(), CaptureOutcome::Reused);
+
+    remote.corrupt_artifact(workspace.path(), &warm).await;
+    let repaired = remote.capture_again(workspace.path(), &first_case).await;
+    assert_eq!(repaired.outcome(), CaptureOutcome::CapturedAndPublished);
 }

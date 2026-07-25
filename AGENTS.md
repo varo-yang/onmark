@@ -2,13 +2,13 @@
 
 Onmark is a screenplay-first, browser-rendered video compiler and execution engine. Rust owns deterministic compilation and native execution; TypeScript owns authoring and the browser runtime.
 
-**Current phase:** delivery gates one through seven are complete. No later gate
-is currently active. Do not add an interactive player, preview server, Studio
-surface, or source-mutation API. Deployment work also remains frozen: do not add
-a coordinator, database, queue, lease system, cloud workflow, infrastructure
-definition, or another provider adapter. Do not add transition spelling, infer
-temporal or visual separability from source inspection, or hide a pixel-path
-fallback.
+**Current phase:** delivery gates one through seven and distributed incremental
+capture reuse are complete. No later gate is currently active. Deployment work
+is frozen again: do not add a remote authoring command, coordinator, database,
+queue, lease system, cloud workflow, infrastructure definition, or another
+provider adapter. Do not add an interactive player, preview server, Studio
+surface, source-mutation API, transition spelling, inferred temporal or visual
+separability, or a hidden pixel-path fallback.
 
 ## Read before changing code
 
@@ -20,7 +20,7 @@ Read only the documents relevant to the task:
 | New crate/package, dependency, process boundary, render pipeline, cache, deployment | `docs/en/architecture.md` |
 | Any Rust implementation or review | `docs/en/rust-style-guide.md` |
 | Any TypeScript/JavaScript implementation, generator, or review | `docs/en/typescript-style-guide.md` |
-| Chinese design discussion or details not yet expanded in English | matching file under `docs/zh-CN/` |
+| Fuller Chinese rationale for a decision already mirrored in English | matching file under `docs/zh-CN/` |
 
 When code and design documents disagree, stop and surface the conflict. Do not silently choose one.
 
@@ -29,7 +29,7 @@ When code and design documents disagree, stop and surface the conflict. Do not s
 1. Source expresses intent; versioned IR records facts.
 2. The compiler core is pure: no filesystem, network, wall clock, Chromium, FFmpeg, or cloud SDK.
 3. TypeScript does not reimplement timing or planning. Rust does not reimplement DOM/CSS/WebGL.
-4. Local and distributed execution consume the same Execution Plan and render executor.
+4. Local and distributed execution consume the same Render Unit contract and render executor.
 5. Unknown browser components are sequential by default. Random seekability must be proven.
 6. Partitions follow render dependencies, not blindly chosen shot boundaries.
 7. Authored mistakes are structured diagnostics; infrastructure faults are typed errors.
@@ -48,7 +48,7 @@ Start with a module. Split a crate/package only when at least one is real:
 
 Every split must document which criterion it satisfies, its allowed dependencies, and its consumers. Code volume and hypothetical reuse are not reasons.
 
-The initial Rust workspace has only:
+The engine and desktop product use four Rust crates:
 
 - `onmark-core`: pure compiler, domain model, diagnostics, IR, protocol;
 - `onmark-media`: asset probing and normalized metadata without Chromium;
