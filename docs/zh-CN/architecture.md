@@ -638,6 +638,11 @@ cache publication 是 content-addressed 且原子完成的；immutable valid ent
 会被删除并重新 capture。store 同时受 artifact 数与 byte 上限约束；满额后保留既有有效
 entry，让新 miss 保持 ephemeral，不会驱逐另一个进程可能正在读取的 artifact。
 
+每次完成的 desktop render 都会报告 region/frame 复用量；这些数字直接来自 capture 前
+已经验证的 cache hit。CLI 还会报告 prepare、bundle、plan、capture、assemble 与 total
+wall time。这些时间只作为运行证据，绝不进入 compilation、planning、artifact identity
+或渲染结果。
+
 仓库保留的
 [incremental-rendering conformance](../../conformance/incremental-rendering-experiment.md)
 验证 whole-film/partition raw-RGBA 等价、局部 edit isolation、跨 region selector isolation、

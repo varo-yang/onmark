@@ -3,10 +3,12 @@
 //! Each phase consumes the previous phase's checked value. No timing or render-
 //! graph rule is recreated at this I/O boundary.
 
+use std::fmt;
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::time::{Duration, Instant};
 
 use onmark_core::compiler;
 use onmark_core::diagnostics::Diagnostic;
@@ -20,7 +22,7 @@ use onmark_render::{
 };
 
 use crate::arguments::{RenderArgs, source_directory};
-use crate::artifact_cache::ArtifactCache;
+use crate::artifact_cache::{ArtifactCache, ArtifactReuse, CacheAdmission};
 use crate::assets::FrozenCatalog;
 use crate::bundler::{BundleArtifact, BundleRegion, PresentationBundler};
 use crate::compilation;
@@ -44,6 +46,46 @@ struct LocalExecutorOptions {
     video_encoder_threads: usize,
 }
 
+struct ExecutedRender {
+    capture_mode: BrowserCaptureMode,
+    graphics_backend: BrowserGraphicsBackend,
+    reuse: ArtifactReuse,
+    capture: Duration,
+    assemble: Duration,
+    video: EncodedVideo,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(super) struct LocalRenderSummary {
+    reuse: ArtifactReuse,
+    timings: RenderTimings,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct RenderTimings {
+    prepare: Duration,
+    bundle: Duration,
+    plan: Duration,
+    capture: Duration,
+    assemble: Duration,
+    total: Duration,
+}
+
+impl fmt::Display for RenderTimings {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "prepare {} ms, bundle {} ms, plan {} ms, capture {} ms, assemble {} ms, total {} ms",
+            self.prepare.as_millis(),
+            self.bundle.as_millis(),
+            self.plan.as_millis(),
+            self.capture.as_millis(),
+            self.assemble.as_millis(),
+            self.total.as_millis(),
+        )
+    }
+}
+
 /// Authored rejection or a completed local render, both retaining diagnostics.
 pub(super) enum RenderOutcome {
     Rejected {
@@ -53,6 +95,7 @@ pub(super) enum RenderOutcome {
         screenplay: AuthoredReport,
         capture_mode: BrowserCaptureMode,
         graphics_backend: BrowserGraphicsBackend,
+        summary: LocalRenderSummary,
         video: EncodedVideo,
     },
 }
@@ -89,16 +132,21 @@ impl RenderOutcome {
                 screenplay,
                 capture_mode,
                 graphics_backend,
+                summary,
                 video,
-            } => write_completed(&screenplay, capture_mode, graphics_backend, &video),
+            } => write_completed(&screenplay, capture_mode, graphics_backend, summary, &video),
         };
         result.unwrap_or(ExitCode::FAILURE)
     }
 }
 
 pub(super) async fn run(args: RenderArgs) -> Result<RenderOutcome, CliError> {
+    let total_started = Instant::now();
     let output = args.output();
-    let admit_persistent_cache = args.browser.is_none();
+    let cache_admission = match args.browser.as_ref() {
+        Some(_) => CacheAdmission::Ephemeral,
+        None => CacheAdmission::Persistent,
+    };
     let profile = RenderProfile::new(args.width, args.height)?;
     let source = input::read_utf8(
         &args.screenplay,
@@ -150,46 +198,49 @@ pub(super) async fn run(args: RenderArgs) -> Result<RenderOutcome, CliError> {
     };
     let timeline = compiler::import_captions(timeline, caption_track)?;
 
-    let bundle = PresentationBundler::new(executables.bundler)
+    let prepare = total_started.elapsed();
+    let bundle_started = Instant::now();
+    let bundle_artifact = PresentationBundler::new(executables.bundler)
         .bundle(&source, source_directory(&args.screenplay))
         .await?;
-    let (partitions, units) = materialize_units(&timeline, profile, &bundle, frozen)?;
+    let bundle = bundle_started.elapsed();
+
+    let plan_started = Instant::now();
+    let (partitions, units) = materialize_units(&timeline, profile, &bundle_artifact, frozen)?;
+    let plan = plan_started.elapsed();
 
     let graphics_backend = args
         .graphics_backend()
         .unwrap_or_else(local_graphics_backend);
-    let executor = LocalExecutorOptions {
+    let executed = LocalExecutorOptions {
         browser: executables.browser,
         ffmpeg: executables.ffmpeg,
         graphics_backend,
         video_encoder_threads: args.video_encoder_threads(),
     }
-    .into_executor();
-    let capture_mode = executor.capture_mode();
-    let graphics_backend = executor.graphics_backend();
-    let cache =
-        ArtifactCache::from_environment(admit_persistent_cache, capture_mode, graphics_backend)?;
-    let artifacts = cache
-        .capture(&executor, &units, execution::frame_artifact_limits())
-        .await?;
-    let video = executor
-        .assemble_frame_artifacts(
-            &partitions,
-            &units,
-            artifacts.as_slice(),
-            cache.environment(),
-            &output,
-        )
-        .await?;
+    .execute(&partitions, &units, cache_admission, &output)
+    .await?;
+    let summary = LocalRenderSummary {
+        reuse: executed.reuse,
+        timings: RenderTimings {
+            prepare,
+            bundle,
+            plan,
+            capture: executed.capture,
+            assemble: executed.assemble,
+            total: total_started.elapsed(),
+        },
+    };
     Ok(RenderOutcome::Completed {
         screenplay: AuthoredReport {
             path: args.screenplay,
             source,
             diagnostics,
         },
-        capture_mode,
-        graphics_backend,
-        video,
+        capture_mode: executed.capture_mode,
+        graphics_backend: executed.graphics_backend,
+        summary,
+        video: executed.video,
     })
 }
 
@@ -266,6 +317,47 @@ impl LocalExecutorOptions {
         RenderExecutor::new(browser, execution::browser_limits(), ffmpeg)
             .with_graphics_backend(graphics_backend)
     }
+
+    async fn execute(
+        self,
+        partitions: &PartitionPlan,
+        units: &[ExecutableUnit],
+        cache_admission: CacheAdmission,
+        output: &Path,
+    ) -> Result<ExecutedRender, CliError> {
+        let executor = self.into_executor();
+        let capture_mode = executor.capture_mode();
+        let graphics_backend = executor.graphics_backend();
+        let cache =
+            ArtifactCache::from_environment(cache_admission, capture_mode, graphics_backend)?;
+
+        let capture_started = Instant::now();
+        let artifacts = cache
+            .capture(&executor, units, execution::frame_artifact_limits())
+            .await?;
+        let capture = capture_started.elapsed();
+        let reuse = artifacts.reuse();
+
+        let assemble_started = Instant::now();
+        let video = executor
+            .assemble_frame_artifacts(
+                partitions,
+                units,
+                artifacts.as_slice(),
+                cache.environment(),
+                output,
+            )
+            .await?;
+
+        Ok(ExecutedRender {
+            capture_mode,
+            graphics_backend,
+            reuse,
+            capture,
+            assemble: assemble_started.elapsed(),
+            video,
+        })
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -286,6 +378,7 @@ fn write_completed(
     report: &AuthoredReport,
     capture_mode: BrowserCaptureMode,
     graphics_backend: BrowserGraphicsBackend,
+    summary: LocalRenderSummary,
     video: &EncodedVideo,
 ) -> io::Result<ExitCode> {
     let mut stderr = io::stderr().lock();
@@ -301,5 +394,14 @@ fn write_completed(
         graphics_backend,
         video.path().display(),
     )?;
+    writeln!(
+        stdout,
+        "Reused {}/{} regions and {}/{} frames",
+        summary.reuse.reused_regions(),
+        summary.reuse.regions(),
+        summary.reuse.reused_frames(),
+        video.frames(),
+    )?;
+    writeln!(stdout, "Timing: {}", summary.timings)?;
     Ok(ExitCode::SUCCESS)
 }
