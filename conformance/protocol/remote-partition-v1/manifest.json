@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "bundleId": "sha256:71291cd6833f0f65263b31a7ae199330470f56c21296c85a11a3deaee1245223",
+  "entryPoint": "index.html",
+  "documentScope": "wholeFilm",
+  "temporalCapability": "randomAccess",
+  "visualCapability": "browserComposite",
+  "frameBehavior": "perFrame",
+  "files": [
+    {
+      "bytes": 289,
+      "path": "index.html",
+      "sha256": "sha256:05dae12b1a9fb5a4d64495de1782c33ff6c1763f5b82ffe46a53ef239ed439bb"
+    },
+    {
+      "bytes": 86529,
+      "path": "presentation.js",
+      "sha256": "sha256:9de28c344b1f9c1fd4c555c16323c499a0dc66e8662c6c62462cc1955e4b0807"
+    }
+  ]
+}

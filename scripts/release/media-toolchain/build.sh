@@ -10,7 +10,7 @@ umask 022
 readonly MAX_BUILD_JOBS=8
 
 if [[ $# -ne 2 ]]; then
-  echo "usage: scripts/release/build-media.sh <source-directory> <output-directory>" >&2
+  echo "usage: scripts/release/media-toolchain/build.sh <source-directory> <output-directory>" >&2
   exit 2
 fi
 
@@ -149,8 +149,8 @@ cp "$ffmpeg_source/COPYING.GPLv2" "$staging/licenses/FFmpeg-GPLv2.txt"
 cp "$x264_source/COPYING" "$staging/licenses/x264-GPLv2.txt"
 cp "$zlib_source/LICENSE" "$staging/licenses/zlib.txt"
 cp "$ffmpeg_archive" "$x264_archive" "$zlib_archive" "$staging/sources/"
-cp "$(dirname "$0")/build-media.sh" "$staging/sources/build-media.sh"
-cp "$(dirname "$0")/media-sources.json" "$staging/media-sources.json"
+cp "$(dirname "$0")/build.sh" "$staging/sources/build-media.sh"
+cp "$(dirname "$0")/sources.json" "$staging/media-sources.json"
 
 {
   printf '%s\n' \

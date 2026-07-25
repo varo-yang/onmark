@@ -1,6 +1,6 @@
 # Onmark Presentation Contract
 
-> 状态：已覆盖 Gate 一至 Gate 七。
+> 状态：当前 browser authoring 合约已覆盖 Gate 七及分布式增量渲染。
 
 `film.html` 是完整的作者入口。Onmark custom element 拥有结构、ID、cue、素材引用和时间关系；
 普通 HTML 与 inline CSS 拥有 presentation。可选的
@@ -321,7 +321,7 @@ frame behavior 是进入 `bundleId` 的 immutable build metadata。它绝不从 
 
 ## 素材
 
-浏览器只看 unit root 下已 materialize 的素材。Gate 一 video source 使用：
+浏览器只看 unit root 下已 materialize 的素材。video placement 使用：
 
 ```ts
 materializedVideoSource(placement);
@@ -387,7 +387,7 @@ presentation 代码必须在 runtime frame clock 下确定。
 - 在 TypeScript 里重写 cue、delay、duration 或 partition 逻辑；
 - 无界等待、队列或 retained buffer。
 
-Gate 五只接纳由精确 `RuntimeFrame` 驱动、playhead 已暂停的动画。首个 conformance matrix 通过标准 frame-effect lifecycle 覆盖 WAAPI、GSAP 与 Three.js，但不会让这些库成为 runtime dependency。依赖加载时刻的静态 CSS transition、free-running library ticker 和 ambient `requestAnimationFrame` progress 仍不属于确定性合约。通过 lifecycle 不等于 bundle 获得 random access；capability metadata 只会与 partitioning proof 一起落地。
+当前动画合约只接纳由精确 `RuntimeFrame` 驱动、playhead 已暂停的动画。准入 conformance matrix 通过标准 frame-effect lifecycle 覆盖 WAAPI、GSAP 与 Three.js，但不会让这些库成为 runtime dependency。依赖加载时刻的静态 CSS transition、free-running library ticker 和 ambient `requestAnimationFrame` progress 仍不属于确定性合约。通过 lifecycle 不等于 bundle 获得 random access；capability metadata 只会与 partitioning proof 一起落地。
 
 ## 失败与清理
 
@@ -404,7 +404,7 @@ native browser boundary 同样会执行禁止网络的规则：只允许 private
 
 ## 非目标
 
-Gate 一不提供 presentation dev server、watch mode、plugin API、component
+当前合约不提供 presentation dev server、watch mode、plugin API、component
 registry、由 screenplay 选择的组件或 props、跨场景 persist、自由
 `begin/end/until` 时间表达式或 browser-side render
 planning。这些能力必须先有明确语言语义、runtime 合约和评测证据，才能成为公开契约。

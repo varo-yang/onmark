@@ -6,7 +6,7 @@ use std::process::Command;
 use tempfile::tempdir;
 
 #[test]
-fn exposes_render_and_the_gate_three_worker_adapter_without_a_coordinator() {
+fn exposes_render_and_the_remote_worker_adapter_without_a_coordinator() {
     let output = Command::new(env!("CARGO_BIN_EXE_onmark"))
         .arg("--help")
         .output()

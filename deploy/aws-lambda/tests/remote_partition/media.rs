@@ -14,6 +14,8 @@ const PROCESS_TIMEOUT: Duration = Duration::from_mins(3);
 const WIDTH: u32 = 320;
 const HEIGHT: u32 = 180;
 const EXPECTED_FRAMES: usize = 60;
+const AUDIO_SAMPLE_RATE: u64 = 48_000;
+const AUDIBLE_SAMPLE_THRESHOLD: u16 = 256;
 const EXPECTED_AUDIO_START_MICROS: u64 = 1_000_000;
 const AAC_PACKET_TOLERANCE_MICROS: u64 = 25_000;
 
@@ -153,8 +155,7 @@ async fn verify_audio(path: &Path, environment: &RemoteEnvironment) {
             .arg(path)
             .args([
                 "-show_entries",
-                "stream=codec_name,sample_rate,channels:packet=pts_time",
-                "-show_packets",
+                "stream=codec_name,sample_rate,channels",
                 "-of",
                 "json",
             ]),
@@ -170,13 +171,29 @@ async fn verify_audio(path: &Path, environment: &RemoteEnvironment) {
     assert_eq!(stream.codec_name.as_ref(), "aac");
     assert_eq!(stream.sample_rate.as_ref(), "48000");
     assert_eq!(stream.channels, 2);
-    let actual = timestamp_micros(
-        &response
-            .packets
-            .first()
-            .expect("the output audio has a first packet")
-            .pts_time,
-    );
+
+    let decoded = run(
+        Command::new(environment.ffmpeg())
+            .args(["-nostdin", "-v", "error", "-i"])
+            .arg(path)
+            .args([
+                "-map",
+                "0:a:0",
+                "-f",
+                "s16le",
+                "-acodec",
+                "pcm_s16le",
+                "-ar",
+            ])
+            .arg(AUDIO_SAMPLE_RATE.to_string())
+            .args(["-ac", "1", "-"]),
+        "decode assembled audio",
+    )
+    .await;
+    let sample = first_audible_sample(&decoded.stdout)
+        .expect("the assembled output contains audible PCM samples");
+    let actual = u64::try_from(sample).expect("the bounded fixture length fits in u64") * 1_000_000
+        / AUDIO_SAMPLE_RATE;
     assert!(
         actual.abs_diff(EXPECTED_AUDIO_START_MICROS) <= AAC_PACKET_TOLERANCE_MICROS,
         "audio starts at {actual}µs instead of {EXPECTED_AUDIO_START_MICROS}µs",
@@ -197,22 +214,16 @@ async fn run(command: &mut Command, operation: &str) -> Output {
     output
 }
 
-fn timestamp_micros(timestamp: &str) -> u64 {
-    let (seconds, fraction) = timestamp.split_once('.').unwrap_or((timestamp, ""));
-    let seconds = seconds
-        .parse::<u64>()
-        .expect("the first audio packet has a non-negative timestamp");
-    let mut micros = 0_u64;
-    let mut digits = 0_u32;
-    for digit in fraction.bytes().take(6) {
-        assert!(digit.is_ascii_digit());
-        micros = micros * 10 + u64::from(digit - b'0');
-        digits += 1;
-    }
-    for _ in digits..6 {
-        micros *= 10;
-    }
-    seconds * 1_000_000 + micros
+fn first_audible_sample(pcm: &[u8]) -> Option<usize> {
+    let mut samples = pcm.chunks_exact(2);
+    let audible = samples.position(|sample| {
+        i16::from_le_bytes([sample[0], sample[1]]).unsigned_abs() >= AUDIBLE_SAMPLE_THRESHOLD
+    });
+    assert!(
+        samples.remainder().is_empty(),
+        "decoded PCM is frame-aligned"
+    );
+    audible
 }
 
 #[derive(Deserialize)]
@@ -232,7 +243,6 @@ struct VideoStream {
 #[derive(Deserialize)]
 struct AudioProbe {
     streams: Vec<AudioStream>,
-    packets: Vec<AudioPacket>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -242,18 +252,13 @@ struct AudioStream {
     channels: u32,
 }
 
-#[derive(Deserialize)]
-struct AudioPacket {
-    pts_time: Box<str>,
-}
-
 #[cfg(test)]
 mod tests {
-    use super::timestamp_micros;
+    use super::first_audible_sample;
 
     #[test]
-    fn parses_audio_timestamps_without_floating_point() {
-        assert_eq!(timestamp_micros("0.978000"), 978_000);
-        assert_eq!(timestamp_micros("1.2"), 1_200_000);
+    fn finds_the_first_audible_pcm_sample() {
+        let pcm = [0, 0, 255, 0, 0, 1];
+        assert_eq!(first_audible_sample(&pcm), Some(2));
     }
 }

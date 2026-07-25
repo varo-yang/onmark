@@ -526,13 +526,41 @@ test("keeps the checked-in browser bundle current", async () => {
   });
 });
 
+test("keeps the remote-partition bundle current", async () => {
+  await withWorkspace(async (workspace) => {
+    const repository = fileURLToPath(new URL("../../../..", import.meta.url));
+    const expected = join(
+      repository,
+      "conformance/protocol/remote-partition-v1",
+    );
+    const outputDirectory = join(workspace, "bundle");
+    await bundlePresentation({
+      ...options(
+        join(repository, "conformance/cli/partitioned.html"),
+        outputDirectory,
+      ),
+      temporalCapability: "randomAccess",
+    });
+
+    const files = await artifactFiles(expected);
+    assert.deepEqual(await artifactFiles(outputDirectory), files);
+    for (const file of files) {
+      assert.deepEqual(
+        await readFile(join(outputDirectory, file)),
+        await readFile(join(expected, file)),
+        `${file} is stale`,
+      );
+    }
+  });
+});
+
 test("bundles the temporal experiment with its browser libraries", async () => {
   await withWorkspace(async (workspace) => {
     const repository = fileURLToPath(new URL("../../../..", import.meta.url));
     const outputDirectory = join(workspace, "bundle");
     await bundlePresentation({
       ...options(
-        join(repository, "conformance/browser/temporal-experiment.html"),
+        join(repository, "conformance/browser/temporal-effects.html"),
         outputDirectory,
       ),
       maxOutputBytes: 2_000_000,

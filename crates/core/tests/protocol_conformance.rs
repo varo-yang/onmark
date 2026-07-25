@@ -19,8 +19,8 @@ use onmark_core::timeline::TimelineIr;
 use conformance::{assert_or_update, fixture};
 
 #[test]
-fn gate_one_browser_requests_match_the_versioned_wire_contract() {
-    let plan = gate_one_plan();
+fn browser_requests_match_the_versioned_wire_contract() {
+    let plan = browser_plan_fixture();
     let requests = [
         request(1, BrowserCommand::Load { plan }),
         request(
@@ -41,7 +41,7 @@ fn gate_one_browser_requests_match_the_versioned_wire_contract() {
 }
 
 #[test]
-fn gate_one_browser_responses_match_the_versioned_wire_contract() {
+fn browser_responses_match_the_versioned_wire_contract() {
     let timeout = ProtocolFailure::new(
         ProtocolFailureCode::ReadinessTimeout,
         "frame 15 did not become ready",
@@ -70,7 +70,7 @@ fn gate_one_browser_responses_match_the_versioned_wire_contract() {
 
 #[test]
 fn browser_plan_requires_an_admitted_rate_for_every_video() {
-    let (timeline, asset_id, _rate) = gate_one_timeline();
+    let (timeline, asset_id, _rate) = timeline_fixture();
 
     assert_eq!(
         BrowserPlan::from_timeline(&timeline, &BTreeMap::new()),
@@ -80,7 +80,8 @@ fn browser_plan_requires_an_admitted_rate_for_every_video() {
 
 #[test]
 fn browser_plan_retains_solved_structure_and_content_ownership() {
-    let plan = serde_json::to_value(gate_one_plan()).expect("the browser plan must serialize");
+    let plan =
+        serde_json::to_value(browser_plan_fixture()).expect("the browser plan must serialize");
 
     assert_eq!(
         plan["film"],
@@ -161,15 +162,15 @@ fn frame(index: u64) -> WireFrame {
     WireFrame::new(index).expect("fixture frames are browser-safe")
 }
 
-fn gate_one_plan() -> BrowserPlan {
-    let (timeline, asset_id, rate) = gate_one_timeline();
+fn browser_plan_fixture() -> BrowserPlan {
+    let (timeline, asset_id, rate) = timeline_fixture();
     let source_frame_rates = BTreeMap::from([(asset_id, rate)]);
 
     BrowserPlan::from_timeline(&timeline, &source_frame_rates)
         .expect("the fixture timeline fits the browser frame domain")
 }
 
-fn gate_one_timeline() -> (TimelineIr, FrozenAssetId, FrameRate) {
+fn timeline_fixture() -> (TimelineIr, FrozenAssetId, FrameRate) {
     let rate = FrameRate::new(30, 1).expect("the fixture frame rate is valid");
     let asset_id = FrozenAssetId::from_sha256([1; 32]);
     let duration = Duration::from_nanos(2_500_000_000);

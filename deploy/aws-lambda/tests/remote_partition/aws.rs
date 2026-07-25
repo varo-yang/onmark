@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::Output;
 use std::time::Duration;
 
-use onmark_aws_lambda::{CaptureInvocation, CaptureResult, ObjectPrefix};
+use onmark_aws_lambda::{CaptureInvocation, CaptureOutcome, CaptureResult, ObjectPrefix};
 use onmark_render::{CaptureEnvironmentId, FrameArtifact, FrameArtifactLimits};
 use serde::Deserialize;
 use tokio::process::Command;
@@ -72,6 +72,50 @@ impl<'environment> AwsConformance<'environment> {
         let prefix = format!("{}/{}", self.environment.input_prefix, capture.name());
         self.publish_input(&prefix, capture).await;
         let result = self.invoke(workspace, &prefix, capture).await;
+        assert_eq!(result.outcome(), CaptureOutcome::CapturedAndPublished);
+        self.receive_artifact(workspace, capture, &result).await
+    }
+
+    pub(super) async fn capture_again(
+        &self,
+        workspace: &Path,
+        capture: &CaptureCase,
+    ) -> CaptureResult {
+        let prefix = format!("{}/{}", self.environment.input_prefix, capture.name());
+        let result = self.invoke(workspace, &prefix, capture).await;
+        self.receive_artifact(workspace, capture, &result).await;
+        result
+    }
+
+    pub(super) async fn corrupt_artifact(&self, workspace: &Path, result: &CaptureResult) {
+        let invalid = workspace.join("corrupt.onmark-frames");
+        fs::write(&invalid, b"corrupt").expect("the invalid artifact fixture is writable");
+        let artifact = result.artifact();
+        let arguments = [
+            OsString::from("s3api"),
+            OsString::from("put-object"),
+            OsString::from("--bucket"),
+            OsString::from(artifact.bucket()),
+            OsString::from("--key"),
+            OsString::from(artifact.key()),
+            OsString::from("--body"),
+            invalid.into_os_string(),
+        ];
+        run_aws(
+            self.environment,
+            &arguments,
+            AWS_COMMAND_TIMEOUT,
+            "corrupt frame artifact",
+        )
+        .await;
+    }
+
+    async fn receive_artifact(
+        &self,
+        workspace: &Path,
+        capture: &CaptureCase,
+        result: &CaptureResult,
+    ) -> FrameArtifact {
         assert_eq!(
             result.artifact().artifact_id(),
             capture.request().artifact_id()
@@ -79,7 +123,7 @@ impl<'environment> AwsConformance<'environment> {
         assert_eq!(result.artifact().frames(), capture.frames());
 
         let output = workspace.join(format!("{}.onmark-frames", capture.name()));
-        self.download_artifact(&result, &output).await;
+        self.download_artifact(result, &output).await;
         let artifact = FrameArtifact::open(output, artifact_limits(capture.frames()))
             .await
             .expect("the remote artifact envelope is valid");

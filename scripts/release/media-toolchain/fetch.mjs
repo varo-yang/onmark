@@ -6,21 +6,19 @@ import { basename, join, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
-import { withObservedCleanup } from "./observed-cleanup.mjs";
+import { withObservedCleanup } from "../observed-cleanup.mjs";
 
 const MAX_SOURCE_BYTES = 16 * 1024 * 1024;
 const MAX_DOWNLOAD_REDIRECTS = 5;
 const DOWNLOAD_TIMEOUT_MILLISECONDS = 2 * 60_000;
 const REDIRECT_STATUSES = Object.freeze([301, 302, 303, 307, 308]);
-const MANIFEST_PATH = fileURLToPath(
-  new URL("./media-sources.json", import.meta.url),
-);
+const MANIFEST_PATH = fileURLToPath(new URL("./sources.json", import.meta.url));
 
 async function main() {
   const output = process.argv[2];
   if (output === undefined || process.argv.length !== 3) {
     throw new Error(
-      "expected `node scripts/release/fetch-media.mjs <output-directory>`",
+      "expected `node scripts/release/media-toolchain/fetch.mjs <output-directory>`",
     );
   }
 

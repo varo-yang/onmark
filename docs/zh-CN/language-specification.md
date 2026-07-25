@@ -1,7 +1,6 @@
 # Onmark 语言规格书
 
-> 状态：当前剧本语言。Gate 四准入了现有 authored audio 与 subtitle
-> 表面；之后已经完成的 gate 只改变 presentation 与 execution 行为，没有新增剧本拼写。延后语言能力会被明确列出，不与当前语义混写。
+> 状态：当前剧本语言已覆盖 Gate 七及分布式增量渲染。Gate 四是最后一个新增剧本拼写的已完成关卡；后续工作只改变 presentation 与 execution。延后语言能力会被明确列出，不与当前语义混写。
 
 ## 1. 语言为什么存在
 
@@ -67,7 +66,7 @@ Onmark 语言的目标不是用另一套标签重画时间轴，而是让创作�
 </om-film>
 ```
 
-`cue="offer"` 是 Gate 一中将 overlay 对齐到命名 cue 的正式拼写。自由
+`cue="offer"` 将 overlay 对齐到命名 cue。自由
 `begin`、`end` 和 `until` 表达式不进入语言。
 
 ### HTML 语法
@@ -126,7 +125,7 @@ Unit。
 title、cta 等 overlay 属于 shot，但不参与兄弟 shot 的顺序排列。overlay 从已解析的
 `cue`、`delay`
 起点开始；没有显式关系时从所属 shot 起点开始，并持续到该 shot 的 exclusive
-end。Gate 一不给 overlay 设置独立的默认时长。因此 overlay 不能延长所属 shot，解析后的起点落在 shot 外时必须报告 authored
+end。当前语言不给 overlay 设置独立的默认时长。因此 overlay 不能延长所属 shot，解析后的起点落在 shot 外时必须报告 authored
 timing error。
 
 ## 5. 时间来源
@@ -135,17 +134,17 @@ timing error。
 `整数[.小数](s|ms)`，不允许空白或正负号。秒最多九位小数，毫秒最多六位小数，因此每个合法值都能精确表示为无符号整数纳秒。shot 的
 `duration` 必须大于零；cue time 与 delay 可以为零。语言不接受帧单位或浮点近似。
 
-编译器使用整数运算把精确纳秒映射到有理数帧网格。每次换算都必须在调用点明确选择向下或向上取整；隐式 cast 或环境默认值不得决定帧边界。Gate 一的 authored 起点、delay、cue
+编译器使用整数运算把精确纳秒映射到有理数帧网格。每次换算都必须在调用点明确选择向下或向上取整；隐式 cast 或环境默认值不得决定帧边界。当前 authored 起点、delay、cue
 time 和 duration 都选择不早于精确值的第一个帧边界（`Ceil`），因此正的亚帧值不会被静默压成零帧。`Floor`
 只保留给明确要求归属到更早边界的规则。
 
-每个 shot 的持续时间必须来自一种可溯源规则。Gate 一允许：
+每个 shot 的持续时间必须来自一种可溯源规则。当前语言允许：
 
 1. **媒体驱动**：视频或音频素材的探测时长；
 2. **旁白驱动**：`vo` 引用音频的探测时长；
 3. **显式定长**：没有内容时长来源时，使用受限的 `duration`。
 
-Gate 一不允许 shot 结束于 cue，也不实现由总长或 flex 约束进行的容器求解。
+当前语言不允许 shot 结束于 cue，也不实现由总长或 flex 约束进行的容器求解。
 
 同一 shot 存在多个内容时长来源时，默认持续到最长主内容结束。哪些元素是“主内容”、哪些只是 overlay，必须由元素类型确定，不能靠 DOM 位置猜测。
 
@@ -176,7 +175,7 @@ and owning shot ends = 210f
 
 ### 命名 cue
 
-cue 把业务时间命名后供 overlay 对齐。Gate 一的 cue 只来自作者声明的影片绝对时间，不存在其他当前来源。
+cue 把业务时间命名后供 overlay 对齐。当前 cue 只来自作者声明的影片绝对时间，不存在其他来源。
 
 普通元素不直接书写裸绝对秒数；“第 3 秒出现 30% OFF”先成为 `offer = 3s`，元素引用
 `offer`。这样数字集中、可命名、可复用，也更容易诊断。
@@ -196,7 +195,7 @@ cue 把业务时间命名后供 overlay 对齐。Gate 一的 cue 只来自作者
 - 上游 agent 负责在文字变化后重新生成素材；
 - 内容 hash 或 manifest 用于发现文字与素材版本不一致。
 
-Gate 一会把每条已经求解的旁白素材复制到私有 render
+renderer 会把每条已经求解的旁白素材复制到私有 render
 root，并在浏览器捕获之后按其求解出的帧区间混入输出。presentation 不播放、不延迟、也不混音旁白。
 
 没有 `src`
@@ -361,7 +360,7 @@ effect，并满足下方语言实验门槛。在那之前，stylesheet rule 与�
 都是 presentation code，不是 screenplay props。浏览器 authoring contract 另见
 [presentation contract](presentation-contract.md)。
 
-## 11. 不进入 Gate 一的能力
+## 11. 当前不支持的能力
 
 - 自由 `begin`、`end` 和 `until` 时间表达式；
 - shot 结束于 cue；
@@ -389,7 +388,7 @@ effect，并满足下方语言实验门槛。在那之前，stylesheet rule 与�
 
 表面拼写通过固定题、真实广告版式题、编辑变体和 OOV 题评测。不能仅凭纸面优雅进入稳定语言。
 
-语言评测是仓库数据，不是口头结论。语法提案改变 Gate 一表面语言之前，必须提交可复现的题目、prompt、grader、原始输出、模型参数和对照 baseline。CI 可以校验并重新计分这些冻结资产，但不必调用在线模型。
+语言评测是仓库数据，不是口头结论。语法提案改变当前表面语言之前，必须提交可复现的题目、prompt、grader、原始输出、模型参数和对照 baseline。CI 可以校验并重新计分这些冻结资产，但不必调用在线模型。
 
 ## 13. 与渲染架构的边界
 

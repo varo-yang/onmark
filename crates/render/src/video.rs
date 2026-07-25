@@ -100,7 +100,8 @@ mod tests {
     fn admits_only_cfr_h264_visual_streams() {
         let rate = FrameRate::new(30_000, 1_001).expect("NTSC timing is valid");
         let supported = video("h264", VideoTiming::Constant(rate));
-        let admitted = AdmittedVideo::admit(&supported).expect("CFR H.264 is the Gate-one profile");
+        let admitted =
+            AdmittedVideo::admit(&supported).expect("CFR H.264 is an admitted video profile");
 
         assert_eq!(admitted.frame_rate(), rate);
         assert_eq!(admitted.metadata().pixel_format(), "yuv420p");

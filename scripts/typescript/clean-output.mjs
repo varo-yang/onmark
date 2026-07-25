@@ -2,10 +2,10 @@
 // A clean boundary keeps deleted tests and modules out of local verification.
 
 import { rm } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative } from "node:path";
+import { isAbsolute, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const repository = dirname(dirname(fileURLToPath(import.meta.url)));
+const repository = fileURLToPath(new URL("../..", import.meta.url));
 const packages = join(repository, "packages");
 const packageDirectory = process.cwd();
 const packageName = relative(packages, packageDirectory);

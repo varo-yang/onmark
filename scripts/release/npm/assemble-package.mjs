@@ -16,12 +16,12 @@ import { dirname, join, relative, resolve, sep } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
-import { withObservedCleanup } from "./observed-cleanup.mjs";
+import { withObservedCleanup } from "../observed-cleanup.mjs";
 
 const MAX_PRODUCT_BYTES = 32 * 1024 * 1024;
 const MAX_SOURCE_REVISION_BYTES = 256;
 const MANIFEST_NAME = "onmark-release.json";
-const REPOSITORY = fileURLToPath(new URL("../../", import.meta.url));
+const REPOSITORY = fileURLToPath(new URL("../../..", import.meta.url));
 const SOURCE_TREES = Object.freeze([
   "packages/runtime/dist/src",
   "packages/authoring/dist/src",
@@ -249,7 +249,10 @@ async function productPackage() {
     version: launcher.version,
     description: "Screenplay-first deterministic browser video compiler",
     license: "MIT",
-    repository: "https://github.com/varo-yang/onmark",
+    repository: {
+      type: "git",
+      url: "git+https://github.com/varo-yang/onmark.git",
+    },
     type: "module",
     engines: { node: ">=22.12" },
     bin: { onmark: "./packages/launcher/dist/src/command.js" },

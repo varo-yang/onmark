@@ -14,16 +14,14 @@ use crate::model::{ElementKind, FrameInterval, FrameRate, FrozenAssetId, NodeId}
 use crate::timeline::{TimelineIr, TimelineVersion};
 
 use super::frame::{InvalidWireFrame, WireFrame, WireFrameRate, WireInterval};
+use super::projection::ProjectionBuilder;
 
-mod projection;
-
-use projection::ProjectionBuilder;
-const MAX_BROWSER_VIDEOS: usize = 10_000;
-const MAX_BROWSER_OVERLAYS: usize = 10_000;
-const MAX_BROWSER_SCENES: usize = 10_000;
-const MAX_BROWSER_SHOTS: usize = 10_000;
+pub(super) const MAX_BROWSER_VIDEOS: usize = 10_000;
+pub(super) const MAX_BROWSER_OVERLAYS: usize = 10_000;
+pub(super) const MAX_BROWSER_SCENES: usize = 10_000;
+pub(super) const MAX_BROWSER_SHOTS: usize = 10_000;
 const MAX_BROWSER_OVERLAY_TEXT_CHARACTERS: usize = 65_536;
-const MAX_BROWSER_OVERLAY_TEXT_BYTES: usize = 1 << 20;
+pub(super) const MAX_BROWSER_OVERLAY_TEXT_BYTES: usize = 1 << 20;
 
 /// Timeline facts consumed by the browser clock and presentation.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -426,7 +424,7 @@ struct BrowserPlanWire {
 pub struct BrowserNodeId(#[cfg_attr(feature = "schema", schemars(range(max = u32::MAX)))] u32);
 
 impl BrowserNodeId {
-    const fn new(value: u32) -> Self {
+    pub(super) const fn new(value: u32) -> Self {
         Self(value)
     }
 
@@ -447,7 +445,7 @@ pub struct BrowserNode {
 }
 
 impl BrowserNode {
-    fn new(node_id: BrowserNodeId, authored_id: Option<&NodeId>) -> Self {
+    pub(super) fn new(node_id: BrowserNodeId, authored_id: Option<&NodeId>) -> Self {
         Self {
             node_id,
             authored_id: authored_id.map(|id| Box::from(id.as_str())),
@@ -477,6 +475,10 @@ pub struct BrowserScene {
 }
 
 impl BrowserScene {
+    pub(super) const fn new(node: BrowserNode, interval: WireInterval) -> Self {
+        Self { node, interval }
+    }
+
     /// Returns the scene identity retained from Timeline IR.
     #[must_use]
     pub const fn node(&self) -> &BrowserNode {
@@ -501,6 +503,18 @@ pub struct BrowserShot {
 }
 
 impl BrowserShot {
+    pub(super) const fn new(
+        node: BrowserNode,
+        scene_id: BrowserNodeId,
+        interval: WireInterval,
+    ) -> Self {
+        Self {
+            node,
+            scene_id,
+            interval,
+        }
+    }
+
     /// Returns the shot identity retained from Timeline IR.
     #[must_use]
     pub const fn node(&self) -> &BrowserNode {
@@ -540,6 +554,23 @@ pub struct BrowserVideo {
 }
 
 impl BrowserVideo {
+    pub(super) fn new(
+        node: BrowserNode,
+        shot_id: BrowserNodeId,
+        asset_identity: FrozenAssetId,
+        interval: WireInterval,
+        source_frame_rate: WireFrameRate,
+    ) -> Self {
+        Self {
+            node,
+            shot_id,
+            asset_id: asset_identity.to_string().into_boxed_str(),
+            asset_identity,
+            interval,
+            source_frame_rate,
+        }
+    }
+
     /// Returns the video identity retained from Timeline IR.
     #[must_use]
     pub const fn node(&self) -> &BrowserNode {
@@ -636,6 +667,22 @@ pub struct BrowserOverlay {
 }
 
 impl BrowserOverlay {
+    pub(super) const fn new(
+        node: BrowserNode,
+        shot_id: Option<BrowserNodeId>,
+        kind: BrowserOverlayKind,
+        text: Box<str>,
+        interval: WireInterval,
+    ) -> Self {
+        Self {
+            node,
+            shot_id,
+            kind,
+            text,
+            interval,
+        }
+    }
+
     /// Returns the overlay identity retained from Timeline IR.
     #[must_use]
     pub const fn node(&self) -> &BrowserNode {
@@ -707,7 +754,7 @@ fn overlay_text_bytes(overlays: &[BrowserOverlay]) -> usize {
         .unwrap_or(usize::MAX)
 }
 
-fn text_exceeds_limit(text: &str) -> bool {
+pub(super) fn text_exceeds_limit(text: &str) -> bool {
     text.chars()
         .take(MAX_BROWSER_OVERLAY_TEXT_CHARACTERS + 1)
         .count()

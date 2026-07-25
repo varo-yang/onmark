@@ -1,4 +1,4 @@
-//! Dependency-driven partition facts for the Gate-two graph boundary.
+//! Dependency-driven partition facts for the render graph boundary.
 
 mod conformance;
 
@@ -19,8 +19,11 @@ use conformance::{assert_or_update, fixture};
 
 #[test]
 fn independent_shots_form_separate_scoped_units() {
-    let source_path = fixture("render-graph", "valid/two-independent-shots.html");
-    let expected_path = fixture("render-graph", "valid/two-independent-shots.plan.txt");
+    let source_path = fixture("compiler/render-graph", "valid/two-independent-shots.html");
+    let expected_path = fixture(
+        "compiler/render-graph",
+        "valid/two-independent-shots.plan.txt",
+    );
     let assets = frozen_assets([
         ("opening.mp4", "1s"),
         ("closing.mp4", "2s"),

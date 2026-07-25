@@ -1,7 +1,7 @@
 //! Explicit resource policy shared by local rendering and worker capture.
 //!
 //! The renderer owns enforcement. The CLI selects concrete bounded values for
-//! its local composition root and its Gate-three worker entry point.
+//! its local composition root and its remote worker entry point.
 
 use std::time::Duration;
 

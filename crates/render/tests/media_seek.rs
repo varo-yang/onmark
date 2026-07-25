@@ -655,7 +655,7 @@ async fn admitted_source_video(
     match timing {
         FixtureTiming::Constant => {
             let admitted =
-                AdmittedVideo::admit(&metadata).expect("the CFR H.264 fixture must enter Gate one");
+                AdmittedVideo::admit(&metadata).expect("the CFR H.264 fixture must be admitted");
             let color_profile = admitted
                 .metadata()
                 .color_profile()

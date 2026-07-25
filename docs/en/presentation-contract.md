@@ -1,6 +1,7 @@
 # Onmark Presentation Contract
 
-> Status: browser authoring contract through Gate seven.
+> Status: current browser authoring contract through Gate seven and
+> distributed incremental rendering.
 
 `film.html` is the complete authored entry. Onmark custom elements own
 screenplay facts—structure, IDs, cues, media references, and timing
@@ -384,8 +385,8 @@ visual plan.
 
 ## Assets
 
-The browser receives materialized assets under the unit root. Gate-one video
-sources use:
+The browser receives materialized assets under the unit root. Video placements
+use:
 
 ```ts
 materializedVideoSource(placement);
@@ -467,7 +468,7 @@ The native browser boundary also enforces the network rule. It admits only
 canonical files beneath the private Unit Root and in-memory `data:` or `blob:`
 URLs; HTTP, WebSocket, and file paths outside that root are blocked by CDP.
 
-Gate five admits animation only through measured, paused playheads driven by an
+The admitted animation contract uses measured, paused playheads driven by an
 exact `RuntimeFrame`. Its initial conformance matrix covers WAAPI, GSAP, and
 Three.js through the standard frame-effect lifecycle without making those
 libraries runtime dependencies. Static CSS transitions that depend on load
@@ -492,7 +493,7 @@ a request before author code runs does not consume the empty session.
 
 ## Non-goals
 
-Gate one does not provide a presentation development server, watch mode, plugin
+The current contract does not provide a presentation development server, watch mode, plugin
 API, visual template, component registry, screenplay-selected components or
 props, cross-scene persistence, free `begin/end/until` timing, or browser-side
 render planning.

@@ -1,6 +1,6 @@
 # Onmark 架构设计
 
-> 状态：目标架构初稿。本文区分不可动摇的系统原则、分阶段交付路径和后期生产能力，避免用终局蓝图指挥第一天施工。
+> 状态：当前架构已覆盖 Gate 一至 Gate 七及分布式增量渲染。已完成关卡保留为历史验收证据；尚未实现的能力会明确标为延期。
 
 本文与《Onmark 语言规格书》平级。语言规格负责“创作者如何表达影片”，本文负责“已编译的影片如何成为成片”，两者只通过 versioned
 Timeline IR 接合。
@@ -14,8 +14,8 @@ screenplay → semantics → diagnostics       render graph → execution → ar
 文中内容分为三个成熟度：
 
 - **基础原则**：现在写进代码，并保持稳定；
-- **交付关卡**：按顺序验证，上一关没有通过就不建设下一关；
-- **生产终局**：方向已知，但只有在指标和真实负载出现后施工。
+- **已完成关卡**：保留当时的验收范围与证据，不冒充当前限制；
+- **延期能力**：尚未实现，只有在指标和真实负载出现后施工。
 
 ## 1. 系统定义
 
@@ -65,14 +65,14 @@ IR。编译器不访问网络、不生成素材、不读墙钟，也不启动浏
 
 ### 远程执行不是另一套渲染器
 
-CLI 与远程 worker 执行相同的 `ExecutionPlan`
+CLI 与远程 worker 执行相同的 Render Unit 合约
 和 worker 状态机。本地父进程与短生命周期远程 invocation 只是用不同方式拥有同一份有限 DAG，不能有日后删除的“简化渲染路径”。
 
 ### 分片由像素依赖决定
 
 `shot`
-是优秀的创作和缓存候选边界，却不是无条件执行边界。Gate 二的第一版 graph 仅在当前生产 adapter 已证明不会跨 shot 保留状态的前提下，把每个 shot 记录为独立 region，并记录该 region 的直接冻结媒体依赖；这不是“shot 天然可切”的通用规则。转场、贯穿元素、全局层、shader
-history 和相邻采样都会产生跨镜头依赖，必须先扩大或合并 region，再由规划器求依赖闭包、切任务。
+是优秀的创作和缓存候选边界，却不是无条件执行边界。只有 bundle 显式声明并证明 random access，graph 才把各 shot 记录为独立 region；未知 presentation code 仍形成一个 sequential region。graph 同时记录每个 region 的直接冻结媒体依赖。这不是“shot 天然可切”的通用规则。当前 graph 尚未实现转场、贯穿元素、全局层、shader
+history 或相邻采样依赖；这些能力必须先扩展依赖表示、扩大或合并 region，才能进入分片。
 
 ### 浏览器只负责画，不负责决定
 
@@ -115,7 +115,7 @@ Source AST
     → Resolved Film
       → Timeline IR
         → Render Graph
-          → Execution Plan
+          → Partition Plan
 ```
 
 ### Source AST
@@ -150,41 +150,25 @@ fact，不会把 `start`、`end` 或 `begin` 属性带回 screenplay 语言。
 
 ### Render Graph
 
-Timeline IR 回答“何时存在”；Render Graph 回答“这一帧依赖什么”。图中包括 DOM
-layer、素材帧、转场左右输入、persist 状态、滤镜历史窗口、字幕水印等全局层以及音频 clip。轨道只是这张图的只读投影。
+Timeline IR 回答“何时存在”；Render Graph 从已求解事实和已接纳的时间能力中推导可独立求值的 region，并记录其直接冻结媒体依赖。当前图尚不包含转场、persist、全局效果或历史采样边；未来能力若产生这些依赖，必须先扩展图并扩大或合并 region，才能进入分片。
 
-### Execution Plan
+### Partition Plan
 
-这是 CLI、短生命周期编排入口和 worker 的稳定执行合约：
-
-```rust
-pub struct RenderUnit {
-    pub id: RenderUnitId,
-    pub output: FrameInterval,
-    pub evaluation: FrameInterval,
-    pub dependencies: Vec<ArtifactRef>,
-    pub bundle: BundleRef,
-    pub environment: RenderEnvironment,
-    pub cache_key: ContentHash,
-}
-```
-
-`output` 是最终提交的帧；`evaluation`
-可以更宽，以覆盖转场预卷、弹簧动画 warm-up 和历史采样。worker 可以计算额外帧，但只发布 output。
+这是 core 内的纯分片事实：每个 `RenderPartition` 记录 `output`、`evaluation` 和分配给该候选 unit 的冻结素材。它不拥有路径、browser URL、bundle、进程配置或云厂商类型。`output` 是最终提交的帧；未来依赖若需要预卷或历史采样，`evaluation` 可以扩大，但 worker 仍只发布 `output`。
 
 编译管线在 Timeline IR 结束，执行管线从一条独立的组合边界开始：
 
 ```text
-Timeline IR + Frozen Asset Catalog + Bundle Manifest + Render Profile
+Partition + Timeline IR + Frozen Asset Catalog + Bundle Manifest + Render Profile
   → Render Unit
-    → Browser Plan + Audio Plan + materialization requirements
+    → Browser Plan + Visual Execution Plan + Audio Plan
+      → materialize → Executable Unit + verified private root
 ```
 
 这条接缝不是另一个编译相位。Timeline
 IR 只回答影片中什么事实在何时成立；presentation
 bundle 负责把这些事实画成 DOM、CSS、Canvas 或 WebGL；Render
-Unit 则定义一次 executor 调用消费哪些不可变输入。第一关只有一个覆盖整部影片的 unit。第二关加入 Render
-Graph 后，可以产生多个同类型 unit，但不更换执行器合约。
+Unit 则定义一次 executor 调用消费哪些不可变输入。whole-film render 会直接组合一个 unit；partitioned render 从每个 `RenderPartition` 组合相同类型的 unit，不更换执行器合约。
 
 Gate 一最初的 `AudioPlan`
 用已求解的旁白 placement 建立了原生混音边界。materialization 会把冻结音频字节与浏览器素材一起复制，却不把它们变成浏览器输入。Chromium 编出视觉流后，executor 混合轨道并将 AAC
@@ -267,10 +251,8 @@ IR，并在 solve 阶段收到 authored asset diagnostic。
 ### D. 构建 browser bundle
 
 Bundler 把用户组件、Onmark
-runtime、CSS 和静态依赖打成不可变 bundle。bundle 只包含绘制能力，不包含时间求解逻辑。目标 manifest 会记录 chunk、字体、外部素材、runtime 版本和能力声明，并进入缓存键。当前 manifest 强制携带 temporal 与 visual
-capability，还会记录 browser-owned pixels 是否能在已求解 placement boundary 之间变化，
-并把三项声明都纳入 `bundleId`。紧凑 UTF-8 JSON identity 是
-`{version,entryPoint,temporalCapability,visualCapability,frameBehavior,files}`；file 按 portable path 排序，每个 identity entry 的字段顺序固定为
+runtime、CSS 和静态依赖打成不可变 bundle。bundle 只包含绘制能力，不包含时间求解逻辑。manifest 记录固定 entry point、document scope、temporal/visual capability、frame behavior 和每个 payload file；runtime、字体与静态依赖通过这些已哈希文件进入 identity，不另建可变 metadata。这四项声明都进入 `bundleId`。紧凑 UTF-8 JSON identity 是
+`{version,entryPoint,documentScope,temporalCapability,visualCapability,frameBehavior,files}`；file 按 portable path 排序，每个 identity entry 的字段顺序固定为
 `{bytes,path,sha256}`。这是 versioned contract，不是 pretty-printed
 manifest 的偶然表现。bundle 是可重建的临时产物，reader 只接受当前版本，不保留旧版兼容分支。manifest 包含一到 99,999 个 payload
 file；path 只能使用小写 portable ASCII，最长 1,024 bytes，不能进入 unit-owned
@@ -287,7 +269,7 @@ template、layout、style、animation 或 full-screen assumption。所有文档�
 确定性时钟、readiness 和媒体原语。作者侧浏览器代码的公开规则写在
 [presentation contract](presentation-contract.md)。
 
-Gate 一组装一个 content-addressed unit root：所需素材位于 presentation
+materialization 组装一个 content-addressed unit root：所需素材位于 presentation
 entry 下的 `assets/sha256/<lowercase digest>`。browser 直接从 `BrowserPlan`
 已携带的 frozen
 identity 推导这个相对位置，因此不需要第二套 native-path/browser-URL wire
@@ -475,7 +457,7 @@ gate，但不能数学上证明任意用户代码无状态，因此不能作为�
 
 | 层级                                          | 承诺                                                                                      |
 | --------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| Timeline IR、Execution Plan                   | 存在 canonical encoding 后，相同输入必须 byte-identical；当前内存 IR 只承诺结构确定性     |
+| Timeline IR、Partition Plan                   | 存在 canonical encoding 后，相同输入必须 byte-identical；当前内存表示只承诺结构确定性     |
 | 锁定 Chromium、字体、GPU/软件栈后的 raw frame | 目标为 frame hash 完全一致；worker artifact 的逐帧 fingerprint 将其变成可执行的一致性契约 |
 | 跨异构机器的浏览器输出                        | 以 conformance 结果定义支持范围，不提前承诺                                               |
 | 编码后容器                                    | 校验时间戳、帧数、codec 和解码内容；是否 byte-identical 单独验证                          |
@@ -489,6 +471,14 @@ metadata 的字节顺序牺牲更重要的画面正确性。
 可以临时保留进度；worker 直接与对象存储交换 immutable bundle、素材和产物。相同 render
 identity 重跑时，会验证并复用已完成的 artifact。因此引擎的正确性不依赖数据库、持久队列、分布式租约或 Redis
 锁。未来多租户服务可以在外层增加 admission、计费和账号系统，但它们不是 Onmark engine 的依赖。
+
+分布式增量 capture 有两个有界 admission 点。worker 读取 `request.json` 后，必须在下载
+presentation input 或准备 Chromium 之前验证预期 artifact。验证命中时直接返回已有位置，
+并明确记录本次跳过 capture；只有 miss 才进入原有的 materialize/capture/publish 路径。
+未来若有一个短生命周期调用方已经拥有 deployment 的 artifact namespace，它可以在调用
+Lambda 前做同一检查；但 Onmark 不会仅为省掉一次轻量 warm invocation 就引入 caller、
+coordinator 或 durable progress state。worker 内检查是 correctness boundary，即使以后
+外层裁剪已知 hit，也仍然保留。
 
 Gate 三先采用一个刻意收窄的 interchange：worker 把一个完整计划输出区间捕获为一份有界、带校验和的 frame
 artifact。它是单个版本化文件，记录精确 output interval、render
@@ -633,10 +623,11 @@ presentation-global byte、selected semantic subtree 与其他真实 browser inp
 desktop launcher 用 pinned browser artifact、OS/architecture 与有界 system-font inventory
 命名保守 host seed；native 再加入 capture mode、graphics backend 与 composition version。
 显式 custom browser 不属于 launcher-owned browser identity，因此关闭 persistent reuse。
-cache publication 是 content-addressed 且原子完成的；immutable valid entry 无需全局 lease
-即可读取，唯一的跨进程锁只拥有损坏修复与 publication。损坏或 identity 不符的 artifact
-会被删除并重新 capture。store 同时受 artifact 数与 byte 上限约束；满额后保留既有有效
-entry，让新 miss 保持 ephemeral，不会驱逐另一个进程可能正在读取的 artifact。
+cache publication 使用 deterministic capture-contract identity 寻址且原子完成；
+immutable valid entry 无需全局 lease 即可读取，唯一的跨进程锁只拥有损坏修复与
+publication。损坏或 identity 不符的 artifact 会被删除并重新 capture。store 同时受
+artifact 数与 byte 上限约束；满额后保留既有有效 entry，让新 miss 保持 ephemeral，
+不会驱逐另一个进程可能正在读取的 artifact。
 
 每次完成的 desktop render 都会报告 region/frame 复用量；这些数字直接来自 capture 前
 已经验证的 cache hit。CLI 还会报告 prepare、bundle、plan、capture、assemble 与 total
@@ -644,13 +635,13 @@ wall time。这些时间只作为运行证据，绝不进入 compilation、plann
 或渲染结果。
 
 仓库保留的
-[incremental-rendering conformance](../../conformance/incremental-rendering-experiment.md)
+[incremental-rendering conformance](../../conformance/evidence/incremental-rendering.md)
 验证 whole-film/partition raw-RGBA 等价、局部 edit isolation、跨 region selector isolation、
 cold/warm CLI reuse、损坏修复与共享 final assembly。temporal capability 与 DOM scope 仍是
 两个独立 manifest fact：random access 允许独立求值，`documentScope` 说明 artifact 实际
 包含哪些 semantic DOM byte。
 
-## 9. 目标仓库边界
+## 9. 当前仓库边界
 
 ### 先模块，后 crate
 
@@ -688,7 +679,7 @@ onmark/
 └── docs/
 ```
 
-已完成的 Gate 一里程碑包含
+当前仓库包含
 `onmark-core`、`onmark-media`、`onmark-render`、`@onmark/runtime`
 的浏览器 session、`@onmark/authoring` 的 authored-DOM bindings、`@onmark/bundler`
 的 presentation artifact 边界，以及第一条 `onmark-cli` whole-film composition
@@ -741,17 +732,20 @@ package，并把明确的 Node、bundler、browser provisioner、FFmpeg 与 ffpr
 native 命令。参数、诊断、编译、渲染和退出状态仍由 Rust 独占；browser provision
 只会在作者诊断之后发生，ambient executable 绝不构成静默 fallback。
 
-所有 release 自动化统一放在 `scripts/release/`。`assemble-package.mjs`
-把已经构建的 TypeScript module 投影进不超过 32 MiB 的公开 package，封闭内部
-declaration import，并 hash 除自身 manifest 外的每份 payload。`cargo xtask release
-sidecar` 把 native `onmark`、FFmpeg、ffprobe、source archive、build record 与 license
-准入一个不超过 384 MiB 的目标 package。两个 assembler 都通过私有 staging 和最后
-一次 rename 发布；它们都不编译源码、安装依赖或发布 package。
+所有 release 自动化统一放在 `scripts/release/`：Rust module 独占 native sidecar
+准入，`npm/` 独占公开 package 装配与发布，`media-toolchain/` 独占固定 media source
+的获取与构建。`npm/assemble-package.mjs` 把已经构建的 TypeScript module 投影进
+不超过 32 MiB 的公开 package，封闭内部 declaration import，并 hash 除自身
+manifest 外的每份 payload。`cargo xtask release sidecar` 把 native `onmark`、
+FFmpeg、ffprobe、source archive、build record 与 license 准入一个不超过 384 MiB
+的目标 package。两个 assembler 都通过私有 staging 和最后一次 rename 发布；它们都
+不编译源码、安装依赖或发布 package。
 
-`media-sources.json` 用 URL、字节长度和 SHA-256 固定每份 media source。相邻 fetcher
-是唯一的网络 owner；`build-media.sh` 只消费已准入的本地 archive，并关闭
-autodetection、network、shared library 与 nonfree component。sidecar 在准入目标
-binary format 与 provenance 之前，会逐字节复核 source manifest 与 build script。
+`media-toolchain/sources.json` 用 URL、字节长度和 SHA-256 固定每份 media source。
+其 fetcher 是唯一的网络 owner；`media-toolchain/build.sh` 只消费已准入的本地
+archive，并关闭 autodetection、network、shared library 与 nonfree component。
+sidecar 在准入目标 binary format 与 provenance 之前，会逐字节复核 source
+manifest 与 build script。
 
 `packages/launcher/desktop-release.json` 是 supported target 与 browser 的唯一
 contract。它独占固定的 Chrome for Testing build、browser product 与 archive
@@ -759,20 +753,48 @@ digest；native sidecar assembler 会拒绝不同的 target matrix。launcher �
 跨进程锁把所选 browser 安装进 content-addressed cache，并以 atomic rename 发布。每份
 lease 都有 owner-specific heartbeat marker；被回收的旧 owner 不能发布缓存字节，也不能刷新或删除 successor 的锁。
 
-手动 desktop-release workflow 只有在空 consumer 中安装两份生成的 npm tarball，
-并用两个独立 browser session 渲染同一份 screenplay 后，才准入 macOS arm64、Linux
-x64 与 Windows x64。它验证精确帧数、解码音频、canonical raw-RGBA identity、公开
-product import bundling 和 no-clobber output。每个 target artifact 还会保留固定
-profile 下两次真实 CLI render duration；共享 runner 的 timing 只是 evidence sample，
-不是 release threshold。cross-compilation 和 binary-format 检查本身不能证明 target
-support。
+desktop-release workflow 可以手动 dispatch 只做 admission；其 publication path
+只会在 `release/vX.Y.Z` pull request 合并进 `main` 后运行。两种模式都只有在空
+consumer 中安装两份生成的 npm tarball，并用两个独立 browser session 渲染同一份
+screenplay 后，才准入 macOS arm64、Linux x64 与 Windows x64。它验证精确帧数、解码
+音频、canonical raw-RGBA identity、公开 product import bundling 和 no-clobber
+output。每个 target artifact 还会保留固定 profile 下两次真实 CLI render duration；
+共享 runner 的 timing 只是 evidence sample，不是 release threshold。cross-compilation
+和 binary-format 检查本身不能证明 target support。
+
+只有 merged release-PR path 可以跨越 npm publication boundary。受保护的
+`npm-release` environment 与 npm Trusted Publishing 会把该 job 绑定到 reviewed
+workflow，不保存长期 registry token。其 deployment policy 只接受 protected branch；
+`main` 由 required PR 与 CI rule 保护。job 先验证完整且同版本的 archive 集合，再按
+platform sidecar、公开 package 的顺序发布；只有 npm 返回的 integrity 与 admitted
+archive 完全一致，才会复用已经存在的版本。这样多 package 发布中途失败后可以安全
+恢复，同时禁止同一版本获得不同 bytes。npm 接受完整集合后，同一个 job 才会在 admitted
+`main` revision 创建对应 tag 与 GitHub Release。npm 只允许为已存在的 package 配置
+Trusted Publishing，因此第一个公开版本仍需 operator 使用同一组 admitted archive
+做一次 bootstrap。
+
+bootstrap 顺序固定：
+
+1. 保留 unscoped `onmark` 名称并创建 `@onmark` organization；
+2. 在目标 product revision 手动运行 admission workflow；
+3. 使用带 2FA 的交互式 npm identity，先发布三份 admitted
+   `@onmark/cli-*` archive，再发布 admitted `onmark` archive；
+4. 让四个 package 都信任 `varo-yang/onmark` 的 `desktop-release.yml`，并限制为
+   `npm-release` environment 与 `npm publish`；以及
+5. 在后续合并 release pull request 前保护该 GitHub environment。
+
+`cargo xtask release prepare <version>` 会同步 Rust workspace、每个内部 TypeScript
+package 与 Cargo lockfile 的固定产品版本。改动必须放在 `release/v<version>` branch
+接受 review；CI 会验证 fixed-version invariant，并要求 branch suffix 与产品版本一致。
+合并这份 pull request 是唯一的自动发布决定。prerelease version 使用 `next`
+distribution tag，stable version 使用 `latest`。
 
 Lambda ZIP 仍是独立部署产物；它的 bootstrap、archive budget、`/tmp` lifecycle 与
 S3 contract 不会变成桌面 installer 语义。
 
 ### 产品命令与语言证据
 
-Gate 一的 native 命令刻意保持很窄：`onmark render <film.html>`。authored HTML 同时包含
+当前 authored native 命令刻意保持很窄：`onmark render <film.html>`。authored HTML 同时包含
 screenplay custom element 与 presentation DOM/CSS；至多一个带
 `type="module" data-om-motion` 的 inline module 导出 declarative `motion` value，
 固定 infrastructure entry 负责安装 runtime。不存在平行 stylesheet、motion 文件或 custom
@@ -887,18 +909,24 @@ JSON 边界。其可选的 `schema` feature 只为仓库生成工作暴露
 `scripts/`；它既不是产品 package，也不是杂项应用层。其中的 Cargo
 manifest 只用于给 Rust schema generator 一份固定的 build-only 依赖预算和稳定的
 `cargo xtask` 入口。这个 binary 只由开发者与 CI 消费，可以依赖启用 `schema`
-feature 的 core 与 `onmark-aws-lambda`、`schemars`、`serde`/`serde_json`，以及只
-负责 native release identity 的 `sha2` 和只负责私有 sidecar staging 的
-`tempfile`；它会
+feature 的 core 与 `onmark-aws-lambda`、`schemars`、`serde`/`serde_json`、只负责固定
+产品版本的 `semver`，以及只负责 native release identity 的 `sha2` 和只负责私有
+sidecar staging 的 `tempfile`；它会
 关闭 Lambda package 的默认 runtime feature，因此 schema generation 不链接
 AWS。任何产品 crate/package 都不得反向依赖它。Lambda 依赖只为发布该部署边界的
 schema，不得借此把 AWS 偷渡进 core。相邻的 Node generator 可使用固定版本的
-schema-to-TypeScript 与验证工具链。`cargo xtask schema` 先写全部 versioned
-schema，再调用该 generator；`cargo xtask eval audio` 与
-`cargo xtask eval html` 分别重新评分已冻结的 audio language experiment 与 native
-HTML authoring experiment。相邻 release scripts 负责装配公开 npm package 与准入媒体，
-`cargo xtask release sidecar` 只装配 native platform payload；这些工具都不是产品
-installer 或 publisher；
+schema-to-TypeScript 与验证工具链。`cargo xtask schema` 先写全部 versioned schema，
+再调用该 generator；`cargo xtask eval audio` 与 `cargo xtask eval html` 分别重新
+评分已冻结的 audio language experiment 与 native HTML authoring experiment。
+`cargo xtask release prepare/verify` 独占产品版本修改与一致性检查；
+`cargo xtask release sidecar` 只装配 native platform payload。相邻 release scripts
+负责装配并准入公开 npm package 与媒体；只有受保护的 release workflow 会调用 registry
+publisher；
+`scripts/` 内部由 `evaluation/` 独占 frozen language grading，`schema/` 独占
+Rust-to-TypeScript contract generation，`typescript/` 独占全仓库 source-shape
+mechanics，`release/` 独占 desktop artifact construction 与 publication；根
+`xtask.rs` 只负责把命令分发给这些 owner。release owner 内部再由 `npm/` 与
+`media-toolchain/` 把 Node 和 shell process boundary 与 Rust xtask module 分开。
 `json-schema-to-typescript`
 把 browser 类型生成进 runtime、把 manifest 类型生成进 bundler，Ajv 在构建期生成 standalone
 browser validator。Lambda schema 在出现真实 TypeScript caller 前刻意不生成
@@ -918,7 +946,7 @@ contract。在这条 direct-child 契约下，进程寿命和保留的 stdout/st
 failure，`Drop` 只作 best-effort termination fallback。私有 ffprobe response
 type 只在此边界翻译一次并产出 core-owned `AssetMetadata`；JSON
 value 与第三方 error type 不定义稳定 API，但底层 error 会通过标准 source
-chain 保留，供调试使用。Gate 一对每条 stream 请求有界的 stream-level
+chain 保留，供调试使用。探测对每条 stream 请求有界的 stream-level
 facts。attached-picture video stream 不属于可渲染媒体；其余 video stream 与 audio
 stream 分别优先选择声明为 default 的流，default 缺失或并列时按 ffprobe 报告的最低
 stream index 确定。`sample_rate` 与 `channels` 固定 selected audio stream 的 sample
@@ -973,8 +1001,8 @@ portable worker 保持单线程，两条路径都不从 ambient CPU count 推导
 不消耗 encoder inactivity budget。浏览器导航会分别等待 document load 与 runtime
 host；不能把 transport 的 navigation 返回误当成完整生命周期屏障。
 
-Gate 一每次只拥有一张 PNG，捕获后直接写入 `FFmpeg image2pipe`，不存在 frame
-queue 或整段视频 buffer；固定的 H.264 `yuv420p`
+browser capture 最多只保留一张 PNG，捕获后直接写入 `FFmpeg image2pipe`；layered
+path 同样使用 capacity-one stream，不存在整段视频 frame buffer。固定的 H.264 `yuv420p`
 profile 会在进程启动前拒绝奇数 viewport 尺寸。browser capture 在共享 runtime
 protocol 下只有两个封闭 backend：Linux `chrome-headless-shell` 用 `BeginFrame`
 原子提交并读取 compositor transaction；macOS 与 Windows 用 `Screenshot`，在同一个
@@ -1072,7 +1100,7 @@ capture environment，不能由 authored input 或 worker
 invocation 选择，并且必须在真实执行环境中证明后才能成为 production launch
 contract；Chromium launch 失败绝不触发自动降级。
 
-Gate 一的 native browser operation 与 decoded-video
+native browser operation 与 decoded-video
 wait 最多接受一天 deadline，使所有平台 timer 都处于显式支持的时间范围内。
 
 校验失败原因保留为局部领域值。syntax 提供源码上下文后，由 `compiler`
@@ -1096,7 +1124,7 @@ declaration；该 API 成为现实后也只能由 runtime 拥有。`authoring` �
 只通过 runtime 的 types-only entrypoint 使用公开类型，创建语义化 video/overlay
 DOM，并把 CSS 与 layout 留给 presentation。bundler 生成的 neutral entry 把 runtime
 value 组合到这些 binding 周围。`bundler` 注入固定 authoring/runtime artifact 并生成
-manifest；runtime 永不依赖 authoring 或 bundler。Gate 一的
+manifest；runtime 永不依赖 authoring 或 bundler。
 `RuntimeSession` 拥有 protocol 顺序、interval 关系检查、精确帧投影与 terminal
 disposal；并发 command 直接拒绝，不暗中增长队列，adapter 只会收到递归冻结的 plan
 snapshot。浏览器具体工作只通过一个窄 adapter 进入，其等待必须有界，预期失败必须类型化。production
@@ -1111,7 +1139,7 @@ asset directory 同样由 Rust bundle schema 生成。
 
 `@onmark/bundler` 是 Node-only 的产品构建边界，不是仓库自动化。它只允许依赖 Node
 built-in、`@onmark/authoring`/`@onmark/runtime` 的公开入口和固定版本的生产依赖
-`esbuild`；浏览器 package 不得反向依赖它。Gate 一只编译单个 ESM
+`esbuild`；浏览器 package 不得反向依赖它。bundler 只编译单个 ESM
 presentation、替换为固定 authoring/runtime 入口、生成固定 document
 shell，并以稳定 SHA-256 manifest 记录每个 presentation
 payload 文件。package 通过窄 `onmark-bundle` executable 暴露同一个操作，native
@@ -1171,6 +1199,9 @@ operation 完成后才交出 response stream，因此每一次仍在等待的 bo
 read 另有三十秒 progress
 deadline。这样能拒绝卡住的 stream，但不把这条 transport 边界伪装成 scheduler 或 lease
 policy。
+execution role 只能在配置的 artifact prefix 下条件删除 invalid artifact。repair 使用
+失败读取返回的 ETag 约束 `DeleteObject`；若 precondition race，worker 会做有界重读，
+不会删除另一个 worker 已经写入的 replacement。
 
 部署提供 already-expanded headless shell，或者一份 zstd-compressed tar
 archive 加 canonical SHA-256 digest。archive materialization 同时限制 compressed
@@ -1208,7 +1239,7 @@ capture 与 immutable reuse，并用 fresh container
 layer 对照确定性能问题来自 browser delivery 与 preparation phase，而不是 Rust
 handler 或 BeginFrame 本身。`deploy/aws-lambda` 现在能从 locked
 inputs 复现 reviewed ZIP 与 manifest；infrastructure
-definition、cross-build 与 release publication 仍需独立 review。
+definition、cross-build 与 Lambda package publication 仍需独立 review。
 
 如果将来出现 GCP、ECS 或 Kubernetes backend，它们只是同一执行器的另一个 deploy
 adapter，而不是新 renderer。它们各自拥有 SDK、transport semantics 与 release
@@ -1219,8 +1250,10 @@ policy 不会被抽成伪通用 cloud interface。
 
 需要区分两类 TypeScript 类型：
 
-- Timeline IR、Execution Plan、runtime message 属于跨进程 wire protocol；
-- components、props、hooks 属于手写的 authoring API。
+- 已公开的 browser、bundle 与 worker message 属于跨进程 wire protocol；
+- components、resources、effects 属于手写的 authoring API。
+
+Timeline IR 与 Partition Plan 目前只有结构确定的 Rust 内存表示；在出现真实外部消费者前，不提前冻结公开编码。
 
 Rust wire types 是 source of truth。`cargo xtask schema`
 从它们生成 checked-in、versioned JSON
@@ -1228,7 +1261,7 @@ Schema，CI 重新生成并要求工作树零 diff。存在真实 TypeScript
 consumer 的 schema 同时生成 checked-in types/codecs；目前 browser 与 bundle
 contract 属于这一类，Lambda invocation 在没有真实 TypeScript
 caller 前刻意不造 codec。生成结果提交进仓库，供 npm package、diff
-review 和非 Rust 消费者直接使用；禁止手工修改。Gate 一首次对外发布之前，v1 可以原地收口，避免初始公开契约背负实验字段；一旦发布，任何不兼容 wire 变化都必须使用新 protocol
+review 和非 Rust 消费者直接使用；禁止手工修改。产品首次对外发布之前，v1 可以原地收口，避免初始公开契约背负实验字段；一旦发布，任何不兼容 wire 变化都必须使用新 protocol
 version 并带 migration/conformance fixture。Rust 本身直接使用原始领域/wire
 types，不再从 schema 反向生成第二套 Rust 类型。
 
@@ -1336,13 +1369,16 @@ reference 捕获，再让两个 graph partition 并发进入独立 worker，比�
 raw-RGBA frame sequence，并通过共享 H.264/AAC path 总装已校验的 artifact。S3
 transport retry 与 conditional compare-and-verify
 publication 是有界 adapter 语义，不是 distributed retry policy。canonical
-Timeline IR 与 Execution Plan wire encoding 要等真实 external
+Timeline IR 与 Partition Plan wire encoding 要等真实 external
 consumer 出现后再实现；不预设 MP4 容器字节必然一致。
 
 退出 harness 也是 Gate 三完整的 orchestration proof：一个短生命周期 owner 上传 immutable
 input、调用有限数量的 worker、下载并验证 artifact，再完成总装。Gate 三不依赖数据库、queue、lease
-service 或长驻 coordinator。完成该证明后部署工作冻结；provider workflow、公开 remote render
-command、infrastructure definition、release publication 和其他云 adapter 都必须等待新的真实需求，不属于 Gate 四或 Gate 五。
+service 或长驻 coordinator。后续 distributed-incremental exit proof 会直接复用一份已完整验证的
+partition，不 materialize input 或准备 Chromium；随后故意破坏 disposable object，证明 conditional
+repair 后会重新 capture。上述 proof 完成后部署工作冻结；provider workflow、公开 remote render
+command、infrastructure definition、Lambda artifact publication 和其他 cloud
+adapter 都必须等待新的真实需求，不属于 Gate 四或 Gate 五。
 
 ### 第四关（已完成）：作者音频与字幕
 
@@ -1466,7 +1502,7 @@ fixture。任何一项失败，实验继续保持 opt-in，production path 不�
 还必须覆盖 pinned `FFmpeg` binary 与 composition policy。
 
 经过 review 的准入测量、production commits 与 closing CI 证据统一归
-[`conformance/layered-media-admission.md`](../../conformance/layered-media-admission.md)
+[`conformance/evidence/layered-media-admission.md`](../../conformance/evidence/layered-media-admission.md)
 所有。production branch 在一个 local render sequence 内保留同一 compositor、一条容量为一的
 frame queue 和一个显式 `FFmpeg` framesync lookahead；历史样本与准入 revision 不再复制进长期架构合约。
 
@@ -1537,19 +1573,19 @@ composition 的 33,177,600 个抽样 channel 中只有 6,240 个不同，mean ab
 delta 为 0.0002，最大值 2。显式把 source 标为 BT.709 limited
 range 后，完整 native path 的 mean
 delta 从 6.82 降为 0.67，但仍有 4,938,423 个抽样 channel 不同，孤立最大值达到 202，因为 Chromium 与
-`FFmpeg` 并不共享同一套 decode/chroma reconstruction 实现。因此 layered
-path 已证明自己是性能与内存都很有吸引力的候选，但尚未证明 raw-pixel
-equivalence。production 继续以 Chromium 为权威，直到 frozen asset
-metadata 正式拥有 color facts，且 presentation
-capability 能证明 media 与 browser visual 可分层；它绝不能成为隐藏 fallback。
+`FFmpeg` 并不共享同一套 decode/chroma reconstruction 实现。当时 layered
+path 只证明了性能与内存候选价值，并未证明 raw-pixel equivalence。Gate 七后来只在
+frozen asset metadata 拥有完整 BT.709 limited color tuple、且 bundle 显式声明
+`separableOverlay` 后，准入了更窄的生产合约。planner 会在 launch 前用事实选择该
+native path；否则选择 `browserComposite`。executor 绝不在运行中切换成隐藏 fallback。
 
-因此 Gate 一只接纳 CFR H.264 视觉素材，并把锁定 Chromium
-decoder 作为唯一权威 decode/color path。adapter 在 Rust 已选帧内部采样，且只有
-`requestVideoFrameCallback.mediaTime` 指向期望 source
-frame 时才返回 ready。不支持的 codec 或 VFR 必须在 render 前显式拒绝，不能近似执行。只有 frozen
-metadata 与 Browser Plan 将来携带完整 timestamp map、而非单一 CFR
-rate 后，VFR 才能转为正式能力。FFmpeg exact-frame
-extraction 保持备选实验，不作为会在同一次 render 中改变像素的隐藏 fallback。
+当前视觉 profile 只接纳 CFR H.264 素材。`browserComposite` 使用锁定 Chromium
+decoder 作为权威 decode/color path，且只有
+`requestVideoFrameCallback.mediaTime` 指向 Rust 选中的 source frame 时才返回
+ready。`separableOverlay` 在 Gate 七的 color 与 layout proof 下使用已准入的持久 native
+decoder 与 compositor。不支持的 codec、native path 所需的不完整 color fact 与 VFR
+不会被静默近似：它们会被拒绝，或留在已经证明的 browser path。只有 frozen metadata 与
+Browser Plan 携带完整 timestamp map、而非单一 CFR rate 后，VFR 才能转为正式能力。
 
 这条策略由 render-owned `AdmittedVideo` proof 对 core-owned
 metadata 执行 admission 来表达。它借用规范化事实，不再复制一套 render 媒体模型，并证明 H.264
@@ -1563,7 +1599,7 @@ executor 通过 production adapter 消费被接纳的视频，并验证最终动
   BeginFrameControl；只有更强的正确性与性能证据才能重开 WebDriver BiDi、surface
   copy、编码流或其他 transport 选择；
 - 分层 alpha 缓存何时值得额外成本；
-- Execution Plan 公开编码使用 JSON、Protobuf 或分层组合；
+- Timeline IR 与 Partition Plan 公开编码使用 JSON、Protobuf 或分层组合；
 - subtitle style 如何归一化，同时不把不支持的 ASS 语义静默降级；
 - 哪些动画适配器可随机 seek，哪些必须 warm-up/sequential；
 - 浏览器、字体与 FFmpeg 环境锁定到什么粒度。

@@ -153,21 +153,27 @@ Open Sans environment. At 4,096 MiB, three independent cold environments
 captured, verified, and conditionally published or reused the same 30 lossless
 320×180 frames:
 
-| sample | init | prepare browser | capture artifact | complete invocation | peak memory |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| cold 1 | 175 ms | 1,673 ms | 852 ms | 3,005 ms | 455 MB |
-| cold 2 | 246 ms | 1,097 ms | 732 ms | 2,277 ms | 457 MB |
-| cold 3 | 216 ms | 1,683 ms | 906 ms | 3,069 ms | 457 MB |
-| warm reuse | — | 0 ms | 774 ms | 1,325 ms | 457 MB |
+| sample     |   init | prepare browser | capture artifact | complete invocation | peak memory |
+| ---------- | -----: | --------------: | ---------------: | ------------------: | ----------: |
+| cold 1     | 175 ms |        1,673 ms |           852 ms |            3,005 ms |      455 MB |
+| cold 2     | 246 ms |        1,097 ms |           732 ms |            2,277 ms |      457 MB |
+| cold 3     | 216 ms |        1,683 ms |           906 ms |            3,069 ms |      457 MB |
+| warm reuse |      — |            0 ms |           774 ms |            1,325 ms |      457 MB |
+
+These historical samples predate pre-capture artifact admission. “Warm reuse”
+in that table reused the browser installation and existing publication, but
+still captured every frame. The current result uses one closed `outcome` enum,
+so a verified pre-capture hit cannot be confused with capture followed by a
+post-capture publication race.
 
 The same artifact also located the memory/CPU knee with one independent cold
 environment at each lower setting:
 
 | configured memory | prepare browser | capture artifact | complete invocation | peak memory |
-| ---: | ---: | ---: | ---: | ---: |
-| 4,096 MiB | 1,673 ms | 852 ms | 3,005 ms | 455 MB |
-| 2,048 MiB | 1,688 ms | 923 ms | 3,069 ms | 454 MB |
-| 1,024 MiB | 2,906 ms | 1,705 ms | 5,080 ms | 451 MB |
+| ----------------: | --------------: | ---------------: | ------------------: | ----------: |
+|         4,096 MiB |        1,673 ms |           852 ms |            3,005 ms |      455 MB |
+|         2,048 MiB |        1,688 ms |           923 ms |            3,069 ms |      454 MB |
+|         1,024 MiB |        2,906 ms |         1,705 ms |            5,080 ms |      451 MB |
 
 Two GiB is the measured latency/cost knee for this fixture: four GiB adds no
 material speed, while one GiB remains viable when lower GB-seconds matter more
@@ -182,10 +188,10 @@ independent cold environments. The values below are individual samples, not a
 statistical production benchmark:
 
 | configured memory | warm capture | cold invocation | warm GB-seconds | peak memory |
-| ---: | ---: | ---: | ---: | ---: |
-| 2,048 MiB | 22.07 s | 20.69–25.55 s | 47.11 | 600–603 MB |
-| 4,096 MiB | 13.00 s | 16.37 s | 58.72 | 610–616 MB |
-| 8,192 MiB | 7.91 s | 10.82 s | 73.46 | 609–612 MB |
+| ----------------: | -----------: | --------------: | --------------: | ----------: |
+|         2,048 MiB |      22.07 s |   20.69–25.55 s |           47.11 |  600–603 MB |
+|         4,096 MiB |      13.00 s |         16.37 s |           58.72 |  610–616 MB |
+|         8,192 MiB |       7.91 s |         10.82 s |           73.46 |  609–612 MB |
 
 Actual memory stayed near 600 MiB; the configured tier mainly bought Lambda CPU.
 Two GiB minimized measured GB-seconds, eight GiB minimized latency, and four GiB
@@ -218,21 +224,26 @@ this performance path and is not introduced without a release consumer.
 These measurements prove one locked experimental environment. They do not
 generalize across resolutions, media-heavy presentations, or AWS regions. The
 reviewed packager now replaces the experiment's hand-built ZIP procedure; a
-published release workflow is still intentionally absent.
+published Lambda package workflow is still intentionally absent.
 
 ## Remote partition exit conformance
 
 The ignored `remote_partition` integration test is the Gate-three exit check
 for the AWS adapter. It compiles one media-bearing two-shot film, captures the
 whole film through the deployed Lambda, then invokes both graph partitions
-concurrently. The final run's logs show those calls overlapping in a warm
-environment and a second cold environment. The harness verifies all three
-immutable frame artifacts, compares the whole-film raw-RGBA sequence with the
-two adjacent partition sequences, and assembles the remote partitions through
-the shared local encoder and audio path. The final MP4 must contain 60 H.264
-frames, AAC audio, decoded motion, and the expected audio start.
+concurrently. It repeats one completed partition and requires the structured
+result to report `outcome: "reused"` before accepting the warm artifact.
+It then corrupts that disposable object, requires the worker to conditionally
+remove only the observed invalid generation, and requires a fresh capture.
+The harness verifies all immutable frame artifacts, compares the
+whole-film raw-RGBA sequence with the two adjacent partition sequences, and
+assembles the remote partitions through the shared local encoder and audio
+path. The final MP4 must contain 60 H.264 frames, AAC audio, decoded motion, and
+the expected audio start.
 
-Run it only against a disposable function and an unused input prefix:
+Run it only against a disposable function, an unused input prefix, and an empty
+configured artifact prefix. The first three invocations must prove capture
+rather than inherit artifacts from an earlier run.
 
 ```sh
 ONMARK_REMOTE_FUNCTION=onmark-capture-conformance \
@@ -261,13 +272,26 @@ three synchronous invocations, artifact download, raw-pixel comparison, local
 audio/video assembly, and output probing. These are conformance observations
 from one locked 320×180 fixture, not production throughput claims.
 
+The distributed-incremental exit run on 2026-07-25 used the same 2,048 MiB
+arm64 function with the current worker. A verified 30-frame hit completed in
+62.87 ms and stopped after `read_request` plus the 36 ms artifact check; no
+input materialization or browser phase ran. After the harness deliberately
+replaced that object with invalid bytes, conditional repair and fresh capture
+completed in 1.900 seconds. The complete 48.69-second run also repeated the
+cold whole-film and concurrent-partition proof, local assembly, media probing,
+artifact downloads, and both incremental checks.
+
 ## Publication and limits
 
 The handler follows one linear path:
 
 ```text
 decode invocation
-→ download the bounded worker input
+→ download and validate request.json
+→ verify the expected artifact key
+→ return a verified hit with capture skipped
+  or continue on a miss
+→ download the bounded presentation input
 → materialize the verified Render Unit
 → prepare or reuse the verified browser installation
 → capture and verify one frame artifact
@@ -276,6 +300,10 @@ decode invocation
 ```
 
 S3 object keys are derived from the worker request's frame-artifact identity.
+An existing key is not a hit until the bounded reader verifies its complete
+envelope, payload checksum, identity, and canonical raw-RGBA fingerprints.
+An invalid object is deleted only with its observed ETag; a concurrent repair
+causes a bounded re-read rather than deleting the replacement.
 The adapter completes a multipart upload with `If-None-Match: *`. A `412`
 fetches, fully verifies, and compares the existing raw-RGBA sequence with this
 capture before returning `reused`; a transient `409` retries the conditional
@@ -324,9 +352,11 @@ Lambda invocation is still capturing. Conditional publication prevents an
 incorrect overwrite, but it cannot recover the duplicated browser cost.
 
 The execution role should be restricted to `s3:GetObject` over the approved
-worker-input and artifact prefixes, plus `s3:PutObject` and
-`s3:AbortMultipartUpload` over the artifact prefix. It does not require a broad
-bucket listing permission.
+worker-input and artifact prefixes, plus `s3:PutObject`,
+`s3:AbortMultipartUpload`, and `s3:DeleteObject` over the artifact prefix.
+Delete is used only with the ETag observed while reading an invalid
+immutable frame artifact. The adapter does not require a broad bucket listing
+permission.
 
 ## Deliberate non-goals
 

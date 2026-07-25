@@ -22,6 +22,8 @@ pub(super) fn run(
     SidecarBuilder::new(repository, Options::parse(arguments)?).build()
 }
 
+// ── Options
+
 #[derive(Debug)]
 struct Options {
     target: ReleaseTarget,
@@ -100,6 +102,8 @@ fn required<T>(value: Option<T>, flag: &str) -> Result<T, PackageError> {
         PackageError::InvalidOptions(format!("missing option {flag}").into_boxed_str())
     })
 }
+
+// ── Assembly
 
 struct SidecarBuilder<'a> {
     repository: &'a Path,
@@ -232,6 +236,8 @@ impl<'a> SidecarBuilder<'a> {
     }
 }
 
+// ── Package metadata
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PackageManifest<'a> {
@@ -298,6 +304,7 @@ struct PackageJson {
     version: &'static str,
     description: &'static str,
     license: &'static str,
+    repository: PackageRepository,
     os: [&'static str; 1],
     cpu: [&'static str; 1],
     files: [&'static str; 7],
@@ -312,6 +319,10 @@ impl PackageJson {
             version: env!("CARGO_PKG_VERSION"),
             description: "Native Onmark video compiler and release media tools",
             license: "SEE LICENSE IN LICENSE",
+            repository: PackageRepository {
+                r#type: "git",
+                url: "git+https://github.com/varo-yang/onmark.git",
+            },
             os: [target.operating_system()],
             cpu: [target.architecture()],
             files: [
@@ -333,6 +344,12 @@ impl PackageJson {
 }
 
 #[derive(Serialize)]
+struct PackageRepository {
+    r#type: &'static str,
+    url: &'static str,
+}
+
+#[derive(Serialize)]
 struct PackageExports {
     #[serde(rename = "./package.json")]
     package: &'static str,
@@ -344,6 +361,8 @@ struct PackageExports {
 struct PublishConfig {
     access: &'static str,
 }
+
+// ── Filesystem boundary
 
 fn write_json(path: &Path, value: &impl Serialize) -> Result<(), PackageError> {
     let mut contents = serde_json::to_string_pretty(value)?;
@@ -420,6 +439,8 @@ fn output_parent(output: &Path) -> &Path {
         .unwrap_or_else(|| Path::new("."))
 }
 
+// ── Tests
+
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -474,6 +495,11 @@ mod tests {
         assert_eq!(package["os"], serde_json::json!(["darwin"]));
         assert_eq!(package["cpu"], serde_json::json!(["arm64"]));
         assert_eq!(package["publishConfig"]["access"], "public");
+        assert_eq!(package["repository"]["type"], "git");
+        assert_eq!(
+            package["repository"]["url"],
+            "git+https://github.com/varo-yang/onmark.git"
+        );
 
         let manifest = read_json(&output.join("onmark-release.json"));
         assert_eq!(manifest["target"], "darwin-arm64");
@@ -605,10 +631,10 @@ mod tests {
         }
         fs::write(media.join("build.txt"), "FFmpeg version 8.1.2\n")
             .expect("the media build record is written");
-        let release = repository.join("scripts/release");
-        fs::create_dir_all(&release).expect("the repository release directory is created");
+        let toolchain = repository.join("scripts/release/media-toolchain");
+        fs::create_dir_all(&toolchain).expect("the media toolchain fixture is created");
         let build_script = "#!/usr/bin/env bash\nexit 0\n";
-        fs::write(release.join("build-media.sh"), build_script)
+        fs::write(toolchain.join("build.sh"), build_script)
             .expect("the canonical media build script is written");
         fs::write(sources.join("build-media.sh"), build_script)
             .expect("the supplied media build script is written");
@@ -648,7 +674,7 @@ mod tests {
         let mut contents =
             serde_json::to_string_pretty(&manifest).expect("the source manifest serializes");
         contents.push('\n');
-        let canonical = release.join("media-sources.json");
+        let canonical = toolchain.join("sources.json");
         fs::write(&canonical, &contents).expect("the canonical source manifest is written");
         fs::write(media.join("media-sources.json"), contents)
             .expect("the supplied source manifest is written");

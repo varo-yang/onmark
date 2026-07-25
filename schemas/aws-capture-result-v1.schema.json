@@ -37,25 +37,30 @@
       "minimum": 0,
       "type": "integer"
     },
-    "FrameArtifactId": {
-      "description": "Deterministic identity of one frame-artifact capture contract.\n\nThis identifies the immutable visual inputs and locked capture environment,\nnot the encoded PNG payload. Deployments use it to choose an object key;\nthe artifact's internal checksum still verifies the published bytes.",
-      "pattern": "^sha256:[0-9a-f]{64}$",
-      "type": "string"
-    },
-    "Publication": {
-      "description": "Whether this invocation committed a new object or reused a verified one.",
+    "CaptureOutcome": {
+      "description": "Observable outcome of one immutable capture request.",
       "oneOf": [
         {
-          "const": "published",
-          "description": "This invocation conditionally committed a new immutable artifact.",
+          "const": "capturedAndPublished",
+          "description": "Browser capture completed and this invocation published the artifact.",
+          "type": "string"
+        },
+        {
+          "const": "capturedAndReused",
+          "description": "Browser capture completed, but a concurrent winner was verified and reused.",
           "type": "string"
         },
         {
           "const": "reused",
-          "description": "A concurrent or prior invocation had already committed the same artifact.",
+          "description": "A prior artifact was verified before browser capture became necessary.",
           "type": "string"
         }
       ]
+    },
+    "FrameArtifactId": {
+      "description": "Deterministic identity of one frame-artifact capture contract.\n\nThis identifies the immutable visual inputs and locked capture environment,\nnot the encoded PNG payload. Deployments use it to choose an object key;\nthe artifact's internal checksum still verifies the published bytes.",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "type": "string"
     }
   },
   "$id": "https://onmark.dev/schemas/aws-capture-result-v1.schema.json",
@@ -66,8 +71,8 @@
     "artifact": {
       "$ref": "#/$defs/ArtifactLocation"
     },
-    "publication": {
-      "$ref": "#/$defs/Publication"
+    "outcome": {
+      "$ref": "#/$defs/CaptureOutcome"
     },
     "version": {
       "$ref": "#/$defs/CaptureInvocationVersion"
@@ -76,7 +81,7 @@
   "required": [
     "version",
     "artifact",
-    "publication"
+    "outcome"
   ],
   "title": "CaptureResult",
   "type": "object"

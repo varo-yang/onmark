@@ -133,7 +133,7 @@ async fn bounds_a_runtime_adapter_that_never_finishes_loading() {
     let request = BrowserRequest::new(
         RequestId::new(1),
         BrowserCommand::Load {
-            plan: gate_one_plan(),
+            plan: browser_plan_fixture(),
         },
     );
     let error = session
@@ -220,10 +220,10 @@ async fn seeks_dynamic_frames_deterministically_on_metal() {
 
 #[tokio::test]
 #[ignore = "requires ONMARK_HEADLESS_SHELL, ONMARK_FFMPEG, and ONMARK_FFPROBE"]
-async fn renders_the_gate_one_plan_to_a_verified_mp4() {
+async fn renders_the_browser_plan_to_a_verified_mp4() {
     let directory = tempdir().expect("the test output directory must be available");
     let source = directory.path().join("source.mp4");
-    let output = directory.path().join("gate-one.mp4");
+    let output = directory.path().join("render.mp4");
     generate_source_video(&source, "2.5").await;
     let frozen = freeze_asset(&source).await;
     let executor = real_executor(100);
@@ -333,8 +333,8 @@ async fn renders_and_repeats_the_production_layered_path() {
 #[ignore = "requires ONMARK_HEADLESS_SHELL, ONMARK_FFMPEG, and ONMARK_FFPROBE"]
 async fn renders_random_access_media_equally_as_one_or_two_units() {
     let directory = tempdir().expect("the test output directory must be available");
-    let bundle = FixtureBundle::build_gate_four(directory.path()).await;
-    let fixture = GateFourFixture::materialize(directory.path(), &bundle).await;
+    let bundle = FixtureBundle::build_audio_subtitle(directory.path()).await;
+    let fixture = AudioSubtitleFixture::materialize(directory.path(), &bundle).await;
     let whole_output = directory.path().join("whole.mp4");
     let partitioned_output = directory.path().join("partitioned.mp4");
     let executor = real_executor(TWO_UNIT_FRAME_COUNT);
@@ -354,8 +354,8 @@ async fn renders_random_access_media_equally_as_one_or_two_units() {
 
     assert_eq!(whole.frames(), TWO_UNIT_FRAME_COUNT);
     assert_eq!(partitioned.frames(), TWO_UNIT_FRAME_COUNT);
-    let whole = inspect_gate_four_output(&whole_output).await;
-    let partitioned = inspect_gate_four_output(&partitioned_output).await;
+    let whole = inspect_audio_subtitle_output(&whole_output).await;
+    let partitioned = inspect_audio_subtitle_output(&partitioned_output).await;
     assert_eq!(
         whole.video_hashes, partitioned.video_hashes,
         "reusing Chromium across units must preserve whole-film pixels",
@@ -370,8 +370,8 @@ async fn renders_random_access_media_equally_as_one_or_two_units() {
 #[ignore = "requires ONMARK_BUNDLER, ONMARK_HEADLESS_SHELL, ONMARK_FFMPEG, and ONMARK_FFPROBE"]
 async fn assembles_temporal_frame_artifacts_equivalently_to_the_whole_film() {
     let directory = tempdir().expect("the test output directory must be available");
-    let bundle = FixtureBundle::build_gate_four(directory.path()).await;
-    let fixture = GateFourFixture::materialize(directory.path(), &bundle).await;
+    let bundle = FixtureBundle::build_audio_subtitle(directory.path()).await;
+    let fixture = AudioSubtitleFixture::materialize(directory.path(), &bundle).await;
     let whole_artifact_path = directory.path().join("whole-film.onmark-frames");
     let assembled_output = directory.path().join("assembled-from-artifacts.mp4");
     let executor = real_executor(TWO_UNIT_FRAME_COUNT);
@@ -418,7 +418,7 @@ async fn assembles_temporal_frame_artifacts_equivalently_to_the_whole_film() {
         .await
         .expect("partition artifacts must reproduce the whole-film pixel sequence");
     assert_eq!(assembled.frames(), TWO_UNIT_FRAME_COUNT);
-    inspect_gate_four_output(&assembled_output).await;
+    inspect_audio_subtitle_output(&assembled_output).await;
 }
 
 #[tokio::test]
@@ -536,16 +536,16 @@ async fn shot_projection_blocks_cross_partition_css_observation() {
     .expect("an omitted closing shot cannot affect opening pixels through :has()");
 }
 
-async fn inspect_gate_four_output(output: &Path) -> DecodedOutput {
+async fn inspect_audio_subtitle_output(output: &Path) -> DecodedOutput {
     assert_video_stream(output, TWO_UNIT_FRAME_COUNT).await;
     let output = inspect_output(output).await;
     assert!(
         output.has_motion(),
-        "the Gate-four video must contain motion"
+        "the audio-and-subtitle video must contain motion"
     );
     assert!(
         !output.audio_hashes.is_empty(),
-        "the Gate-four video must retain its final audio mix",
+        "the audio-and-subtitle video must retain its final audio mix",
     );
     assert_audio_starts_at(&output, 0);
     output
@@ -786,7 +786,7 @@ async fn exercise_temporal_sequence(
     fixture: &Url,
 ) -> Result<Vec<RawRgbaHash>, Box<dyn Error>> {
     load_and_prepare(session, fixture).await?;
-    let frame_rate = gate_one_plan().frame_rate();
+    let frame_rate = browser_plan_fixture().frame_rate();
     let mut fingerprints = Vec::with_capacity(TEMPORAL_SEEK_SEQUENCE.len());
     let mut request_id = 3_u32;
 
@@ -817,7 +817,7 @@ async fn exercise_protocol(
 
     stage(session, 3, 15).await?;
     let captured = session
-        .capture_frame(frame(15), gate_one_plan().frame_rate())
+        .capture_frame(frame(15), browser_plan_fixture().frame_rate())
         .await?;
     confirm(session, 4, 15).await?;
     let disposed = session
@@ -837,7 +837,7 @@ async fn load_and_prepare(
     fixture: &Url,
 ) -> Result<(), Box<dyn Error>> {
     session.navigate(fixture, &fixture_root(fixture)).await?;
-    let plan = gate_one_plan();
+    let plan = browser_plan_fixture();
     let frame_rate = plan.frame_rate();
     let loaded = session
         .dispatch(&BrowserRequest::new(
@@ -1150,7 +1150,7 @@ fn frame_artifact_limits() -> FrameArtifactLimits {
 
 fn browser_fixture() -> Url {
     let repository = repository();
-    let fixture = repository.join("conformance/browser/gate-one.html");
+    let fixture = repository.join("conformance/browser/runtime-protocol.html");
     let runtime = repository.join("packages/runtime/dist/src/index.js");
     assert!(runtime.is_file(), "run `pnpm --dir packages/runtime build`");
     Url::from_file_path(fixture).expect("the fixture path is absolute")
@@ -1188,7 +1188,7 @@ fn repository() -> PathBuf {
         .to_owned()
 }
 
-fn gate_one_plan() -> BrowserPlan {
+fn browser_plan_fixture() -> BrowserPlan {
     BrowserPlan::from_timeline(&synthetic_timeline(), &BTreeMap::new())
         .expect("the fixture timeline fits the browser frame domain")
 }
@@ -1232,7 +1232,7 @@ fn executable_video_unit(
     frozen: FrozenAsset,
     source: PathBuf,
 ) -> ExecutableUnit {
-    let timeline = gate_one_video_timeline(frozen.clone());
+    let timeline = video_timeline_fixture(frozen.clone());
     let materialized =
         MaterializedAsset::new(frozen, source).expect("the fixture source path is present");
     let unit = RenderUnit::whole_film(
@@ -1246,7 +1246,7 @@ fn executable_video_unit(
     bundle.materialize(unit)
 }
 
-fn gate_one_video_timeline(frozen: FrozenAsset) -> onmark_core::timeline::TimelineIr {
+fn video_timeline_fixture(frozen: FrozenAsset) -> onmark_core::timeline::TimelineIr {
     let asset = AssetRef::parse("source.mp4").expect("the fixture asset reference is valid");
     let assets = BTreeMap::from([(asset, frozen)]);
     solve_timeline(
@@ -1259,13 +1259,13 @@ fn gate_one_video_timeline(frozen: FrozenAsset) -> onmark_core::timeline::Timeli
     )
 }
 
-struct GateFourFixture {
+struct AudioSubtitleFixture {
     partition_plan: PartitionPlan,
     whole_film: ExecutableUnit,
     partitioned_units: Vec<ExecutableUnit>,
 }
 
-impl GateFourFixture {
+impl AudioSubtitleFixture {
     async fn materialize(workspace: &Path, bundle: &FixtureBundle) -> Self {
         let video_path = workspace.join("source.mp4");
         let voice_over_path = workspace.join("voice.m4a");
@@ -1292,8 +1292,8 @@ impl GateFourFixture {
             (asset_ref("music.wav"), music.clone()),
             (asset_ref("effect.wav"), effect.clone()),
         ]);
-        let source = fs::read_to_string(repository().join("conformance/cli/gate-four.html"))
-            .expect("the Gate-four screenplay fixture is readable");
+        let source = fs::read_to_string(repository().join("conformance/cli/audio-subtitle.html"))
+            .expect("the audio-and-subtitle screenplay fixture is readable");
         let timeline = solve_timeline(&source, &assets);
         let timeline = compiler::import_captions(timeline, [caption_track()])
             .expect("fixture captions must enter the frame grid");
@@ -1485,7 +1485,7 @@ impl FixtureBundle {
         Self::build(
             workspace,
             "temporal-bundle",
-            "temporal-experiment.html",
+            "temporal-effects.html",
             "randomAccess",
             "browserComposite",
             "perFrame",
@@ -1493,11 +1493,11 @@ impl FixtureBundle {
         .await
     }
 
-    async fn build_gate_four(workspace: &Path) -> Self {
+    async fn build_audio_subtitle(workspace: &Path) -> Self {
         Self::build_from(
             workspace,
-            "gate-four-bundle",
-            &repository().join("conformance/cli/gate-four.html"),
+            "audio-subtitle-bundle",
+            &repository().join("conformance/cli/audio-subtitle.html"),
             "randomAccess",
             "browserComposite",
             "perFrame",

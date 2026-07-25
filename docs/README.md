@@ -1,6 +1,8 @@
 # Onmark engineering documents
 
-English and Chinese documents share the same decisions. Chinese architecture documents currently carry the fuller design discussion; English documents provide the maintained project-facing specification.
+English documents are the normative project-facing specification. Chinese
+documents mirror the same decisions and may retain fuller design rationale.
+Semantic divergence between the two languages is a documentation bug.
 
 | Document | Purpose |
 | --- | --- |
@@ -10,7 +12,7 @@ English and Chinese documents share the same decisions. Chinese architecture doc
 | [`zh-CN/typescript-style-guide.md`](zh-CN/typescript-style-guide.md) | 中文 TypeScript/JavaScript 代码宪法 |
 | [`en/presentation-contract.md`](en/presentation-contract.md) | Browser presentation authoring contract |
 | [`zh-CN/presentation-contract.md`](zh-CN/presentation-contract.md) | 浏览器 presentation authoring 合约 |
-| [`en/architecture.md`](en/architecture.md) | Target architecture and execution model |
+| [`en/architecture.md`](en/architecture.md) | Current architecture, execution model, and deferred work |
 | [`zh-CN/architecture.md`](zh-CN/architecture.md) | 中文架构设计与完整渲染链路 |
 | [`en/language-specification.md`](en/language-specification.md) | Screenplay language semantics and diagnostics |
 | [`zh-CN/language-specification.md`](zh-CN/language-specification.md) | 剧本语言语义、求时规则与诊断规范 |

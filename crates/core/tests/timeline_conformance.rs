@@ -54,8 +54,8 @@ fn music_retains_its_natural_end_before_the_film_ends() {
 
 #[test]
 fn timing_errors_match_stable_diagnostics() {
-    let source_path = fixture("timeline", "invalid/timing-errors.html");
-    let expected_path = fixture("timeline", "invalid/timing-errors.diagnostics.txt");
+    let source_path = fixture("compiler/timeline", "invalid/timing-errors.html");
+    let expected_path = fixture("compiler/timeline", "invalid/timing-errors.diagnostics.txt");
     let assets = frozen_assets([("clip.mp4", "2s")]);
     let report = solve_fixture(&source_path, &assets).expect("all referenced assets were probed");
 
@@ -65,9 +65,12 @@ fn timing_errors_match_stable_diagnostics() {
 
 #[test]
 fn a_sound_effect_cannot_escape_its_shot() {
-    let source_path = fixture("timeline", "invalid/sound-effect-outside-shot.html");
+    let source_path = fixture(
+        "compiler/timeline",
+        "invalid/sound-effect-outside-shot.html",
+    );
     let expected_path = fixture(
-        "timeline",
+        "compiler/timeline",
         "invalid/sound-effect-outside-shot.diagnostics.txt",
     );
     let assets = frozen_assets([("hit.wav", "500ms")]);
@@ -79,8 +82,8 @@ fn a_sound_effect_cannot_escape_its_shot() {
 
 #[test]
 fn an_empty_film_reports_an_authored_timing_error() {
-    let source_path = fixture("timeline", "invalid/empty-film.html");
-    let expected_path = fixture("timeline", "invalid/empty-film.diagnostics.txt");
+    let source_path = fixture("compiler/timeline", "invalid/empty-film.html");
+    let expected_path = fixture("compiler/timeline", "invalid/empty-film.diagnostics.txt");
     let report = solve_fixture(&source_path, &BTreeMap::new())
         .expect("the empty fixture references no external assets");
 
@@ -90,9 +93,12 @@ fn an_empty_film_reports_an_authored_timing_error() {
 
 #[test]
 fn an_unrelated_cue_failure_does_not_conceal_an_empty_film() {
-    let source_path = fixture("timeline", "invalid/empty-film-with-overflowing-cue.html");
+    let source_path = fixture(
+        "compiler/timeline",
+        "invalid/empty-film-with-overflowing-cue.html",
+    );
     let expected_path = fixture(
-        "timeline",
+        "compiler/timeline",
         "invalid/empty-film-with-overflowing-cue.diagnostics.txt",
     );
     let rate = FrameRate::new(u32::MAX, 1).expect("the maximum frame rate is valid");
@@ -124,7 +130,7 @@ fn an_unrelated_cue_failure_does_not_conceal_an_empty_film() {
 
 #[test]
 fn missing_frozen_asset_is_a_typed_failure() {
-    let source_path = fixture("timeline", "valid/media-duration.html");
+    let source_path = fixture("compiler/timeline", "valid/media-duration.html");
     let error = solve_fixture(&source_path, &BTreeMap::new())
         .expect_err("the fixture references assets absent from the catalog");
     let asset = AssetRef::parse("clip.mp4").expect("the fixture asset reference is valid");
@@ -134,9 +140,12 @@ fn missing_frozen_asset_is_a_typed_failure() {
 
 #[test]
 fn incompatible_video_source_matches_stable_diagnostics() {
-    let source_path = fixture("timeline", "invalid/incompatible-video-source.html");
+    let source_path = fixture(
+        "compiler/timeline",
+        "invalid/incompatible-video-source.html",
+    );
     let expected_path = fixture(
-        "timeline",
+        "compiler/timeline",
         "invalid/incompatible-video-source.diagnostics.txt",
     );
     let asset = AssetRef::parse("voice.mp3").expect("the fixture asset reference is valid");
@@ -155,9 +164,12 @@ fn incompatible_video_source_matches_stable_diagnostics() {
 
 #[test]
 fn incompatible_audio_source_matches_stable_diagnostics() {
-    let source_path = fixture("timeline", "invalid/incompatible-audio-source.html");
+    let source_path = fixture(
+        "compiler/timeline",
+        "invalid/incompatible-audio-source.html",
+    );
     let expected_path = fixture(
-        "timeline",
+        "compiler/timeline",
         "invalid/incompatible-audio-source.diagnostics.txt",
     );
     let asset = AssetRef::parse("silent.mp4").expect("the fixture asset reference is valid");
@@ -172,8 +184,11 @@ fn incompatible_audio_source_matches_stable_diagnostics() {
 
 #[test]
 fn frame_domain_overflow_matches_stable_diagnostics() {
-    let source_path = fixture("timeline", "invalid/frame-overflow.html");
-    let expected_path = fixture("timeline", "invalid/frame-overflow.diagnostics.txt");
+    let source_path = fixture("compiler/timeline", "invalid/frame-overflow.html");
+    let expected_path = fixture(
+        "compiler/timeline",
+        "invalid/frame-overflow.diagnostics.txt",
+    );
     let rate = FrameRate::new(u32::MAX, 1).expect("the maximum frame rate is valid");
     let report = solve_fixture_at(&source_path, &BTreeMap::new(), rate)
         .expect("the fixture references no external assets");
@@ -183,8 +198,8 @@ fn frame_domain_overflow_matches_stable_diagnostics() {
 }
 
 fn assert_valid_fixture(name: &str, assets: BTreeMap<AssetRef, FrozenAsset>) {
-    let source_path = fixture("timeline", &format!("valid/{name}.html"));
-    let expected_path = fixture("timeline", &format!("valid/{name}.timeline.txt"));
+    let source_path = fixture("compiler/timeline", &format!("valid/{name}.html"));
+    let expected_path = fixture("compiler/timeline", &format!("valid/{name}.timeline.txt"));
     let solved = solve_fixture(&source_path, &assets).expect("all fixture assets were probed");
 
     assert!(solved.diagnostics().is_empty());

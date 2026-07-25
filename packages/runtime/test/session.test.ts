@@ -60,7 +60,7 @@ const plan: BrowserPlan = {
 
 // ── Protocol progression ──
 
-test("executes the Gate-one protocol in order", async () => {
+test("executes the browser protocol in order", async () => {
   const adapter = new RecordingAdapter();
   const session = new RuntimeSession(adapter);
 

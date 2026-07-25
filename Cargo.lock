@@ -1967,6 +1967,7 @@ dependencies = [
  "onmark-aws-lambda",
  "onmark-core",
  "schemars",
+ "semver",
  "serde",
  "serde_json",
  "sha2 0.10.9",

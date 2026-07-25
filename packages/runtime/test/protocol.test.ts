@@ -26,7 +26,7 @@ const PROTOCOL_FIXTURES = new URL(
 
 // ── Decoding boundaries ──
 
-test("decodes every checked-in Gate-one protocol example", async () => {
+test("decodes every checked-in browser protocol example", async () => {
   for (const request of await fixture("browser-requests-v1.jsonl")) {
     assert.deepEqual(decodeBrowserRequest(request), request);
   }

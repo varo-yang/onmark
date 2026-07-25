@@ -8,6 +8,7 @@ mod bundle;
 mod frame;
 mod message;
 mod plan;
+mod projection;
 
 pub use bundle::{
     BundleFile, BundleIdentity, BundleManifest, BundleVersion, InvalidBundleFile,

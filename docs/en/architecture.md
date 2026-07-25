@@ -1,7 +1,8 @@
 # Onmark Architecture
 
-> Status: target architecture. This document separates foundational rules,
-> ordered delivery gates, and later production capabilities.
+> Status: current architecture through Gate seven and distributed incremental
+> rendering. Completed gates are retained as historical acceptance evidence;
+> unimplemented work is marked deferred.
 
 This document is paired with the Onmark Language Specification. The language
 defines authored meaning; this document defines execution. Their only contract
@@ -17,8 +18,8 @@ locally or across stateless workers.
 1. Source expresses intent; IR records facts.
 2. The compiler is a pure function of source, frozen asset catalog, options, and
    version.
-3. Local and distributed rendering execute the same `ExecutionPlan` and worker
-   state machine.
+3. Local and distributed rendering execute the same Render Unit contract and
+   worker state machine.
 4. Partitions follow pixel and temporal dependencies, not blindly chosen shot
    boundaries.
 5. Chromium draws resolved frames; it does not solve time or discover work.
@@ -45,7 +46,7 @@ Source AST
     → Resolved Film
       → Timeline IR
         → Render Graph
-          → Execution Plan
+          → Partition Plan
 ```
 
 - **Source AST** preserves authored structure and source spans.
@@ -55,22 +56,22 @@ Source AST
   content start rules without exposing syntax-layer attributes.
 - **Timeline IR** contains exact frame intervals and provenance for every timing
   decision.
-- **Render Graph** records pixel, media, transition, history, global-layer, and
-  audio dependencies.
-- **Execution Plan** contains immutable work units, environments, dependencies,
-  output intervals, evaluation intervals, and cache keys.
+- **Render Graph** derives independently evaluable regions and direct frozen
+  media dependencies from solved facts and an admitted temporal capability.
+- **Partition Plan** contains pure output/evaluation intervals and the frozen
+  assets assigned to each candidate unit.
 
-A render unit has separate `evaluation` and `output` intervals. Evaluation may
-include transition preroll, animation warm-up, or history frames; only output
-frames are published.
+A render unit has separate `evaluation` and `output` intervals. The current
+graph emits equal intervals. A future dependency may widen evaluation for
+preroll, warm-up, or history, but only output frames may be published.
 
 The compiler pipeline ends at Timeline IR. Execution begins at a separate
 composition boundary:
 
 ```text
-Timeline IR + Frozen Asset Catalog + Bundle Manifest + Render Profile
+Partition + Timeline IR + Frozen Asset Catalog + Bundle Manifest + Render Profile
   → Render Unit
-    → Browser Plan + Audio Plan + materialization requirements
+    → Browser Plan + Visual Execution Plan + Audio Plan
       → materialize → Executable Unit + verified private root
 ```
 
@@ -81,9 +82,9 @@ executor invocation consumes. `RenderProfile` owns pixel-affecting facts such as
 viewport dimensions; process deadlines and retained-memory ceilings remain
 executor limits. Materialization consumes the unit into an `ExecutableUnit`, so
 the executor cannot pair a browser plan with an unrelated URL or asset root.
-Gate one has exactly one whole-film unit. Gate two introduces the Render Graph
-and may derive several units of the same type; it does not replace the executor
-contract.
+A whole-film render composes one unit directly. Partitioned rendering derives
+the same unit type from every `RenderPartition`; it does not replace the
+executor contract.
 
 The original Gate-one `AudioPlan` established the native mixing boundary with
 solved voice-over placements. Materialization copies frozen audio bytes beside
@@ -146,20 +147,23 @@ freeze inputs ─┬→ probe media ─→ compile ─────────�
                            → materialize Executable Unit
                              → capture/encode → mix audio → verify
 
-Gate two inserts: Timeline IR → Render Graph → partition → Render Units
+Partitioned execution inserts: Timeline IR → Render Graph → Partition Plan → Render Units
 ```
 
 The compiler performs parse, structural bind, attribute/reference resolve, and
 timeline solve without IO. Validation belongs to the phase that first has enough
 information to decide; solve constructs Timeline IR directly. Onmark does not
 add ceremonial `validate` or `lower` phases without a representation that proves
-a new invariant. At Gate two, the planner computes dependency closure before
-partitioning. Its first graph records each Gate-one shot as an independent
-region only because the production adapter has proved that it keeps no state
-across shot boundaries; the graph also records each region's direct frozen-media
-dependencies. This is evidence-backed, not a general shot-boundary rule.
-Transitions, persistent elements, global effects, and historical shaders must
-widen or merge regions for correctness before partitioning consumes them.
+a new invariant. The planner derives admitted dependency regions before
+partitioning. It records each shot as an independent region only when the
+bundle declares and proves random access; unknown presentation code remains one
+sequential region. The random-access adapter is admissible only because it
+keeps no state across shot boundaries. The graph also records each region's
+direct frozen-media dependencies. This is evidence-backed, not a general
+shot-boundary rule. The current graph has no transition, persistence,
+global-effect, or history edges. Any future capability with those dependencies
+must first extend the graph to widen or merge regions before partitioning may
+consume it.
 
 Structural binding and attribute/reference resolution aggregate authored
 diagnostics while building candidate outputs. An error withholds the phase value
@@ -190,17 +194,17 @@ diagnostic. A media element with no authored source remains valid through static
 resolution but cannot produce renderable Timeline IR and receives an authored
 asset diagnostic during solving.
 
-Gate-one `FrozenAssetId` uses SHA-256 and the canonical `sha256:<lowercase-hex>`
+`FrozenAssetId` uses SHA-256 and the canonical `sha256:<lowercase-hex>`
 spelling. The hashing operation belongs at the IO freezing boundary; core owns
 only the validated identity and deterministic mapping.
 
 The bundle manifest has the same separation. Its contract identifies an
-immutable presentation artifact and its entry point, runtime version, fonts,
-static dependencies, and declared temporal and visual capabilities. The
-current manifest also records whether browser-owned pixels may change between
-solved placement boundaries, and binds all three declarations into `bundleId`.
+immutable presentation artifact, its fixed entry point, document scope,
+declared temporal and visual capabilities, frame behavior, and every payload
+file. Runtime, fonts, and static dependencies enter through those hashed files
+rather than parallel mutable metadata. All four declarations enter `bundleId`.
 Its identity is
-`{version,entryPoint,temporalCapability,visualCapability,frameBehavior,files}`.
+`{version,entryPoint,documentScope,temporalCapability,visualCapability,frameBehavior,files}`.
 It uses
 SHA-256 over UTF-8 compact JSON, with files sorted by portable path and each
 entry ordered as
@@ -210,7 +214,7 @@ Paths are lowercase portable ASCII, at
 most 1,024 bytes, cannot enter unit-owned namespaces, and cannot make one file
 the directory ancestor of another. Materialization turns frozen bundle and asset
 identities into local paths or browser URLs immediately before execution and
-verifies their digests. Gate one assembles one content-addressed unit root:
+verifies their digests. Materialization assembles one content-addressed unit root:
 required assets appear at `assets/sha256/<lowercase digest>` beneath the
 presentation entry. The browser derives that relative location from the frozen
 identity already present in `BrowserPlan`; native paths and browser URLs
@@ -337,16 +341,16 @@ default to `sequential`: parallel seekability must be proven, not guessed.
 Native APIs and audited adapters may provide stronger declarations; detection
 may recommend an adapter but may not silently relax correctness.
 
-Determinism is layered. Canonically encoded Timeline IR and Execution Plans must
-be byte-identical once those encodings exist. The current in-memory Timeline IR
-is structurally deterministic but does not yet claim canonical wire bytes. Raw
+Determinism is layered. Canonically encoded Timeline IR and Partition Plans must
+be byte-identical once those encodings exist. Their current in-memory forms are
+structurally deterministic but do not yet claim canonical wire bytes. Raw
 frames target identical hashes inside a locked browser/font/render environment;
 per-frame worker-artifact fingerprints make that property an executable
 conformance claim. Encoded containers are validated by timestamps, frame counts,
 codec configuration, and decoded content; byte-identical MP4 output is an
 experimental property, not a blanket promise.
 
-## Distributed execution (production target)
+## Distributed execution
 
 A remote render is one finite DAG owned by one short-lived invocation. A parent
 process or provider-native workflow may retain transient progress while workers
@@ -356,6 +360,17 @@ engine therefore needs no database, durable queue, distributed lease, or Redis
 lock for correctness. A future multi-tenant service may wrap this contract with
 its own admission and accounting systems, but those are not Onmark engine
 dependencies.
+
+Distributed incremental capture has two bounded admission points. The worker
+must verify its expected artifact immediately after reading `request.json` and
+before downloading presentation inputs or preparing Chromium. A verified hit
+returns the existing location and records that capture was skipped; only a miss
+enters the unchanged materialize/capture/publish path. A future short-lived
+caller that already owns the deployment's artifact namespace may perform the
+same check before invoking Lambda, but Onmark does not introduce such a caller,
+a coordinator, or durable progress state merely to avoid a lightweight warm
+invocation. The worker-side check is the correctness boundary and remains
+necessary even when an outer caller later prunes known hits.
 
 Gate three starts with a deliberately narrower interchange: a worker captures a
 whole planned output interval into one bounded, checksummed frame artifact. The
@@ -423,8 +438,8 @@ browser I/O, verifies and expands the archive during the first bounded
 invocation, and retains that private installation for warm invocations. An
 already-expanded executable remains a supported deployment input. The deployment
 package's dedicated packager owns the reviewed deterministic ZIP shape described
-below; cross-compilation, release publication, and infrastructure templates
-remain separate concerns.
+below; cross-compilation, Lambda package publication, and infrastructure
+templates remain separate concerns.
 
 ## Incremental rendering
 
@@ -469,8 +484,9 @@ The desktop launcher names a conservative host seed from the pinned browser
 artifact, OS and architecture, and bounded system-font inventory. Native code
 adds its capture mode, graphics backend, and composition version. An explicit
 custom browser disables persistent reuse because it is not covered by the
-launcher-owned browser identity. Cache publication is content-addressed and
-atomic. Immutable valid entries are read without a global lease; one
+launcher-owned browser identity. Cache publication is keyed by the deterministic
+capture-contract identity and is atomic. Immutable valid entries are read
+without a global lease; one
 cross-process lock owns only corruption repair and publication. Corrupt or
 mismatched artifacts are removed and recaptured. The store is bounded by
 artifact count and bytes. Once full, it keeps existing valid entries and leaves
@@ -484,14 +500,14 @@ are operational evidence only: no elapsed value enters compilation, planning,
 artifact identity, or rendered output.
 
 The retained
-[incremental-rendering conformance](../../conformance/incremental-rendering-experiment.md)
+[incremental-rendering conformance](../../conformance/evidence/incremental-rendering.md)
 checks whole-film/partition raw-RGBA equivalence, local edit isolation,
 cross-region selector isolation, cold/warm CLI reuse, corruption repair, and
 shared final assembly. Temporal capability and DOM scope remain separate
 manifest facts: random access permits independent evaluation; `documentScope`
 states which semantic DOM bytes the artifact actually contains.
 
-## Target repository shape
+## Repository shape
 
 Concepts start as modules, not crates. A package is split only for a distinct
 runtime, dependency budget, real independent consumer, or deployment/release
@@ -512,7 +528,7 @@ onmark/
 ├── schemas/ conformance/ evals/ docs/
 ```
 
-The completed Gate-one milestone contains `onmark-core`, `onmark-media`,
+The current repository contains `onmark-core`, `onmark-media`,
 `onmark-render`, `@onmark/runtime`'s browser session, `@onmark/authoring`'s
 authored-DOM bindings, `@onmark/bundler`'s presentation artifact boundary, and
 the first `onmark-cli` whole-film composition root. Media is a separate crate
@@ -569,20 +585,23 @@ arguments, diagnostics, compilation, rendering, and exit status. Browser
 provisioning begins only after authored diagnostics, and no ambient executable
 is a silent fallback.
 
-All release automation is co-located under `scripts/release/`.
-`assemble-package.mjs` projects already-built TypeScript modules into the
-32 MiB public package, closes internal declaration imports, and hashes every
-payload except its own manifest. `cargo xtask release sidecar` admits the native
-`onmark`, FFmpeg, ffprobe, source archives, build record, and licenses into one
-target-specific package with a 384 MiB ceiling. Both assemblers use private
-staging and one final rename; neither compiles source, installs dependencies, or
-publishes.
+All release automation is co-located under `scripts/release/`. Its Rust module
+owns native sidecar admission, `npm/` owns public-package assembly and
+publication, and `media-toolchain/` owns pinned media-source acquisition and
+construction. `npm/assemble-package.mjs` projects already-built TypeScript
+modules into the 32 MiB public package, closes internal declaration imports,
+and hashes every payload except its own manifest. `cargo xtask release sidecar`
+admits the native `onmark`, FFmpeg, ffprobe, source archives, build record, and
+licenses into one target-specific package with a 384 MiB ceiling. Both
+assemblers use private staging and one final rename; neither compiles source,
+installs dependencies, or publishes.
 
-`media-sources.json` fixes every media source by URL, byte length, and SHA-256.
-The adjacent fetcher is the only network owner, while `build-media.sh` consumes
-only admitted local archives with autodetection, network, shared libraries, and
-nonfree components disabled. The sidecar rechecks the source manifest and build
-script byte for byte before admitting target binary formats and provenance.
+`media-toolchain/sources.json` fixes every media source by URL, byte length, and
+SHA-256. Its fetcher is the only network owner, while
+`media-toolchain/build.sh` consumes only admitted local archives with
+autodetection, network, shared libraries, and nonfree components disabled. The
+sidecar rechecks the source manifest and build script byte for byte before
+admitting target binary formats and provenance.
 
 `packages/launcher/desktop-release.json` is the single supported-target and
 browser contract. It owns the pinned Chrome for Testing build, browser product,
@@ -592,14 +611,49 @@ cross-process lock into a content-addressed cache and publishes it by atomic
 rename. Each lease has an owner-specific heartbeat marker; a reclaimed owner
 cannot publish cache bytes or refresh or remove its successor's lock.
 
-The manual desktop-release workflow admits macOS arm64, Linux x64, and Windows
-x64 only after installing the two produced npm tarballs into an empty consumer
-and rendering the same screenplay in two independent browser sessions. It
-checks exact frame count, decoded audio, canonical raw-RGBA identity,
-product-import bundling, and no-clobber output. Each target artifact also
-retains the two real CLI render durations with its fixed profile; shared runner
-timings are evidence samples, not release thresholds. Cross-compilation and
-binary format inspection alone never establish target support.
+The desktop-release workflow can be dispatched for admission only. Its
+publication path runs only after a `release/vX.Y.Z` pull request is merged into
+`main`. In both modes it admits macOS arm64, Linux x64, and Windows x64 only
+after installing the two produced npm tarballs into an empty consumer and
+rendering the same screenplay in two independent browser sessions. It checks
+exact frame count, decoded audio, canonical raw-RGBA identity, product-import
+bundling, and no-clobber output. Each target artifact also retains the two real
+CLI render durations with its fixed profile; shared runner timings are evidence
+samples, not release thresholds. Cross-compilation and binary format inspection
+alone never establish target support.
+
+Only the merged release-PR path may cross the npm publication boundary. A
+protected `npm-release` environment and npm Trusted Publishing bind that job to
+the reviewed workflow without a long-lived registry token. Its deployment
+policy accepts only protected branches; `main` is protected by required PR and
+CI rules. The job validates one complete same-version archive set, publishes
+platform sidecars before the public package, and treats an existing version as
+reusable only when npm reports the exact admitted integrity. This makes a
+failed multi-package publication safe to resume without allowing a version to
+acquire different bytes. After npm accepts the complete set, the same job
+creates the matching tag and GitHub Release at the admitted `main` revision.
+npm requires packages to exist before Trusted Publishing can be configured, so
+the first public version remains a one-time operator bootstrap from these same
+admitted archives.
+
+The bootstrap order is fixed:
+
+1. reserve the unscoped `onmark` name and the `@onmark` organization;
+2. run the manual admission workflow at the intended product revision;
+3. publish the three admitted `@onmark/cli-*` archives, then the admitted
+   `onmark` archive, using an interactive npm identity with 2FA;
+4. configure all four packages to trust `desktop-release.yml` in
+   `varo-yang/onmark`, restricted to the `npm-release` environment and
+   `npm publish`; and
+5. protect that GitHub environment before merging later release pull requests.
+
+`cargo xtask release prepare <version>` updates the fixed product version in the
+Rust workspace, every internal TypeScript package, and Cargo lockfile. The
+resulting changes are reviewed on a `release/v<version>` branch. CI verifies the
+fixed-version invariant and requires the branch suffix to equal the product
+version. Merging that pull request is the sole automated release decision.
+Prerelease versions use the `next` distribution tag; stable versions use
+`latest`.
 
 The Lambda ZIP remains a separate deployment artifact. Its bootstrap, archive
 budget, `/tmp` lifecycle, and S3 contract are not reused as desktop installer
@@ -607,7 +661,7 @@ semantics.
 
 ### Product commands and language evidence
 
-Gate one's native command is deliberately narrow: `onmark render <film.html>`.
+The authored native command is deliberately narrow: `onmark render <film.html>`.
 The authored HTML contains both screenplay custom elements and presentation
 DOM/CSS. At most one inline module marked `type="module" data-om-motion`
 exports the declarative `motion` value; the generated infrastructure entry owns
@@ -717,18 +771,26 @@ application layer. Its Cargo manifest exists solely to give the Rust schema
 generator a pinned build-only dependency budget and a stable `cargo xtask` entry
 point. That binary is consumed only by developers and CI and may depend on core
 and `onmark-aws-lambda` with their `schema` features, `schemars`,
-`serde`/`serde_json`, `sha2` for native release identities, and `tempfile` for
-private sidecar staging; it disables the Lambda package's default runtime feature, so
-schema generation does not link AWS. Product crates and packages never depend
-on it. The Lambda dependency exists solely to publish that deployment
-boundary's schemas, not to smuggle AWS into core. The adjacent Node generator
-may use the pinned schema-to-TypeScript and validation toolchain. `cargo xtask
-schema` writes every versioned schema, then invokes that generator. `cargo
-xtask eval audio` and `cargo xtask eval html` independently regrade the frozen
-audio-language and native-HTML authoring experiments.
-The adjacent release scripts assemble the public npm package and admitted media;
-`cargo xtask release sidecar` assembles only the native platform payload. None
-of these tools installs or publishes product artifacts.
+`serde`/`serde_json`, `semver` for the fixed release version, `sha2` for native
+release identities, and `tempfile` for private sidecar staging; it disables the
+Lambda package's default runtime feature, so schema generation does not link
+AWS. Product crates and packages never depend on it. The Lambda dependency
+exists solely to publish that deployment boundary's schemas, not to smuggle AWS
+into core. The adjacent Node generator may use the pinned schema-to-TypeScript
+and validation toolchain. `cargo xtask schema` writes every versioned schema,
+then invokes that generator. `cargo xtask eval audio` and `cargo xtask eval
+html` independently regrade the frozen audio-language and native-HTML authoring
+experiments. `cargo xtask release prepare/verify` owns product-version changes
+and consistency; `cargo xtask release sidecar` assembles only the native
+platform payload. Adjacent release scripts assemble and admit the public npm
+package and media. Only the protected release workflow invokes the registry
+publisher.
+Within `scripts/`, `evaluation/` owns frozen language grading, `schema/` owns
+Rust-to-TypeScript contract generation, `typescript/` owns repository-wide
+source-shape mechanics, and `release/` owns desktop artifact construction and
+publication. Inside the release owner, `npm/` and `media-toolchain/` separate
+their Node and shell process boundaries from the Rust xtask module. The root
+`xtask.rs` only dispatches these owners.
 `json-schema-to-typescript` emits reviewable browser types into runtime and the
 manifest type into bundler; Ajv emits standalone browser validation code at
 build time. The Lambda schemas intentionally have no TypeScript codec until a
@@ -753,7 +815,7 @@ shutdown reports process-control failures while `Drop` remains a best-effort
 termination fallback. Private ffprobe response types are translated once into
 core-owned `AssetMetadata`; JSON values and third-party error types do not
 define the stable API, while underlying errors remain available through the
-standard error source chain for debugging. Gate-one probing requests bounded
+standard error source chain for debugging. Probing requests bounded
 stream-level facts for every stream. Attached-picture video streams are not
 renderable media. Among the remaining video streams and among audio streams,
 the declared default stream wins; ties and absent defaults resolve to the
@@ -826,8 +888,9 @@ inactivity budget. Browser navigation waits separately for document load and
 the runtime host because the transport's navigation call does not itself
 establish that lifecycle barrier.
 
-Gate one captures one PNG at a time and writes it directly to `FFmpeg`'s
-`image2pipe`; there is no frame queue or whole-video buffer. The fixed H.264
+Browser capture retains at most one PNG at a time and writes it directly to
+`FFmpeg`'s `image2pipe`; the layered path similarly uses a capacity-one stream.
+There is no whole-video frame buffer. The fixed H.264
 `yuv420p` profile rejects odd viewport dimensions before either process starts.
 Browser capture has one closed backend choice beneath the shared runtime
 protocol. `BeginFrame` atomically commits and reads a compositor transaction on
@@ -950,7 +1013,7 @@ input or a worker invocation, and must be proven in its real execution
 environment before it is treated as a production launch contract. A failed
 Chromium launch never causes an automatic downgrade.
 
-Gate-one native browser operations and decoded-video waits accept at most a
+Native browser operations and decoded-video waits accept at most a
 one-day deadline, keeping every platform timer inside an explicit supported
 horizon.
 
@@ -970,7 +1033,7 @@ bindings. CSS and custom entries still own every visual decision. Bundler
 injects the pinned authoring and runtime artifacts. Runtime never depends on
 authoring or bundler. `stateless`, `warmup`, and `sequential` are architectural categories
 today, not a public capability-declaration API; when that extension point
-becomes real, runtime will own it. The Gate-one `RuntimeSession` owns protocol
+becomes real, runtime will own it. `RuntimeSession` owns protocol
 ordering, interval-relationship checks, exact-frame projection, and terminal
 disposal. It rejects concurrent commands instead of growing a hidden queue and
 gives the adapter a recursively frozen snapshot of accepted plan facts.
@@ -990,7 +1053,7 @@ bundle schema.
 `@onmark/bundler` is the Node-only product build boundary, not repository
 automation. It may depend on Node built-ins, the product `@onmark/authoring` and
 `@onmark/runtime` entry points, and the pinned `esbuild` production dependency;
-browser packages never depend back on it. Gate one compiles one ESM
+browser packages never depend back on it. The bundler compiles one ESM
 presentation, substitutes the pinned authoring and runtime entries, emits a
 fixed document shell, and records every presentation payload file in a stable
 SHA-256 manifest. The package exposes the same operation through the narrow
@@ -1036,7 +1099,7 @@ diff. A schema with a real TypeScript consumer also generates checked-in
 types/codecs; the browser and bundle contracts do so today, while the Lambda
 invocation deliberately has no speculative TypeScript caller. Generated files
 are never hand-edited, and Rust does not regenerate a second Rust model from its
-own schema. Before the first external Gate-one release, v1 is refined in place
+own schema. Before the first external product release, v1 is refined in place
 so the initial public contract does not preserve experimental fields; after
 publication, an incompatible wire change requires a new protocol version and
 migration fixture. The `BrowserPlan` carries the output frame rate,
@@ -1115,6 +1178,10 @@ three SDK attempts. Since `GetObject` returns a response stream after the SDK
 operation has completed, every pending body read separately has a 30-second
 progress deadline. This prevents a stalled stream from becoming an unbounded
 worker wait without pretending that it is a scheduler or lease policy.
+The execution role may conditionally delete only an invalid artifact under the
+configured artifact prefix. Repair binds `DeleteObject` to the ETag returned by
+the failed read; a precondition race triggers a bounded re-read instead of
+removing another worker's replacement.
 
 This JSON contract has checked-in Rust-generated schemas. It intentionally has
 no generated TypeScript SDK because no TypeScript caller exists yet; creating a
@@ -1133,11 +1200,12 @@ seconds, and pre-runtime archive expansion exhausted Lambda's ten-second
 initialization window. These measurements select ZIP delivery plus
 invocation-owned preparation for this environment; they do not generalize to
 other workloads. The reviewed packager replaces the hand-built ZIP procedure,
-but release publication and infrastructure definitions remain experimental until
-separately reviewed. Other backends such as GCP, ECS, or Kubernetes follow the
-same adapter rule and consume the same worker request and artifact format. They
-own their own SDK, transport semantics, and release artifact; Lambda environment
-variables, ZIP layout, and S3 policy are not a generic cloud interface.
+but Lambda package publication and infrastructure definitions remain
+experimental until separately reviewed. Other backends such as GCP, ECS, or
+Kubernetes follow the same adapter rule and consume the same worker request and
+artifact format. They own their own SDK, transport semantics, and release
+artifact; Lambda environment variables, ZIP layout, and S3 policy are not a
+generic cloud interface.
 
 ### Deployment performance evidence
 
@@ -1194,16 +1262,20 @@ concurrently on independent workers, compares canonical raw-RGBA frame
 sequences, and assembles the verified artifacts through the shared H.264/AAC
 path. S3 transport retries and conditional compare-and-verify publication are
 bounded adapter semantics, not a distributed retry policy. Canonical Timeline IR
-and Execution Plan wire encodings remain deferred until they have an external
+and Partition Plan wire encodings remain deferred until they have an external
 consumer; byte-identical MP4 containers are not presumed.
 
 The exit harness is also the gate's complete orchestration proof: one
 short-lived owner uploads immutable inputs, invokes the finite set of workers,
 downloads and verifies their artifacts, and assembles the result. Gate three
 does not require a database, queue, lease service, or long-running coordinator.
-Deployment work is frozen after this proof. Provider workflows, public remote
-render commands, infrastructure definitions, release publication, and additional
-cloud adapters require a later user need and are not part of gates four or five.
+The later distributed-incremental exit proof repeats one verified partition
+without materializing inputs or preparing Chromium, then corrupts the
+disposable object and proves conditional repair followed by fresh capture.
+Deployment work is frozen after these proofs. Provider workflows, public remote
+render commands, infrastructure definitions, Lambda artifact publication, and
+additional cloud adapters require a later user need and are not part of gates
+four or five.
 
 **Gate four (complete): authored audio and subtitles.** This gate carried
 general audio and user-supplied subtitle files through the existing local
@@ -1387,7 +1459,8 @@ binary and composition policy in addition to Chromium, fonts, launch policy,
 and other pixel-affecting host facts.
 
 The reviewed admission measurements, production commits, and closing CI evidence
-live in [`conformance/layered-media-admission.md`](../../conformance/layered-media-admission.md).
+live in
+[`conformance/evidence/layered-media-admission.md`](../../conformance/evidence/layered-media-admission.md).
 The production branch retains one compositor across a local render sequence,
 one capacity-one frame queue, and one explicit `FFmpeg` framesync lookahead; the
 evidence record owns the historical samples and revisions that admitted it.
@@ -1479,21 +1552,24 @@ base on both sides, straight-alpha composition differed in only 6,240 of
 delta 2. Explicitly tagging the source as BT.709 limited range reduced the
 complete native-path mean delta from 6.82 to 0.67, but 4,938,423 sampled
 channels still differed and isolated maxima reached 202 because Chromium and
-`FFmpeg` do not share one decode/chroma-reconstruction implementation. The
-layered path therefore proves a compelling performance and memory candidate, not
-raw-pixel equivalence. Production keeps Chromium authoritative until frozen
-asset metadata owns color facts and a presentation capability proves that media
-and browser visuals are separable; it is never a hidden fallback.
+`FFmpeg` do not share one decode/chroma-reconstruction implementation. At the
+time, the layered path proved a performance and memory candidate rather than
+raw-pixel equivalence. Gate seven later admitted a narrower production contract
+only after frozen asset metadata carried a complete BT.709 limited color tuple
+and the bundle explicitly declared `separableOverlay`. Planning now selects
+that native path before launch when all facts prove it; otherwise it selects
+`browserComposite`. The executor never switches paths as a fallback.
 
-Gate one therefore admits CFR H.264 visual assets only and uses the locked
-Chromium decoder as the authoritative visual decode/color path. The adapter
-seeks inside the Rust-selected frame and does not report readiness until
-`requestVideoFrameCallback.mediaTime` identifies the expected source frame.
-Unsupported codec or variable-frame-rate input is rejected before rendering, not
-silently approximated. VFR becomes admissible only after frozen metadata and the
-browser plan carry a complete timestamp map rather than one CFR rate. `FFmpeg`
-exact-frame extraction remains an alternative experiment rather than a hidden
-fallback that would change pixels within one render.
+The current visual profile admits CFR H.264 assets only. `browserComposite`
+uses the locked Chromium decoder as its authoritative decode/color path and
+does not report readiness until `requestVideoFrameCallback.mediaTime`
+identifies the Rust-selected source frame. `separableOverlay` uses the admitted
+persistent native decoder and compositor under the Gate-seven color and layout
+proof. Unsupported codecs, incomplete native-path color facts, and
+variable-frame-rate input are rejected or kept on the proved browser path
+rather than silently approximated. VFR becomes admissible only after frozen
+metadata and the browser plan carry a complete timestamp map rather than one
+CFR rate.
 
 This policy is represented by render-owned `AdmittedVideo` proof over core-owned
 metadata. It borrows the normalized facts instead of introducing a second media
