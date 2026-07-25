@@ -4,7 +4,7 @@ const PACKAGE_ORDER = Object.freeze([
   "@onmark/cli-darwin-arm64",
   "@onmark/cli-linux-x64",
   "@onmark/cli-win32-x64",
-  "onmark",
+  "@onmark/cli",
 ]);
 
 export const PUBLICATION_PACKAGE_COUNT = PACKAGE_ORDER.length;

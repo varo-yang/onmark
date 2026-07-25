@@ -53,6 +53,7 @@ const resolveOnmarkExport = createRequire(
   new URL("../../../../package.json", import.meta.url),
 ).resolve;
 const AUTHORING_ENTRY = resolveOnmarkExport("#onmark-authoring");
+const MOTION_GSAP_ENTRY = resolveOnmarkExport("#onmark-motion-gsap");
 const RUNTIME_ENTRY = resolveOnmarkExport("#onmark-runtime");
 const VISUAL_RESOURCE_LOADERS = {
   ".avif": "file",
@@ -355,15 +356,12 @@ function publicOnmarkImports(): Plugin {
 }
 
 function resolvePublicImport(args: OnResolveArgs): OnResolveResult {
-  try {
-    return { path: resolveOnmarkExport(args.path) };
-  } catch (error) {
-    const failure = {
-      detail: error,
-      text: `cannot resolve public Onmark import ${args.path}`,
-    };
-    return { errors: [failure] };
+  if (args.path === "onmark/motion/gsap") {
+    return { path: MOTION_GSAP_ENTRY };
   }
+  return {
+    errors: [{ text: `cannot resolve public Onmark import ${args.path}` }],
+  };
 }
 
 function authoredHtmlEntry(

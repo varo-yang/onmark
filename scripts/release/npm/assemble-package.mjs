@@ -248,7 +248,7 @@ async function productPackage() {
     optionalDependencies[`@onmark/cli-${target}`] = launcher.version;
   }
   return {
-    name: "onmark",
+    name: "@onmark/cli",
     version: launcher.version,
     description: "Screenplay-first deterministic browser video compiler",
     license: "MIT",
@@ -272,6 +272,7 @@ async function productPackage() {
     imports: {
       "#onmark-authoring": "./packages/authoring/dist/src/index.js",
       "#onmark-bundler-command": "./packages/bundler/dist/src/command.js",
+      "#onmark-motion-gsap": "./packages/motion-gsap/dist/src/index.js",
       "#onmark-runtime": "./packages/runtime/dist/src/index.js",
     },
     files: ["packages", "LICENSE", "README.md", MANIFEST_NAME],

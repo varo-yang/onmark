@@ -28,6 +28,11 @@ test("assembles the complete pinned runtime dependency budget", async () => {
       await readFile(join(product, "package.json"), "utf8"),
     );
 
+    assert.equal(package_.name, "@onmark/cli");
+    assert.equal(
+      package_.imports["#onmark-motion-gsap"],
+      "./packages/motion-gsap/dist/src/index.js",
+    );
     assert.deepEqual(package_.dependencies, {
       "@puppeteer/browsers": "3.0.6",
       esbuild: "0.28.1",
