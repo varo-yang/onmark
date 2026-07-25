@@ -1,7 +1,7 @@
 name: Desktop release
 
 on:
-  pull_request:
+  pull_request_target:
     branches: [main]
     types: [closed]
   workflow_dispatch:
@@ -43,7 +43,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.merge_commit_sha || github.sha }}
 
       - name: Resolve admitted source revision
         shell: bash
@@ -51,7 +51,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           RELEASE_BRANCH: ${{ github.event.pull_request.head.ref }}
         run: |
-          if [[ "$EVENT_NAME" == pull_request ]]; then
+          if [[ "$EVENT_NAME" == pull_request_target ]]; then
             release_version="${RELEASE_BRANCH#release/v}"
           else
             release_version=
@@ -215,7 +215,7 @@ jobs:
       - name: Check out released source
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
 
       - name: Resolve release identity
         shell: bash

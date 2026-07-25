@@ -755,13 +755,15 @@ digest；native sidecar assembler 会拒绝不同的 target matrix。launcher �
 lease 都有 owner-specific heartbeat marker；被回收的旧 owner 不能发布缓存字节，也不能刷新或删除 successor 的锁。
 
 desktop-release workflow 可以手动 dispatch 只做 admission；其 publication path
-只会在 `release/vX.Y.Z` pull request 合并进 `main` 后运行。两种模式都只有在空
-consumer 中安装两份生成的 npm tarball，并用两个独立 browser session 渲染同一份
-screenplay 后，才准入 macOS arm64、Linux x64 与 Windows x64。它验证精确帧数、解码
-音频、canonical raw-RGBA identity、公开 product import bundling 和 no-clobber
-output。每个 target artifact 还会保留固定 profile 下两次真实 CLI render duration；
-共享 runner 的 timing 只是 evidence sample，不是 release threshold。cross-compilation
-和 binary-format 检查本身不能证明 target support。
+只会在 `release/vX.Y.Z` pull request 合并进 `main` 后运行。merged path 从受保护的
+base context 启动，并显式 checkout 该 pull request 的 merge commit，因此 admission、
+npm provenance 与 GitHub tag 都指向同一份已 review 的 `main` revision。两种模式都
+只有在空 consumer 中安装两份生成的 npm tarball，并用两个独立 browser session 渲染
+同一份 screenplay 后，才准入 macOS arm64、Linux x64 与 Windows x64。它验证精确
+帧数、解码音频、canonical raw-RGBA identity、公开 product import bundling 和
+no-clobber output。每个 target artifact 还会保留固定 profile 下两次真实 CLI render
+duration；共享 runner 的 timing 只是 evidence sample，不是 release threshold。
+cross-compilation 和 binary-format 检查本身不能证明 target support。
 
 只有 merged release-PR path 可以跨越 npm publication boundary。受保护的
 `npm-release` environment 与 npm Trusted Publishing 会把该 job 绑定到 reviewed
