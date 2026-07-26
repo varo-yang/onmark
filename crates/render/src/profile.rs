@@ -34,12 +34,12 @@ struct RenderProfileWire {
 }
 
 impl RenderProfile {
-    /// Creates the fixed H.264 output profile.
+    /// Creates checked pixel dimensions shared by every output profile.
     ///
     /// # Errors
     ///
     /// Returns [`InvalidRenderProfile`] when a dimension is empty, exceeds the
-    /// supported viewport edge, or cannot enter the fixed `yuv420p` encoder.
+    /// supported viewport edge, or cannot enter every admitted pixel format.
     pub const fn new(width: u32, height: u32) -> Result<Self, InvalidRenderProfile> {
         if width == 0 || height == 0 {
             return Err(InvalidRenderProfile::EmptyDimensions);
@@ -73,7 +73,7 @@ pub enum InvalidRenderProfile {
     EmptyDimensions,
     /// At least one output dimension exceeds the supported viewport edge.
     DimensionsTooLarge,
-    /// The fixed `yuv420p` encoder requires even dimensions.
+    /// The admitted subsampled pixel formats require even dimensions.
     OddDimensions,
 }
 
@@ -82,7 +82,7 @@ impl fmt::Display for InvalidRenderProfile {
         formatter.write_str(match self {
             Self::EmptyDimensions => "render dimensions must be positive",
             Self::DimensionsTooLarge => "render dimensions exceed the supported viewport",
-            Self::OddDimensions => "H.264 yuv420p output requires even dimensions",
+            Self::OddDimensions => "encoded video output requires even dimensions",
         })
     }
 }

@@ -140,7 +140,7 @@ impl PresentationBundler {
 }
 
 impl BundlerProcess {
-    fn command(&self) -> Command {
+    pub(super) fn command(&self) -> Command {
         match self {
             Self::Direct(executable) => Command::new(executable),
             Self::Node { executable, entry } => {
@@ -151,7 +151,7 @@ impl BundlerProcess {
         }
     }
 
-    fn executable(&self) -> &Path {
+    pub(super) fn executable(&self) -> &Path {
         match self {
             Self::Direct(executable) | Self::Node { executable, .. } => executable.as_path(),
         }

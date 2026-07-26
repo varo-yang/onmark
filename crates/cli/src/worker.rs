@@ -12,6 +12,7 @@ use onmark_render::{
     BrowserCaptureMode, BrowserLaunchPolicy, Ffmpeg, FrameArtifact, FrameCaptureExecutor,
     WorkerCaptureRequest,
 };
+use serde::Serialize;
 
 use crate::arguments::{WorkerArgs, WorkerCaptureArgs, WorkerCommand};
 use crate::environment;
@@ -21,10 +22,14 @@ use crate::input;
 
 pub(super) struct WorkerOutcome {
     artifact: FrameArtifact,
+    json: bool,
 }
 
 impl WorkerOutcome {
     pub(super) fn write(self) -> ExitCode {
+        if self.json {
+            return self.write_json();
+        }
         let mut stdout = io::stdout().lock();
         writeln!(
             stdout,
@@ -34,15 +39,28 @@ impl WorkerOutcome {
         )
         .map_or(ExitCode::FAILURE, |()| ExitCode::SUCCESS)
     }
-}
 
-pub(super) async fn run(args: WorkerArgs) -> Result<WorkerOutcome, CliError> {
-    match args.command {
-        WorkerCommand::Capture(args) => capture(args).await,
+    fn write_json(&self) -> ExitCode {
+        let report = WorkerReport {
+            version: 1,
+            command: "worker.capture",
+            artifact: self.artifact.path().display().to_string(),
+            frames: self.artifact.frames(),
+        };
+        let mut stdout = io::stdout().lock();
+        let result = serde_json::to_writer_pretty(&mut stdout, &report)
+            .and_then(|()| writeln!(stdout).map_err(serde_json::Error::io));
+        result.map_or(ExitCode::FAILURE, |()| ExitCode::SUCCESS)
     }
 }
 
-async fn capture(args: WorkerCaptureArgs) -> Result<WorkerOutcome, CliError> {
+pub(super) async fn run(args: WorkerArgs, json: bool) -> Result<WorkerOutcome, CliError> {
+    match args.command {
+        WorkerCommand::Capture(args) => capture(args, json).await,
+    }
+}
+
+async fn capture(args: WorkerCaptureArgs, json: bool) -> Result<WorkerOutcome, CliError> {
     let browser = environment::worker_browser(&args.browser)?;
     create_output_directory(&args.output)?;
     let request = read_request(&args.input)?;
@@ -58,7 +76,11 @@ async fn capture(args: WorkerCaptureArgs) -> Result<WorkerOutcome, CliError> {
         BrowserLaunchPolicy::local(),
         BrowserCaptureMode::BeginFrame,
         execution::browser_limits(),
-        Ffmpeg::new(args.ffmpeg, execution::worker_encode_limits())?,
+        Ffmpeg::new(
+            args.ffmpeg,
+            execution::worker_encode_limits(),
+            onmark_render::EncodeProfile::H264Mp4,
+        )?,
     );
     let artifact = capture
         .capture_frame_artifact(
@@ -69,7 +91,16 @@ async fn capture(args: WorkerCaptureArgs) -> Result<WorkerOutcome, CliError> {
         )
         .await?;
 
-    Ok(WorkerOutcome { artifact })
+    Ok(WorkerOutcome { artifact, json })
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkerReport {
+    version: u16,
+    command: &'static str,
+    artifact: String,
+    frames: u64,
 }
 
 fn read_request(input: &Path) -> Result<WorkerCaptureRequest, CliError> {

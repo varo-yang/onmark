@@ -483,6 +483,18 @@ pub enum TimelineAudioKind {
     SoundEffect,
 }
 
+impl TimelineAudioKind {
+    /// Returns the stable machine spelling of this audio role.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::VoiceOver => "voiceOver",
+            Self::Music => "music",
+            Self::SoundEffect => "soundEffect",
+        }
+    }
+}
+
 impl From<GeneralAudioKind> for TimelineAudioKind {
     fn from(kind: GeneralAudioKind) -> Self {
         match kind {
@@ -689,4 +701,60 @@ pub enum TimingReason {
     ShotEnd,
     /// The solved film's exclusive end frame.
     FilmEnd,
+}
+
+impl TimingReason {
+    /// Returns the stable machine spelling of this timing provenance.
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::FilmStart => "filmStart",
+            Self::Sequential => "sequential",
+            Self::ShotStart => "shotStart",
+            Self::AuthoredDelay(_) => "authoredDelay",
+            Self::Event { .. } => "event",
+            Self::ExplicitDuration(_) => "explicitDuration",
+            Self::AssetDuration => "assetDuration",
+            Self::LongestContent(_) => "longestContent",
+            Self::Children => "children",
+            Self::ShotEnd => "shotEnd",
+            Self::FilmEnd => "filmEnd",
+        }
+    }
+
+    /// Returns the authored span that directly selected this boundary.
+    #[must_use]
+    pub const fn authored_at(&self) -> Option<SourceSpan> {
+        match self {
+            Self::AuthoredDelay(span)
+            | Self::ExplicitDuration(span)
+            | Self::LongestContent(span) => Some(*span),
+            Self::Event { authored_at, .. } => Some(*authored_at),
+            Self::FilmStart
+            | Self::Sequential
+            | Self::ShotStart
+            | Self::AssetDuration
+            | Self::Children
+            | Self::ShotEnd
+            | Self::FilmEnd => None,
+        }
+    }
+
+    /// Returns the named event that selected this boundary, when present.
+    #[must_use]
+    pub const fn event(&self) -> Option<&EventRef> {
+        match self {
+            Self::Event { event, .. } => Some(event),
+            Self::FilmStart
+            | Self::Sequential
+            | Self::ShotStart
+            | Self::AuthoredDelay(_)
+            | Self::ExplicitDuration(_)
+            | Self::AssetDuration
+            | Self::LongestContent(_)
+            | Self::Children
+            | Self::ShotEnd
+            | Self::FilmEnd => None,
+        }
+    }
 }

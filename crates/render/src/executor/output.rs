@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
 use super::{RenderError, RenderErrorKind};
-use crate::EncodedVideo;
+use crate::{EncodeProfile, EncodedVideo};
 
 /// Private visual and mixed outputs awaiting one atomic publication step.
 #[derive(Debug)]
@@ -19,7 +19,7 @@ pub(super) struct StagedOutput {
 }
 
 impl StagedOutput {
-    pub(super) fn new(output: &Path) -> Result<Self, RenderError> {
+    pub(super) fn new(output: &Path, profile: EncodeProfile) -> Result<Self, RenderError> {
         if output.exists() {
             return Err(RenderError::new(
                 RenderErrorKind::Output,
@@ -34,8 +34,14 @@ impl StagedOutput {
             .map_err(|source| {
                 RenderError::output_io(output, "failed to create output staging directory", source)
             })?;
-        let visual_path = directory.path().join("visual.mp4");
-        let mixed_path = directory.path().join("video.mp4");
+        let visual_path = directory
+            .path()
+            .join("visual")
+            .with_extension(profile.extension());
+        let mixed_path = directory
+            .path()
+            .join("video")
+            .with_extension(profile.extension());
         Ok(Self {
             directory,
             visual_path,
@@ -89,7 +95,8 @@ mod tests {
         let output = directory.path().join("video.mp4");
         std::fs::write(&output, b"existing").expect("the fixture output is writable");
 
-        let error = StagedOutput::new(&output).expect_err("publication is no-clobber");
+        let error = StagedOutput::new(&output, crate::EncodeProfile::H264Mp4)
+            .expect_err("publication is no-clobber");
 
         assert_eq!(error.kind(), RenderErrorKind::Output);
         assert_eq!(
@@ -102,12 +109,37 @@ mod tests {
     fn removes_the_private_directory_when_staging_is_abandoned() {
         let directory = tempdir().expect("the fixture directory is available");
         let output = directory.path().join("video.mp4");
-        let staging = StagedOutput::new(&output).expect("staging can be created");
+        let staging = StagedOutput::new(&output, crate::EncodeProfile::H264Mp4)
+            .expect("staging can be created");
         let staging_directory = staging.directory.path().to_owned();
 
         drop(staging);
 
         assert!(!staging_directory.exists());
         assert!(!output.exists());
+    }
+
+    #[test]
+    fn stages_visual_and_mixed_bytes_in_the_selected_container() {
+        let directory = tempdir().expect("the fixture directory is available");
+        let output = directory.path().join("video.mov");
+
+        let staging = StagedOutput::new(&output, crate::EncodeProfile::ProResMov)
+            .expect("editing output can be staged");
+
+        assert_eq!(
+            staging
+                .visual_path
+                .extension()
+                .and_then(|value| value.to_str()),
+            Some("mov")
+        );
+        assert_eq!(
+            staging
+                .mixed_path
+                .extension()
+                .and_then(|value| value.to_str()),
+            Some("mov")
+        );
     }
 }

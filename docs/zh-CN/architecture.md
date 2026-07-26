@@ -1,6 +1,6 @@
 # Onmark 架构设计
 
-> 状态：当前架构已覆盖 Gate 一至 Gate 七及分布式增量渲染。已完成关卡保留为历史验收证据；尚未实现的能力会明确标为延期。
+> 状态：Gate 八已在 Gate 一至 Gate 七及分布式增量渲染完成后启动。已完成关卡保留为历史验收证据；尚未实现的能力会明确标为延期。
 
 本文与《Onmark 语言规格书》平级。语言规格负责“创作者如何表达影片”，本文负责“已编译的影片如何成为成片”，两者只通过 versioned
 Timeline IR 接合。
@@ -1037,8 +1037,8 @@ host；不能把 transport 的 navigation 返回误当成完整生命周期屏�
 browser capture 最多只保留一张 PNG，捕获后直接写入 `FFmpeg image2pipe`。分布式
 layered capture 因 frame artifact 需要拥有 canonical RGBA 与 hash，使用一条 capacity-one
 stream 返回像素；本地 layered video 只把透明前景送入 encoder process，不会 split 已合成帧，
-也不会在写 MP4 前把 raw RGBA 再复制回 Rust。不存在整段视频 frame buffer。固定的 H.264 `yuv420p`
-profile 会在进程启动前拒绝奇数 viewport 尺寸。browser capture 在共享 runtime
+也不会在写入所选视频 profile 前把 raw RGBA 再复制回 Rust。不存在整段视频 frame buffer。
+共享的 subsampled 输出 profile 会在进程启动前拒绝奇数 viewport 尺寸。browser capture 在共享 runtime
 protocol 下只有两个封闭 backend：Linux `chrome-headless-shell` 用 `BeginFrame`
 原子提交并读取 compositor transaction；macOS 与 Windows 用 `Screenshot`，在同一个
 `Seek` readiness barrier 后通过 `Page.captureScreenshot` 读取 surface，并复用同一条
@@ -1132,9 +1132,11 @@ observed process peak RSS 分别约为 533–541、545、561–577、605–615 M
 比较：x264 是有损编码，同一 canonical input 也可能产生细微不同的 decoded pixels，因此
 确定性 visual oracle 仍是 raw RGBA。
 
-direct screenshot encoder 与 layered media encoder 共同拥有同一份标准 H.264 policy：
-x264 `medium`、CRF 18、`yuv420p` 与 BT.709 limited-range metadata。该 policy 必须显式
-声明，不能继承 FFmpeg default；FFmpeg 升级不得悄悄改变文字、渐变或运动画质。
+direct screenshot encoder 与 layered media encoder 共同消费同一份封闭输出 policy。
+交付 profile 使用 x264 `medium`、CRF 18、`yuv420p` 与 BT.709 limited-range metadata；
+剪辑 profile 使用 `prores_ks` profile 3、`yuv422p10le` 与相同 color declaration。
+这些事实必须显式声明，不能继承 FFmpeg default；FFmpeg 升级不得暗中选择 codec、
+pixel format 或 container。
 
 本地 capture 保留 Chromium 的标准 multi-process
 topology；只有独立审计过的外层 container 或 microVM 承担等价的 process
@@ -1565,6 +1567,58 @@ frame output。历史样本与准入 revision 不再复制进长期架构合约�
 Gate 七当时没有加入 VFR、新 codec、HDR、hardware acceleration、lossy screenshot transport、parallel browser
 capture、transition、playback-rate control、Studio、component marketplace 或新的 screenplay
 拼写；它们仍属于独立的 measured gate 或 language gate。
+
+### 第八关（进行中）：闭合创作反馈，并扩展经过测量的媒体交付能力
+
+本关先把现有 compiler 与 renderer 已经拥有的事实变成正式产品表面。`check`
+在不启动 Chromium 的前提下验证作者源码、素材、presentation resource 与 render planning；
+`inspect` 以稳定的人类文本和带版本的机器格式呈现 solved timeline、dependency region、
+execution choice 与 cache identity；`doctor` 报告准入的 browser、媒体工具、capture mode
+与平台策略。render progress 与 benchmark 使用同一组具名阶段和有界测量；这些命令都不能创建第二套
+compiler 或 planner。
+
+`doctor` 不会仅凭 executable bit 或零 exit status 推断 readiness。它并行运行四个十秒
+有界的 handshake：browser、`FFmpeg` 与 ffprobe version probe，以及 bundler help
+contract。每个 handshake 都校验 role-specific signature，并从每条 pipe 最多捕获
+64 KiB，且不会把这些输出转发到 command output。每个 child 都有 kill-on-drop 与五秒
+显式 cleanup bound，因此“可执行但角色错误”的文件不能被报告为 admitted toolchain。
+
+交互式 `render` 会在 `prepare`、`bundle`、`plan`、`capture` 与 `assemble`
+开始和完成时报告进度；redirected 与 JSON 输出不混入进度文本。`benchmark` 在私有
+workspace 内执行一至九次有界奇数样本，强制使用 ephemeral frame artifact，使每份
+样本都测量完整 capture，并报告所有阶段样本及中位数。它直接调用生产 render pipeline，
+不得替换成缩水的 benchmark-only executor。
+
+第二个切片只通过 typed fact 与锁定证据接纳更广的媒体输入、输出 profile 与 native placement。
+输入归一化可以把 VFR 或额外 codec 冻结成具有精确 identity 的规范字节，但不能让 browser 或
+`FFmpeg` 默认值选择 source frame。透明或其他 container 输出必须端到端保留请求的 pixel
+contract。native crop、scale、picture-in-picture 与 multi-video placement 必须先具有显式
+layout fact，并通过 whole-film、partitioned 与 distributed raw-pixel equivalence，才能绕过
+Chromium。
+
+首个获准的替代输出是面向剪辑的 MOV：`ProRes` 422 HQ（`yuv422p10le`）
+配 48 kHz 双声道 24-bit PCM。原有交付配置仍是 MP4 中的 x264 H.264
+（`yuv420p`）与 AAC。一个封闭的 `EncodeProfile` 在浏览器直出、原生分层、
+本地组装和分布式帧产物组装之间统一拥有视觉编码器、音频编码器、像素格式、
+容器、暂存后缀与机器拼写。CLI 只从 `.mp4` 或 `.mov` 扩展名选择一次，并拒绝
+其他拼写；不得让 `FFmpeg` 默认值暗中决定结果。桌面发布验收会从已安装
+产品分别渲染并探测两种配置。透明输出须等 alpha 契约贯穿浏览器捕获、原生合成、
+缓存和最终封装并获得证据后再准入。
+
+media treatment、transition、dynamic author input、caption presentation 与 multiple subtitle
+track 一旦改变作者语义，就属于语言工作。每项新增能力都必须先提交语言准入规则要求的 cases、
+prompts、grader、raw model outputs 与 baseline。之后 trim、rate、gain、fade、dependency 或
+transition interval 由 Rust 独占；TypeScript 只能实现已经求解的视觉 effect。JavaScript
+timeline、CLI flag 或 `FFmpeg` filter string 都不能成为另一套 scheduler。
+
+Gate 八不加入 Player、Studio、preview server、source-mutation API、component marketplace、
+remote authoring command、coordinator、database、queue、lease service、cloud workflow、
+infrastructure definition 或新的 provider adapter。Agent integration 只是稳定 CLI diagnostic
+与 inspection 之上的薄 skill；它可以教授工作流，但不能隐藏重试、静默自更新，或用 prompt 文本替代
+compiler policy。
+仓库中的 `skills/onmark-video` 通过开放 Agent Skills 目录布局分发。它不包含 executable
+helper、模板、复制的语言规范或私有 render path；安装它的 agent 必须通过已发布 CLI 闭合
+反馈循环，并把 versioned JSON diagnostics 与 inspection 视为权威事实。
 
 每一关都使用最终方向的 IR 和协议，但只实现本关真实消费的部分。上一关没有稳定通过，不创建下一关的空架子。
 

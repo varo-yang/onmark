@@ -17,6 +17,7 @@ use super::error::{EncodeError, EncodeErrorKind};
 use super::layered::{LayeredJob, LayeredSession};
 use super::limits::{EncodeLimits, InvalidFfmpeg};
 use super::process::{CapturedStderr, capture_stderr, spawn_ffmpeg};
+use super::profile::EncodeProfile;
 use super::{AudioInput, audio};
 use crate::EncodedPng;
 
@@ -27,6 +28,7 @@ const CLEANUP_TIMEOUT: Duration = Duration::from_secs(5);
 pub struct Ffmpeg {
     executable: PathBuf,
     limits: EncodeLimits,
+    profile: EncodeProfile,
 }
 
 impl Ffmpeg {
@@ -38,23 +40,32 @@ impl Ffmpeg {
     pub fn new(
         executable: impl Into<PathBuf>,
         limits: EncodeLimits,
+        profile: EncodeProfile,
     ) -> Result<Self, InvalidFfmpeg> {
         let executable = executable.into();
         if executable.as_os_str().is_empty() {
             return Err(InvalidFfmpeg::EmptyExecutable);
         }
-        Ok(Self { executable, limits })
+        Ok(Self {
+            executable,
+            limits,
+            profile,
+        })
     }
 
     pub(crate) const fn max_frames(&self) -> u64 {
         self.limits.max_frames()
     }
 
-    pub(crate) fn start_layered(&self, job: LayeredJob) -> Result<LayeredSession, EncodeError> {
-        LayeredSession::start(&self.executable, self.limits, job)
+    pub(crate) const fn profile(&self) -> EncodeProfile {
+        self.profile
     }
 
-    /// Starts one H.264 MP4 encoding session.
+    pub(crate) fn start_layered(&self, job: LayeredJob) -> Result<LayeredSession, EncodeError> {
+        LayeredSession::start(&self.executable, self.limits, job, self.profile)
+    }
+
+    /// Starts one encoding session with the selected output profile.
     ///
     /// # Errors
     ///
@@ -86,6 +97,7 @@ impl Ffmpeg {
             &output,
             frame_rate,
             self.limits.video_encoder_threads(),
+            self.profile,
         )?;
         let Some(stdin) = child.stdin.take() else {
             return Err(EncodeError::new(
@@ -135,6 +147,7 @@ impl Ffmpeg {
             inputs,
             frame_rate,
             output.into(),
+            self.profile,
         )
         .await
     }
@@ -216,7 +229,7 @@ impl FfmpegSession {
         Ok(())
     }
 
-    /// Closes frame input and observes the final MP4 result.
+    /// Closes frame input and observes the final encoded result.
     ///
     /// # Errors
     ///
@@ -408,7 +421,7 @@ impl EncodedVideo {
         Self { path, frames }
     }
 
-    /// Returns the completed MP4 path.
+    /// Returns the completed video path.
     #[must_use]
     pub fn path(&self) -> &Path {
         &self.path
@@ -447,7 +460,10 @@ mod tests {
     use tempfile::{TempDir, tempdir};
     use tokio::time::{sleep, timeout};
 
-    use super::{EncodeError, EncodeErrorKind, EncodeLimits, EncodedVideo, Ffmpeg, FfmpegSession};
+    use super::{
+        EncodeError, EncodeErrorKind, EncodeLimits, EncodeProfile, EncodedVideo, Ffmpeg,
+        FfmpegSession,
+    };
     use crate::EncodedPng;
     use crate::encoder::AudioInput;
 
@@ -591,7 +607,7 @@ mod tests {
                 stderr_limit,
             )
             .expect("the fixture limits are bounded");
-            let ffmpeg = Ffmpeg::new(fixture_executable(), limits)
+            let ffmpeg = Ffmpeg::new(fixture_executable(), limits, EncodeProfile::H264Mp4)
                 .expect("the fixture executable path is present");
 
             Self {

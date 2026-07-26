@@ -1,10 +1,11 @@
 //! Checked command-line surface for local rendering and portable worker capture.
 
 use std::path::{Path, PathBuf};
+use std::{error::Error, fmt};
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use onmark_core::model::FrameRate;
-use onmark_render::{BrowserGraphicsBackend, EncodeLimits};
+use onmark_render::{BrowserGraphicsBackend, EncodeLimits, EncodeProfile};
 
 use crate::execution::LOCAL_VIDEO_ENCODER_THREADS;
 
@@ -12,16 +13,158 @@ use crate::execution::LOCAL_VIDEO_ENCODER_THREADS;
 #[derive(Debug, Parser)]
 #[command(name = "onmark", version, about)]
 pub(super) struct Cli {
+    /// Emit versioned JSON instead of human-oriented command output.
+    #[arg(long, global = true)]
+    pub(super) json: bool,
+
     #[command(subcommand)]
     pub(super) command: Command,
 }
 
 #[derive(Debug, Subcommand)]
 pub(super) enum Command {
-    /// Compile and render one screenplay into an H.264 MP4.
+    /// Measure complete uncached renders with phase-level timings.
+    Benchmark(BenchmarkArgs),
+    /// Validate one screenplay without launching Chromium or encoding video.
+    Check(CheckArgs),
+    /// Validate the local browser and media toolchain.
+    Doctor(DoctorArgs),
+    /// Print the installed Onmark and host identities.
+    Info,
+    /// Explain the solved timeline and render regions without rendering.
+    Inspect(InspectArgs),
+    /// Compile and render one screenplay into an admitted video profile.
     Render(RenderArgs),
     /// Execute one already-planned worker task without recompiling source.
     Worker(WorkerArgs),
+}
+
+#[derive(Debug, Args)]
+pub(super) struct BenchmarkArgs {
+    #[command(flatten)]
+    pub(super) validation: ValidationArgs,
+
+    /// Browser executable. Defaults to headless shell on Linux and Chrome elsewhere.
+    #[arg(long, help_heading = "Execution overrides")]
+    browser: Option<PathBuf>,
+
+    /// Browser graphics implementation. Omit to use the admitted host default.
+    #[arg(long, value_enum, help_heading = "Execution overrides")]
+    graphics: Option<GraphicsBackend>,
+
+    /// Threads assigned to the final visual encoder.
+    #[arg(
+        long,
+        default_value_t = LOCAL_VIDEO_ENCODER_THREADS,
+        value_parser = parse_video_encoder_threads,
+        help_heading = "Execution overrides"
+    )]
+    video_encoder_threads: usize,
+
+    /// `FFmpeg` executable.
+    #[arg(
+        long,
+        env = "ONMARK_FFMPEG",
+        hide_env = true,
+        default_value = "ffmpeg",
+        help_heading = "Execution overrides"
+    )]
+    ffmpeg: PathBuf,
+
+    /// Complete uncached render samples to collect.
+    #[arg(long, default_value_t = 3, value_parser = parse_benchmark_runs)]
+    pub(super) runs: usize,
+}
+
+#[derive(Debug, Args)]
+pub(super) struct DoctorArgs {
+    /// Browser executable. Defaults to headless shell on Linux and Chrome elsewhere.
+    #[arg(long, help_heading = "Execution overrides")]
+    pub(super) browser: Option<PathBuf>,
+
+    /// Presentation bundler executable.
+    #[arg(
+        long,
+        env = "ONMARK_BUNDLER",
+        hide_env = true,
+        default_value = "onmark-bundle",
+        help_heading = "Execution overrides"
+    )]
+    pub(super) bundler: PathBuf,
+
+    /// `FFmpeg` executable.
+    #[arg(
+        long,
+        env = "ONMARK_FFMPEG",
+        hide_env = true,
+        default_value = "ffmpeg",
+        help_heading = "Execution overrides"
+    )]
+    pub(super) ffmpeg: PathBuf,
+
+    /// ffprobe executable.
+    #[arg(
+        long,
+        env = "ONMARK_FFPROBE",
+        hide_env = true,
+        default_value = "ffprobe",
+        help_heading = "Execution overrides"
+    )]
+    pub(super) ffprobe: PathBuf,
+}
+
+#[derive(Debug, Args)]
+pub(super) struct CheckArgs {
+    #[command(flatten)]
+    pub(super) validation: ValidationArgs,
+}
+
+#[derive(Debug, Args)]
+pub(super) struct InspectArgs {
+    #[command(flatten)]
+    pub(super) validation: ValidationArgs,
+}
+
+#[derive(Debug, Args)]
+pub(super) struct ValidationArgs {
+    /// Authored HTML document to validate.
+    pub(super) screenplay: PathBuf,
+
+    /// Exact output frame rate, such as 30 or 30000/1001.
+    #[arg(long = "fps", default_value = "30", value_parser = parse_frame_rate)]
+    pub(super) frame_rate: FrameRate,
+
+    /// Output width in CSS pixels.
+    #[arg(long, default_value_t = 1_920)]
+    pub(super) width: u32,
+
+    /// Output height in CSS pixels.
+    #[arg(long, default_value_t = 1_080)]
+    pub(super) height: u32,
+
+    /// Presentation bundler executable.
+    #[arg(
+        long,
+        env = "ONMARK_BUNDLER",
+        hide_env = true,
+        default_value = "onmark-bundle",
+        help_heading = "Execution overrides"
+    )]
+    pub(super) bundler: PathBuf,
+
+    /// ffprobe executable.
+    #[arg(
+        long,
+        env = "ONMARK_FFPROBE",
+        hide_env = true,
+        default_value = "ffprobe",
+        help_heading = "Execution overrides"
+    )]
+    pub(super) ffprobe: PathBuf,
+
+    /// Standalone SRT, `WebVTT`, or ASS file.
+    #[arg(long = "subtitle", value_name = "FILE")]
+    pub(super) subtitle: Option<PathBuf>,
 }
 
 #[derive(Debug, Args)]
@@ -60,7 +203,7 @@ pub(super) struct RenderArgs {
     /// Authored HTML document to compile and render.
     pub(super) screenplay: PathBuf,
 
-    /// MP4 destination. Defaults to `renders/<screenplay>.mp4`.
+    /// MP4 or MOV destination. The extension selects the delivery profile.
     #[arg(short, long)]
     output: Option<PathBuf>,
 
@@ -84,7 +227,7 @@ pub(super) struct RenderArgs {
     #[arg(long, value_enum, help_heading = "Execution overrides")]
     graphics: Option<GraphicsBackend>,
 
-    /// Threads assigned to the final H.264 encoder.
+    /// Threads assigned to the final visual encoder.
     #[arg(
         long,
         default_value_t = LOCAL_VIDEO_ENCODER_THREADS,
@@ -139,6 +282,20 @@ impl RenderArgs {
         })
     }
 
+    pub(super) fn encode_profile(&self) -> Result<EncodeProfile, InvalidOutputExtension> {
+        let output = self.output();
+        let Some(extension) = output.extension().and_then(|value| value.to_str()) else {
+            return Err(InvalidOutputExtension(output));
+        };
+        if extension.eq_ignore_ascii_case("mp4") {
+            Ok(EncodeProfile::H264Mp4)
+        } else if extension.eq_ignore_ascii_case("mov") {
+            Ok(EncodeProfile::ProResMov)
+        } else {
+            Err(InvalidOutputExtension(output))
+        }
+    }
+
     pub(super) fn graphics_backend(&self) -> Option<BrowserGraphicsBackend> {
         self.graphics.map(GraphicsBackend::into_render_backend)
     }
@@ -147,6 +304,40 @@ impl RenderArgs {
         self.video_encoder_threads
     }
 }
+
+impl BenchmarkArgs {
+    pub(super) fn render_args(&self, output: PathBuf) -> RenderArgs {
+        RenderArgs {
+            screenplay: self.validation.screenplay.clone(),
+            output: Some(output),
+            frame_rate: self.validation.frame_rate,
+            width: self.validation.width,
+            height: self.validation.height,
+            browser: self.browser.clone(),
+            graphics: self.graphics,
+            video_encoder_threads: self.video_encoder_threads,
+            bundler: self.validation.bundler.clone(),
+            ffmpeg: self.ffmpeg.clone(),
+            ffprobe: self.validation.ffprobe.clone(),
+            subtitle: self.validation.subtitle.clone(),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(super) struct InvalidOutputExtension(PathBuf);
+
+impl fmt::Display for InvalidOutputExtension {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "output {} must use the .mp4 or .mov extension",
+            self.0.display(),
+        )
+    }
+}
+
+impl Error for InvalidOutputExtension {}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
 enum GraphicsBackend {
@@ -203,11 +394,20 @@ fn parse_video_encoder_threads(value: &str) -> Result<usize, String> {
     Ok(threads)
 }
 
+fn parse_benchmark_runs(value: &str) -> Result<usize, String> {
+    let message = "benchmark runs must be one of 1, 3, 5, 7, or 9";
+    let runs = value.parse().map_err(|_| message.to_owned())?;
+    if !matches!(runs, 1 | 3 | 5 | 7 | 9) {
+        return Err(message.to_owned());
+    }
+    Ok(runs)
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::Path;
 
-    use onmark_render::{BrowserGraphicsBackend, EncodeLimits};
+    use onmark_render::{BrowserGraphicsBackend, EncodeLimits, EncodeProfile};
 
     use super::{Cli, Command, LOCAL_VIDEO_ENCODER_THREADS, WorkerCommand};
     use clap::Parser;
@@ -221,10 +421,63 @@ mod tests {
         };
 
         assert_eq!(args.output(), Path::new("renders/film.mp4"));
+        assert_eq!(
+            args.encode_profile().expect("the default profile is valid"),
+            EncodeProfile::H264Mp4,
+        );
         assert_eq!(args.frame_rate.numerator(), 30);
         assert_eq!(args.frame_rate.denominator(), 1);
         assert_eq!(args.graphics_backend(), None);
         assert_eq!(args.video_encoder_threads(), LOCAL_VIDEO_ENCODER_THREADS);
+    }
+
+    #[test]
+    fn selects_output_profiles_only_from_canonical_extensions() {
+        let cli = Cli::try_parse_from(["onmark", "render", "film.html", "--output", "film.mov"])
+            .expect("the MOV extension selects the editing profile");
+        let Command::Render(args) = cli.command else {
+            panic!("the fixture must parse as a render command");
+        };
+        assert_eq!(
+            args.encode_profile().expect("the MOV profile is valid"),
+            EncodeProfile::ProResMov,
+        );
+
+        let cli = Cli::try_parse_from(["onmark", "render", "film.html", "--output", "film.webm"])
+            .expect("argument structure is valid before profile selection");
+        let Command::Render(args) = cli.command else {
+            panic!("the fixture must parse as a render command");
+        };
+        assert!(args.encode_profile().is_err());
+    }
+
+    #[test]
+    fn accepts_a_browser_free_check_command() {
+        let cli = Cli::try_parse_from(["onmark", "check", "project/film.html", "--json"])
+            .expect("the check command accepts one authored document");
+        let Command::Check(args) = cli.command else {
+            panic!("the fixture must parse as a check command");
+        };
+
+        assert_eq!(args.validation.screenplay, Path::new("project/film.html"));
+        assert_eq!(args.validation.frame_rate.numerator(), 30);
+        assert_eq!(args.validation.frame_rate.denominator(), 1);
+        assert!(cli.json);
+    }
+
+    #[test]
+    fn accepts_only_bounded_complete_render_benchmarks() {
+        let cli = Cli::try_parse_from(["onmark", "benchmark", "project/film.html", "--runs", "9"])
+            .expect("the maximum bounded benchmark is valid");
+        let Command::Benchmark(args) = cli.command else {
+            panic!("the fixture must parse as a benchmark command");
+        };
+
+        assert_eq!(args.validation.screenplay, Path::new("project/film.html"));
+        assert_eq!(args.runs, 9);
+        assert!(Cli::try_parse_from(["onmark", "benchmark", "film.html", "--runs", "0"]).is_err());
+        assert!(Cli::try_parse_from(["onmark", "benchmark", "film.html", "--runs", "10"]).is_err());
+        assert!(Cli::try_parse_from(["onmark", "benchmark", "film.html", "--runs", "2"]).is_err());
     }
 
     #[test]

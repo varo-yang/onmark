@@ -214,7 +214,7 @@ impl FrameCaptureExecutor {
     /// Captures one independently executable unit into a verified worker artifact.
     ///
     /// The artifact contains ordered PNG frames rather than an independently
-    /// encoded MP4. A later assembler can therefore retain one continuous
+    /// encoded video. A later assembler can therefore retain one continuous
     /// visual encoder and one final audio mix across workers.
     ///
     /// # Errors

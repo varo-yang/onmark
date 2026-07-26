@@ -17,10 +17,10 @@
 Onmark is a screenplay-first video compiler for people and agents. Write one
 HTML document with semantic film elements, ordinary CSS, and optional seekable
 motion. Onmark compiles the authored intent into an exact timeline, renders it
-through Chromium, mixes media with FFmpeg, and writes an MP4.
+through Chromium, mixes media with FFmpeg, and writes a delivery-ready video.
 
 ```text
-screenplay → Timeline IR → Render Units → browser frames + audio → MP4
+screenplay → Timeline IR → Render Units → browser frames + audio → video
 ```
 
 ## One timeline. Three visual languages.
@@ -79,6 +79,22 @@ onmark render film.html
 ```
 
 The command writes `renders/film.mp4` without overwriting an existing file.
+Validate or inspect the same production plan without launching Chromium:
+
+```bash
+onmark check film.html
+onmark inspect film.html --json
+onmark doctor
+onmark benchmark film.html --runs 3 --json
+```
+
+Use the default H.264/AAC MP4 for delivery, or select the edit-friendly
+ProRes/PCM MOV profile by filename:
+
+```bash
+onmark render film.html --output film.mov
+```
+
 Resolution, exact rational frame rates, and imported subtitles stay explicit:
 
 ```bash
@@ -88,6 +104,13 @@ onmark render film.html \
   --height 1080 \
   --fps 30000/1001 \
   --subtitle captions.vtt
+```
+
+Install the optional agent skill for a product-owned create/check/inspect/render
+loop:
+
+```bash
+npx skills add varo-yang/onmark --skill onmark-video
 ```
 
 ## Why screenplay-first

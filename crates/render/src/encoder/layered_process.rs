@@ -14,7 +14,8 @@ use tokio::sync::mpsc;
 use super::error::{EncodeError, EncodeErrorKind};
 use super::layered::{CanonicalFrame, LayeredJob, LayeredOutput};
 use super::limits::EncodeLimits;
-use super::process::configure_h264_output;
+use super::process::configure_video_output;
+use super::profile::EncodeProfile;
 use crate::{RawRgbaHash, RenderProfile};
 
 const MAX_MEDIA_INPUTS: usize = 64;
@@ -70,6 +71,7 @@ pub(super) fn spawn(
     executable: &Path,
     job: &LayeredJob,
     video_encoder_threads: usize,
+    profile: EncodeProfile,
 ) -> Result<Child, EncodeError> {
     let rate = frame_rate(job.output_frame_rate);
     let frames = job.frame_count().to_string();
@@ -119,7 +121,13 @@ pub(super) fn spawn(
                 .stdout(Stdio::piped());
         }
         LayeredOutput::Video(output) => {
-            configure_video_output(&mut command, output, &frames, video_encoder_threads);
+            configure_layered_video_output(
+                &mut command,
+                output,
+                &frames,
+                video_encoder_threads,
+                profile,
+            );
             command.stdout(Stdio::null());
         }
     }
@@ -138,14 +146,15 @@ pub(super) fn spawn(
         })
 }
 
-fn configure_video_output(
+fn configure_layered_video_output(
     command: &mut Command,
     output: &Path,
     frames: &str,
     video_encoder_threads: usize,
+    profile: EncodeProfile,
 ) {
     command.args(["-map", "[encoded]", "-frames:v", frames]);
-    configure_h264_output(command, output, video_encoder_threads);
+    configure_video_output(command, output, video_encoder_threads, profile);
 }
 
 fn composition_filter(job: &LayeredJob) -> String {

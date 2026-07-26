@@ -14,8 +14,10 @@ use onmark_core::render_graph::InvalidRenderGraph;
 use onmark_render::{
     InvalidFfmpeg, InvalidRenderProfile, InvalidRenderUnit, RenderError, UnitRootError,
 };
+use serde::Serialize;
 use tokio::task::JoinError;
 
+use crate::arguments::InvalidOutputExtension;
 use crate::artifact_cache::ArtifactCacheError;
 use crate::assets::AssetError;
 use crate::bundler::BundleError;
@@ -39,11 +41,16 @@ pub(super) enum CliError {
         source: serde_json::Error,
     },
     WorkerTask(JoinError),
+    WriteProgress(io::Error),
+    BenchmarkWorkspace(io::Error),
+    BenchmarkDrift(&'static str),
+    Doctor(crate::doctor::DoctorError),
     CreateOutputDirectory {
         path: PathBuf,
         source: io::Error,
     },
     OutputExists(PathBuf),
+    InvalidOutputExtension(InvalidOutputExtension),
     InvalidProfile(InvalidRenderProfile),
     InvalidFfmpeg(InvalidFfmpeg),
     ArtifactCache(ArtifactCacheError),
@@ -86,6 +93,18 @@ impl CliError {
             source,
         }
     }
+
+    pub(super) fn benchmark_workspace(source: io::Error) -> Self {
+        Self::BenchmarkWorkspace(source)
+    }
+
+    pub(super) const fn benchmark_drift(fact: &'static str) -> Self {
+        Self::BenchmarkDrift(fact)
+    }
+
+    pub(super) fn write_progress(source: io::Error) -> Self {
+        Self::WriteProgress(source)
+    }
 }
 
 impl fmt::Display for CliError {
@@ -110,6 +129,14 @@ impl fmt::Display for CliError {
                 )
             }
             Self::WorkerTask(_) => formatter.write_str("worker materialization did not finish"),
+            Self::WriteProgress(_) => formatter.write_str("failed to write render progress"),
+            Self::BenchmarkWorkspace(_) => {
+                formatter.write_str("failed to create the private benchmark workspace")
+            }
+            Self::BenchmarkDrift(fact) => {
+                write!(formatter, "benchmark samples disagree on {fact}")
+            }
+            Self::Doctor(source) => source.fmt(formatter),
             Self::CreateOutputDirectory { path, .. } => {
                 write!(
                     formatter,
@@ -120,6 +147,7 @@ impl fmt::Display for CliError {
             Self::OutputExists(path) => {
                 write!(formatter, "output {} already exists", path.display())
             }
+            Self::InvalidOutputExtension(source) => source.fmt(formatter),
             Self::InvalidProfile(source) => source.fmt(formatter),
             Self::InvalidFfmpeg(source) => source.fmt(formatter),
             Self::ArtifactCache(source) => source.fmt(formatter),
@@ -143,10 +171,14 @@ impl Error for CliError {
             Self::ReadScreenplay { source, .. } | Self::ReadWorkerRequest { source, .. } => {
                 Some(source)
             }
-            Self::CreateOutputDirectory { source, .. } => Some(source),
+            Self::CreateOutputDirectory { source, .. }
+            | Self::WriteProgress(source)
+            | Self::BenchmarkWorkspace(source) => Some(source),
+            Self::Doctor(source) => Some(source),
             Self::ParseWorkerRequest { source, .. } => Some(source),
             Self::WorkerTask(source) => Some(source),
-            Self::OutputExists(_) => None,
+            Self::OutputExists(_) | Self::BenchmarkDrift(_) => None,
+            Self::InvalidOutputExtension(source) => Some(source),
             Self::InvalidProfile(source) => Some(source),
             Self::InvalidFfmpeg(source) => Some(source),
             Self::ArtifactCache(source) => Some(source),
@@ -169,9 +201,21 @@ impl From<EnvironmentError> for CliError {
     }
 }
 
+impl From<crate::doctor::DoctorError> for CliError {
+    fn from(source: crate::doctor::DoctorError) -> Self {
+        Self::Doctor(source)
+    }
+}
+
 impl From<InvalidRenderProfile> for CliError {
     fn from(source: InvalidRenderProfile) -> Self {
         Self::InvalidProfile(source)
+    }
+}
+
+impl From<InvalidOutputExtension> for CliError {
+    fn from(source: InvalidOutputExtension) -> Self {
+        Self::InvalidOutputExtension(source)
     }
 }
 
@@ -256,6 +300,41 @@ pub(super) fn write(writer: &mut impl Write, error: &CliError) -> io::Result<Exi
         source = cause.source();
     }
     Ok(ExitCode::from(2))
+}
+
+pub(super) fn write_json(writer: &mut impl Write, error: &CliError) -> io::Result<ExitCode> {
+    let report = JsonFailure {
+        version: 1,
+        kind: "infrastructure",
+        message: error.to_string(),
+        causes: causes(error),
+    };
+    serde_json::to_writer_pretty(&mut *writer, &report)?;
+    writeln!(writer)?;
+    Ok(ExitCode::from(2))
+}
+
+fn causes(error: &CliError) -> Vec<String> {
+    let mut causes = Vec::new();
+    let mut previous = error.to_string();
+    let mut source = error.source();
+    while let Some(cause) = source {
+        let message = cause.to_string();
+        if message != previous {
+            causes.push(message.clone());
+        }
+        previous = message;
+        source = cause.source();
+    }
+    causes
+}
+
+#[derive(Serialize)]
+struct JsonFailure {
+    version: u16,
+    kind: &'static str,
+    message: String,
+    causes: Vec<String>,
 }
 
 #[cfg(test)]

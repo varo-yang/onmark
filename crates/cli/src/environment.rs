@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use onmark_render::BrowserCaptureMode;
 
-use crate::arguments::RenderArgs;
+use crate::arguments::{DoctorArgs, RenderArgs, ValidationArgs};
 use crate::browser_install::{self, BrowserInstallError};
 use crate::bundler::BundlerProcess;
 
@@ -47,6 +47,42 @@ impl Executables {
             bundler,
             ffmpeg,
             ffprobe,
+        })
+    }
+}
+
+/// Validated tools needed to compile and plan without browser execution.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct CheckExecutables {
+    pub(super) bundler: BundlerProcess,
+    pub(super) ffprobe: PathBuf,
+}
+
+impl CheckExecutables {
+    pub(super) fn discover(args: &ValidationArgs) -> Result<Self, EnvironmentError> {
+        Ok(Self {
+            bundler: bundler(&args.bundler)?,
+            ffprobe: locate("ffprobe", &args.ffprobe)?,
+        })
+    }
+}
+
+/// Admitted local toolchain reported by `onmark doctor`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct DoctorExecutables {
+    pub(super) browser: BrowserExecutable,
+    pub(super) bundler: BundlerProcess,
+    pub(super) ffmpeg: PathBuf,
+    pub(super) ffprobe: PathBuf,
+}
+
+impl DoctorExecutables {
+    pub(super) async fn discover(args: &DoctorArgs) -> Result<Self, EnvironmentError> {
+        Ok(Self {
+            browser: browser(args.browser.as_deref()).await?,
+            bundler: bundler(&args.bundler)?,
+            ffmpeg: locate("FFmpeg", &args.ffmpeg)?,
+            ffprobe: locate("ffprobe", &args.ffprobe)?,
         })
     }
 }

@@ -12,12 +12,14 @@ use tokio::io::{AsyncRead, AsyncReadExt as _};
 use tokio::process::{Child, Command};
 
 use super::error::{EncodeError, EncodeErrorKind};
+use super::profile::EncodeProfile;
 
 pub(super) fn spawn_ffmpeg(
     executable: &Path,
     output: &Path,
     frame_rate: WireFrameRate,
     video_encoder_threads: usize,
+    profile: EncodeProfile,
 ) -> Result<Child, EncodeError> {
     let frame_rate = format!("{}/{}", frame_rate.numerator(), frame_rate.denominator());
     let mut command = Command::new(executable);
@@ -32,7 +34,7 @@ pub(super) fn spawn_ffmpeg(
         ])
         .arg(frame_rate)
         .args(["-vcodec", "png", "-i", "pipe:0"]);
-    configure_h264_output(&mut command, output, video_encoder_threads);
+    configure_video_output(&mut command, output, video_encoder_threads, profile);
     command
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
@@ -49,37 +51,16 @@ pub(super) fn spawn_ffmpeg(
         })
 }
 
-pub(super) fn configure_h264_output(
+pub(super) fn configure_video_output(
     command: &mut Command,
     output: &Path,
     video_encoder_threads: usize,
+    profile: EncodeProfile,
 ) {
-    let video_encoder_threads = video_encoder_threads.to_string();
     // Encoder threads retain full-resolution reference frames. Keep the exact
     // bounded policy independent of ambient CPU count.
-    command
-        .args([
-            "-an", "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-threads",
-        ])
-        .arg(video_encoder_threads)
-        .args([
-            "-pix_fmt",
-            "yuv420p",
-            "-movflags",
-            "+faststart",
-            "-colorspace",
-            "bt709",
-            "-color_primaries",
-            "bt709",
-            "-color_trc",
-            "bt709",
-            "-color_range",
-            "tv",
-            "-f",
-            "mp4",
-            "-n",
-        ])
-        .arg(output);
+    profile.configure_video(command, video_encoder_threads);
+    command.arg(output);
 }
 
 #[derive(Debug)]
@@ -135,13 +116,19 @@ mod tests {
 
     use tokio::process::Command;
 
-    use super::{configure_h264_output, retain_tail};
+    use super::{configure_video_output, retain_tail};
+    use crate::EncodeProfile;
 
     #[test]
     fn owns_the_standard_h264_quality_policy() {
         let mut command = Command::new("ffmpeg");
 
-        configure_h264_output(&mut command, Path::new("film.mp4"), 4);
+        configure_video_output(
+            &mut command,
+            Path::new("film.mp4"),
+            4,
+            EncodeProfile::H264Mp4,
+        );
 
         let arguments = command
             .as_std()

@@ -1,8 +1,8 @@
 # Onmark Architecture
 
-> Status: current architecture through Gate seven and distributed incremental
-> rendering. Completed gates are retained as historical acceptance evidence;
-> unimplemented work is marked deferred.
+> Status: Gate eight is active after completion of Gate seven and distributed
+> incremental rendering. Completed gates are retained as historical acceptance
+> evidence; unimplemented work is marked deferred.
 
 This document is paired with the Onmark Language Specification. The language
 defines authored meaning; this document defines execution. Their only contract
@@ -708,7 +708,13 @@ semantics.
 
 ### Product commands and language evidence
 
-The authored native command is deliberately narrow: `onmark render <film.html>`.
+The authored native surface stays narrow: `onmark check <film.html>` validates
+through Render Unit planning without Chromium, `onmark inspect <film.html>`
+explains the solved and planned facts, and `onmark render <film.html>` executes
+them. `onmark doctor` validates the admitted local toolchain, while `onmark
+info` reports the installed product and host identity. Machine-readable command
+reports carry an explicit version and preserve stable diagnostic codes and byte
+spans.
 The authored HTML contains both screenplay custom elements and presentation
 DOM/CSS. At most one inline module marked `type="module" data-om-motion`
 exports the declarative `motion` value; the generated infrastructure entry owns
@@ -723,7 +729,10 @@ unless `--output` is supplied, and exposes only exact frame rate and viewport
 dimensions as ordinary render controls. Process paths are execution overrides,
 not screenplay facts. Authored diagnostics are emitted before executable
 preflight so an invalid screenplay never requires Chromium, Node, or `FFmpeg`
-merely to explain itself. Gate three adds the deliberately separate worker entry
+merely to explain itself. Check and inspect use the same compiler, asset,
+bundler, Render Graph, and Render Unit constructors as rendering; they stop
+before private unit-root materialization, Chromium, and encoding rather than
+reimplementing those phases. Gate three adds the deliberately separate worker entry
 point `onmark worker capture`: it accepts one versioned `request.json`,
 including the deployment-owned SHA-256 identity of its locked capture
 environment, the `bundle/` payload files named by that manifest, and frozen
@@ -940,8 +949,9 @@ Browser capture retains at most one PNG at a time and writes it directly to
 through one capacity-one stream because the frame artifact owns those pixels
 and their hashes. Local layered video sends the transparent foreground only
 into the encoder process; it neither splits composed frames nor copies raw RGBA
-back through Rust before writing MP4. There is no whole-video frame buffer. The fixed H.264
-`yuv420p` profile rejects odd viewport dimensions before either process starts.
+back through Rust before writing the selected video profile. There is no
+whole-video frame buffer. The shared subsampled output profiles reject odd
+viewport dimensions before either process starts.
 Browser capture has one closed backend choice beneath the shared runtime
 protocol. `BeginFrame` atomically commits and reads a compositor transaction on
 Linux `chrome-headless-shell`; `Screenshot` reads the surface with
@@ -1060,10 +1070,12 @@ identity comparison: x264 is lossy and may produce slightly different decoded
 pixels even from the same canonical input, so raw RGBA remains the
 deterministic visual oracle.
 
-Both the direct screenshot encoder and the layered media encoder own the same
-standard H.264 policy: x264 `medium`, CRF 18, `yuv420p`, and BT.709 limited-range
-metadata. The policy is explicit rather than inherited from FFmpeg defaults, so
-an FFmpeg upgrade cannot silently change text, gradient, or motion quality.
+Both the direct screenshot encoder and the layered media encoder consume the
+same closed output policy. The delivery profile uses x264 `medium`, CRF 18,
+`yuv420p`, and BT.709 limited-range metadata; the editing profile uses
+`prores_ks` profile 3 and `yuv422p10le` with the same color declaration. These
+facts are explicit rather than inherited from FFmpeg defaults, so an FFmpeg
+upgrade cannot silently choose a codec, pixel format, or container.
 
 Local capture retains Chromium's normal multiprocess topology. An adapter may
 select `BrowserLaunchPolicy::isolated_worker()` only when an independently
@@ -1548,6 +1560,75 @@ Gate seven did not add VFR, new codecs, HDR, hardware acceleration, lossy
 screenshot transport, parallel browser capture, transitions, playback-rate
 control, Studio, component marketplace, or new screenplay spelling.
 Those remain separate measured or language gates.
+
+**Gate eight (active): close the authoring loop and broaden measured media
+delivery.** The gate begins with product surfaces that expose facts the existing
+compiler and renderer already own. `check` validates authored source, assets,
+presentation resources, and render planning without launching Chromium.
+`inspect` renders the solved timeline, dependency regions, execution choices,
+and cache identity in stable human and versioned machine-readable forms.
+`doctor` reports the admitted browser, media tools, capture mode, and platform
+policy. Render progress and benchmark reports use the same named phases and
+bounded measurements; none of these commands creates a second compiler or
+planner.
+
+`doctor` does not infer readiness from executable bits or a zero exit status
+alone. It runs four parallel, ten-second handshakes: browser, `FFmpeg`, and
+ffprobe version probes plus the bundler help contract. Each handshake verifies
+a role-specific signature while capturing at most 64 KiB from each pipe; output
+is never forwarded to command output. Every child has kill-on-drop and a
+five-second explicit cleanup bound. A wrong but executable file therefore
+cannot be reported as an admitted toolchain.
+
+Interactive `render` reports `prepare`, `bundle`, `plan`, `capture`, and
+`assemble` as they begin and complete; redirected and JSON output remains free
+of progress text. `benchmark` executes an odd, bounded count from one through
+nine inside a private workspace, forces ephemeral frame artifacts so every
+sample measures a complete capture, and reports every phase sample plus its
+median. It calls the production render pipeline directly and cannot substitute
+a reduced benchmark-only executor.
+
+The second slice admits broader media inputs, output profiles, and native
+placements only through typed facts and locked evidence. Input normalization
+may accept VFR and additional codecs by freezing their exact normalized bytes
+before compilation; it may not let browser or `FFmpeg` defaults choose source
+frames. Transparent or alternate-container outputs must preserve the requested
+pixel contract end to end. Native crop, scale, picture-in-picture, and
+multi-video placement require explicit layout facts plus whole-film,
+partitioned, and distributed raw-pixel equivalence before they may bypass
+Chromium.
+
+The first admitted alternate output is the edit-friendly MOV profile:
+`ProRes` 422 HQ (`yuv422p10le`) with 48 kHz stereo 24-bit PCM. The existing
+delivery profile remains x264 H.264 (`yuv420p`) with AAC in MP4. One closed
+`EncodeProfile` owns each profile's visual codec, audio codec, pixel format,
+container, staging suffix, and machine spelling across direct browser,
+layered-media, local assembly, and distributed-artifact assembly. The CLI
+selects the profile only from the `.mp4` or `.mov` output extension and rejects
+every other spelling; no FFmpeg default changes the encoded bytes. Desktop release
+admission renders and probes both profiles from the installed product.
+Transparent output remains unadmitted until the alpha contract is proved
+through browser capture, native composition, caching, and final muxing.
+
+Media treatment, transitions, dynamic author inputs, caption presentation, and
+multiple subtitle tracks are language work when they change authored meaning.
+Each such addition starts with the checked-in cases, prompts, grader, raw model
+outputs, and baseline required by the language admission rule. Rust then owns
+the resulting trim, rate, gain, fade, dependency, or transition interval;
+TypeScript may only realize the already-solved visual effect. No JavaScript
+timeline, CLI flag, or `FFmpeg` filter string may become an alternate scheduler.
+
+Gate eight does not add a Player, Studio, preview server, source-mutation API,
+component marketplace, remote authoring command, coordinator, database, queue,
+lease service, cloud workflow, infrastructure definition, or provider adapter.
+Agent integration is a thin skill over stable CLI diagnostics and inspection;
+it may teach the workflow but may not hide retries, silently update itself, or
+replace compiler policy with prompt text.
+The checked-in `skills/onmark-video` skill is distributed from the repository
+through the open Agent Skills layout. It contains no executable helper,
+template, copied language specification, or private render path: the installed
+agent must close its feedback loop through the released CLI and treat versioned
+JSON diagnostics and inspection as authoritative.
 
 Every gate uses the final-direction contracts but implements only fields
 consumed by that gate. A failed gate blocks construction of the next gate's

@@ -438,6 +438,12 @@ impl RenderUnit {
         &self.visual_execution
     }
 
+    /// Returns the immutable presentation identity used by capture artifacts.
+    #[must_use]
+    pub fn bundle_id(&self) -> &str {
+        self.bundle_manifest.bundle_id()
+    }
+
     pub(crate) fn bundle_manifest(&self) -> &BundleManifest {
         self.bundle_manifest.as_ref()
     }

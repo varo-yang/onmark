@@ -79,7 +79,7 @@ impl RenderExecutor {
         self.capture.graphics_backend()
     }
 
-    /// Renders one independently executable unit into an H.264 MP4 artifact.
+    /// Renders one independently executable unit into the selected video profile.
     ///
     /// Frame capture and encoder input are sequential: at most one encoded PNG
     /// is owned between Chromium and `FFmpeg` at any time.
@@ -102,7 +102,7 @@ impl RenderExecutor {
             .await
     }
 
-    /// Renders contiguous independent units into one complete MP4 artifact.
+    /// Renders contiguous independent units into one complete video artifact.
     ///
     /// Every unit keeps its own verified browser root and runtime lifecycle.
     /// Local execution reuses one browser process for the validated sequence;
@@ -131,7 +131,7 @@ impl RenderExecutor {
     /// Captures one independently executable unit into a verified worker artifact.
     ///
     /// The artifact contains ordered PNG frames rather than an independently
-    /// encoded MP4. A later assembler can therefore retain one
+    /// encoded video. A later assembler can therefore retain one
     /// continuous visual encoder and one final audio mix across workers.
     ///
     /// # Errors
@@ -186,7 +186,7 @@ impl RenderExecutor {
             .await
     }
 
-    /// Assembles independently captured worker artifacts into one MP4.
+    /// Assembles independently captured worker artifacts into one video.
     ///
     /// The supplied units may be newly materialized on this assembler. They
     /// provide the expected unit identities and the verified local audio bytes;
@@ -213,7 +213,7 @@ impl RenderExecutor {
         let sequence = self.validate_sequence(units, expected_output, output)?;
         let frame_rate = sequence.frame_rate;
 
-        let staging = StagedOutput::new(output)?;
+        let staging = StagedOutput::new(output, self.ffmpeg.profile())?;
         let mut encoder = self
             .ffmpeg
             .start(staging.visual_path(), frame_rate)
@@ -260,7 +260,7 @@ impl RenderExecutor {
         frame_rate: WireFrameRate,
         output: &Path,
     ) -> Result<EncodedVideo, RenderError> {
-        let staging = StagedOutput::new(output)?;
+        let staging = StagedOutput::new(output, self.ffmpeg.profile())?;
         let mut encoder = self
             .ffmpeg
             .start(staging.visual_path(), frame_rate)
@@ -288,7 +288,7 @@ impl RenderExecutor {
         frame_rate: WireFrameRate,
         output: &Path,
     ) -> Result<EncodedVideo, RenderError> {
-        let staging = StagedOutput::new(output)?;
+        let staging = StagedOutput::new(output, self.ffmpeg.profile())?;
         let job = layered_job(
             units,
             LayeredOutput::Video(staging.visual_path().to_owned()),

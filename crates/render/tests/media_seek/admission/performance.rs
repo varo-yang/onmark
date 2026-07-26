@@ -173,8 +173,12 @@ async fn capture_browser_frames(
 }
 
 fn start_browser_encoder(frame_rate: FrameRate, output: &Path) -> FfmpegSession {
-    let ffmpeg = Ffmpeg::new(required_path("ONMARK_FFMPEG"), encoder_limits())
-        .expect("the benchmark encoder must be valid");
+    let ffmpeg = Ffmpeg::new(
+        required_path("ONMARK_FFMPEG"),
+        encoder_limits(),
+        onmark_render::EncodeProfile::H264Mp4,
+    )
+    .expect("the benchmark encoder must be valid");
     ffmpeg
         .start(output, WireFrameRate::from(frame_rate))
         .expect("the benchmark encoder must start")
