@@ -1572,10 +1572,12 @@ policy. Render progress and benchmark reports use the same named phases and
 bounded measurements; none of these commands creates a second compiler or
 planner.
 
-`doctor` does not infer readiness from executable bits alone. It runs four
-parallel, output-free, ten-second handshakes: browser, `FFmpeg`, and ffprobe
-version probes plus the bundler help contract. Every child has kill-on-drop and
-a five-second explicit cleanup bound. A wrong but executable file therefore
+`doctor` does not infer readiness from executable bits or a zero exit status
+alone. It runs four parallel, ten-second handshakes: browser, `FFmpeg`, and
+ffprobe version probes plus the bundler help contract. Each handshake verifies
+a role-specific signature while capturing at most 64 KiB from each pipe; output
+is never forwarded to command output. Every child has kill-on-drop and a
+five-second explicit cleanup bound. A wrong but executable file therefore
 cannot be reported as an admitted toolchain.
 
 Interactive `render` reports `prepare`, `bundle`, `plan`, `capture`, and

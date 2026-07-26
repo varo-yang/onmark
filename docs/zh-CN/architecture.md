@@ -1577,10 +1577,11 @@ execution choice 与 cache identity；`doctor` 报告准入的 browser、媒体�
 与平台策略。render progress 与 benchmark 使用同一组具名阶段和有界测量；这些命令都不能创建第二套
 compiler 或 planner。
 
-`doctor` 不会仅凭 executable bit 推断 readiness。它并行运行四个无输出、十秒有界的
-handshake：browser、`FFmpeg` 与 ffprobe version probe，以及 bundler help contract。
-每个 child 都有 kill-on-drop 与五秒显式 cleanup bound，因此“可执行但角色错误”的文件
-不能被报告为 admitted toolchain。
+`doctor` 不会仅凭 executable bit 或零 exit status 推断 readiness。它并行运行四个十秒
+有界的 handshake：browser、`FFmpeg` 与 ffprobe version probe，以及 bundler help
+contract。每个 handshake 都校验 role-specific signature，并从每条 pipe 最多捕获
+64 KiB，且不会把这些输出转发到 command output。每个 child 都有 kill-on-drop 与五秒
+显式 cleanup bound，因此“可执行但角色错误”的文件不能被报告为 admitted toolchain。
 
 交互式 `render` 会在 `prepare`、`bundle`、`plan`、`capture` 与 `assemble`
 开始和完成时报告进度；redirected 与 JSON 输出不混入进度文本。`benchmark` 在私有
