@@ -7,6 +7,7 @@
 mod arguments;
 mod artifact_cache;
 mod assets;
+mod benchmark;
 mod browser_install;
 mod bundler;
 mod check;
@@ -19,6 +20,7 @@ mod failure;
 mod info;
 mod input;
 mod inspect;
+mod progress;
 mod render;
 mod subtitle;
 mod worker;
@@ -35,6 +37,9 @@ async fn main() -> ExitCode {
     let cli = Cli::parse();
     let json = cli.json;
     let result = match cli.command {
+        Command::Benchmark(args) => benchmark::run(args, json)
+            .await
+            .map(benchmark::BenchmarkOutcome::write),
         Command::Check(args) => check::run(args, json).await.map(check::CheckOutcome::write),
         Command::Doctor(args) => doctor::run(args, json)
             .await

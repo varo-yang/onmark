@@ -41,6 +41,9 @@ pub(super) enum CliError {
         source: serde_json::Error,
     },
     WorkerTask(JoinError),
+    WriteProgress(io::Error),
+    BenchmarkWorkspace(io::Error),
+    BenchmarkDrift(&'static str),
     CreateOutputDirectory {
         path: PathBuf,
         source: io::Error,
@@ -89,6 +92,18 @@ impl CliError {
             source,
         }
     }
+
+    pub(super) fn benchmark_workspace(source: io::Error) -> Self {
+        Self::BenchmarkWorkspace(source)
+    }
+
+    pub(super) const fn benchmark_drift(fact: &'static str) -> Self {
+        Self::BenchmarkDrift(fact)
+    }
+
+    pub(super) fn write_progress(source: io::Error) -> Self {
+        Self::WriteProgress(source)
+    }
 }
 
 impl fmt::Display for CliError {
@@ -113,6 +128,13 @@ impl fmt::Display for CliError {
                 )
             }
             Self::WorkerTask(_) => formatter.write_str("worker materialization did not finish"),
+            Self::WriteProgress(_) => formatter.write_str("failed to write render progress"),
+            Self::BenchmarkWorkspace(_) => {
+                formatter.write_str("failed to create the private benchmark workspace")
+            }
+            Self::BenchmarkDrift(fact) => {
+                write!(formatter, "benchmark samples disagree on {fact}")
+            }
             Self::CreateOutputDirectory { path, .. } => {
                 write!(
                     formatter,
@@ -147,10 +169,12 @@ impl Error for CliError {
             Self::ReadScreenplay { source, .. } | Self::ReadWorkerRequest { source, .. } => {
                 Some(source)
             }
-            Self::CreateOutputDirectory { source, .. } => Some(source),
+            Self::CreateOutputDirectory { source, .. }
+            | Self::WriteProgress(source)
+            | Self::BenchmarkWorkspace(source) => Some(source),
             Self::ParseWorkerRequest { source, .. } => Some(source),
             Self::WorkerTask(source) => Some(source),
-            Self::OutputExists(_) => None,
+            Self::OutputExists(_) | Self::BenchmarkDrift(_) => None,
             Self::InvalidOutputExtension(source) => Some(source),
             Self::InvalidProfile(source) => Some(source),
             Self::InvalidFfmpeg(source) => Some(source),

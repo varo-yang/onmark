@@ -14,6 +14,7 @@ fn exposes_local_feedback_rendering_and_the_remote_worker_adapter() {
 
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).expect("help output is UTF-8");
+    assert!(stdout.contains("benchmark"));
     assert!(stdout.contains("check"));
     assert!(stdout.contains("doctor"));
     assert!(stdout.contains("info"));
@@ -21,6 +22,32 @@ fn exposes_local_feedback_rendering_and_the_remote_worker_adapter() {
     assert!(stdout.contains("render"));
     assert!(stdout.contains("worker"));
     assert!(!stdout.contains("coordinator"));
+}
+
+#[test]
+fn benchmark_reuses_structured_diagnostics_before_running_samples() {
+    let directory = tempdir().expect("the fixture directory is available");
+    let screenplay = directory.path().join("invalid.html");
+    std::fs::write(&screenplay, "<om-film><om-scene></om-film>")
+        .expect("the fixture screenplay is writable");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_onmark"))
+        .arg("benchmark")
+        .arg(&screenplay)
+        .arg("--json")
+        .env("PATH", "")
+        .output()
+        .expect("the CLI can be started");
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stderr.is_empty());
+    let report: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("the benchmark is JSON");
+    assert_eq!(report["version"], 1);
+    assert_eq!(report["command"], "benchmark");
+    assert_eq!(report["valid"], false);
+    assert!(report.get("benchmark").is_none());
+    assert_eq!(report["diagnostics"][0]["code"], "ONM-SYNTAX-005");
 }
 
 #[test]

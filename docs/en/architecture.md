@@ -1572,6 +1572,14 @@ policy. Render progress and benchmark reports use the same named phases and
 bounded measurements; none of these commands creates a second compiler or
 planner.
 
+Interactive `render` reports `prepare`, `bundle`, `plan`, `capture`, and
+`assemble` as they begin and complete; redirected and JSON output remains free
+of progress text. `benchmark` executes an odd, bounded count from one through
+nine inside a private workspace, forces ephemeral frame artifacts so every
+sample measures a complete capture, and reports every phase sample plus its
+median. It calls the production render pipeline directly and cannot substitute
+a reduced benchmark-only executor.
+
 The second slice admits broader media inputs, output profiles, and native
 placements only through typed facts and locked evidence. Input normalization
 may accept VFR and additional codecs by freezing their exact normalized bytes

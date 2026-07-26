@@ -63,6 +63,7 @@ pub(super) struct RegionInspection {
     pub(super) output_end: u64,
     pub(super) visual_mode: &'static str,
     pub(super) capture_cadence: &'static str,
+    pub(super) bundle_id: Box<str>,
 }
 
 struct ResolvedInput {
@@ -233,6 +234,7 @@ fn inspect_plan(
                 onmark_render::BrowserCaptureCadence::EveryFrame => "everyFrame",
                 onmark_render::BrowserCaptureCadence::PlacementBounded => "placementBounded",
             },
+            bundle_id: unit.bundle_id().into(),
         })
         .collect();
     Inspection {

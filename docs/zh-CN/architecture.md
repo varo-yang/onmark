@@ -1577,6 +1577,12 @@ execution choice 与 cache identity；`doctor` 报告准入的 browser、媒体�
 与平台策略。render progress 与 benchmark 使用同一组具名阶段和有界测量；这些命令都不能创建第二套
 compiler 或 planner。
 
+交互式 `render` 会在 `prepare`、`bundle`、`plan`、`capture` 与 `assemble`
+开始和完成时报告进度；redirected 与 JSON 输出不混入进度文本。`benchmark` 在私有
+workspace 内执行一至九次有界奇数样本，强制使用 ephemeral frame artifact，使每份
+样本都测量完整 capture，并报告所有阶段样本及中位数。它直接调用生产 render pipeline，
+不得替换成缩水的 benchmark-only executor。
+
 第二个切片只通过 typed fact 与锁定证据接纳更广的媒体输入、输出 profile 与 native placement。
 输入归一化可以把 VFR 或额外 codec 冻结成具有精确 identity 的规范字节，但不能让 browser 或
 `FFmpeg` 默认值选择 source frame。透明或其他 container 输出必须端到端保留请求的 pixel

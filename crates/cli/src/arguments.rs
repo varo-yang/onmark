@@ -23,6 +23,8 @@ pub(super) struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub(super) enum Command {
+    /// Measure complete uncached renders with phase-level timings.
+    Benchmark(BenchmarkArgs),
     /// Validate one screenplay without launching Chromium or encoding video.
     Check(CheckArgs),
     /// Validate the local browser and media toolchain.
@@ -35,6 +37,43 @@ pub(super) enum Command {
     Render(RenderArgs),
     /// Execute one already-planned worker task without recompiling source.
     Worker(WorkerArgs),
+}
+
+#[derive(Debug, Args)]
+pub(super) struct BenchmarkArgs {
+    #[command(flatten)]
+    pub(super) validation: ValidationArgs,
+
+    /// Browser executable. Defaults to headless shell on Linux and Chrome elsewhere.
+    #[arg(long, help_heading = "Execution overrides")]
+    browser: Option<PathBuf>,
+
+    /// Browser graphics implementation. Omit to use the admitted host default.
+    #[arg(long, value_enum, help_heading = "Execution overrides")]
+    graphics: Option<GraphicsBackend>,
+
+    /// Threads assigned to the final visual encoder.
+    #[arg(
+        long,
+        default_value_t = LOCAL_VIDEO_ENCODER_THREADS,
+        value_parser = parse_video_encoder_threads,
+        help_heading = "Execution overrides"
+    )]
+    video_encoder_threads: usize,
+
+    /// `FFmpeg` executable.
+    #[arg(
+        long,
+        env = "ONMARK_FFMPEG",
+        hide_env = true,
+        default_value = "ffmpeg",
+        help_heading = "Execution overrides"
+    )]
+    ffmpeg: PathBuf,
+
+    /// Complete uncached render samples to collect.
+    #[arg(long, default_value_t = 3, value_parser = parse_benchmark_runs)]
+    pub(super) runs: usize,
 }
 
 #[derive(Debug, Args)]
@@ -266,6 +305,25 @@ impl RenderArgs {
     }
 }
 
+impl BenchmarkArgs {
+    pub(super) fn render_args(&self, output: PathBuf) -> RenderArgs {
+        RenderArgs {
+            screenplay: self.validation.screenplay.clone(),
+            output: Some(output),
+            frame_rate: self.validation.frame_rate,
+            width: self.validation.width,
+            height: self.validation.height,
+            browser: self.browser.clone(),
+            graphics: self.graphics,
+            video_encoder_threads: self.video_encoder_threads,
+            bundler: self.validation.bundler.clone(),
+            ffmpeg: self.ffmpeg.clone(),
+            ffprobe: self.validation.ffprobe.clone(),
+            subtitle: self.validation.subtitle.clone(),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub(super) struct InvalidOutputExtension(PathBuf);
 
@@ -336,6 +394,15 @@ fn parse_video_encoder_threads(value: &str) -> Result<usize, String> {
     Ok(threads)
 }
 
+fn parse_benchmark_runs(value: &str) -> Result<usize, String> {
+    let message = "benchmark runs must be one of 1, 3, 5, 7, or 9";
+    let runs = value.parse().map_err(|_| message.to_owned())?;
+    if !matches!(runs, 1 | 3 | 5 | 7 | 9) {
+        return Err(message.to_owned());
+    }
+    Ok(runs)
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::Path;
@@ -396,6 +463,21 @@ mod tests {
         assert_eq!(args.validation.frame_rate.numerator(), 30);
         assert_eq!(args.validation.frame_rate.denominator(), 1);
         assert!(cli.json);
+    }
+
+    #[test]
+    fn accepts_only_bounded_complete_render_benchmarks() {
+        let cli = Cli::try_parse_from(["onmark", "benchmark", "project/film.html", "--runs", "9"])
+            .expect("the maximum bounded benchmark is valid");
+        let Command::Benchmark(args) = cli.command else {
+            panic!("the fixture must parse as a benchmark command");
+        };
+
+        assert_eq!(args.validation.screenplay, Path::new("project/film.html"));
+        assert_eq!(args.runs, 9);
+        assert!(Cli::try_parse_from(["onmark", "benchmark", "film.html", "--runs", "0"]).is_err());
+        assert!(Cli::try_parse_from(["onmark", "benchmark", "film.html", "--runs", "10"]).is_err());
+        assert!(Cli::try_parse_from(["onmark", "benchmark", "film.html", "--runs", "2"]).is_err());
     }
 
     #[test]

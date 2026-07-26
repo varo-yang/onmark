@@ -32,12 +32,13 @@ use crate::environment::Executables;
 use crate::execution;
 use crate::failure::CliError;
 use crate::input;
+use crate::progress::Progress;
 use crate::subtitle::SubtitleImport;
 
 pub(super) struct AuthoredReport {
-    path: PathBuf,
-    source: String,
-    diagnostics: Vec<Diagnostic>,
+    pub(super) path: PathBuf,
+    pub(super) source: String,
+    pub(super) diagnostics: Vec<Diagnostic>,
 }
 
 struct LocalExecutorOptions {
@@ -59,6 +60,25 @@ struct ExecutedRender {
     encode_profile: EncodeProfile,
 }
 
+struct PreparedRender {
+    args: RenderArgs,
+    source: String,
+    diagnostics: Vec<Diagnostic>,
+    timeline: TimelineIr,
+    frozen: FrozenCatalog,
+    output: PathBuf,
+    profile: RenderProfile,
+    encode_profile: EncodeProfile,
+    cache_admission: CacheAdmission,
+    executables: Executables,
+    elapsed: Duration,
+}
+
+enum Preparation {
+    Rejected(Box<RenderOutcome>),
+    Ready(Box<PreparedRender>),
+}
+
 #[derive(Clone, Copy, Debug)]
 pub(super) struct LocalRenderSummary {
     reuse: ArtifactReuse,
@@ -67,13 +87,13 @@ pub(super) struct LocalRenderSummary {
 }
 
 #[derive(Clone, Copy, Debug)]
-struct RenderTimings {
-    prepare: Duration,
-    bundle: Duration,
-    plan: Duration,
-    capture: Duration,
-    assemble: Duration,
-    total: Duration,
+pub(super) struct RenderTimings {
+    pub(super) prepare: Duration,
+    pub(super) bundle: Duration,
+    pub(super) plan: Duration,
+    pub(super) capture: Duration,
+    pub(super) assemble: Duration,
+    pub(super) total: Duration,
 }
 
 impl fmt::Display for RenderTimings {
@@ -105,6 +125,23 @@ pub(super) enum RenderOutcome {
         video: EncodedVideo,
         json: bool,
     },
+}
+
+pub(super) enum BenchmarkAttempt {
+    Rejected(AuthoredReport),
+    Completed {
+        report: AuthoredReport,
+        sample: BenchmarkSample,
+    },
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(super) struct BenchmarkSample {
+    pub(super) frames: u64,
+    pub(super) capture_mode: BrowserCaptureMode,
+    pub(super) graphics_backend: BrowserGraphicsBackend,
+    pub(super) encode_profile: EncodeProfile,
+    pub(super) timings: RenderTimings,
 }
 
 impl RenderOutcome {
@@ -176,28 +213,79 @@ impl RenderOutcome {
         };
         result.unwrap_or(ExitCode::FAILURE)
     }
+
+    pub(super) fn into_benchmark_attempt(self) -> BenchmarkAttempt {
+        match self {
+            Self::Rejected { report, .. } => BenchmarkAttempt::Rejected(report),
+            Self::Completed {
+                screenplay,
+                capture_mode,
+                graphics_backend,
+                summary,
+                video,
+                ..
+            } => BenchmarkAttempt::Completed {
+                report: screenplay,
+                sample: BenchmarkSample {
+                    frames: video.frames(),
+                    capture_mode,
+                    graphics_backend,
+                    encode_profile: summary.encode_profile,
+                    timings: summary.timings,
+                },
+            },
+        }
+    }
 }
 
 pub(super) async fn run(args: RenderArgs, json: bool) -> Result<RenderOutcome, CliError> {
+    run_with_cache(args, json, None).await
+}
+
+pub(super) async fn run_uncached(args: RenderArgs, json: bool) -> Result<RenderOutcome, CliError> {
+    run_with_cache(args, json, Some(CacheAdmission::Ephemeral)).await
+}
+
+async fn run_with_cache(
+    args: RenderArgs,
+    json: bool,
+    cache_admission: Option<CacheAdmission>,
+) -> Result<RenderOutcome, CliError> {
     let total_started = Instant::now();
+    let progress = Progress::for_command(json);
+    progress.started("prepare")?;
+    let prepared = match prepare_render(args, json, total_started, cache_admission).await? {
+        Preparation::Rejected(outcome) => return Ok(*outcome),
+        Preparation::Ready(prepared) => *prepared,
+    };
+    progress.completed("prepare", prepared.elapsed)?;
+    execute_render(prepared, json, total_started, progress).await
+}
+
+async fn prepare_render(
+    args: RenderArgs,
+    json: bool,
+    started: Instant,
+    cache_admission: Option<CacheAdmission>,
+) -> Result<Preparation, CliError> {
     let output = args.output();
     let encode_profile = args.encode_profile()?;
-    let cache_admission = match args.browser.as_ref() {
+    let cache_admission = cache_admission.unwrap_or(match args.browser.as_ref() {
         Some(_) => CacheAdmission::Ephemeral,
         None => CacheAdmission::Persistent,
-    };
+    });
     let profile = RenderProfile::new(args.width, args.height)?;
     let source = read_screenplay(&args)?;
 
     let resolved = compilation::resolve(&source);
     let (film, diagnostics) = resolved.into_parts();
     let Some(film) = film else {
-        return Ok(RenderOutcome::rejected(
+        return Ok(Preparation::Rejected(Box::new(RenderOutcome::rejected(
             args.screenplay,
             source,
             diagnostics,
             json,
-        ));
+        ))));
     };
     let caption_track = match args
         .subtitle
@@ -207,7 +295,9 @@ pub(super) async fn run(args: RenderArgs, json: bool) -> Result<RenderOutcome, C
     {
         Some(SubtitleImport::Track(track)) => Some(track),
         Some(SubtitleImport::Rejected(rejected)) => {
-            return Ok(RenderOutcome::rejected_subtitle(rejected, json));
+            return Ok(Preparation::Rejected(Box::new(
+                RenderOutcome::rejected_subtitle(rejected, json),
+            )));
         }
         None => None,
     };
@@ -215,7 +305,7 @@ pub(super) async fn run(args: RenderArgs, json: bool) -> Result<RenderOutcome, C
     reject_existing_output(&output)?;
     let executables = Executables::discover(&args).await?;
     create_output_directory(&output)?;
-    let ffprobe = ffprobe(executables.ffprobe);
+    let ffprobe = ffprobe(executables.ffprobe.clone());
     let frozen = FrozenCatalog::freeze(&film, source_directory(&args.screenplay), &ffprobe).await?;
     let solved = compilation::solve(
         film,
@@ -225,25 +315,62 @@ pub(super) async fn run(args: RenderArgs, json: bool) -> Result<RenderOutcome, C
     )?;
     let (timeline, diagnostics) = solved.into_parts();
     let Some(timeline) = timeline else {
-        return Ok(RenderOutcome::rejected(
+        return Ok(Preparation::Rejected(Box::new(RenderOutcome::rejected(
             args.screenplay,
             source,
             diagnostics,
             json,
-        ));
+        ))));
     };
     let timeline = compiler::import_captions(timeline, caption_track)?;
 
-    let prepare = total_started.elapsed();
+    Ok(Preparation::Ready(Box::new(PreparedRender {
+        args,
+        source,
+        diagnostics,
+        timeline,
+        frozen,
+        output,
+        profile,
+        encode_profile,
+        cache_admission,
+        executables,
+        elapsed: started.elapsed(),
+    })))
+}
+
+async fn execute_render(
+    prepared: PreparedRender,
+    json: bool,
+    total_started: Instant,
+    progress: Progress,
+) -> Result<RenderOutcome, CliError> {
+    let PreparedRender {
+        args,
+        source,
+        diagnostics,
+        timeline,
+        frozen,
+        output,
+        profile,
+        encode_profile,
+        cache_admission,
+        executables,
+        elapsed: prepare,
+    } = prepared;
+    progress.started("bundle")?;
     let bundle_started = Instant::now();
     let bundle_artifact = PresentationBundler::new(executables.bundler)
         .bundle(&source, source_directory(&args.screenplay))
         .await?;
     let bundle = bundle_started.elapsed();
+    progress.completed("bundle", bundle)?;
 
+    progress.started("plan")?;
     let plan_started = Instant::now();
     let (partitions, units) = materialize_units(&timeline, profile, &bundle_artifact, frozen)?;
     let plan = plan_started.elapsed();
+    progress.completed("plan", plan)?;
 
     let graphics_backend = args
         .graphics_backend()
@@ -256,7 +383,7 @@ pub(super) async fn run(args: RenderArgs, json: bool) -> Result<RenderOutcome, C
         video_encoder_threads: args.video_encoder_threads(),
         encode_profile,
     }
-    .execute(&partitions, &units, cache_admission, &output)
+    .execute(&partitions, &units, cache_admission, &output, progress)
     .await?;
     let summary = LocalRenderSummary {
         reuse: executed.reuse,
@@ -374,6 +501,7 @@ impl LocalExecutorOptions {
         units: &[ExecutableUnit],
         cache_admission: CacheAdmission,
         output: &Path,
+        progress: Progress,
     ) -> Result<ExecutedRender, CliError> {
         let encode_profile = self.encode_profile;
         let executor = self.into_executor();
@@ -382,13 +510,16 @@ impl LocalExecutorOptions {
         let cache =
             ArtifactCache::from_environment(cache_admission, capture_mode, graphics_backend)?;
 
+        progress.started("capture")?;
         let capture_started = Instant::now();
         let artifacts = cache
             .capture(&executor, units, execution::frame_artifact_limits())
             .await?;
         let capture = capture_started.elapsed();
+        progress.completed("capture", capture)?;
         let reuse = artifacts.reuse();
 
+        progress.started("assemble")?;
         let assemble_started = Instant::now();
         let video = executor
             .assemble_frame_artifacts(
@@ -399,13 +530,15 @@ impl LocalExecutorOptions {
                 output,
             )
             .await?;
+        let assemble = assemble_started.elapsed();
+        progress.completed("assemble", assemble)?;
 
         Ok(ExecutedRender {
             capture_mode,
             graphics_backend,
             reuse,
             capture,
-            assemble: assemble_started.elapsed(),
+            assemble,
             video,
             encode_profile,
         })

@@ -74,13 +74,14 @@ fn write_human(validation: &Validation) -> io::Result<()> {
     for (index, region) in inspection.regions.iter().enumerate() {
         writeln!(
             stdout,
-            "Region {index}: evaluate {}..{}, output {}..{}, {}, {}",
+            "Region {index}: evaluate {}..{}, output {}..{}, {}, {}, bundle {}",
             region.evaluation_start,
             region.evaluation_end,
             region.output_start,
             region.output_end,
             region.visual_mode,
             region.capture_cadence,
+            region.bundle_id,
         )?;
     }
     Ok(())
@@ -164,6 +165,7 @@ struct JsonRegion<'a> {
     output_end: u64,
     visual_mode: &'a str,
     capture_cadence: &'a str,
+    bundle_id: &'a str,
 }
 
 impl<'a> From<&'a RegionInspection> for JsonRegion<'a> {
@@ -175,6 +177,7 @@ impl<'a> From<&'a RegionInspection> for JsonRegion<'a> {
             output_end: region.output_end,
             visual_mode: region.visual_mode,
             capture_cadence: region.capture_cadence,
+            bundle_id: &region.bundle_id,
         }
     }
 }

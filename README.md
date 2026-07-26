@@ -85,6 +85,7 @@ Validate or inspect the same production plan without launching Chromium:
 onmark check film.html
 onmark inspect film.html --json
 onmark doctor
+onmark benchmark film.html --runs 3 --json
 ```
 
 Use the default H.264/AAC MP4 for delivery, or select the edit-friendly
