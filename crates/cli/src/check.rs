@@ -10,7 +10,7 @@ use std::process::ExitCode;
 use onmark_core::compiler;
 use onmark_core::compiler::ResolvedFilm;
 use onmark_core::diagnostics::Diagnostic;
-use onmark_core::model::{CaptionTrack, FrameRate, Timebase};
+use onmark_core::model::{CaptionTrack, Timebase};
 use onmark_core::render_graph::{PartitionPlan, RenderGraph};
 use onmark_core::timeline::TimelineIr;
 use onmark_media::Ffprobe;
@@ -42,17 +42,8 @@ pub(super) struct Validation {
 }
 
 pub(super) struct Inspection {
-    pub(super) frame_rate: FrameRate,
-    pub(super) interval_start: u64,
-    pub(super) interval_end: u64,
+    pub(super) timeline: TimelineIr,
     pub(super) assets: usize,
-    pub(super) scenes: usize,
-    pub(super) shots: usize,
-    pub(super) videos: usize,
-    pub(super) overlays: usize,
-    pub(super) audio: usize,
-    pub(super) captions: usize,
-    pub(super) cues: usize,
     pub(super) regions: Vec<RegionInspection>,
 }
 
@@ -205,22 +196,20 @@ async fn validate_resolved(input: ResolvedInput) -> Result<Validation, CliError>
         RenderProfile::new(args.width, args.height)?,
         materialized.assets().iter().cloned(),
     )?;
-    let inspection = inspect_plan(&timeline, &partitions, &units, args.frame_rate, asset_count);
+    let regions = inspect_regions(&partitions, &units);
 
     Ok(Validation {
         report: authored_report(args.screenplay, source, diagnostics),
-        inspection: Some(inspection),
+        inspection: Some(Inspection {
+            timeline,
+            assets: asset_count,
+            regions,
+        }),
     })
 }
 
-fn inspect_plan(
-    timeline: &TimelineIr,
-    partitions: &PartitionPlan,
-    units: &[RenderUnit],
-    frame_rate: FrameRate,
-    assets: usize,
-) -> Inspection {
-    let regions = partitions
+fn inspect_regions(partitions: &PartitionPlan, units: &[RenderUnit]) -> Vec<RegionInspection> {
+    partitions
         .units()
         .iter()
         .zip(units)
@@ -236,21 +225,7 @@ fn inspect_plan(
             },
             bundle_id: unit.bundle_id().into(),
         })
-        .collect();
-    Inspection {
-        frame_rate,
-        interval_start: timeline.interval().start().get(),
-        interval_end: timeline.interval().end().get(),
-        assets,
-        scenes: timeline.scenes().len(),
-        shots: timeline.shots().count(),
-        videos: timeline.videos().count(),
-        overlays: timeline.overlays().count(),
-        audio: timeline.audio().count(),
-        captions: timeline.captions().len(),
-        cues: timeline.events().len(),
-        regions,
-    }
+        .collect()
 }
 
 fn authored_report(path: PathBuf, source: String, diagnostics: Vec<Diagnostic>) -> AuthoredReport {
@@ -277,13 +252,15 @@ fn write_result(validation: &Validation, json: bool) -> io::Result<()> {
     drop(stderr);
 
     if let Some(inspection) = &validation.inspection {
+        let timeline = &inspection.timeline;
+        let frame_rate = timeline.timebase().frame_rate();
         let mut stdout = io::stdout().lock();
         writeln!(
             stdout,
             "Checked {} frames at {}/{} fps across {} render regions and {} frozen assets",
-            inspection.interval_end - inspection.interval_start,
-            inspection.frame_rate.numerator(),
-            inspection.frame_rate.denominator(),
+            timeline.interval().len().get(),
+            frame_rate.numerator(),
+            frame_rate.denominator(),
             inspection.regions.len(),
             inspection.assets,
         )?;
@@ -334,10 +311,12 @@ struct JsonCheckSummary {
 
 impl From<&Inspection> for JsonCheckSummary {
     fn from(inspection: &Inspection) -> Self {
+        let timeline = &inspection.timeline;
+        let frame_rate = timeline.timebase().frame_rate();
         Self {
-            frame_rate_numerator: inspection.frame_rate.numerator(),
-            frame_rate_denominator: inspection.frame_rate.denominator(),
-            frames: inspection.interval_end - inspection.interval_start,
+            frame_rate_numerator: frame_rate.numerator(),
+            frame_rate_denominator: frame_rate.denominator(),
+            frames: timeline.interval().len().get(),
             assets: inspection.assets,
             render_regions: inspection.regions.len(),
         }
