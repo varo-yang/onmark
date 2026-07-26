@@ -1,0 +1,343 @@
+<!doctype html>
+<om-film>
+  <!-- Presentation -->
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body,
+    om-film,
+    om-scene,
+    om-shot {
+      display: block;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      width: 100%;
+    }
+
+    body {
+      background: #090817;
+      color: #f1ede2;
+      font-family: "Instrument Sans", sans-serif;
+    }
+
+    .story {
+      background: #090817;
+      height: 100%;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .light-field {
+      filter: blur(68px) saturate(128%);
+      inset: -18%;
+      position: absolute;
+    }
+
+    .light {
+      border-radius: 50%;
+      position: absolute;
+      will-change: transform;
+    }
+
+    .light-a {
+      background: #623cff;
+      height: 72%;
+      left: 4%;
+      top: 14%;
+      width: 48%;
+    }
+
+    .light-b {
+      background: #ff1ea8;
+      height: 58%;
+      left: 42%;
+      top: 5%;
+      width: 42%;
+    }
+
+    .light-c {
+      background: #05c8ff;
+      height: 66%;
+      left: 56%;
+      top: 38%;
+      width: 44%;
+    }
+
+    .light-d {
+      background: #ff663e;
+      height: 34%;
+      left: 30%;
+      top: 62%;
+      width: 34%;
+    }
+
+    .veil {
+      background:
+        radial-gradient(circle at center, transparent 20%, rgb(9 8 23 / 34%)),
+        linear-gradient(90deg, rgb(9 8 23 / 44%), transparent 40%);
+      inset: 0;
+      position: absolute;
+    }
+
+    .phrases {
+      inset: 0;
+      position: absolute;
+      z-index: 2;
+    }
+
+    .phrase {
+      left: 7%;
+      opacity: 0;
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 86%;
+    }
+
+    .phrase span {
+      display: block;
+      font-size: clamp(86px, 11vw, 210px);
+      font-weight: 700;
+      letter-spacing: -0.055em;
+      line-height: 0.83;
+      word-spacing: 0.06em;
+    }
+
+    .phrase em {
+      font-family: "Instrument Serif", serif;
+      font-weight: 400;
+    }
+
+    .phrase-two,
+    .phrase-four {
+      text-align: right;
+    }
+
+    .phrase-two span,
+    .phrase-four span {
+      margin-left: auto;
+    }
+
+    .phrase-two em {
+      color: #cffff1;
+    }
+
+    .phrase-three em {
+      color: #ffd4ec;
+    }
+
+    .phrase-four em {
+      color: #d8d0ff;
+    }
+
+    .chrome {
+      display: flex;
+      font-size: clamp(9px, 0.62vw, 12px);
+      font-weight: 700;
+      justify-content: space-between;
+      left: 30px;
+      letter-spacing: 0.16em;
+      position: absolute;
+      right: 30px;
+      text-transform: uppercase;
+      z-index: 3;
+    }
+
+    .chrome-top {
+      top: 28px;
+    }
+
+    .chrome-bottom {
+      bottom: 28px;
+    }
+  </style>
+
+  <!-- Screenplay -->
+  <om-scene>
+    <om-shot duration="15s">
+      <div class="story">
+        <div class="light-field">
+          <i class="light light-a"></i>
+          <i class="light light-b"></i>
+          <i class="light light-c"></i>
+          <i class="light light-d"></i>
+        </div>
+        <div class="veil"></div>
+
+        <om-title class="phrases">
+          <strong class="phrase phrase-one">
+            <span>Time has</span><span><em>weight.</em></span>
+          </strong>
+          <strong class="phrase phrase-two">
+            <span>Intent</span><span><em>bends it.</em></span>
+          </strong>
+          <strong class="phrase phrase-three">
+            <span>Frames find</span><span><em>form.</em></span>
+          </strong>
+          <strong class="phrase phrase-four">
+            <span>Stories stay</span><span><em>in motion.</em></span>
+          </strong>
+        </om-title>
+
+        <div class="chrome chrome-top">
+          <span>Onmark / temporal cinema</span><span>15 seconds / exact</span>
+        </div>
+        <div class="chrome chrome-bottom">
+          <span>Intent enters</span><span>Frames emerge</span>
+        </div>
+      </div>
+    </om-shot>
+  </om-scene>
+
+  <!-- Motion -->
+  <script type="module" data-om-motion>
+    import { combineMotion, createFontResource } from "onmark/authoring";
+    import { gsapMotion } from "onmark/motion/gsap";
+    import sansUrl from "./assets/fonts/instrument-sans.woff2";
+    import sansBoldUrl from "./assets/fonts/instrument-sans-bold.woff2";
+    import serifUrl from "./assets/fonts/instrument-serif.woff2";
+
+    const typography = {
+      bind() {
+        return {
+          effects: [],
+          resources: [
+            fontResource("Instrument Sans", sansUrl, "400", "sans-regular"),
+            fontResource("Instrument Sans", sansBoldUrl, "700", "sans-bold"),
+            fontResource("Instrument Serif", serifUrl, "400", "serif"),
+          ],
+        };
+      },
+    };
+
+    const choreography = gsapMotion({
+      shot({ element, timeline }) {
+        animateLight(timeline, element);
+        animatePhrase(timeline, element, ".phrase-one", 0.25, 2.8, -1);
+        animatePhrase(timeline, element, ".phrase-two", 3.55, 6.3, 1);
+        animatePhrase(timeline, element, ".phrase-three", 7.05, 9.8, -1);
+        animatePhrase(timeline, element, ".phrase-four", 10.55, 13.5, 1);
+        timeline.to(
+          element,
+          { duration: 0.55, ease: "power2.in", opacity: 0 },
+          14.45,
+        );
+      },
+    });
+
+    export const motion = combineMotion(typography, choreography);
+
+    function fontResource(family, source, weight, id) {
+      const face = new FontFace(family, `url(${source}) format("woff2")`, {
+        weight,
+      });
+      return createFontResource({ face, fonts: document.fonts, id });
+    }
+
+    function animateLight(timeline, element) {
+      timeline
+        .to(
+          element.querySelector(".light-a"),
+          {
+            duration: 14.6,
+            ease: "sine.inOut",
+            scale: 1.35,
+            xPercent: 72,
+            yPercent: -18,
+          },
+          0,
+        )
+        .to(
+          element.querySelector(".light-b"),
+          {
+            duration: 14.6,
+            ease: "sine.inOut",
+            scale: 0.72,
+            xPercent: -94,
+            yPercent: 68,
+          },
+          0,
+        )
+        .to(
+          element.querySelector(".light-c"),
+          {
+            duration: 14.6,
+            ease: "sine.inOut",
+            scale: 1.28,
+            xPercent: -45,
+            yPercent: -64,
+          },
+          0,
+        )
+        .to(
+          element.querySelector(".light-d"),
+          {
+            duration: 14.6,
+            ease: "sine.inOut",
+            scale: 1.6,
+            xPercent: 88,
+            yPercent: -52,
+          },
+          0,
+        );
+    }
+
+    function animatePhrase(
+      timeline,
+      element,
+      selector,
+      enter,
+      leave,
+      direction,
+    ) {
+      const phrase = element.querySelector(selector);
+      const lines = phrase.querySelectorAll("span");
+
+      timeline
+        .fromTo(
+          phrase,
+          {
+            filter: "blur(30px)",
+            opacity: 0,
+            scale: 1.16,
+            x: direction * 90,
+          },
+          {
+            duration: 1.2,
+            ease: "expo.out",
+            filter: "blur(0px)",
+            opacity: 1,
+            scale: 1,
+            x: 0,
+          },
+          enter,
+        )
+        .from(
+          lines,
+          {
+            duration: 1.3,
+            ease: "expo.out",
+            letterSpacing: "0.04em",
+            stagger: 0.1,
+          },
+          enter,
+        )
+        .to(
+          phrase,
+          {
+            duration: 0.95,
+            ease: "expo.in",
+            filter: "blur(24px)",
+            opacity: 0,
+            scale: 0.88,
+            x: direction * -65,
+          },
+          leave,
+        );
+    }
+  </script>
+</om-film>

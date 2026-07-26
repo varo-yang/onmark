@@ -23,6 +23,35 @@ through Chromium, mixes media with FFmpeg, and writes an MP4.
 screenplay → Timeline IR → Render Units → browser frames + audio → MP4
 ```
 
+## One timeline. Three visual languages.
+
+Each film is one authored HTML document rendered by the same deterministic CLI.
+
+<table>
+  <tr>
+    <td width="33%" align="center">
+      <a href="https://onmark-cdn-1313593665.cos.ap-guangzhou.myqcloud.com/onmark-luminous-story.mp4">
+        <img src="docs/showcase-luminous.gif" alt="Luminous Story: chromatic light and kinetic typography">
+      </a>
+    </td>
+    <td width="33%" align="center">
+      <a href="https://onmark-cdn-1313593665.cos.ap-guangzhou.myqcloud.com/onmark-exact-system.mp4">
+        <img src="docs/showcase-system.gif" alt="Exact System: black-and-lime deterministic interface">
+      </a>
+    </td>
+    <td width="33%" align="center">
+      <a href="https://onmark-cdn-1313593665.cos.ap-guangzhou.myqcloud.com/onmark-printed-motion.mp4">
+        <img src="docs/showcase-printed.gif" alt="Printed Motion: monochrome editorial choreography">
+      </a>
+    </td>
+  </tr>
+  <tr>
+    <td align="center"><strong>Luminous Story</strong><br><sub>Chromatic atmosphere</sub></td>
+    <td align="center"><strong>Exact System</strong><br><sub>Deterministic interface</sub></td>
+    <td align="center"><strong>Printed Motion</strong><br><sub>Editorial choreography</sub></td>
+  </tr>
+</table>
+
 ## Quick start
 
 Install the desktop CLI on macOS arm64, Linux x64, or Windows x64:
