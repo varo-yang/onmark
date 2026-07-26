@@ -27,7 +27,8 @@ pub use browser::{
     EncodedPng, InvalidBrowserLimits, RawRgbaHash,
 };
 pub use encoder::{
-    EncodeError, EncodeErrorKind, EncodeLimits, EncodedVideo, Ffmpeg, FfmpegSession, InvalidFfmpeg,
+    EncodeError, EncodeErrorKind, EncodeLimits, EncodeProfile, EncodedVideo, Ffmpeg, FfmpegSession,
+    InvalidFfmpeg,
 };
 pub use environment::{CaptureEnvironmentId, InvalidCaptureEnvironmentId};
 pub use executor::{

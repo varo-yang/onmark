@@ -1,10 +1,11 @@
 //! Checked command-line surface for local rendering and portable worker capture.
 
 use std::path::{Path, PathBuf};
+use std::{error::Error, fmt};
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use onmark_core::model::FrameRate;
-use onmark_render::{BrowserGraphicsBackend, EncodeLimits};
+use onmark_render::{BrowserGraphicsBackend, EncodeLimits, EncodeProfile};
 
 use crate::execution::LOCAL_VIDEO_ENCODER_THREADS;
 
@@ -30,7 +31,7 @@ pub(super) enum Command {
     Info,
     /// Explain the solved timeline and render regions without rendering.
     Inspect(InspectArgs),
-    /// Compile and render one screenplay into an H.264 MP4.
+    /// Compile and render one screenplay into an admitted video profile.
     Render(RenderArgs),
     /// Execute one already-planned worker task without recompiling source.
     Worker(WorkerArgs),
@@ -163,7 +164,7 @@ pub(super) struct RenderArgs {
     /// Authored HTML document to compile and render.
     pub(super) screenplay: PathBuf,
 
-    /// MP4 destination. Defaults to `renders/<screenplay>.mp4`.
+    /// MP4 or MOV destination. The extension selects the delivery profile.
     #[arg(short, long)]
     output: Option<PathBuf>,
 
@@ -187,7 +188,7 @@ pub(super) struct RenderArgs {
     #[arg(long, value_enum, help_heading = "Execution overrides")]
     graphics: Option<GraphicsBackend>,
 
-    /// Threads assigned to the final H.264 encoder.
+    /// Threads assigned to the final visual encoder.
     #[arg(
         long,
         default_value_t = LOCAL_VIDEO_ENCODER_THREADS,
@@ -242,6 +243,20 @@ impl RenderArgs {
         })
     }
 
+    pub(super) fn encode_profile(&self) -> Result<EncodeProfile, InvalidOutputExtension> {
+        let output = self.output();
+        let Some(extension) = output.extension().and_then(|value| value.to_str()) else {
+            return Err(InvalidOutputExtension(output));
+        };
+        if extension.eq_ignore_ascii_case("mp4") {
+            Ok(EncodeProfile::H264Mp4)
+        } else if extension.eq_ignore_ascii_case("mov") {
+            Ok(EncodeProfile::ProResMov)
+        } else {
+            Err(InvalidOutputExtension(output))
+        }
+    }
+
     pub(super) fn graphics_backend(&self) -> Option<BrowserGraphicsBackend> {
         self.graphics.map(GraphicsBackend::into_render_backend)
     }
@@ -250,6 +265,21 @@ impl RenderArgs {
         self.video_encoder_threads
     }
 }
+
+#[derive(Debug)]
+pub(super) struct InvalidOutputExtension(PathBuf);
+
+impl fmt::Display for InvalidOutputExtension {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "output {} must use the .mp4 or .mov extension",
+            self.0.display(),
+        )
+    }
+}
+
+impl Error for InvalidOutputExtension {}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
 enum GraphicsBackend {
@@ -310,7 +340,7 @@ fn parse_video_encoder_threads(value: &str) -> Result<usize, String> {
 mod tests {
     use std::path::Path;
 
-    use onmark_render::{BrowserGraphicsBackend, EncodeLimits};
+    use onmark_render::{BrowserGraphicsBackend, EncodeLimits, EncodeProfile};
 
     use super::{Cli, Command, LOCAL_VIDEO_ENCODER_THREADS, WorkerCommand};
     use clap::Parser;
@@ -324,10 +354,34 @@ mod tests {
         };
 
         assert_eq!(args.output(), Path::new("renders/film.mp4"));
+        assert_eq!(
+            args.encode_profile().expect("the default profile is valid"),
+            EncodeProfile::H264Mp4,
+        );
         assert_eq!(args.frame_rate.numerator(), 30);
         assert_eq!(args.frame_rate.denominator(), 1);
         assert_eq!(args.graphics_backend(), None);
         assert_eq!(args.video_encoder_threads(), LOCAL_VIDEO_ENCODER_THREADS);
+    }
+
+    #[test]
+    fn selects_output_profiles_only_from_canonical_extensions() {
+        let cli = Cli::try_parse_from(["onmark", "render", "film.html", "--output", "film.mov"])
+            .expect("the MOV extension selects the editing profile");
+        let Command::Render(args) = cli.command else {
+            panic!("the fixture must parse as a render command");
+        };
+        assert_eq!(
+            args.encode_profile().expect("the MOV profile is valid"),
+            EncodeProfile::ProResMov,
+        );
+
+        let cli = Cli::try_parse_from(["onmark", "render", "film.html", "--output", "film.webm"])
+            .expect("argument structure is valid before profile selection");
+        let Command::Render(args) = cli.command else {
+            panic!("the fixture must parse as a render command");
+        };
+        assert!(args.encode_profile().is_err());
     }
 
     #[test]

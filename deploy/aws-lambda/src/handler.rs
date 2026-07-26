@@ -41,8 +41,12 @@ impl CaptureHandler {
         let browser = BrowserRuntime::new(
             configuration.browser().clone(),
             Configuration::browser_limits(),
-            Ffmpeg::new(PACKAGED_FFMPEG, Configuration::encode_limits())
-                .expect("the deployed FFmpeg path and limits are fixed and nonempty"),
+            Ffmpeg::new(
+                PACKAGED_FFMPEG,
+                Configuration::encode_limits(),
+                onmark_render::EncodeProfile::H264Mp4,
+            )
+            .expect("the deployed FFmpeg path and limits are fixed and nonempty"),
         );
 
         Ok(Self {

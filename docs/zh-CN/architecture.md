@@ -1037,8 +1037,8 @@ host；不能把 transport 的 navigation 返回误当成完整生命周期屏�
 browser capture 最多只保留一张 PNG，捕获后直接写入 `FFmpeg image2pipe`。分布式
 layered capture 因 frame artifact 需要拥有 canonical RGBA 与 hash，使用一条 capacity-one
 stream 返回像素；本地 layered video 只把透明前景送入 encoder process，不会 split 已合成帧，
-也不会在写 MP4 前把 raw RGBA 再复制回 Rust。不存在整段视频 frame buffer。固定的 H.264 `yuv420p`
-profile 会在进程启动前拒绝奇数 viewport 尺寸。browser capture 在共享 runtime
+也不会在写入所选视频 profile 前把 raw RGBA 再复制回 Rust。不存在整段视频 frame buffer。
+共享的 subsampled 输出 profile 会在进程启动前拒绝奇数 viewport 尺寸。browser capture 在共享 runtime
 protocol 下只有两个封闭 backend：Linux `chrome-headless-shell` 用 `BeginFrame`
 原子提交并读取 compositor transaction；macOS 与 Windows 用 `Screenshot`，在同一个
 `Seek` readiness barrier 后通过 `Page.captureScreenshot` 读取 surface，并复用同一条
@@ -1132,9 +1132,11 @@ observed process peak RSS 分别约为 533–541、545、561–577、605–615 M
 比较：x264 是有损编码，同一 canonical input 也可能产生细微不同的 decoded pixels，因此
 确定性 visual oracle 仍是 raw RGBA。
 
-direct screenshot encoder 与 layered media encoder 共同拥有同一份标准 H.264 policy：
-x264 `medium`、CRF 18、`yuv420p` 与 BT.709 limited-range metadata。该 policy 必须显式
-声明，不能继承 FFmpeg default；FFmpeg 升级不得悄悄改变文字、渐变或运动画质。
+direct screenshot encoder 与 layered media encoder 共同消费同一份封闭输出 policy。
+交付 profile 使用 x264 `medium`、CRF 18、`yuv420p` 与 BT.709 limited-range metadata；
+剪辑 profile 使用 `prores_ks` profile 3、`yuv422p10le` 与相同 color declaration。
+这些事实必须显式声明，不能继承 FFmpeg default；FFmpeg 升级不得暗中选择 codec、
+pixel format 或 container。
 
 本地 capture 保留 Chromium 的标准 multi-process
 topology；只有独立审计过的外层 container 或 microVM 承担等价的 process
@@ -1581,6 +1583,15 @@ compiler 或 planner。
 contract。native crop、scale、picture-in-picture 与 multi-video placement 必须先具有显式
 layout fact，并通过 whole-film、partitioned 与 distributed raw-pixel equivalence，才能绕过
 Chromium。
+
+首个获准的替代输出是面向剪辑的 MOV：`ProRes` 422 HQ（`yuv422p10le`）
+配 48 kHz 双声道 24-bit PCM。原有交付配置仍是 MP4 中的 x264 H.264
+（`yuv420p`）与 AAC。一个封闭的 `EncodeProfile` 在浏览器直出、原生分层、
+本地组装和分布式帧产物组装之间统一拥有视觉编码器、音频编码器、像素格式、
+容器、暂存后缀与机器拼写。CLI 只从 `.mp4` 或 `.mov` 扩展名选择一次，并拒绝
+其他拼写；不得让 `FFmpeg` 默认值暗中决定结果。桌面发布验收会从已安装
+产品分别渲染并探测两种配置。透明输出须等 alpha 契约贯穿浏览器捕获、原生合成、
+缓存和最终封装并获得证据后再准入。
 
 media treatment、transition、dynamic author input、caption presentation 与 multiple subtitle
 track 一旦改变作者语义，就属于语言工作。每项新增能力都必须先提交语言准入规则要求的 cases、

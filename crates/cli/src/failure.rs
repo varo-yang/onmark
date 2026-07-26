@@ -17,6 +17,7 @@ use onmark_render::{
 use serde::Serialize;
 use tokio::task::JoinError;
 
+use crate::arguments::InvalidOutputExtension;
 use crate::artifact_cache::ArtifactCacheError;
 use crate::assets::AssetError;
 use crate::bundler::BundleError;
@@ -45,6 +46,7 @@ pub(super) enum CliError {
         source: io::Error,
     },
     OutputExists(PathBuf),
+    InvalidOutputExtension(InvalidOutputExtension),
     InvalidProfile(InvalidRenderProfile),
     InvalidFfmpeg(InvalidFfmpeg),
     ArtifactCache(ArtifactCacheError),
@@ -121,6 +123,7 @@ impl fmt::Display for CliError {
             Self::OutputExists(path) => {
                 write!(formatter, "output {} already exists", path.display())
             }
+            Self::InvalidOutputExtension(source) => source.fmt(formatter),
             Self::InvalidProfile(source) => source.fmt(formatter),
             Self::InvalidFfmpeg(source) => source.fmt(formatter),
             Self::ArtifactCache(source) => source.fmt(formatter),
@@ -148,6 +151,7 @@ impl Error for CliError {
             Self::ParseWorkerRequest { source, .. } => Some(source),
             Self::WorkerTask(source) => Some(source),
             Self::OutputExists(_) => None,
+            Self::InvalidOutputExtension(source) => Some(source),
             Self::InvalidProfile(source) => Some(source),
             Self::InvalidFfmpeg(source) => Some(source),
             Self::ArtifactCache(source) => Some(source),
@@ -173,6 +177,12 @@ impl From<EnvironmentError> for CliError {
 impl From<InvalidRenderProfile> for CliError {
     fn from(source: InvalidRenderProfile) -> Self {
         Self::InvalidProfile(source)
+    }
+}
+
+impl From<InvalidOutputExtension> for CliError {
+    fn from(source: InvalidOutputExtension) -> Self {
+        Self::InvalidOutputExtension(source)
     }
 }
 

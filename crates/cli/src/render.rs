@@ -17,8 +17,8 @@ use onmark_core::render_graph::{PartitionPlan, RenderGraph};
 use onmark_core::timeline::TimelineIr;
 use onmark_media::Ffprobe;
 use onmark_render::{
-    BrowserCaptureMode, BrowserGraphicsBackend, EncodedVideo, ExecutableUnit, Ffmpeg,
-    RenderExecutor, RenderProfile, RenderUnit,
+    BrowserCaptureMode, BrowserGraphicsBackend, EncodeProfile, EncodedVideo, ExecutableUnit,
+    Ffmpeg, RenderExecutor, RenderProfile, RenderUnit,
 };
 use serde::Serialize;
 
@@ -46,6 +46,7 @@ struct LocalExecutorOptions {
     ffmpeg: PathBuf,
     graphics_backend: BrowserGraphicsBackend,
     video_encoder_threads: usize,
+    encode_profile: EncodeProfile,
 }
 
 struct ExecutedRender {
@@ -55,12 +56,14 @@ struct ExecutedRender {
     capture: Duration,
     assemble: Duration,
     video: EncodedVideo,
+    encode_profile: EncodeProfile,
 }
 
 #[derive(Clone, Copy, Debug)]
 pub(super) struct LocalRenderSummary {
     reuse: ArtifactReuse,
     timings: RenderTimings,
+    encode_profile: EncodeProfile,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -178,6 +181,7 @@ impl RenderOutcome {
 pub(super) async fn run(args: RenderArgs, json: bool) -> Result<RenderOutcome, CliError> {
     let total_started = Instant::now();
     let output = args.output();
+    let encode_profile = args.encode_profile()?;
     let cache_admission = match args.browser.as_ref() {
         Some(_) => CacheAdmission::Ephemeral,
         None => CacheAdmission::Persistent,
@@ -250,11 +254,13 @@ pub(super) async fn run(args: RenderArgs, json: bool) -> Result<RenderOutcome, C
         ffmpeg: executables.ffmpeg,
         graphics_backend,
         video_encoder_threads: args.video_encoder_threads(),
+        encode_profile,
     }
     .execute(&partitions, &units, cache_admission, &output)
     .await?;
     let summary = LocalRenderSummary {
         reuse: executed.reuse,
+        encode_profile: executed.encode_profile,
         timings: RenderTimings {
             prepare,
             bundle,
@@ -349,10 +355,12 @@ impl LocalExecutorOptions {
             ffmpeg,
             graphics_backend,
             video_encoder_threads,
+            encode_profile,
         } = self;
         let ffmpeg = Ffmpeg::new(
             ffmpeg,
             execution::local_encode_limits(video_encoder_threads),
+            encode_profile,
         )
         .expect("environment discovery returns a non-empty FFmpeg path");
 
@@ -367,6 +375,7 @@ impl LocalExecutorOptions {
         cache_admission: CacheAdmission,
         output: &Path,
     ) -> Result<ExecutedRender, CliError> {
+        let encode_profile = self.encode_profile;
         let executor = self.into_executor();
         let capture_mode = executor.capture_mode();
         let graphics_backend = executor.graphics_backend();
@@ -398,6 +407,7 @@ impl LocalExecutorOptions {
             capture,
             assemble: assemble_started.elapsed(),
             video,
+            encode_profile,
         })
     }
 }
@@ -430,8 +440,9 @@ fn write_completed(
     let mut stdout = io::stdout().lock();
     writeln!(
         stdout,
-        "Rendered {} frames with {} capture on {} to {}",
+        "Rendered {} frames as {} with {} capture on {} to {}",
         video.frames(),
+        summary.encode_profile.as_str(),
         capture_mode,
         graphics_backend,
         video.path().display(),
@@ -482,6 +493,7 @@ struct JsonRenderReport<'a> {
 #[serde(rename_all = "camelCase")]
 struct JsonCompleted {
     output: String,
+    output_profile: &'static str,
     frames: u64,
     capture_mode: String,
     graphics_backend: String,
@@ -500,6 +512,7 @@ impl JsonCompleted {
     ) -> Self {
         Self {
             output: video.path().display().to_string(),
+            output_profile: summary.encode_profile.as_str(),
             frames: video.frames(),
             capture_mode: capture_mode.to_string(),
             graphics_backend: graphics_backend.to_string(),

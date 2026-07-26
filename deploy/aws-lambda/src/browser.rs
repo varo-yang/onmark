@@ -583,7 +583,8 @@ mod tests {
     fn fixture_ffmpeg() -> Ffmpeg {
         let limits = EncodeLimits::new(Duration::from_secs(1), 1, 1, 1)
             .expect("the fixture encoder limits are bounded");
-        Ffmpeg::new("ffmpeg", limits).expect("the fixture executable path is present")
+        Ffmpeg::new("ffmpeg", limits, onmark_render::EncodeProfile::H264Mp4)
+            .expect("the fixture executable path is present")
     }
 
     #[test]

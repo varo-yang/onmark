@@ -141,8 +141,12 @@ impl ConformanceFilm {
         let encode_limits =
             EncodeLimits::new(PROCESS_TIMEOUT, EXPECTED_FRAMES, UNIT_BYTES, 64 * 1024)
                 .expect("the conformance encoder limits are bounded");
-        let ffmpeg = Ffmpeg::new(environment.ffmpeg(), encode_limits)
-            .expect("the conformance FFmpeg path is non-empty");
+        let ffmpeg = Ffmpeg::new(
+            environment.ffmpeg(),
+            encode_limits,
+            onmark_render::EncodeProfile::H264Mp4,
+        )
+        .expect("the conformance FFmpeg path is non-empty");
         let executor = RenderExecutor::new(
             "unused-during-assembly",
             onmark_render::BrowserCaptureMode::BeginFrame,

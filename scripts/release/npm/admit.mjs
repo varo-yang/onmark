@@ -282,11 +282,18 @@ async function admitRender(tools, directory) {
   const screenplay = join(directory, "film.html");
   const first = join(directory, "first.mp4");
   const second = join(directory, "second.mp4");
+  const editing = join(directory, "editing.mov");
   const outputs = Object.freeze([first, second]);
   const renderMilliseconds = await renderIndependently(
     tools.onmark,
     screenplay,
     outputs,
+    directory,
+  );
+  const [editingMilliseconds] = await renderIndependently(
+    tools.onmark,
+    screenplay,
+    [editing],
     directory,
   );
 
@@ -315,6 +322,7 @@ async function admitRender(tools, directory) {
       `release output has an unexpected frame count: ${firstFrames}, ${secondFrames}`,
     );
   }
+  await verifyEditingStreams(tools.ffprobe, editing, directory);
 
   const before = await fileIdentity(first);
   const refusal = await runInvocationStatus(
@@ -333,6 +341,7 @@ async function admitRender(tools, directory) {
   return Object.freeze({
     frames: EXPECTED_OUTPUT_FRAMES,
     height: HEIGHT,
+    editingMilliseconds,
     renderMilliseconds,
     target: releaseTarget(),
     width: WIDTH,
@@ -453,6 +462,47 @@ async function verifyStreams(ffprobe, input, directory) {
     throw new Error("release output has no decoded AAC audio stream");
   }
   return frames;
+}
+
+async function verifyEditingStreams(ffprobe, input, directory) {
+  const result = await capture(
+    ffprobe,
+    [
+      "-v",
+      "error",
+      "-show_entries",
+      "stream=codec_type,codec_name,pix_fmt,sample_rate,channels",
+      "-of",
+      "json",
+      input,
+    ],
+    directory,
+    TOOL_TIMEOUT_MILLISECONDS,
+  );
+  const value = JSON.parse(result.stdout);
+  const streams =
+    isObject(value) && Array.isArray(value.streams) ? value.streams : [];
+  const video = streams.find(
+    (stream) => isObject(stream) && stream.codec_type === "video",
+  );
+  const audio = streams.find(
+    (stream) => isObject(stream) && stream.codec_type === "audio",
+  );
+  if (
+    !isObject(video) ||
+    video.codec_name !== "prores" ||
+    video.pix_fmt !== "yuv422p10le"
+  ) {
+    throw new Error("release editing output is not ProRes 422 HQ");
+  }
+  if (
+    !isObject(audio) ||
+    audio.codec_name !== "pcm_s24le" ||
+    audio.sample_rate !== "48000" ||
+    audio.channels !== 2
+  ) {
+    throw new Error("release editing output is not 48 kHz stereo PCM");
+  }
 }
 
 // ── Bounded child processes

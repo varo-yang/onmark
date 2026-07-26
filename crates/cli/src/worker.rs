@@ -76,7 +76,11 @@ async fn capture(args: WorkerCaptureArgs, json: bool) -> Result<WorkerOutcome, C
         BrowserLaunchPolicy::local(),
         BrowserCaptureMode::BeginFrame,
         execution::browser_limits(),
-        Ffmpeg::new(args.ffmpeg, execution::worker_encode_limits())?,
+        Ffmpeg::new(
+            args.ffmpeg,
+            execution::worker_encode_limits(),
+            onmark_render::EncodeProfile::H264Mp4,
+        )?,
     );
     let artifact = capture
         .capture_frame_artifact(

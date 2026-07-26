@@ -21,6 +21,7 @@ use tokio::time::timeout;
 use super::error::{EncodeError, EncodeErrorKind};
 use super::limits::EncodeLimits;
 use super::process::{CapturedStderr, capture_stderr};
+use super::profile::EncodeProfile;
 use super::session::{EncodedVideo, with_stderr};
 
 const CLEANUP_TIMEOUT: Duration = Duration::from_secs(5);
@@ -121,6 +122,7 @@ pub(super) async fn mix_audio(
     inputs: Vec<AudioInput>,
     frame_rate: WireFrameRate,
     output: PathBuf,
+    profile: EncodeProfile,
 ) -> Result<EncodedVideo, EncodeError> {
     if output.exists() {
         return Err(EncodeError::new(
@@ -147,6 +149,7 @@ pub(super) async fn mix_audio(
         frame_rate,
         output_samples,
         &output,
+        profile,
     )?;
     let Some(stderr) = process.child.stderr.take() else {
         discard_partial_output(&output);
@@ -193,6 +196,7 @@ fn spawn_audio_mix(
     frame_rate: FrameRate,
     output_samples: AudioSampleCount,
     output: &Path,
+    profile: EncodeProfile,
 ) -> Result<RunningAudioMix, EncodeError> {
     let filter = audio_filter(inputs, frame_rate, output_samples).map_err(|source| {
         EncodeError::new(
@@ -209,16 +213,15 @@ fn spawn_audio_mix(
         command.args(["-i"]);
         command.arg(&input.source);
     }
-    let child = command
+    command
         .args(["-filter_complex_script"])
         .arg(filter.path())
-        .args([
-            "-map", "0:v:0", "-map", "[audio]", "-c:v", "copy", "-c:a", "aac",
-        ])
+        .args(["-map", "0:v:0", "-map", "[audio]", "-c:v", "copy"]);
+    profile.configure_audio(&mut command);
+    let child = command
         .arg("-ar")
         .arg(OUTPUT_SAMPLE_RATE_HZ.to_string())
-        .args(["-ac", "2"])
-        .args(["-shortest", "-movflags", "+faststart", "-f", "mp4", "-n"])
+        .args(["-ac", "2", "-shortest"])
         .arg(output)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())

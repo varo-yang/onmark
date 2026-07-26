@@ -949,8 +949,9 @@ Browser capture retains at most one PNG at a time and writes it directly to
 through one capacity-one stream because the frame artifact owns those pixels
 and their hashes. Local layered video sends the transparent foreground only
 into the encoder process; it neither splits composed frames nor copies raw RGBA
-back through Rust before writing MP4. There is no whole-video frame buffer. The fixed H.264
-`yuv420p` profile rejects odd viewport dimensions before either process starts.
+back through Rust before writing the selected video profile. There is no
+whole-video frame buffer. The shared subsampled output profiles reject odd
+viewport dimensions before either process starts.
 Browser capture has one closed backend choice beneath the shared runtime
 protocol. `BeginFrame` atomically commits and reads a compositor transaction on
 Linux `chrome-headless-shell`; `Screenshot` reads the surface with
@@ -1069,10 +1070,12 @@ identity comparison: x264 is lossy and may produce slightly different decoded
 pixels even from the same canonical input, so raw RGBA remains the
 deterministic visual oracle.
 
-Both the direct screenshot encoder and the layered media encoder own the same
-standard H.264 policy: x264 `medium`, CRF 18, `yuv420p`, and BT.709 limited-range
-metadata. The policy is explicit rather than inherited from FFmpeg defaults, so
-an FFmpeg upgrade cannot silently change text, gradient, or motion quality.
+Both the direct screenshot encoder and the layered media encoder consume the
+same closed output policy. The delivery profile uses x264 `medium`, CRF 18,
+`yuv420p`, and BT.709 limited-range metadata; the editing profile uses
+`prores_ks` profile 3 and `yuv422p10le` with the same color declaration. These
+facts are explicit rather than inherited from FFmpeg defaults, so an FFmpeg
+upgrade cannot silently choose a codec, pixel format, or container.
 
 Local capture retains Chromium's normal multiprocess topology. An adapter may
 select `BrowserLaunchPolicy::isolated_worker()` only when an independently
@@ -1578,6 +1581,18 @@ pixel contract end to end. Native crop, scale, picture-in-picture, and
 multi-video placement require explicit layout facts plus whole-film,
 partitioned, and distributed raw-pixel equivalence before they may bypass
 Chromium.
+
+The first admitted alternate output is the edit-friendly MOV profile:
+`ProRes` 422 HQ (`yuv422p10le`) with 48 kHz stereo 24-bit PCM. The existing
+delivery profile remains x264 H.264 (`yuv420p`) with AAC in MP4. One closed
+`EncodeProfile` owns each profile's visual codec, audio codec, pixel format,
+container, staging suffix, and machine spelling across direct browser,
+layered-media, local assembly, and distributed-artifact assembly. The CLI
+selects the profile only from the `.mp4` or `.mov` output extension and rejects
+every other spelling; no FFmpeg default changes the encoded bytes. Desktop release
+admission renders and probes both profiles from the installed product.
+Transparent output remains unadmitted until the alpha contract is proved
+through browser capture, native composition, caching, and final muxing.
 
 Media treatment, transitions, dynamic author inputs, caption presentation, and
 multiple subtitle tracks are language work when they change authored meaning.

@@ -148,6 +148,7 @@ impl LayeredSession {
         executable: &Path,
         limits: EncodeLimits,
         job: LayeredJob,
+        profile: super::profile::EncodeProfile,
     ) -> Result<Self, EncodeError> {
         validate_job(&job, limits)?;
         let runtime = Handle::try_current().map_err(|_| {
@@ -157,7 +158,7 @@ impl LayeredSession {
                 "layered composition requires a Tokio runtime",
             )
         })?;
-        let mut child = spawn(executable, &job, limits.video_encoder_threads())?;
+        let mut child = spawn(executable, &job, limits.video_encoder_threads(), profile)?;
         let input = take_pipe(child.stdin.take(), &job.diagnostic_path, "input")?;
         let stderr = take_pipe(
             child.stderr.take(),

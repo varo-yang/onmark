@@ -46,7 +46,8 @@ const AUDIO_TIMESTAMP_TOLERANCE_MICROS: u64 = 25_000;
 fn render_executor_uses_the_environment_owned_capture_mode() {
     let limits = EncodeLimits::new(Duration::from_secs(1), 2, 2, 2)
         .expect("the fixture encoding limits are bounded");
-    let ffmpeg = Ffmpeg::new("ffmpeg", limits).expect("the fixture executable path is present");
+    let ffmpeg = Ffmpeg::new("ffmpeg", limits, onmark_render::EncodeProfile::H264Mp4)
+        .expect("the fixture executable path is present");
     let executor = RenderExecutor::new(
         "misleading/chrome-headless-shell",
         BrowserCaptureMode::Screenshot,
@@ -76,7 +77,8 @@ async fn rejects_units_that_do_not_match_the_partition_plan_before_launching_bro
     let output = directory.path().join("partitioned.mp4");
     let limits = EncodeLimits::new(Duration::from_secs(1), 2, 2, 2)
         .expect("the fixture encoding limits are bounded");
-    let ffmpeg = Ffmpeg::new("ffmpeg", limits).expect("the fixture executable path is present");
+    let ffmpeg = Ffmpeg::new("ffmpeg", limits, onmark_render::EncodeProfile::H264Mp4)
+        .expect("the fixture executable path is present");
     let executor = RenderExecutor::new(
         "browser",
         BrowserCaptureMode::Screenshot,
@@ -1325,8 +1327,12 @@ fn render_executor(
         64 * 1024,
     )
     .expect("the fixture encoding limits are bounded");
-    let ffmpeg = Ffmpeg::new(required_path("ONMARK_FFMPEG"), limits)
-        .expect("the FFmpeg executable path is present");
+    let ffmpeg = Ffmpeg::new(
+        required_path("ONMARK_FFMPEG"),
+        limits,
+        onmark_render::EncodeProfile::H264Mp4,
+    )
+    .expect("the FFmpeg executable path is present");
 
     RenderExecutor::new(
         browser,

@@ -6,10 +6,12 @@ mod layered;
 mod layered_process;
 mod limits;
 mod process;
+mod profile;
 mod session;
 
 pub use error::{EncodeError, EncodeErrorKind};
 pub use limits::{EncodeLimits, InvalidFfmpeg};
+pub use profile::EncodeProfile;
 pub use session::{EncodedVideo, Ffmpeg, FfmpegSession};
 
 pub(crate) use audio::AudioInput;

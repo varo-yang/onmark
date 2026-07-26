@@ -394,7 +394,12 @@ fn executor() -> RenderExecutor {
     let encode_limits =
         EncodeLimits::new(PROCESS_TIMEOUT, FRAME_COUNT, 64 * 1024 * 1024, 64 * 1024)
             .expect("the fixture encoder limits are bounded");
-    let ffmpeg = Ffmpeg::new(ffmpeg(), encode_limits).expect("the fixture FFmpeg path is valid");
+    let ffmpeg = Ffmpeg::new(
+        ffmpeg(),
+        encode_limits,
+        onmark_render::EncodeProfile::H264Mp4,
+    )
+    .expect("the fixture FFmpeg path is valid");
 
     RenderExecutor::new(
         headless_shell(),
