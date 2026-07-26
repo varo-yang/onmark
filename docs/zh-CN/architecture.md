@@ -781,6 +781,10 @@ cache 由 target、已准入 source manifest 与 build script 共同寻址；cac
 拉取并构建固定源码。Cargo cache 由 target、lockfile 与 toolchain 寻址。恢复出的
 output 在发布前仍需通过相同的 manifest 校验、package assembly、空 consumer 安装与
 真实 render admission；冷构建与缓存构建不会获得不同的发布路径。
+merged release path 只恢复 cache，不尝试写入：GitHub 会刻意让
+`pull_request_target` run 以只读方式访问 default branch 的 cache scope。可信的手动
+admission 可以填充缺失 cache，供后续 release 使用；publication 的正确性与可用性不依赖
+这条可选 warm path。
 
 只有 merged release-PR path 可以跨越 npm publication boundary。受保护的
 `npm-release` environment 与 npm Trusted Publishing 会把该 job 绑定到 reviewed

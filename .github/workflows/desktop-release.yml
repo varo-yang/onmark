@@ -76,15 +76,16 @@ jobs:
         with:
           ref: ${{ needs.source.outputs.revision }}
 
-      - name: Cache release media tools
+      - name: Restore release media tools
         id: media-cache
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: .release/media
           key: desktop-media-${{ matrix.target }}-${{ hashFiles('scripts/release/media-toolchain/*') }}
 
-      - name: Cache release Cargo artifacts
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+      - name: Restore release Cargo artifacts
+        id: cargo-cache
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: |
             ~/.cargo/registry
@@ -104,7 +105,6 @@ jobs:
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: 26.4.0
-          cache: pnpm
 
       - name: Install Linux media build tools
         if: steps.media-cache.outputs.cache-hit != 'true' && runner.os == 'Linux'
@@ -236,6 +236,27 @@ jobs:
           if-no-files-found: error
           include-hidden-files: true
           retention-days: 7
+
+      - name: Save release media tools
+        if: >-
+          github.event_name == 'workflow_dispatch' &&
+          steps.media-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: .release/media
+          key: desktop-media-${{ matrix.target }}-${{ hashFiles('scripts/release/media-toolchain/*') }}
+
+      - name: Save release Cargo artifacts
+        if: >-
+          github.event_name == 'workflow_dispatch' &&
+          steps.cargo-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            .release/cargo-target
+          key: desktop-cargo-${{ matrix.target }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
 
   publish:
     name: Publish npm release

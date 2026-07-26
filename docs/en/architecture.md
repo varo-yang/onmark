@@ -648,6 +648,11 @@ script; a miss fetches and rebuilds the fixed sources. The Cargo cache is
 addressed by target, lockfile, and toolchain. Restored outputs still pass the
 same manifest checks, package assembly, clean-consumer installation, and real
 render admission as cold outputs before any archive can be published.
+The merged release path restores caches without attempting to write them:
+GitHub deliberately gives `pull_request_target` runs read-only access to the
+default branch's cache scope. A trusted manual admission may populate a missing
+cache for later releases; publication correctness and availability never depend
+on that optional warm path.
 
 Only the merged release-PR path may cross the npm publication boundary. A
 protected `npm-release` environment and npm Trusted Publishing bind that job to
