@@ -22,7 +22,7 @@ test("releases the merged main revision from the protected base context", async 
   assert.match(source, /EVENT_NAME" == pull_request_target/u);
 });
 
-test("reuses content-addressed release build artifacts", async () => {
+test("restores trusted release build caches without writing from release PRs", async () => {
   const source = await readFile(WORKFLOW, "utf8");
 
   assert.match(source, /id: media-cache/u);
@@ -32,10 +32,29 @@ test("reuses content-addressed release build artifacts", async () => {
   assert.match(source, /desktop-media-\$\{\{ matrix\.target \}\}/u);
   assert.match(source, /steps\.media-cache\.outputs\.cache-hit != 'true'/u);
   assert.match(source, /desktop-cargo-\$\{\{ matrix\.target \}\}/u);
-  assert.match(source, /steps\.cargo-cache\.outputs\.cache-hit != 'true'/u);
-  assert.match(source, /github\.event_name == 'workflow_dispatch'/u);
+  assert.match(
+    source,
+    /restore-keys:[\s\S]*desktop-cargo-\$\{\{ matrix\.target \}\}-\$\{\{ hashFiles\('rust-toolchain\.toml'\) \}\}-/u,
+  );
+  assert.equal(
+    source.split(
+      "(github.event_name == 'push' || github.event_name == 'workflow_dispatch')",
+    ).length - 1,
+    2,
+  );
   assert.match(source, /CARGO_TARGET_DIR: \.release\/cargo-target/u);
   assert.doesNotMatch(source, /^\s+cache: pnpm$/mu);
+});
+
+test("warms release caches only after trusted main changes", async () => {
+  const source = await readFile(WORKFLOW, "utf8");
+
+  assert.match(source, /^  push:$/mu);
+  assert.match(source, /^    branches: \[main\]$/mu);
+  assert.match(source, /^  workflow_dispatch:$/mu);
+  assert.match(source, /scripts\/release\/media-toolchain\/\*\*/u);
+  assert.match(source, /\.github\/workflows\/desktop-release\.yml/u);
+  assert.match(source, /rust-toolchain\.toml/u);
 });
 
 test("builds the CLI and release driver in one native profile", async () => {

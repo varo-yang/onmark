@@ -645,14 +645,18 @@ establish target support.
 Release build caches are disposable accelerators, not artifact authorities. The
 media-tool cache is addressed by target, admitted source manifest, and build
 script; a miss fetches and rebuilds the fixed sources. The Cargo cache is
-addressed by target, lockfile, and toolchain. Restored outputs still pass the
-same manifest checks, package assembly, clean-consumer installation, and real
-render admission as cold outputs before any archive can be published.
+addressed by target, lockfile, and toolchain. When that exact Cargo key changes,
+the build may restore the newest cache for the same target and toolchain before
+Cargo revalidates every fingerprint and incrementally rebuilds the changed
+graph. Restored outputs still pass the same manifest checks, package assembly,
+clean-consumer installation, and real render admission as cold outputs before
+any archive can be published.
 The merged release path restores caches without attempting to write them:
 GitHub deliberately gives `pull_request_target` runs read-only access to the
-default branch's cache scope. A trusted manual admission may populate a missing
-cache for later releases; publication correctness and availability never depend
-on that optional warm path.
+default branch's cache scope. A trusted `main` push that changes the release
+workflow, media toolchain, or Rust toolchain runs the same admission path and
+refreshes missing caches; a manual admission may do the same. Publication
+correctness and availability never depend on either warm path.
 
 Only the merged release-PR path may cross the npm publication boundary. A
 protected `npm-release` environment and npm Trusted Publishing bind that job to
@@ -667,6 +671,11 @@ matching tag and GitHub Release at the admitted `main` revision.
 The publication step removes `setup-node`'s placeholder `NODE_AUTH_TOKEN`
 before invoking npm, so authentication can only use the job's short-lived OIDC
 identity.
+An external publication failure is retried as the failed publication job of the
+same workflow run. GitHub then reuses the retained admitted archives and does
+not rebuild any platform. The complete workflow is rerun only when an admission
+input changed; publication remains idempotent because every existing npm
+version must match the admitted integrity.
 npm requires packages to exist before Trusted Publishing can be configured, so
 the first public version remains a one-time operator bootstrap from these same
 admitted archives.
