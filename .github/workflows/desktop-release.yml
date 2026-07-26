@@ -5,11 +5,11 @@ on:
     branches: [main]
     paths:
       - .github/workflows/desktop-release.yml
+      - Cargo.lock
+      - Cargo.toml
+      - packages/*/package.json
       - rust-toolchain.toml
       - scripts/release/media-toolchain/**
-  pull_request_target:
-    branches: [main]
-    types: [closed]
   workflow_dispatch:
 
 permissions:
@@ -22,13 +22,11 @@ concurrency:
 jobs:
   source:
     name: Resolve release source
-    if: >-
-      github.event_name == 'push' ||
-      github.event_name == 'workflow_dispatch' ||
-      (github.event.pull_request.merged == true &&
-       startsWith(github.event.pull_request.head.ref, 'release/v'))
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
     outputs:
       revision: ${{ steps.identity.outputs.revision }}
       version: ${{ steps.identity.outputs.version }}
@@ -38,16 +36,31 @@ jobs:
         id: identity
         shell: bash
         env:
-          EVENT_NAME: ${{ github.event_name }}
-          EVENT_REVISION: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.merge_commit_sha || github.sha }}
-          RELEASE_BRANCH: ${{ github.event.pull_request.head.ref }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          if [[ "$EVENT_NAME" == pull_request_target ]]; then
-            release_version="${RELEASE_BRANCH#release/v}"
+          release_branch=
+          if [[ "$GITHUB_EVENT_NAME" == push ]]; then
+            release_branch="$(
+              gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" \
+                --jq '
+                  [.[] | select(
+                    .merged_at != null and
+                    (.head.ref | startswith("release/v"))
+                  )] |
+                  if length == 0 then ""
+                  elif length == 1 then .[0].head.ref
+                  else error("main revision belongs to multiple release pull requests")
+                  end
+                '
+            )"
+          fi
+
+          if [[ -n "$release_branch" ]]; then
+            release_version="${release_branch#release/v}"
           else
             release_version=
           fi
-          echo "revision=$EVENT_REVISION" >> "$GITHUB_OUTPUT"
+          echo "revision=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
           echo "version=$release_version" >> "$GITHUB_OUTPUT"
 
   admit:
@@ -247,18 +260,14 @@ jobs:
           retention-days: 7
 
       - name: Save release media tools
-        if: >-
-          (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
-          steps.media-cache.outputs.cache-hit != 'true'
+        if: steps.media-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: .release/media
           key: desktop-media-${{ matrix.target }}-${{ hashFiles('scripts/release/media-toolchain/*') }}
 
       - name: Save release Cargo artifacts
-        if: >-
-          (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
-          steps.cargo-cache.outputs.cache-hit != 'true'
+        if: steps.cargo-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: |
@@ -269,9 +278,7 @@ jobs:
 
   publish:
     name: Publish npm release
-    if: >-
-      github.event.pull_request.merged == true &&
-      startsWith(github.event.pull_request.head.ref, 'release/v')
+    if: needs.source.outputs.version != ''
     needs: [source, admit]
     runs-on: ubuntu-24.04
     timeout-minutes: 15

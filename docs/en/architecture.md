@@ -625,12 +625,12 @@ cross-process lock into a content-addressed cache and publishes it by atomic
 rename. Each lease has an owner-specific heartbeat marker; a reclaimed owner
 cannot publish cache bytes or refresh or remove its successor's lock.
 
-The desktop-release workflow can be dispatched for admission only. Its
-publication path runs only after a `release/vX.Y.Z` pull request is merged into
-`main`. The merged path runs from the protected base context and explicitly
-checks out the pull request's merge commit. One source job owns that revision
-and proposed product version; every admission and publication job consumes its
-outputs. The Linux admission verifies the version with the same release driver
+The desktop-release workflow can be dispatched for admission only. Trusted
+pushes to `main` run admission when a release input changes. The source job asks
+GitHub which merged pull request owns that exact `main` revision; only a unique
+`release/vX.Y.Z` owner supplies a proposed product version and enables
+publication. Every admission and publication job consumes that revision and
+version. The Linux admission verifies the version with the same release driver
 used to assemble the archives. Admission, npm provenance, and the GitHub tag
 therefore identify the same reviewed `main` revision. In both modes it admits
 macOS arm64, Linux x64, and Windows x64 only after installing the two produced
@@ -651,17 +651,20 @@ Cargo revalidates every fingerprint and incrementally rebuilds the changed
 graph. Restored outputs still pass the same manifest checks, package assembly,
 clean-consumer installation, and real render admission as cold outputs before
 any archive can be published.
-The merged release path restores caches without attempting to write them:
-GitHub deliberately gives `pull_request_target` runs read-only access to the
-default branch's cache scope. A trusted `main` push that changes the release
-workflow, media toolchain, or Rust toolchain runs the same admission path and
-refreshes missing caches; a manual admission may do the same. Publication
-correctness and availability never depend on either warm path.
+Every admitted `main` push may refresh a missing cache after the complete
+platform admission succeeds. Changes to the product lockfile, fixed package
+versions, release workflow, media toolchain, or Rust toolchain therefore warm
+the same cache path that the next release consumes. A manual admission may do
+the same in its selected ref scope. Publication correctness and availability
+never depend on either warm path.
 
-Only the merged release-PR path may cross the npm publication boundary. A
-protected `npm-release` environment and npm Trusted Publishing bind that job to
-the reviewed workflow without a long-lived registry token. Its deployment
-policy names only `main`; that branch is protected by required PR and CI rules.
+Only the protected `main` push associated with a merged release PR may cross the
+npm publication boundary. This avoids npm Trusted Publishing's unsupported
+`pull_request_target` identity while preserving the release PR as the sole
+decision. A protected `npm-release` environment and npm Trusted Publishing bind
+that job to the reviewed workflow without a long-lived registry token. Its
+deployment policy names only `main`; that branch is protected by required PR
+and CI rules.
 The job validates one complete same-version archive set, publishes platform
 sidecars before the public package, and treats an existing version as reusable
 only when npm reports the exact admitted integrity. This makes a failed

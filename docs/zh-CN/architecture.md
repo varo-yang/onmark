@@ -762,13 +762,13 @@ digest；native sidecar assembler 会拒绝不同的 target matrix。launcher �
 跨进程锁把所选 browser 安装进 content-addressed cache，并以 atomic rename 发布。每份
 lease 都有 owner-specific heartbeat marker；被回收的旧 owner 不能发布缓存字节，也不能刷新或删除 successor 的锁。
 
-desktop-release workflow 可以手动 dispatch 只做 admission；其 publication path
-只会在 `release/vX.Y.Z` pull request 合并进 `main` 后运行。merged path 从受保护的
-base context 启动，并显式 checkout 该 pull request 的 merge commit。revision 与
-proposed product version 由一个 source job 独占；其余 admission 与 publication job
-只消费该 job 的输出。Linux admission 会使用组装 archive 的同一个 release driver
-校验 version。因此 admission、npm provenance 与 GitHub tag 都指向同一份已 review
-的 `main` revision。两种模式都只有在空 consumer 中安装两份生成的 npm tarball，
+desktop-release workflow 可以手动 dispatch 只做 admission。release input 变化时，
+可信 `main` push 会运行 admission。source job 会向 GitHub 查询哪一份 merged pull
+request 拥有这条精确的 `main` revision；只有唯一的 `release/vX.Y.Z` owner 才能提供
+proposed product version 并启用 publication。其余 admission 与 publication job
+只消费这份 revision 与 version。Linux admission 会使用组装 archive 的同一个 release
+driver 校验 version。因此 admission、npm provenance 与 GitHub tag 都指向同一份已
+review 的 `main` revision。两种模式都只有在空 consumer 中安装两份生成的 npm tarball，
 并用两个独立 browser session 渲染同一份 screenplay 后，才准入 macOS arm64、
 Linux x64 与 Windows x64。它验证精确帧数、解码音频、canonical raw-RGBA identity、
 公开 product import bundling 和 no-clobber output。每个 target artifact 还会保留
@@ -783,21 +783,22 @@ cache 由 target、已准入 source manifest 与 build script 共同寻址；cac
 fingerprint，并只增量重建变化后的依赖图。恢复出的 output 在发布前仍需通过相同的
 manifest 校验、package assembly、空 consumer 安装与真实 render admission；冷构建与
 缓存构建不会获得不同的发布路径。
-merged release path 只恢复 cache，不尝试写入：GitHub 会刻意让
-`pull_request_target` run 以只读方式访问 default branch 的 cache scope。release
-workflow、media toolchain 或 Rust toolchain 发生变化的可信 `main` push 会执行同一条
-admission path，并刷新缺失 cache；手动 admission 也可以执行相同预热。publication 的
-正确性与可用性不依赖任一 warm path。
+每条完成 admission 的 `main` push 都可以刷新缺失 cache。product lockfile、固定
+package version、release workflow、media toolchain 或 Rust toolchain 发生变化时，
+都会预热下一次 release 消费的同一条 cache path。手动 admission 也可以在所选 ref
+scope 内做相同预热。publication 的正确性与可用性不依赖任一 warm path。
 
-只有 merged release-PR path 可以跨越 npm publication boundary。受保护的
-`npm-release` environment 与 npm Trusted Publishing 会把该 job 绑定到 reviewed
-workflow，不保存长期 registry token。其 deployment policy 只点名 `main`；该 branch
-由 required PR 与 CI rule 保护。job 先验证完整且同版本的 archive 集合，再按 platform
-sidecar、公开 package 的顺序发布；只有 npm 返回的 integrity 与 admitted archive 完全
-一致，才会复用已经存在的版本。这样多 package 发布中途失败后可以安全恢复，同时禁止
-同一版本获得不同 bytes。npm 接受完整集合后，同一个 job 才会在 admitted `main`
-revision 创建对应 tag 与 GitHub Release。publication step 会先移除 `setup-node`
-注入的 placeholder `NODE_AUTH_TOKEN`，使 npm 只能消费 job 的短效 OIDC identity。
+只有与 merged release PR 关联的受保护 `main` push 可以跨越 npm publication
+boundary。这样既绕开 npm Trusted Publishing 尚不支持的 `pull_request_target`
+identity，又保留 release PR 作为唯一发布决定。受保护的 `npm-release` environment
+与 npm Trusted Publishing 会把该 job 绑定到 reviewed workflow，不保存长期 registry
+token。其 deployment policy 只点名 `main`；该 branch 由 required PR 与 CI rule
+保护。job 先验证完整且同版本的 archive 集合，再按 platform sidecar、公开 package
+的顺序发布；只有 npm 返回的 integrity 与 admitted archive 完全一致，才会复用已经
+存在的版本。这样多 package 发布中途失败后可以安全恢复，同时禁止同一版本获得不同
+bytes。npm 接受完整集合后，同一个 job 才会在 admitted `main` revision 创建对应 tag
+与 GitHub Release。publication step 会先移除 `setup-node` 注入的 placeholder
+`NODE_AUTH_TOKEN`，使 npm 只能消费 job 的短效 OIDC identity。
 外部 publication 失败时，只重跑同一 workflow run 的失败 publication job；GitHub 会
 复用已留存的 admitted archive，不会重建任何平台。只有 admission input 发生变化时，
 才重跑完整 workflow；已经存在的 npm version 仍必须与 admitted integrity 完全相同，

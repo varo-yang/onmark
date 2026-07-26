@@ -10,19 +10,20 @@ const WORKFLOW = fileURLToPath(
 );
 const PUBLISHER = fileURLToPath(new URL("../publish.mjs", import.meta.url));
 
-test("releases the merged main revision from the protected base context", async () => {
+test("releases a merged release PR from its protected main push", async () => {
   const source = await readFile(WORKFLOW, "utf8");
-  const mergedRevision = "github.event.pull_request.merge_commit_sha";
 
-  assert.match(source, /^  pull_request_target:$/mu);
-  assert.equal(source.split(mergedRevision).length - 1, 1);
+  assert.doesNotMatch(source, /^  pull_request_target:$/mu);
+  assert.match(source, /^  push:$/mu);
   assert.match(source, /^  source:$/mu);
+  assert.match(source, /commits\/\$GITHUB_SHA\/pulls/u);
+  assert.match(source, /startswith\("release\/v"\)/u);
+  assert.match(source, /echo "revision=\$GITHUB_SHA"/u);
+  assert.match(source, /needs\.source\.outputs\.version != ''/u);
   assert.match(source, /needs\.source\.outputs\.revision/u);
-  assert.doesNotMatch(source, /ref: \$\{\{ github\.sha \}\}/u);
-  assert.match(source, /EVENT_NAME" == pull_request_target/u);
 });
 
-test("restores trusted release build caches without writing from release PRs", async () => {
+test("restores and refreshes release build caches from trusted main runs", async () => {
   const source = await readFile(WORKFLOW, "utf8");
 
   assert.match(source, /id: media-cache/u);
@@ -36,11 +37,22 @@ test("restores trusted release build caches without writing from release PRs", a
     source,
     /restore-keys:[\s\S]*desktop-cargo-\$\{\{ matrix\.target \}\}-\$\{\{ hashFiles\('rust-toolchain\.toml'\) \}\}-/u,
   );
-  assert.equal(
-    source.split(
-      "(github.event_name == 'push' || github.event_name == 'workflow_dispatch')",
-    ).length - 1,
-    2,
+  const mediaSave = source.slice(
+    source.indexOf("- name: Save release media tools"),
+    source.indexOf("- name: Save release Cargo artifacts"),
+  );
+  const cargoSave = source.slice(
+    source.indexOf("- name: Save release Cargo artifacts"),
+    source.indexOf("\n  publish:"),
+  );
+
+  assert.match(
+    mediaSave,
+    /if: steps\.media-cache\.outputs\.cache-hit != 'true'/u,
+  );
+  assert.match(
+    cargoSave,
+    /if: steps\.cargo-cache\.outputs\.cache-hit != 'true'/u,
   );
   assert.match(source, /CARGO_TARGET_DIR: \.release\/cargo-target/u);
   assert.doesNotMatch(source, /^\s+cache: pnpm$/mu);
