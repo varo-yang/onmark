@@ -16,8 +16,12 @@ test("releases a merged release PR from its protected main push", async () => {
   assert.doesNotMatch(source, /^  pull_request_target:$/mu);
   assert.match(source, /^  push:$/mu);
   assert.match(source, /^  source:$/mu);
-  assert.match(source, /commits\/\$GITHUB_SHA\/pulls/u);
-  assert.match(source, /startswith\("release\/v"\)/u);
+  assert.doesNotMatch(source, /commits\/\$GITHUB_SHA\/pulls/u);
+  assert.match(source, /commits\/\$GITHUB_SHA"/u);
+  assert.match(source, /pulls\/\$pull_number/u);
+  assert.match(source, /"\$merge_revision" == "\$GITHUB_SHA"/u);
+  assert.match(source, /"\$base_branch" == main/u);
+  assert.match(source, /"\$candidate_branch" == release\/v\*/u);
   assert.match(source, /echo "revision=\$GITHUB_SHA"/u);
   assert.match(source, /needs\.source\.outputs\.version != ''/u);
   assert.match(source, /needs\.source\.outputs\.revision/u);
