@@ -611,8 +611,11 @@ installs dependencies, or publishes.
 SHA-256. Its fetcher is the only network owner, while
 `media-toolchain/build.sh` consumes only admitted local archives with
 autodetection, network, shared libraries, and nonfree components disabled. The
-sidecar rechecks the source manifest and build script byte for byte before
-admitting target binary formats and provenance.
+fetcher retries transport faults and HTTP 408, 425, 429, and 5xx responses
+through four fixed, per-attempt-bounded attempts. Redirect-policy, length, and
+digest violations fail immediately. The sidecar rechecks the source manifest
+and build script byte for byte before admitting target binary formats and
+provenance.
 
 `packages/launcher/desktop-release.json` is the single supported-target and
 browser contract. It owns the pinned Chrome for Testing build, browser product,

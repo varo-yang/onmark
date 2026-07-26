@@ -752,8 +752,9 @@ FFmpeg、ffprobe、source archive、build record 与 license 准入一个不超�
 `media-toolchain/sources.json` 用 URL、字节长度和 SHA-256 固定每份 media source。
 其 fetcher 是唯一的网络 owner；`media-toolchain/build.sh` 只消费已准入的本地
 archive，并关闭 autodetection、network、shared library 与 nonfree component。
-sidecar 在准入目标 binary format 与 provenance 之前，会逐字节复核 source
-manifest 与 build script。
+fetcher 对传输故障与 HTTP 408、425、429、5xx 使用四次固定、单次有界的尝试；
+redirect policy、长度或 digest 违规会立即失败。sidecar 在准入目标 binary format
+与 provenance 之前，会逐字节复核 source manifest 与 build script。
 
 `packages/launcher/desktop-release.json` 是 supported target 与 browser 的唯一
 contract。它独占固定的 Chrome for Testing build、browser product 与 archive
