@@ -788,14 +788,15 @@ admission 可以填充缺失 cache，供后续 release 使用；publication 的�
 
 只有 merged release-PR path 可以跨越 npm publication boundary。受保护的
 `npm-release` environment 与 npm Trusted Publishing 会把该 job 绑定到 reviewed
-workflow，不保存长期 registry token。其 deployment policy 只接受 protected branch；
-`main` 由 required PR 与 CI rule 保护。job 先验证完整且同版本的 archive 集合，再按
-platform sidecar、公开 package 的顺序发布；只有 npm 返回的 integrity 与 admitted
-archive 完全一致，才会复用已经存在的版本。这样多 package 发布中途失败后可以安全
-恢复，同时禁止同一版本获得不同 bytes。npm 接受完整集合后，同一个 job 才会在 admitted
-`main` revision 创建对应 tag 与 GitHub Release。npm 只允许为已存在的 package 配置
-Trusted Publishing，因此第一个公开版本仍需 operator 使用同一组 admitted archive
-做一次 bootstrap。
+workflow，不保存长期 registry token。其 deployment policy 只点名 `main`；该 branch
+由 required PR 与 CI rule 保护。job 先验证完整且同版本的 archive 集合，再按 platform
+sidecar、公开 package 的顺序发布；只有 npm 返回的 integrity 与 admitted archive 完全
+一致，才会复用已经存在的版本。这样多 package 发布中途失败后可以安全恢复，同时禁止
+同一版本获得不同 bytes。npm 接受完整集合后，同一个 job 才会在 admitted `main`
+revision 创建对应 tag 与 GitHub Release。publication step 会先移除 `setup-node`
+注入的 placeholder `NODE_AUTH_TOKEN`，使 npm 只能消费 job 的短效 OIDC identity。
+npm 只允许为已存在的 package 配置 Trusted Publishing，因此第一个公开版本仍需
+operator 使用同一组 admitted archive 做一次 bootstrap。
 
 bootstrap 顺序固定：
 

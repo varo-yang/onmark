@@ -296,6 +296,7 @@ jobs:
         env:
           RELEASE_TAG: v${{ needs.source.outputs.version }}
         run: |
+          unset NODE_AUTH_TOKEN
           npm_root="$(npm root --global)"
           npm_cli="$(node -e 'process.stdout.write(require("node:path").join(process.argv[1], "npm/bin/npm-cli.js"))' "$npm_root")"
           test -f "$npm_cli"
