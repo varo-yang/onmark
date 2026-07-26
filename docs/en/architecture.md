@@ -1572,6 +1572,12 @@ policy. Render progress and benchmark reports use the same named phases and
 bounded measurements; none of these commands creates a second compiler or
 planner.
 
+`doctor` does not infer readiness from executable bits alone. It runs four
+parallel, output-free, ten-second handshakes: browser, `FFmpeg`, and ffprobe
+version probes plus the bundler help contract. Every child has kill-on-drop and
+a five-second explicit cleanup bound. A wrong but executable file therefore
+cannot be reported as an admitted toolchain.
+
 Interactive `render` reports `prepare`, `bundle`, `plan`, `capture`, and
 `assemble` as they begin and complete; redirected and JSON output remains free
 of progress text. `benchmark` executes an odd, bounded count from one through

@@ -44,6 +44,7 @@ pub(super) enum CliError {
     WriteProgress(io::Error),
     BenchmarkWorkspace(io::Error),
     BenchmarkDrift(&'static str),
+    Doctor(crate::doctor::DoctorError),
     CreateOutputDirectory {
         path: PathBuf,
         source: io::Error,
@@ -135,6 +136,7 @@ impl fmt::Display for CliError {
             Self::BenchmarkDrift(fact) => {
                 write!(formatter, "benchmark samples disagree on {fact}")
             }
+            Self::Doctor(source) => source.fmt(formatter),
             Self::CreateOutputDirectory { path, .. } => {
                 write!(
                     formatter,
@@ -172,6 +174,7 @@ impl Error for CliError {
             Self::CreateOutputDirectory { source, .. }
             | Self::WriteProgress(source)
             | Self::BenchmarkWorkspace(source) => Some(source),
+            Self::Doctor(source) => Some(source),
             Self::ParseWorkerRequest { source, .. } => Some(source),
             Self::WorkerTask(source) => Some(source),
             Self::OutputExists(_) | Self::BenchmarkDrift(_) => None,
@@ -195,6 +198,12 @@ impl Error for CliError {
 impl From<EnvironmentError> for CliError {
     fn from(source: EnvironmentError) -> Self {
         Self::Environment(source)
+    }
+}
+
+impl From<crate::doctor::DoctorError> for CliError {
+    fn from(source: crate::doctor::DoctorError) -> Self {
+        Self::Doctor(source)
     }
 }
 
