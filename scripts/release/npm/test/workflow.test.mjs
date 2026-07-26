@@ -55,3 +55,17 @@ test("inspects archives without consulting publication state", async () => {
   assert.match(source, /\["pack", "--dry-run", "--json", archive\]/u);
   assert.doesNotMatch(source, /\["publish", "--dry-run", "--json", archive\]/u);
 });
+
+test("removes setup-node token fallback before OIDC publication", async () => {
+  const source = await readFile(WORKFLOW, "utf8");
+  const publishStep = source.slice(
+    source.indexOf("- name: Publish admitted packages"),
+    source.indexOf("- name: Publish GitHub release"),
+  );
+
+  assert.match(publishStep, /^\s+unset NODE_AUTH_TOKEN$/mu);
+  assert.ok(
+    publishStep.indexOf("unset NODE_AUTH_TOKEN") <
+      publishStep.indexOf("publish.mjs"),
+  );
+});

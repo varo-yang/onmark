@@ -657,13 +657,16 @@ on that optional warm path.
 Only the merged release-PR path may cross the npm publication boundary. A
 protected `npm-release` environment and npm Trusted Publishing bind that job to
 the reviewed workflow without a long-lived registry token. Its deployment
-policy accepts only protected branches; `main` is protected by required PR and
-CI rules. The job validates one complete same-version archive set, publishes
-platform sidecars before the public package, and treats an existing version as
-reusable only when npm reports the exact admitted integrity. This makes a
-failed multi-package publication safe to resume without allowing a version to
-acquire different bytes. After npm accepts the complete set, the same job
-creates the matching tag and GitHub Release at the admitted `main` revision.
+policy names only `main`; that branch is protected by required PR and CI rules.
+The job validates one complete same-version archive set, publishes platform
+sidecars before the public package, and treats an existing version as reusable
+only when npm reports the exact admitted integrity. This makes a failed
+multi-package publication safe to resume without allowing a version to acquire
+different bytes. After npm accepts the complete set, the same job creates the
+matching tag and GitHub Release at the admitted `main` revision.
+The publication step removes `setup-node`'s placeholder `NODE_AUTH_TOKEN`
+before invoking npm, so authentication can only use the job's short-lived OIDC
+identity.
 npm requires packages to exist before Trusted Publishing can be configured, so
 the first public version remains a one-time operator bootstrap from these same
 admitted archives.
