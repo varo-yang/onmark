@@ -40,19 +40,31 @@ jobs:
         run: |
           release_branch=
           if [[ "$GITHUB_EVENT_NAME" == push ]]; then
-            release_branch="$(
-              gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" \
-                --jq '
-                  [.[] | select(
-                    .merged_at != null and
-                    (.head.ref | startswith("release/v"))
-                  )] |
-                  if length == 0 then ""
-                  elif length == 1 then .[0].head.ref
-                  else error("main revision belongs to multiple release pull requests")
-                  end
-                '
+            commit_subject="$(
+              gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA" \
+                --jq '.commit.message | split("\n")[0]'
             )"
+            pull_number=
+            if [[ "$commit_subject" =~ \(#([0-9]+)\)$ ]]; then
+              pull_number="${BASH_REMATCH[1]}"
+            fi
+
+            if [[ -n "$pull_number" ]]; then
+              pull_identity="$(
+                gh api "repos/$GITHUB_REPOSITORY/pulls/$pull_number" \
+                  --jq '[.merged_at // "", .merge_commit_sha // "", .base.ref // "", .head.ref // ""] | join("\u001f")'
+              )"
+              IFS=$'\x1f' read -r \
+                merged_at merge_revision base_branch candidate_branch \
+                <<< "$pull_identity"
+
+              if [[ -n "$merged_at" &&
+                    "$merge_revision" == "$GITHUB_SHA" &&
+                    "$base_branch" == main &&
+                    "$candidate_branch" == release/v* ]]; then
+                release_branch="$candidate_branch"
+              fi
+            fi
           fi
 
           if [[ -n "$release_branch" ]]; then

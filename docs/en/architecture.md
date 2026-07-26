@@ -627,8 +627,11 @@ cannot publish cache bytes or refresh or remove its successor's lock.
 
 The desktop-release workflow can be dispatched for admission only. Trusted
 pushes to `main` run admission when a release input changes. The source job asks
-GitHub which merged pull request owns that exact `main` revision; only a unique
-`release/vX.Y.Z` owner supplies a proposed product version and enables
+GitHub for that protected squash commit and reads its terminal pull-request
+number, then verifies that the exact pull request is merged into `main`, owns
+the current merge revision, and has a `release/vX.Y.Z` head. It does not depend
+on GitHub's eventually consistent commit-to-pull association index. Only that
+verified release owner supplies a proposed product version and enables
 publication. Every admission and publication job consumes that revision and
 version. The Linux admission verifies the version with the same release driver
 used to assemble the archives. Admission, npm provenance, and the GitHub tag

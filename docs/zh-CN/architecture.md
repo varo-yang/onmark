@@ -763,10 +763,12 @@ digest；native sidecar assembler 会拒绝不同的 target matrix。launcher �
 lease 都有 owner-specific heartbeat marker；被回收的旧 owner 不能发布缓存字节，也不能刷新或删除 successor 的锁。
 
 desktop-release workflow 可以手动 dispatch 只做 admission。release input 变化时，
-可信 `main` push 会运行 admission。source job 会向 GitHub 查询哪一份 merged pull
-request 拥有这条精确的 `main` revision；只有唯一的 `release/vX.Y.Z` owner 才能提供
-proposed product version 并启用 publication。其余 admission 与 publication job
-只消费这份 revision 与 version。Linux admission 会使用组装 archive 的同一个 release
+可信 `main` push 会运行 admission。source job 会读取受保护 squash commit 末尾的
+pull-request 编号，再向 GitHub 校验该 pull request 已合并进 `main`、精确拥有当前
+merge revision，且 head 为 `release/vX.Y.Z`。它不依赖 GitHub 最终一致的
+commit-to-pull 关联索引。只有通过这些校验的 release owner 才能提供 proposed
+product version 并启用 publication。其余 admission 与 publication job 只消费这份
+revision 与 version。Linux admission 会使用组装 archive 的同一个 release
 driver 校验 version。因此 admission、npm provenance 与 GitHub tag 都指向同一份已
 review 的 `main` revision。两种模式都只有在空 consumer 中安装两份生成的 npm tarball，
 并用两个独立 browser session 渲染同一份 screenplay 后，才准入 macOS arm64、
