@@ -23,6 +23,7 @@ import {
   type PresentationTarget,
   type PresentationTargetKind,
 } from "./motion.js";
+import { authoredImageResources } from "./resource.js";
 
 const ELEMENTS = Object.freeze({
   callToAction: "om-cta",
@@ -74,11 +75,22 @@ export function createDomPresentationBindings(
     bindVideo: document.bindVideo.bind(document),
     bindOverlay: document.bindOverlay.bind(document),
     async bindExtensions(plan) {
-      if (motion === undefined) {
-        return EMPTY_PRESENTATION_EXTENSIONS;
-      }
-      const extensions = await motion.bind(document.motionContext(plan));
-      return ownExtensions(extensions);
+      // Static authored images exist before extensions may add their own
+      // explicitly owned resources. Snapshot them once to avoid two owners for
+      // a motion-created image.
+      const images = document.imageElements();
+      const extensions =
+        motion === undefined
+          ? EMPTY_PRESENTATION_EXTENSIONS
+          : await motion.bind(document.motionContext(plan));
+      const imageResources = authoredImageResources(
+        images,
+        extensions.resources,
+      );
+      return ownExtensions({
+        effects: extensions.effects,
+        resources: [...imageResources, ...extensions.resources],
+      });
     },
   };
   return Object.freeze(bindings);
@@ -89,27 +101,30 @@ export function createDomPresentationBindings(
 /** Single mutable owner of authored-node admission and runtime decoration. */
 class AuthoredDocument {
   readonly #document: Document;
-  readonly #nodes: AuthoredNodeIndex;
+  #nodes: AuthoredNodeIndex | undefined;
   readonly #targets: PresentationTarget[] = [];
   readonly #videoSource: VideoSource;
 
   constructor(document: Document, videoSource: VideoSource) {
     this.#document = document;
-    this.#nodes = collectAuthoredNodes(document);
     this.#videoSource = videoSource;
   }
 
-  bindFilm(node: RuntimeNode): ContainerPresentation {
-    const element = requiredNode(this.#nodes, node, "film", ELEMENTS.film);
+  bindFilm(plan: RuntimePlan): ContainerPresentation {
+    if (this.#nodes !== undefined) {
+      throw new Error("authored HTML film is already bound");
+    }
+    this.#nodes = collectAuthoredNodes(this.#document, plan);
+    const element = requiredNode(this.#nodes, plan.film, "film", ELEMENTS.film);
     const visibility = visibilityStyle(this.#document);
-    const bound = bindElement(element, node, () => visibility.remove());
-    this.#record("film", element, node, { start: 0, end: 0 });
+    const bound = bindElement(element, plan.film, () => visibility.remove());
+    this.#record("film", element, plan.film, { start: 0, end: 0 });
     return bound;
   }
 
   bindScene(scene: RuntimeScene): ContainerPresentation {
     const element = requiredNode(
-      this.#nodes,
+      this.#nodeIndex(),
       scene.node,
       "scene",
       ELEMENTS.scene,
@@ -120,7 +135,12 @@ class AuthoredDocument {
   }
 
   bindShot(shot: RuntimeShot): ContainerPresentation {
-    const element = requiredNode(this.#nodes, shot.node, "shot", ELEMENTS.shot);
+    const element = requiredNode(
+      this.#nodeIndex(),
+      shot.node,
+      "shot",
+      ELEMENTS.shot,
+    );
     const bound = bindElement(element, shot.node);
     this.#record("shot", element, shot.node, shot.interval);
     return bound;
@@ -128,7 +148,7 @@ class AuthoredDocument {
 
   bindVideo(placement: RuntimeVideo): VideoPresentation {
     const element = requiredNode(
-      this.#nodes,
+      this.#nodeIndex(),
       placement.node,
       "video",
       ELEMENTS.video,
@@ -152,7 +172,7 @@ class AuthoredDocument {
     const expected =
       placement.kind === "title" ? ELEMENTS.title : ELEMENTS.callToAction;
     const element = requiredNode(
-      this.#nodes,
+      this.#nodeIndex(),
       placement.node,
       placement.kind,
       expected,
@@ -169,7 +189,7 @@ class AuthoredDocument {
     }
     const targets = this.#targets.map((target) =>
       target.kind === "film"
-        ? Object.freeze({ ...target, interval: plan.evaluation })
+        ? Object.freeze({ ...target, interval: plan.timeline })
         : target,
     );
     return Object.freeze({
@@ -178,10 +198,16 @@ class AuthoredDocument {
     });
   }
 
+  imageElements(): readonly HTMLImageElement[] {
+    return Array.from(this.#document.images).filter((element) =>
+      element.hasAttribute("src"),
+    );
+  }
+
   #bindCaption(placement: RuntimeOverlay): OverlayPresentation {
     const element = this.#document.createElement(ELEMENTS.caption);
     element.textContent = placement.text;
-    this.#nodes.film.append(element);
+    this.#nodeIndex().film.append(element);
     const bound = bindElement(element, placement.node, () => element.remove());
     this.#record("caption", element, placement.node, placement.interval);
     return bound;
@@ -194,6 +220,13 @@ class AuthoredDocument {
     interval: RuntimePlan["evaluation"],
   ): void {
     this.#targets.push(Object.freeze({ kind, element, interval, node }));
+  }
+
+  #nodeIndex(): AuthoredNodeIndex {
+    if (this.#nodes === undefined) {
+      throw new Error("authored HTML nodes require a bound film");
+    }
+    return this.#nodes;
   }
 }
 
@@ -210,23 +243,28 @@ interface AuthoredNodeIndex {
  * Whole-film and region documents each receive the matching Browser Plan.
  * Authored IDs, rather than protocol node IDs, carry cross-build identity.
  */
-function collectAuthoredNodes(document: Document): AuthoredNodeIndex {
+function collectAuthoredNodes(
+  document: Document,
+  plan: RuntimePlan,
+): AuthoredNodeIndex {
   const films = semanticChildren(document.body, ELEMENTS.film);
   if (films.length !== 1) {
     throw new Error("authored HTML requires exactly one om-film element");
   }
   const film = films[0]!;
   const indexed = [film];
+  const browserVideoShots = new Set(plan.videos.map(({ shotId }) => shotId));
   for (const scene of semanticChildren(film, ELEMENTS.scene)) {
     indexed.push(scene);
     for (const shot of semanticChildren(scene, ELEMENTS.shot)) {
       indexed.push(shot);
-      indexed.push(
-        ...semanticChildren(
-          shot,
-          `${ELEMENTS.video}, ${ELEMENTS.title}, ${ELEMENTS.callToAction}`,
-        ),
-      );
+      // Browser Plans assign dense semantic preorder IDs. The shot just
+      // admitted is therefore the parent ID carried by projected videos.
+      const shotNodeId = indexed.length - 1;
+      const contentSelector = browserVideoShots.has(shotNodeId)
+        ? `${ELEMENTS.video}, ${ELEMENTS.title}, ${ELEMENTS.callToAction}`
+        : `${ELEMENTS.title}, ${ELEMENTS.callToAction}`;
+      indexed.push(...semanticChildren(shot, contentSelector));
     }
   }
   return Object.freeze({ film, elements: Object.freeze(indexed) });

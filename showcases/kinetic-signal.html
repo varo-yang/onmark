@@ -1,0 +1,203 @@
+<!doctype html>
+<om-film>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body,
+    om-film,
+    om-scene,
+    om-shot {
+      display: block;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      width: 100%;
+    }
+
+    body {
+      background: #ffdf38;
+      color: #151515;
+      font-family: "Arial Black", "Helvetica Neue", sans-serif;
+    }
+
+    .signal {
+      height: 100%;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .rails {
+      left: 2%;
+      position: absolute;
+      right: -5%;
+      top: 47%;
+      transform: translateY(-50%) rotate(-5deg);
+    }
+
+    .word {
+      border-bottom: 4px solid #151515;
+      font-size: clamp(92px, 12vw, 230px);
+      letter-spacing: -0.085em;
+      line-height: 0.77;
+      overflow: hidden;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    .word:nth-child(2) {
+      color: #e52d27;
+      margin-left: 12%;
+      -webkit-text-stroke: 2px #151515;
+    }
+
+    .word:nth-child(3) {
+      margin-left: 5%;
+    }
+
+    .word span {
+      display: inline-block;
+    }
+
+    .meter {
+      align-items: end;
+      bottom: 34px;
+      display: flex;
+      gap: 8px;
+      height: 92px;
+      left: 38px;
+      position: absolute;
+      right: 38px;
+    }
+
+    .meter i {
+      background: #151515;
+      flex: 1;
+      height: var(--level);
+      transform-origin: center bottom;
+    }
+
+    .meta {
+      display: flex;
+      font-family: "Courier New", monospace;
+      font-size: 14px;
+      justify-content: space-between;
+      left: 38px;
+      letter-spacing: 0.16em;
+      position: absolute;
+      right: 38px;
+      text-transform: uppercase;
+      top: 30px;
+    }
+
+    .pulse {
+      background: #151515;
+      border-radius: 50%;
+      height: 18px;
+      position: absolute;
+      right: 38px;
+      top: 72px;
+      width: 18px;
+    }
+  </style>
+
+  <om-scene>
+    <om-shot duration="8s">
+      <div class="signal">
+        <div class="meta">
+          <span>Signal integrity</span><span>06 / 20</span>
+        </div>
+        <div class="pulse"></div>
+        <om-title class="rails">
+          <div class="word"><span>Hear the</span></div>
+          <div class="word"><span>picture</span></div>
+          <div class="word"><span>move.</span></div>
+        </om-title>
+        <div class="meter">
+          <i style="--level: 24%"></i><i style="--level: 62%"></i>
+          <i style="--level: 88%"></i><i style="--level: 42%"></i>
+          <i style="--level: 76%"></i><i style="--level: 30%"></i>
+          <i style="--level: 96%"></i><i style="--level: 54%"></i>
+          <i style="--level: 72%"></i><i style="--level: 38%"></i>
+          <i style="--level: 84%"></i><i style="--level: 48%"></i>
+          <i style="--level: 92%"></i><i style="--level: 66%"></i>
+          <i style="--level: 28%"></i><i style="--level: 74%"></i>
+        </div>
+      </div>
+    </om-shot>
+  </om-scene>
+
+  <script type="module" data-om-motion>
+    import { gsapMotion } from "onmark/motion/gsap";
+
+    export const motion = gsapMotion({
+      shot({ element, timeline }) {
+        const words = element.querySelectorAll(".word span");
+        const bars = element.querySelectorAll(".meter i");
+
+        timeline
+          .from(
+            words,
+            {
+              duration: 1.1,
+              ease: "expo.out",
+              stagger: 0.09,
+              xPercent: (index) => (index % 2 === 0 ? -110 : 110),
+            },
+            0.1,
+          )
+          .from(
+            bars,
+            {
+              duration: 0.9,
+              ease: "elastic.out(1, 0.35)",
+              scaleY: 0,
+              stagger: 0.035,
+            },
+            0.7,
+          )
+          .to(
+            bars,
+            {
+              duration: 5.8,
+              ease: "sine.inOut",
+              scaleY: (index) => 0.35 + ((index * 7) % 10) / 10,
+              stagger: 0.025,
+            },
+            1.65,
+          )
+          .to(
+            ".rails",
+            {
+              duration: 6.5,
+              ease: "sine.inOut",
+              rotation: 2,
+              scale: 1.12,
+              xPercent: -3,
+            },
+            1.1,
+          )
+          .to(
+            ".pulse",
+            {
+              duration: 6,
+              ease: "power2.in",
+              scale: 80,
+            },
+            1.9,
+          )
+          .to(
+            ".signal",
+            {
+              color: "#ffdf38",
+              duration: 0.75,
+              ease: "power2.in",
+            },
+            7.2,
+          );
+      },
+    });
+  </script>
+</om-film>

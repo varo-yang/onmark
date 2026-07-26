@@ -1,0 +1,265 @@
+<!doctype html>
+<om-film>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body,
+    om-film,
+    om-scene,
+    om-shot {
+      display: block;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      width: 100%;
+    }
+
+    body {
+      background: #eee8d8;
+      color: #13110d;
+      font-family: "Courier New", monospace;
+    }
+
+    .desk {
+      background:
+        repeating-linear-gradient(
+          0deg,
+          rgb(19 17 13 / 4%) 0 1px,
+          transparent 1px 5px
+        ),
+        #eee8d8;
+      height: 100%;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .photo {
+      background: #f9f6ee;
+      box-shadow: 0 18px 35px rgb(25 18 8 / 24%);
+      padding: 16px 16px 54px;
+      position: absolute;
+      transform-origin: center center;
+    }
+
+    .photo i {
+      display: block;
+      height: 100%;
+      overflow: hidden;
+      position: relative;
+      width: 100%;
+    }
+
+    .photo-a {
+      height: 450px;
+      left: 7%;
+      top: 18%;
+      transform: rotate(-8deg);
+      width: 350px;
+    }
+
+    .photo-a i {
+      background:
+        radial-gradient(circle at 58% 38%, #ffdf56 0 18%, transparent 19%),
+        linear-gradient(155deg, #193c55 0 42%, #e85d3d 42% 66%, #f2c9a0 66%);
+    }
+
+    .photo-b {
+      height: 390px;
+      left: 38%;
+      top: 8%;
+      transform: rotate(5deg);
+      width: 500px;
+    }
+
+    .photo-b i {
+      background:
+        linear-gradient(120deg, transparent 46%, #fff 46% 52%, transparent 52%),
+        radial-gradient(ellipse at 70% 70%, #261d54 0 20%, transparent 21%),
+        linear-gradient(35deg, #ff6d4a, #f8d85c 48%, #4f9ac9);
+    }
+
+    .photo-c {
+      bottom: -50px;
+      height: 420px;
+      right: 5%;
+      transform: rotate(-4deg);
+      width: 330px;
+    }
+
+    .photo-c i {
+      background:
+        repeating-linear-gradient(
+          90deg,
+          transparent 0 26px,
+          rgb(255 255 255 / 36%) 26px 30px
+        ),
+        linear-gradient(145deg, #18382c 0 45%, #8ecf7b 45% 69%, #f3efe3 69%);
+    }
+
+    .tape {
+      background: rgb(255 232 129 / 78%);
+      height: 42px;
+      position: absolute;
+      width: 150px;
+      z-index: 4;
+    }
+
+    .tape-a {
+      left: 16%;
+      top: 15%;
+      transform: rotate(5deg);
+    }
+
+    .tape-b {
+      right: 17%;
+      top: 48%;
+      transform: rotate(-11deg);
+    }
+
+    .copy {
+      background: #13110d;
+      bottom: 40px;
+      color: #f6f0df;
+      left: 38px;
+      max-width: 600px;
+      padding: 24px 28px;
+      position: absolute;
+      transform: rotate(1.5deg);
+      z-index: 6;
+    }
+
+    .copy span {
+      display: block;
+      font-size: 13px;
+      letter-spacing: 0.18em;
+      margin-bottom: 10px;
+      text-transform: uppercase;
+    }
+
+    .copy strong {
+      display: block;
+      font-family: Georgia, serif;
+      font-size: clamp(54px, 6vw, 114px);
+      font-weight: 400;
+      letter-spacing: -0.055em;
+      line-height: 0.85;
+    }
+
+    .stamp {
+      border: 3px solid #e5452d;
+      border-radius: 50%;
+      color: #e5452d;
+      font-size: 16px;
+      font-weight: 700;
+      height: 96px;
+      line-height: 90px;
+      position: absolute;
+      right: 42px;
+      text-align: center;
+      text-transform: uppercase;
+      top: 36px;
+      transform: rotate(12deg);
+      width: 96px;
+      z-index: 6;
+    }
+  </style>
+
+  <om-scene>
+    <om-shot duration="9s">
+      <div class="desk">
+        <div class="photo photo-a"><i></i></div>
+        <div class="photo photo-b"><i></i></div>
+        <div class="photo photo-c"><i></i></div>
+        <i class="tape tape-a"></i><i class="tape tape-b"></i>
+        <om-title class="copy">
+          <span>Memory, rearranged / 11</span>
+          <strong>Cut with feeling.</strong>
+        </om-title>
+        <div class="stamp">Exact</div>
+      </div>
+    </om-shot>
+  </om-scene>
+
+  <script type="module" data-om-motion>
+    import { gsapMotion } from "onmark/motion/gsap";
+
+    export const motion = gsapMotion({
+      shot({ element, timeline }) {
+        const photos = element.querySelectorAll(".photo");
+
+        timeline
+          .from(
+            photos,
+            {
+              duration: 1.2,
+              ease: "expo.out",
+              opacity: 0,
+              rotation: (index) => (index % 2 === 0 ? -28 : 24),
+              scale: 1.8,
+              stagger: 0.14,
+              x: (index) => (index - 1) * 180,
+              y: -120,
+            },
+            0.1,
+          )
+          .from(
+            ".tape",
+            {
+              duration: 0.5,
+              ease: "power3.out",
+              scaleX: 0,
+              stagger: 0.16,
+            },
+            0.9,
+          )
+          .from(
+            ".copy",
+            {
+              duration: 0.9,
+              ease: "back.out(1.5)",
+              opacity: 0,
+              rotation: -8,
+              y: 110,
+            },
+            1.1,
+          )
+          .from(
+            ".stamp",
+            {
+              duration: 0.7,
+              ease: "back.out(2)",
+              opacity: 0,
+              scale: 2.5,
+            },
+            1.45,
+          )
+          .to(
+            photos,
+            {
+              duration: 6.7,
+              ease: "sine.inOut",
+              rotation: (index) => [4, -7, 6][index],
+              scale: 1.08,
+              stagger: 0.08,
+              x: (index) => [90, -70, -110][index],
+              y: (index) => [-30, 80, -60][index],
+            },
+            1.2,
+          )
+          .to(
+            ".desk",
+            {
+              duration: 0.9,
+              ease: "expo.in",
+              filter: "sepia(1) contrast(1.4) blur(12px)",
+              scale: 1.22,
+            },
+            8,
+          );
+      },
+    });
+  </script>
+</om-film>

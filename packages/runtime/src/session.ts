@@ -347,8 +347,14 @@ function readinessFailure(
 }
 
 function planViolation(plan: BrowserPlan): string | undefined {
+  if (plan.timeline.start >= plan.timeline.end) {
+    return "plan timeline interval is empty or reversed";
+  }
   if (plan.evaluation.start > plan.evaluation.end) {
     return "plan evaluation interval is reversed";
+  }
+  if (!insideInterval(plan.evaluation, plan.timeline)) {
+    return "plan evaluation interval falls outside timeline";
   }
   if (plan.output.start >= plan.output.end) {
     return "plan output interval is empty or reversed";
@@ -375,19 +381,19 @@ function planViolation(plan: BrowserPlan): string | undefined {
     return filmViolation;
   }
 
-  const sceneIntervals = new Map<number, BrowserPlan["evaluation"]>();
+  const sceneIntervals = new Map<number, BrowserPlan["timeline"]>();
   for (const scene of plan.scenes) {
     const nodeViolation = claimNode(scene.node, nodeIds, authoredIds);
     if (nodeViolation !== undefined) {
       return nodeViolation;
     }
-    if (!insideEvaluation(scene.interval, plan.evaluation)) {
-      return "plan scene interval falls outside evaluation";
+    if (!validPlacement(scene.interval, plan.timeline, plan.evaluation)) {
+      return "plan scene interval is invalid for this evaluation";
     }
     sceneIntervals.set(scene.node.nodeId, scene.interval);
   }
 
-  const shotIntervals = new Map<number, BrowserPlan["evaluation"]>();
+  const shotIntervals = new Map<number, BrowserPlan["timeline"]>();
   for (const shot of plan.shots) {
     const nodeViolation = claimNode(shot.node, nodeIds, authoredIds);
     if (nodeViolation !== undefined) {
@@ -397,8 +403,8 @@ function planViolation(plan: BrowserPlan): string | undefined {
     if (sceneInterval === undefined) {
       return "plan shot names an unknown scene";
     }
-    if (!insideEvaluation(shot.interval, plan.evaluation)) {
-      return "plan shot interval falls outside evaluation";
+    if (!validPlacement(shot.interval, plan.timeline, plan.evaluation)) {
+      return "plan shot interval is invalid for this evaluation";
     }
     if (!insideInterval(shot.interval, sceneInterval)) {
       return "plan shot interval falls outside its scene";
@@ -432,8 +438,8 @@ function planViolation(plan: BrowserPlan): string | undefined {
     if (parentViolation !== undefined) {
       return parentViolation;
     }
-    if (!insideEvaluation(overlay.interval, plan.evaluation)) {
-      return "plan overlay interval falls outside evaluation";
+    if (!validPlacement(overlay.interval, plan.timeline, plan.evaluation)) {
+      return "plan overlay interval is invalid for this evaluation";
     }
   }
   if (!hasDenseNodeIdentity(nodeIds)) {
@@ -466,7 +472,7 @@ function hasCanonicalNodeOrder(
 
 function overlayParentViolation(
   overlay: BrowserPlan["overlays"][number],
-  shotIntervals: ReadonlyMap<number, BrowserPlan["evaluation"]>,
+  shotIntervals: ReadonlyMap<number, BrowserPlan["timeline"]>,
 ): string | undefined {
   if (overlay.kind === "caption") {
     return overlay.shotId === undefined || overlay.shotId === null
@@ -487,8 +493,8 @@ function overlayParentViolation(
 }
 
 function insideInterval(
-  interval: BrowserPlan["evaluation"],
-  parent: BrowserPlan["evaluation"],
+  interval: BrowserPlan["timeline"],
+  parent: BrowserPlan["timeline"],
 ): boolean {
   return interval.start >= parent.start && interval.end <= parent.end;
 }
@@ -526,10 +532,30 @@ function insideEvaluation(
   );
 }
 
+function validPlacement(
+  interval: BrowserPlan["timeline"],
+  timeline: BrowserPlan["timeline"],
+  evaluation: BrowserPlan["evaluation"],
+): boolean {
+  return (
+    interval.start < interval.end &&
+    insideInterval(interval, timeline) &&
+    intervalsIntersect(interval, evaluation)
+  );
+}
+
+function intervalsIntersect(
+  left: BrowserPlan["timeline"],
+  right: BrowserPlan["evaluation"],
+): boolean {
+  return left.start < right.end && right.start < left.end;
+}
+
 function snapshotPlan(plan: BrowserPlan): RuntimePlan {
   // Listing every generated field makes a schema addition fail compilation
   // instead of silently falling outside the immutable adapter snapshot.
   const frameRate = Object.freeze({ ...plan.frameRate });
+  const timeline = Object.freeze({ ...plan.timeline });
   const evaluation = Object.freeze({ ...plan.evaluation });
   const output = Object.freeze({ ...plan.output });
   const film = snapshotNode(plan.film);
@@ -541,6 +567,7 @@ function snapshotPlan(plan: BrowserPlan): RuntimePlan {
   return Object.freeze({
     timelineVersion: plan.timelineVersion,
     frameRate,
+    timeline,
     evaluation,
     output,
     film,

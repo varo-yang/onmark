@@ -1,0 +1,296 @@
+<!doctype html>
+<om-film>
+  <om-music src="assets/pulse.wav" gain="20%"></om-music>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body,
+    om-film,
+    om-scene,
+    om-shot {
+      display: block;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      width: 100%;
+    }
+
+    body {
+      background: #f1eee4;
+      color: #11110f;
+      font-family: "Helvetica Neue", Arial, sans-serif;
+    }
+
+    .manifesto {
+      background:
+        radial-gradient(
+          circle at 20% 18%,
+          rgb(255 85 54 / 65%),
+          transparent 28%
+        ),
+        radial-gradient(
+          circle at 82% 74%,
+          rgb(112 88 255 / 56%),
+          transparent 30%
+        ),
+        #f1eee4;
+      height: 100%;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .mark {
+      align-items: center;
+      display: flex;
+      font-size: clamp(100px, 17vw, 325px);
+      font-weight: 800;
+      height: 100%;
+      justify-content: center;
+      letter-spacing: -0.095em;
+      line-height: 0.72;
+      position: absolute;
+      text-transform: uppercase;
+      width: 100%;
+      z-index: 3;
+    }
+
+    .mark span {
+      display: inline-block;
+    }
+
+    .rail {
+      background: #11110f;
+      height: 10px;
+      left: 6%;
+      position: absolute;
+      top: 50%;
+      transform-origin: left center;
+      width: 88%;
+      z-index: 2;
+    }
+
+    .nodes {
+      display: flex;
+      justify-content: space-between;
+      left: 6%;
+      position: absolute;
+      right: 6%;
+      top: calc(50% - 22px);
+      z-index: 4;
+    }
+
+    .nodes i {
+      background: #dfff4f;
+      border: 7px solid #11110f;
+      border-radius: 50%;
+      height: 54px;
+      width: 54px;
+    }
+
+    .statement {
+      font-family: "Arial Black", "Helvetica Neue", sans-serif;
+      font-size: clamp(70px, 10vw, 190px);
+      font-weight: 900;
+      left: 50%;
+      letter-spacing: -0.08em;
+      line-height: 0.8;
+      opacity: 0;
+      position: absolute;
+      text-align: center;
+      text-transform: uppercase;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      width: 92%;
+      z-index: 5;
+    }
+
+    .statement em {
+      color: #ff5536;
+      font-style: normal;
+    }
+
+    .meta {
+      display: flex;
+      font-family: "Courier New", monospace;
+      font-size: 13px;
+      justify-content: space-between;
+      left: 38px;
+      letter-spacing: 0.17em;
+      position: absolute;
+      right: 38px;
+      text-transform: uppercase;
+      top: 30px;
+      z-index: 8;
+    }
+
+    .final {
+      align-items: center;
+      background: #11110f;
+      color: #f1eee4;
+      display: flex;
+      inset: 0;
+      justify-content: center;
+      opacity: 0;
+      position: absolute;
+      z-index: 10;
+    }
+
+    .final strong {
+      font-size: clamp(100px, 18vw, 340px);
+      letter-spacing: -0.095em;
+      line-height: 0.7;
+      text-transform: lowercase;
+    }
+
+    .final i {
+      background: #ff5536;
+      border-radius: 50%;
+      height: 32px;
+      margin-left: 16px;
+      margin-top: 10%;
+      width: 32px;
+    }
+  </style>
+
+  <om-scene>
+    <om-shot duration="10s">
+      <div class="manifesto">
+        <div class="meta">
+          <span>Screenplay → fact</span><span>20 / 20</span>
+        </div>
+        <om-title class="mark">
+          <span>W</span><span>r</span><span>i</span><span>t</span><span>e</span>
+        </om-title>
+        <div class="rail"></div>
+        <div class="nodes"><i></i><i></i><i></i><i></i><i></i></div>
+        <div class="statement">Don’t calculate<br /><em>the timeline.</em></div>
+        <div class="final"><strong>onmark</strong><i></i></div>
+      </div>
+    </om-shot>
+  </om-scene>
+
+  <script type="module" data-om-motion>
+    import { gsapMotion } from "onmark/motion/gsap";
+
+    export const motion = gsapMotion({
+      shot({ element, timeline }) {
+        const letters = element.querySelectorAll(".mark span");
+        const nodes = element.querySelectorAll(".nodes i");
+        const structure = element.querySelectorAll(".rail, .nodes");
+
+        timeline
+          .from(
+            letters,
+            {
+              duration: 1,
+              ease: "expo.out",
+              filter: "blur(22px)",
+              opacity: 0,
+              rotation: (index) => (index - 2) * 18,
+              scale: 2.2,
+              stagger: 0.07,
+              y: (index) => (index % 2 === 0 ? -110 : 110),
+            },
+            0.1,
+          )
+          .fromTo(
+            ".rail",
+            { scaleX: 0 },
+            { duration: 1.1, ease: "expo.inOut", scaleX: 1 },
+            1.05,
+          )
+          .from(
+            nodes,
+            {
+              duration: 0.65,
+              ease: "back.out(1.9)",
+              scale: 0,
+              stagger: 0.09,
+            },
+            1.65,
+          )
+          .to(
+            letters,
+            {
+              duration: 0.8,
+              ease: "expo.in",
+              filter: "blur(18px)",
+              opacity: 0,
+              scale: 0.3,
+              stagger: 0.03,
+              y: 80,
+            },
+            3,
+          )
+          .to(
+            structure,
+            {
+              duration: 0.7,
+              ease: "expo.in",
+              opacity: 0,
+              scaleX: 0.25,
+            },
+            3.2,
+          )
+          .fromTo(
+            ".statement",
+            {
+              clipPath: "inset(0 100% 0 0)",
+              opacity: 1,
+            },
+            {
+              clipPath: "inset(0 0% 0 0)",
+              duration: 0.9,
+              ease: "power4.out",
+              opacity: 1,
+            },
+            3.45,
+          )
+          .to(
+            ".statement",
+            {
+              duration: 1,
+              ease: "expo.in",
+              filter: "blur(18px)",
+              letterSpacing: "0.04em",
+              opacity: 0,
+              scale: 1.6,
+            },
+            6.65,
+          )
+          .to(
+            ".final",
+            {
+              duration: 0.9,
+              ease: "power3.out",
+              opacity: 1,
+            },
+            7.4,
+          )
+          .from(
+            ".final strong",
+            {
+              duration: 1.1,
+              ease: "expo.out",
+              filter: "blur(20px)",
+              letterSpacing: "0.08em",
+              scale: 1.8,
+            },
+            7.45,
+          )
+          .from(
+            ".final i",
+            {
+              duration: 0.6,
+              ease: "back.out(2)",
+              scale: 0,
+            },
+            8.15,
+          );
+      },
+    });
+  </script>
+</om-film>

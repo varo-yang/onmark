@@ -163,6 +163,7 @@ impl ArtifactCache {
             .capture_frame_artifacts(&references, self.environment, &destinations, limits)
             .await
             .map_err(ArtifactCacheError::Render)?;
+        validate_capture_count(misses.len(), captured.len())?;
 
         let captured = match &self.directory {
             Some(directory) => {
@@ -182,8 +183,8 @@ impl ArtifactCache {
         Ok(CapturedArtifacts {
             artifacts: artifacts
                 .into_iter()
-                .map(|artifact| artifact.expect("every cache miss is filled by the capture batch"))
-                .collect(),
+                .collect::<Option<Vec<_>>>()
+                .ok_or(ArtifactCacheError::IncompleteCaptureBatch)?,
             reuse,
             _staging: staging,
         })
@@ -298,6 +299,13 @@ fn missing_units(
 
 fn empty_artifacts(length: usize) -> Vec<Option<FrameArtifact>> {
     std::iter::repeat_with(|| None).take(length).collect()
+}
+
+fn validate_capture_count(expected: usize, actual: usize) -> Result<(), ArtifactCacheError> {
+    if expected != actual {
+        return Err(ArtifactCacheError::CaptureCount { expected, actual });
+    }
+    Ok(())
 }
 
 async fn load_cache_entry(
@@ -548,6 +556,8 @@ pub(super) enum ArtifactCacheError {
     NonUtf8EnvironmentSeed,
     InvalidEnvironmentSeed(InvalidCaptureEnvironmentId),
     FrameAccounting,
+    CaptureCount { expected: usize, actual: usize },
+    IncompleteCaptureBatch,
     Directory { path: PathBuf, source: io::Error },
     Staging(io::Error),
     Lock { path: PathBuf, source: io::Error },
@@ -571,6 +581,15 @@ impl fmt::Display for ArtifactCacheError {
             Self::InvalidEnvironmentSeed(source) => source.fmt(formatter),
             Self::FrameAccounting => {
                 formatter.write_str("reused frame count exceeds its accounting domain")
+            }
+            Self::CaptureCount { expected, actual } => {
+                write!(
+                    formatter,
+                    "browser captured {actual} artifact(s) for {expected} requested region(s)"
+                )
+            }
+            Self::IncompleteCaptureBatch => {
+                formatter.write_str("captured artifacts do not cover every requested region")
             }
             Self::Directory { path, .. } => {
                 write!(
@@ -630,9 +649,11 @@ impl Error for ArtifactCacheError {
             Self::LockTask(source) => Some(source),
             Self::Artifact(source) => Some(source),
             Self::Render(source) => Some(source),
-            Self::IncompleteEnvironment | Self::NonUtf8EnvironmentSeed | Self::FrameAccounting => {
-                None
-            }
+            Self::IncompleteEnvironment
+            | Self::NonUtf8EnvironmentSeed
+            | Self::FrameAccounting
+            | Self::CaptureCount { .. }
+            | Self::IncompleteCaptureBatch => None,
         }
     }
 }
@@ -647,8 +668,21 @@ mod tests {
 
     use super::{
         CacheEntry, artifact_path, cache_usage, capture_environment, inspect_cache_entry,
-        remove_corrupt,
+        remove_corrupt, validate_capture_count,
     };
+
+    #[test]
+    fn rejects_an_incomplete_capture_batch_before_pairing_artifacts() {
+        let error = validate_capture_count(2, 1).expect_err("one captured artifact is missing");
+
+        assert!(matches!(
+            error,
+            super::ArtifactCacheError::CaptureCount {
+                expected: 2,
+                actual: 1
+            }
+        ));
+    }
 
     #[test]
     fn native_capture_policy_participates_in_environment_identity() {

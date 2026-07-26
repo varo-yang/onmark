@@ -1,0 +1,238 @@
+<!doctype html>
+<om-film>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body,
+    om-film,
+    om-scene,
+    om-shot {
+      display: block;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      width: 100%;
+    }
+
+    body {
+      background: #02030a;
+      color: #f4f2ff;
+      font-family: "Avenir Next", "Helvetica Neue", sans-serif;
+    }
+
+    .cosmos {
+      height: 100%;
+      overflow: hidden;
+      position: relative;
+    }
+
+    canvas {
+      height: 100%;
+      inset: 0;
+      position: absolute;
+      width: 100%;
+    }
+
+    .copy {
+      bottom: 42px;
+      left: 44px;
+      position: absolute;
+      z-index: 2;
+    }
+
+    .copy small {
+      color: #a694ff;
+      display: block;
+      font-size: 14px;
+      letter-spacing: 0.24em;
+      margin-bottom: 14px;
+      text-transform: uppercase;
+    }
+
+    .copy strong {
+      display: block;
+      font-size: clamp(66px, 8vw, 150px);
+      letter-spacing: -0.075em;
+      line-height: 0.82;
+    }
+
+    .coordinates {
+      font-family: "Courier New", monospace;
+      font-size: 13px;
+      letter-spacing: 0.12em;
+      position: absolute;
+      right: 42px;
+      text-align: right;
+      text-transform: uppercase;
+      top: 36px;
+      z-index: 2;
+    }
+  </style>
+
+  <om-scene>
+    <om-shot duration="10s">
+      <div class="cosmos">
+        <canvas></canvas>
+        <om-title class="copy">
+          <small>Three.js / exact-frame orbit</small>
+          <strong>One timeline.<br />Infinite depth.</strong>
+        </om-title>
+        <div class="coordinates">X 09.441<br />Y 20.026<br />09 / 20</div>
+      </div>
+    </om-shot>
+  </om-scene>
+
+  <script type="module" data-om-motion>
+    import { combineMotion } from "onmark/authoring";
+    import { gsapMotion } from "onmark/motion/gsap";
+    import * as THREE from "three";
+
+    const constellation = {
+      bind(context) {
+        const shot = context.targets.find((target) => target.kind === "shot");
+        const canvas = shot?.element.querySelector("canvas");
+        if (!(canvas instanceof HTMLCanvasElement) || shot === undefined) {
+          return { effects: [], resources: [] };
+        }
+
+        const renderer = new THREE.WebGLRenderer({
+          antialias: true,
+          canvas,
+          powerPreference: "high-performance",
+        });
+        renderer.setPixelRatio(1);
+        renderer.setSize(window.innerWidth, window.innerHeight, false);
+        renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x02030a, 0.026);
+        const camera = new THREE.PerspectiveCamera(
+          44,
+          window.innerWidth / window.innerHeight,
+          0.1,
+          100,
+        );
+        const geometry = starGeometry();
+        const material = new THREE.PointsMaterial({
+          blending: THREE.AdditiveBlending,
+          color: 0xb8abff,
+          depthWrite: false,
+          size: 0.055,
+          transparent: true,
+        });
+        const points = new THREE.Points(geometry, material);
+        scene.add(points);
+
+        const ringGeometry = new THREE.TorusGeometry(4.1, 0.012, 8, 240);
+        const ringMaterial = new THREE.MeshBasicMaterial({
+          color: 0x36e9c4,
+          transparent: true,
+          opacity: 0.75,
+        });
+        const rings = [0, 1, 2].map((index) => {
+          const ring = new THREE.Mesh(ringGeometry, ringMaterial);
+          ring.rotation.x = 0.6 + index * 0.42;
+          ring.rotation.y = index * 0.65;
+          ring.scale.setScalar(0.72 + index * 0.24);
+          scene.add(ring);
+          return ring;
+        });
+
+        return {
+          effects: [
+            {
+              apply(frame) {
+                const seconds =
+                  ((frame.index - shot.interval.start) *
+                    context.frameRate.denominator) /
+                  context.frameRate.numerator;
+                points.rotation.y = seconds * 0.085;
+                points.rotation.x = Math.sin(seconds * 0.31) * 0.13;
+                rings.forEach((ring, index) => {
+                  ring.rotation.z = seconds * (0.08 + index * 0.035);
+                });
+                camera.position.set(
+                  Math.sin(seconds * 0.19) * 1.6,
+                  Math.cos(seconds * 0.23) * 0.7,
+                  8.2 - Math.sin(seconds * 0.17) * 0.8,
+                );
+                camera.lookAt(0, 0, 0);
+                renderer.render(scene, camera);
+              },
+              dispose() {
+                geometry.dispose();
+                material.dispose();
+                ringGeometry.dispose();
+                ringMaterial.dispose();
+                renderer.dispose();
+              },
+            },
+          ],
+          resources: [],
+        };
+      },
+    };
+
+    const labels = gsapMotion({
+      title({ element, timeline }) {
+        timeline
+          .from(
+            element.querySelector("strong"),
+            {
+              duration: 1.3,
+              ease: "expo.out",
+              filter: "blur(18px)",
+              opacity: 0,
+              y: 70,
+            },
+            0.2,
+          )
+          .from(
+            element.querySelector("small"),
+            {
+              duration: 0.8,
+              ease: "power3.out",
+              letterSpacing: "0.7em",
+              opacity: 0,
+            },
+            0.9,
+          )
+          .to(
+            element,
+            {
+              duration: 1,
+              ease: "expo.in",
+              filter: "blur(16px)",
+              opacity: 0,
+              scale: 0.82,
+            },
+            8.8,
+          );
+      },
+    });
+
+    export const motion = combineMotion(constellation, labels);
+
+    function starGeometry() {
+      const positions = new Float32Array(2400 * 3);
+      for (let index = 0; index < 2400; index += 1) {
+        const angle = index * 2.399963229728653;
+        const latitude = Math.acos(1 - (2 * (index + 0.5)) / 2400);
+        const radius = 2.4 + ((index * 17) % 41) / 18;
+        positions[index * 3] = radius * Math.sin(latitude) * Math.cos(angle);
+        positions[index * 3 + 1] = radius * Math.cos(latitude);
+        positions[index * 3 + 2] =
+          radius * Math.sin(latitude) * Math.sin(angle);
+      }
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute(
+        "position",
+        new THREE.BufferAttribute(positions, 3),
+      );
+      return geometry;
+    }
+  </script>
+</om-film>

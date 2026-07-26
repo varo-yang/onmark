@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "bundleId": "sha256:9ff7bf8db810b6af24a4eff86aefcde6f3d18593d57a30a26e2490ccd31f5478",
+  "bundleId": "sha256:91f3dfad1f56aa0f74fb4632b3cdbcf4db35b898939141e8e4c8f0130664297d",
   "entryPoint": "index.html",
   "documentScope": "wholeFilm",
   "temporalCapability": "randomAccess",
@@ -8,14 +8,19 @@
   "frameBehavior": "perFrame",
   "files": [
     {
-      "bytes": 282,
+      "bytes": 703,
       "path": "index.html",
-      "sha256": "sha256:97fbbe2f8a4485dbe4615f452963972248ea39cdf701c613b15ba8e48ae6dff5"
+      "sha256": "sha256:40a7402e37101e80f6d4456ae2c1f85552b6bf660e2fcae822f8e4e63c98568f"
     },
     {
-      "bytes": 86529,
+      "bytes": 89195,
       "path": "presentation.js",
-      "sha256": "sha256:9de28c344b1f9c1fd4c555c16323c499a0dc66e8662c6c62462cc1955e4b0807"
+      "sha256": "sha256:1c8ad2c5e40efc2fa2f2d621522764cb3e8c74b9e0f31f6dd597d79dffbadb00"
+    },
+    {
+      "bytes": 181,
+      "path": "resources/c3285c1f405319f27a1d57d8a58201c0b38d57a327269ff6359c0ab53162a338.svg",
+      "sha256": "sha256:c3285c1f405319f27a1d57d8a58201c0b38d57a327269ff6359c0ab53162a338"
     }
   ]
 }

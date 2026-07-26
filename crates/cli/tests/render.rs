@@ -61,23 +61,24 @@ async fn reuses_only_unchanged_regions_across_cli_processes() {
     let directory = tempdir().expect("the conformance workspace is available");
     let fixture = Fixture::write(directory.path(), &incremental_film("Closing"));
     let cache = directory.path().join("frame-cache");
+    let capture_mode = managed_capture_mode();
 
     let first = fixture.render_cached("first.mp4", &cache).await;
-    assert_success(&first.output, PARTITIONED_FRAME_COUNT);
+    assert_success(&first.output, PARTITIONED_FRAME_COUNT, capture_mode);
     assert_incremental_summary(&first.output, "Reused 0/2 regions and 0/60 frames");
     let first_hashes = decode_video_hashes(&first.path).await;
     let first_artifacts = cache_artifacts(&cache);
     assert_eq!(first_artifacts.len(), 2);
 
     let warm = fixture.render_cached("warm.mp4", &cache).await;
-    assert_success(&warm.output, PARTITIONED_FRAME_COUNT);
+    assert_success(&warm.output, PARTITIONED_FRAME_COUNT, capture_mode);
     assert_incremental_summary(&warm.output, "Reused 2/2 regions and 60/60 frames");
     assert_eq!(decode_video_hashes(&warm.path).await, first_hashes);
     assert_eq!(cache_artifacts(&cache), first_artifacts);
 
     fixture.replace_screenplay(&incremental_film("Changed"));
     let second = fixture.render_cached("second.mp4", &cache).await;
-    assert_success(&second.output, PARTITIONED_FRAME_COUNT);
+    assert_success(&second.output, PARTITIONED_FRAME_COUNT, capture_mode);
     assert_incremental_summary(&second.output, "Reused 1/2 regions and 30/60 frames");
     let second_hashes = decode_video_hashes(&second.path).await;
     let second_artifacts = cache_artifacts(&cache);
@@ -93,7 +94,7 @@ async fn reuses_only_unchanged_regions_across_cli_processes() {
     fs::write(new_artifact, b"corrupt").expect("the cache fixture can be corrupted");
 
     let repaired = fixture.render_cached("repaired.mp4", &cache).await;
-    assert_success(&repaired.output, PARTITIONED_FRAME_COUNT);
+    assert_success(&repaired.output, PARTITIONED_FRAME_COUNT, capture_mode);
     assert_incremental_summary(&repaired.output, "Reused 1/2 regions and 30/60 frames");
     assert_eq!(decode_video_hashes(&repaired.path).await, second_hashes);
     assert_eq!(cache_artifacts(&cache), second_artifacts);
@@ -117,8 +118,9 @@ async fn render_fixture_twice(
 
     let first = fixture.render("first.mp4").await;
     let second = fixture.render("second.mp4").await;
-    assert_success(&first.output, expected_frames);
-    assert_success(&second.output, expected_frames);
+    let capture_mode = requested_capture_mode();
+    assert_success(&first.output, expected_frames, capture_mode);
+    assert_success(&second.output, expected_frames, capture_mode);
 
     let first_output = inspect_output(&first.path, expected_frames).await;
     let second_output = inspect_output(&second.path, expected_frames).await;
@@ -517,15 +519,10 @@ async fn run_process(command: &mut Command) -> Output {
         .expect("the conformance process starts")
 }
 
-fn assert_success(output: &Output, expected_frames: usize) {
+fn assert_success(output: &Output, expected_frames: usize, capture_mode: &str) {
     assert_process_success("CLI rendering", output);
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains(&format!("Rendered {expected_frames} frames")));
-    let capture_mode = if cfg!(target_os = "linux") {
-        "beginFrame"
-    } else {
-        "screenshot"
-    };
     assert!(stdout.contains(&format!("with {capture_mode} capture")));
     let graphics_backend = if cfg!(target_os = "macos") {
         "Metal"
@@ -539,6 +536,21 @@ fn assert_success(output: &Output, expected_frames: usize) {
     assert!(stdout.contains(", capture "));
     assert!(stdout.contains(", assemble "));
     assert!(stdout.contains(", total "));
+}
+
+fn requested_capture_mode() -> &'static str {
+    if env::var_os("ONMARK_HEADLESS_SHELL").is_some() {
+        return "screenshot";
+    }
+    managed_capture_mode()
+}
+
+const fn managed_capture_mode() -> &'static str {
+    if cfg!(target_os = "linux") {
+        "beginFrame"
+    } else {
+        "screenshot"
+    }
 }
 
 fn assert_incremental_summary(output: &Output, expected: &str) {

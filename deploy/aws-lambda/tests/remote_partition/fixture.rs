@@ -143,7 +143,12 @@ impl ConformanceFilm {
                 .expect("the conformance encoder limits are bounded");
         let ffmpeg = Ffmpeg::new(environment.ffmpeg(), encode_limits)
             .expect("the conformance FFmpeg path is non-empty");
-        let executor = RenderExecutor::new("unused-during-assembly", browser_limits, ffmpeg);
+        let executor = RenderExecutor::new(
+            "unused-during-assembly",
+            onmark_render::BrowserCaptureMode::BeginFrame,
+            browser_limits,
+            ffmpeg,
+        );
 
         let video = executor
             .assemble_frame_artifacts(

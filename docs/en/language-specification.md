@@ -303,6 +303,13 @@ behavior from the authored compiler spelling. IDs, classes, ordinary HTML
 attributes, nested markup, inline styles, and authored overlay text remain
 presentation inputs.
 
+An ordinary `<img src>` is presentation markup, not a screenplay image element
+or duration source. Its local AVIF, GIF, JPEG, PNG, SVG, or WebP bytes are
+frozen into the browser bundle and must decode before capture. Remote URLs and
+`srcset` are rejected. An image nested inside one shot belongs only to that
+shot's projected region; an image outside all shots remains in every projected
+region that retains its presentation wrapper.
+
 For independent Render Graph regions, the browser document contains only the
 selected shot and its owning scene and film shells. Presentation-global style,
 motion, and imported resources remain inputs to every region. Authored IDs

@@ -41,6 +41,7 @@ pub(super) struct AuthoredReport {
 
 struct LocalExecutorOptions {
     browser: PathBuf,
+    capture_mode: BrowserCaptureMode,
     ffmpeg: PathBuf,
     graphics_backend: BrowserGraphicsBackend,
     video_encoder_threads: usize,
@@ -213,7 +214,8 @@ pub(super) async fn run(args: RenderArgs) -> Result<RenderOutcome, CliError> {
         .graphics_backend()
         .unwrap_or_else(local_graphics_backend);
     let executed = LocalExecutorOptions {
-        browser: executables.browser,
+        browser: executables.browser.path,
+        capture_mode: executables.browser.capture_mode,
         ffmpeg: executables.ffmpeg,
         graphics_backend,
         video_encoder_threads: args.video_encoder_threads(),
@@ -304,6 +306,7 @@ impl LocalExecutorOptions {
     fn into_executor(self) -> RenderExecutor {
         let Self {
             browser,
+            capture_mode,
             ffmpeg,
             graphics_backend,
             video_encoder_threads,
@@ -314,7 +317,7 @@ impl LocalExecutorOptions {
         )
         .expect("environment discovery returns a non-empty FFmpeg path");
 
-        RenderExecutor::new(browser, execution::browser_limits(), ffmpeg)
+        RenderExecutor::new(browser, capture_mode, execution::browser_limits(), ffmpeg)
             .with_graphics_backend(graphics_backend)
     }
 

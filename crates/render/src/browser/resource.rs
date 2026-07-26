@@ -18,6 +18,9 @@ use url::Url;
 
 use super::{BrowserError, BrowserErrorKind};
 
+const INVALID_INTERCEPTION_CODE: i64 = -32602;
+const INVALID_INTERCEPTION_ID: &str = "Invalid InterceptionId.";
+
 #[derive(Debug)]
 pub(super) struct ResourceGuard {
     task: JoinHandle<Result<(), CdpError>>,
@@ -65,16 +68,35 @@ async fn handle_request(
     request: &EventRequestPaused,
 ) -> Result<(), CdpError> {
     if policy.allows(&request.request.url).await {
-        page.execute(ContinueRequestParams::new(request.request_id.clone()))
-            .await?;
-    } else {
+        return complete_interception(
+            page.execute(ContinueRequestParams::new(request.request_id.clone()))
+                .await,
+        );
+    }
+
+    complete_interception(
         page.execute(FailRequestParams::new(
             request.request_id.clone(),
             ErrorReason::BlockedByClient,
         ))
-        .await?;
+        .await,
+    )
+}
+
+fn complete_interception<T>(result: Result<T, CdpError>) -> Result<(), CdpError> {
+    match result {
+        Ok(_) => Ok(()),
+        Err(CdpError::Chrome(error))
+            if error.code == INVALID_INTERCEPTION_CODE
+                && error.message == INVALID_INTERCEPTION_ID =>
+        {
+            // Chromium may cancel a media range request after pausing it but
+            // before the policy reply arrives. That request is already gone;
+            // the guard must remain alive for later requests.
+            Ok(())
+        }
+        Err(error) => Err(error),
     }
-    Ok(())
 }
 
 fn resource_cdp_error(source: CdpError) -> BrowserError {
@@ -120,10 +142,27 @@ impl ResourcePolicy {
 mod tests {
     use std::fs;
 
+    use chromiumoxide::error::CdpError;
+    use chromiumoxide::types::Error as ChromeError;
     use tempfile::tempdir;
     use url::Url;
 
-    use super::ResourcePolicy;
+    use super::{ResourcePolicy, complete_interception};
+
+    #[test]
+    fn a_stale_interception_does_not_terminate_request_handling() {
+        let stale = CdpError::Chrome(ChromeError {
+            code: -32602,
+            message: "Invalid InterceptionId.".into(),
+        });
+        let invalid = CdpError::Chrome(ChromeError {
+            code: -32602,
+            message: "Invalid parameters".into(),
+        });
+
+        assert!(complete_interception::<()>(Err(stale)).is_ok());
+        assert!(complete_interception::<()>(Err(invalid)).is_err());
+    }
 
     #[tokio::test]
     async fn admits_only_files_beneath_the_private_root() {

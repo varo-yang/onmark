@@ -1,0 +1,198 @@
+<!doctype html>
+<om-film>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body,
+    om-film,
+    om-scene,
+    om-shot {
+      display: block;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      width: 100%;
+    }
+
+    body {
+      background: #f4eee4;
+      color: #111;
+      font-family: "Helvetica Neue", Arial, sans-serif;
+    }
+
+    .sculpture {
+      height: 100%;
+      overflow: hidden;
+      position: relative;
+    }
+
+    canvas {
+      height: 100%;
+      inset: 0;
+      position: absolute;
+      width: 100%;
+    }
+
+    .copy {
+      left: 42px;
+      position: absolute;
+      top: 36px;
+      z-index: 2;
+    }
+
+    .copy span {
+      display: block;
+      font-family: "Courier New", monospace;
+      font-size: 13px;
+      letter-spacing: 0.2em;
+      margin-bottom: 11px;
+      text-transform: uppercase;
+    }
+
+    .copy strong {
+      display: block;
+      font-size: clamp(66px, 8vw, 155px);
+      font-weight: 400;
+      letter-spacing: -0.075em;
+      line-height: 0.82;
+    }
+
+    .note {
+      bottom: 38px;
+      font-family: "Courier New", monospace;
+      font-size: 13px;
+      letter-spacing: 0.12em;
+      position: absolute;
+      right: 42px;
+      text-align: right;
+      text-transform: uppercase;
+      z-index: 2;
+    }
+  </style>
+
+  <om-scene>
+    <om-shot duration="10s">
+      <div class="sculpture">
+        <canvas></canvas>
+        <om-title class="copy">
+          <span>Parametric study / 19</span>
+          <strong>Motion has<br />weight.</strong>
+        </om-title>
+        <div class="note">Canvas 2D<br />exact frame field</div>
+      </div>
+    </om-shot>
+  </om-scene>
+
+  <script type="module" data-om-motion>
+    import { combineMotion } from "onmark/authoring";
+    import { gsapMotion } from "onmark/motion/gsap";
+
+    const ribbons = {
+      bind(context) {
+        const shot = context.targets.find((target) => target.kind === "shot");
+        const canvas = shot?.element.querySelector("canvas");
+        if (!(canvas instanceof HTMLCanvasElement) || shot === undefined) {
+          return { effects: [], resources: [] };
+        }
+
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+        canvas.width = width;
+        canvas.height = height;
+        const drawing = canvas.getContext("2d");
+        if (drawing === null) {
+          throw new Error("ribbon showcase requires a 2D canvas");
+        }
+
+        return {
+          effects: [
+            {
+              apply(frame) {
+                const seconds =
+                  ((frame.index - shot.interval.start) *
+                    context.frameRate.denominator) /
+                  context.frameRate.numerator;
+                drawRibbons(drawing, width, height, seconds);
+              },
+              dispose() {},
+            },
+          ],
+          resources: [],
+        };
+      },
+    };
+
+    const labels = gsapMotion({
+      title({ element, timeline }) {
+        timeline
+          .from(
+            element.querySelector("strong"),
+            {
+              duration: 1.2,
+              ease: "expo.out",
+              filter: "blur(16px)",
+              opacity: 0,
+              x: -65,
+            },
+            0.2,
+          )
+          .from(
+            element.querySelector("span"),
+            {
+              duration: 0.7,
+              ease: "power3.out",
+              opacity: 0,
+              y: -18,
+            },
+            0.8,
+          )
+          .to(
+            element,
+            {
+              duration: 1,
+              ease: "expo.in",
+              filter: "blur(18px)",
+              opacity: 0,
+              x: -90,
+            },
+            8.8,
+          );
+      },
+    });
+
+    export const motion = combineMotion(ribbons, labels);
+
+    function drawRibbons(drawing, width, height, seconds) {
+      drawing.fillStyle = "#f4eee4";
+      drawing.fillRect(0, 0, width, height);
+      drawing.lineCap = "round";
+
+      for (let ribbon = 0; ribbon < 28; ribbon += 1) {
+        const phase = ribbon * 0.27 + seconds * (0.16 + ribbon * 0.002);
+        const centerY = height * (0.55 + Math.sin(phase * 0.7) * 0.08);
+        const spread = (ribbon - 13.5) * 11;
+        const startX = width * 0.1;
+        const endX = width * 1.05;
+        const bend = Math.sin(phase) * width * 0.17;
+        const hue = 8 + ribbon * 4.7 + Math.sin(seconds * 0.4) * 16;
+
+        drawing.strokeStyle = `hsl(${hue} 84% 53% / 0.56)`;
+        drawing.lineWidth = 3 + (ribbon % 5) * 1.4;
+        drawing.beginPath();
+        drawing.moveTo(startX, centerY + spread);
+        drawing.bezierCurveTo(
+          width * 0.35 + bend,
+          height * 0.04 + spread * 0.25,
+          width * 0.62 - bend,
+          height * 0.96 - spread * 0.18,
+          endX,
+          centerY - spread * 0.35,
+        );
+        drawing.stroke();
+      }
+    }
+  </script>
+</om-film>

@@ -100,6 +100,15 @@ is conditionally repaired through the ordinary worker path. This closes
 distributed incremental reuse without adding a coordinator or durable progress
 service.
 
+## Showcases
+
+[`showcases/`](showcases/) contains twenty self-contained films rendered through
+the public CLI. They cover native media, imported captions, audio, GSAP, Canvas
+2D, raw WebGL, Three.js, spatial CSS, editorial typography, and continuous
+brand motion without relying on a shared visual template or remote assets.
+Rendered outputs remain untracked; each checked-in source and exact render
+command stays reproducible.
+
 The desktop artifact is admitted on macOS arm64, Linux x64, and Windows x64. It
 exposes one `@onmark/cli` package and `onmark` command, carries the native CLI,
 `ffmpeg`, and `ffprobe` in a platform sidecar, and installs the pinned browser
@@ -183,6 +192,7 @@ cargo xtask eval html
 - [Architecture](docs/en/architecture.md)
 - [Language specification](docs/en/language-specification.md)
 - [Presentation contract](docs/en/presentation-contract.md)
+- [Competitive pipeline review](docs/en/competitive-pipeline-review.md)
 - [Rust style guide](docs/en/rust-style-guide.md)
 - [TypeScript style guide](docs/en/typescript-style-guide.md)
 - [中文文档](docs/zh-CN/)

@@ -214,6 +214,9 @@
           "maxItems": 10000,
           "type": "array"
         },
+        "timeline": {
+          "$ref": "#/$defs/WireInterval"
+        },
         "timelineVersion": {
           "const": 1,
           "format": "uint16",
@@ -232,6 +235,7 @@
       "required": [
         "timelineVersion",
         "frameRate",
+        "timeline",
         "evaluation",
         "output",
         "film",
@@ -244,7 +248,7 @@
     },
     "BrowserScene": {
       "additionalProperties": false,
-      "description": "One scene container projected for the current evaluation interval.",
+      "description": "One scene container intersecting this unit, with its complete Timeline interval.",
       "properties": {
         "interval": {
           "$ref": "#/$defs/WireInterval"
@@ -261,7 +265,7 @@
     },
     "BrowserShot": {
       "additionalProperties": false,
-      "description": "One shot container projected for the current evaluation interval.",
+      "description": "One shot container intersecting this unit, with its complete Timeline interval.",
       "properties": {
         "interval": {
           "$ref": "#/$defs/WireInterval"

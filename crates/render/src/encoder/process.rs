@@ -4,7 +4,6 @@
 //! final failure cause without allowing an encoder to grow memory unboundedly.
 
 use std::collections::VecDeque;
-use std::ffi::OsStr;
 use std::path::Path;
 use std::process::Stdio;
 
@@ -21,36 +20,20 @@ pub(super) fn spawn_ffmpeg(
     video_encoder_threads: usize,
 ) -> Result<Child, EncodeError> {
     let frame_rate = format!("{}/{}", frame_rate.numerator(), frame_rate.denominator());
-    let video_encoder_threads = video_encoder_threads.to_string();
-    Command::new(executable)
+    let mut command = Command::new(executable);
+    command
         .args([
-            OsStr::new("-nostdin"),
-            OsStr::new("-loglevel"),
-            OsStr::new("error"),
-            OsStr::new("-f"),
-            OsStr::new("image2pipe"),
-            OsStr::new("-framerate"),
-            OsStr::new(&frame_rate),
-            OsStr::new("-vcodec"),
-            OsStr::new("png"),
-            OsStr::new("-i"),
-            OsStr::new("pipe:0"),
-            OsStr::new("-an"),
-            OsStr::new("-c:v"),
-            OsStr::new("libx264"),
-            // Encoder threads retain full-resolution reference frames. Keep
-            // the exact bounded policy independent of ambient CPU count.
-            OsStr::new("-threads"),
-            OsStr::new(&video_encoder_threads),
-            OsStr::new("-pix_fmt"),
-            OsStr::new("yuv420p"),
-            OsStr::new("-movflags"),
-            OsStr::new("+faststart"),
-            OsStr::new("-f"),
-            OsStr::new("mp4"),
-            OsStr::new("-n"),
+            "-nostdin",
+            "-loglevel",
+            "error",
+            "-f",
+            "image2pipe",
+            "-framerate",
         ])
-        .arg(output)
+        .arg(frame_rate)
+        .args(["-vcodec", "png", "-i", "pipe:0"]);
+    configure_h264_output(&mut command, output, video_encoder_threads);
+    command
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
@@ -64,6 +47,39 @@ pub(super) fn spawn_ffmpeg(
                 source,
             )
         })
+}
+
+pub(super) fn configure_h264_output(
+    command: &mut Command,
+    output: &Path,
+    video_encoder_threads: usize,
+) {
+    let video_encoder_threads = video_encoder_threads.to_string();
+    // Encoder threads retain full-resolution reference frames. Keep the exact
+    // bounded policy independent of ambient CPU count.
+    command
+        .args([
+            "-an", "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-threads",
+        ])
+        .arg(video_encoder_threads)
+        .args([
+            "-pix_fmt",
+            "yuv420p",
+            "-movflags",
+            "+faststart",
+            "-colorspace",
+            "bt709",
+            "-color_primaries",
+            "bt709",
+            "-color_trc",
+            "bt709",
+            "-color_range",
+            "tv",
+            "-f",
+            "mp4",
+            "-n",
+        ])
+        .arg(output);
 }
 
 #[derive(Debug)]
@@ -113,8 +129,30 @@ fn retain_tail(retained: &mut VecDeque<u8>, chunk: &[u8], limit: usize) -> bool 
 
 #[cfg(test)]
 mod tests {
-    use super::retain_tail;
     use std::collections::VecDeque;
+    use std::ffi::OsString;
+    use std::path::Path;
+
+    use tokio::process::Command;
+
+    use super::{configure_h264_output, retain_tail};
+
+    #[test]
+    fn owns_the_standard_h264_quality_policy() {
+        let mut command = Command::new("ffmpeg");
+
+        configure_h264_output(&mut command, Path::new("film.mp4"), 4);
+
+        let arguments = command
+            .as_std()
+            .get_args()
+            .map(OsString::from)
+            .collect::<Vec<_>>();
+        assert!(has_argument_pair(&arguments, "-preset", "medium"));
+        assert!(has_argument_pair(&arguments, "-crf", "18"));
+        assert!(has_argument_pair(&arguments, "-colorspace", "bt709"));
+        assert!(has_argument_pair(&arguments, "-color_range", "tv"));
+    }
 
     #[test]
     fn retains_only_the_bounded_stderr_tail() {
@@ -123,5 +161,11 @@ mod tests {
         assert!(!retain_tail(&mut retained, b"first", 8));
         assert!(retain_tail(&mut retained, b"-second", 8));
         assert_eq!(Vec::from(retained), b"t-second");
+    }
+
+    fn has_argument_pair(arguments: &[OsString], name: &str, value: &str) -> bool {
+        arguments
+            .windows(2)
+            .any(|pair| pair[0] == name && pair[1] == value)
     }
 }

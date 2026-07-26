@@ -12,8 +12,8 @@ use onmark_core::protocol::BundleManifest;
 use onmark_core::render_graph::{PartitionPlan, RenderGraph};
 use onmark_core::timeline::TimelineIr;
 use onmark_render::{
-    BrowserLimits, CaptureEnvironmentId, EncodeLimits, ExecutableUnit, Ffmpeg, FrameArtifact,
-    FrameArtifactLimits, RenderExecutor, RenderProfile, RenderUnit, UnitRootLimits,
+    BrowserCaptureMode, BrowserLimits, CaptureEnvironmentId, EncodeLimits, ExecutableUnit, Ffmpeg,
+    FrameArtifact, FrameArtifactLimits, RenderExecutor, RenderProfile, RenderUnit, UnitRootLimits,
     WorkerCaptureRequest,
 };
 use sha2::{Digest as _, Sha256};
@@ -396,7 +396,12 @@ fn executor() -> RenderExecutor {
             .expect("the fixture encoder limits are bounded");
     let ffmpeg = Ffmpeg::new(ffmpeg(), encode_limits).expect("the fixture FFmpeg path is valid");
 
-    RenderExecutor::new(headless_shell(), browser_limits, ffmpeg)
+    RenderExecutor::new(
+        headless_shell(),
+        BrowserCaptureMode::BeginFrame,
+        browser_limits,
+        ffmpeg,
+    )
 }
 
 fn bundle_manifest() -> BundleManifest {

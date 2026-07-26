@@ -69,6 +69,121 @@ test("presents videos and overlays on their Rust-owned intervals", async () => {
   assert.equal(recorder.allDisposed(), true);
 });
 
+test("loads independent videos concurrently", async () => {
+  const elements: FakeVideoElement[] = [];
+  const adapter = new PresentationRuntimeAdapter(videoBindings(elements), 100);
+  const plan = { ...presentationPlan(), overlays: [] };
+
+  const loading = adapter.load(plan);
+  await Promise.resolve();
+  await Promise.resolve();
+  const started = elements.map(({ hasSource }) => hasSource);
+  for (const element of elements) {
+    element.emit("loadeddata");
+  }
+  await nextTurn();
+  for (const element of elements) {
+    element.emit("loadeddata");
+  }
+  await loading;
+
+  assert.deepEqual(started, [true, true]);
+  await adapter.dispose();
+});
+
+test("bounds concurrent browser video work", async () => {
+  const elements: FakeVideoElement[] = [];
+  const adapter = new PresentationRuntimeAdapter(videoBindings(elements), 100);
+  const baseline = presentationPlan();
+  const plan = {
+    ...baseline,
+    overlays: [],
+    videos: Array.from({ length: 5 }, (_, index) =>
+      video(index + 1, index + 3, 10, 20),
+    ),
+  };
+
+  const loading = adapter.load(plan);
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(elements.filter(({ hasSource }) => hasSource).length, 4);
+
+  for (const element of elements) {
+    element.emit("loadeddata");
+  }
+  await nextTurn();
+  assert.equal(elements.filter(({ hasSource }) => hasSource).length, 5);
+  for (const element of elements) {
+    element.emit("loadeddata");
+  }
+  await loading;
+  await adapter.dispose();
+});
+
+test("reports concurrent video failures in authored order", async () => {
+  const elements: FakeVideoElement[] = [];
+  const adapter = new PresentationRuntimeAdapter(videoBindings(elements), 100);
+  const plan = { ...presentationPlan(), overlays: [] };
+
+  const loading = adapter.load(plan);
+  const rejected = assert.rejects(
+    loading,
+    (error: unknown) =>
+      error instanceof RuntimeAdapterError &&
+      error.message === "video data failed to load",
+  );
+  await Promise.resolve();
+  await Promise.resolve();
+  const second = elements[1];
+  const first = elements[0];
+  assert.ok(first);
+  assert.ok(second);
+  second.releaseError = new Error("second video release failed");
+  second.emit("error");
+  await Promise.resolve();
+  first.emit("error");
+
+  await rejected;
+});
+
+test("seeks simultaneously visible videos concurrently", async () => {
+  const elements: FakeVideoElement[] = [];
+  const adapter = new PresentationRuntimeAdapter(
+    videoBindings(elements, true),
+    100,
+  );
+  const baseline = presentationPlan();
+  const plan = {
+    ...baseline,
+    overlays: [],
+    videos: baseline.videos.map((placement) => ({
+      ...placement,
+      interval: { start: 10, end: 20 },
+    })),
+  };
+
+  await adapter.load(plan);
+  const frame = runtimeFrameAt(10, plan.frameRate);
+  const seeking = adapter.seek(frame);
+  await Promise.resolve();
+  const started = elements.map(({ seekCount }) => seekCount);
+  for (const element of elements) {
+    element.emit("seeked");
+  }
+  await nextTurn();
+  for (const element of elements) {
+    element.emit("seeked");
+  }
+  await seeking;
+
+  assert.deepEqual(started, [1, 1]);
+  for (const element of elements) {
+    element.present(0);
+  }
+  await adapter.confirm(frame);
+  await adapter.dispose();
+});
+
 test("applies frame effects at each exact authored frame", async () => {
   const recorder = new PresentationRecorder();
   const adapter = new PresentationRuntimeAdapter(recorder.bindings, 100);
@@ -475,6 +590,7 @@ function presentationPlan(): BrowserPlan {
   return {
     timelineVersion: 1,
     frameRate: { numerator: 30, denominator: 1 },
+    timeline: { start: 0, end: 40 },
     evaluation: { start: 10, end: 30 },
     output: { start: 10, end: 30 },
     film: { nodeId: 0, authoredId: "film" },
@@ -532,6 +648,31 @@ function emptyBindings(effects: readonly FrameEffect[]): PresentationBindings {
       return { effects, resources: [] };
     },
   };
+}
+
+function videoBindings(
+  elements: FakeVideoElement[],
+  loadAutomatically = false,
+): PresentationBindings {
+  return {
+    ...emptyBindings([]),
+    bindVideo(placement) {
+      const element = new FakeVideoElement(loadAutomatically);
+      elements.push(element);
+      return {
+        element,
+        source: `./assets/${placement.assetId.slice("sha256:".length)}`,
+        setVisible(): void {},
+        dispose(): void {},
+      };
+    },
+  };
+}
+
+function nextTurn(): Promise<void> {
+  return new Promise((resolve) => {
+    setImmediate(resolve);
+  });
 }
 
 function video(

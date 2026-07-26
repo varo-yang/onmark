@@ -1,9 +1,9 @@
 //! Persistent native composition of one transparent browser layer over video.
 //!
-//! One process owns decode, exact CFR selection, source-over composition,
-//! canonical RGBA fingerprinting, and optional final encoding. Its stdin and
-//! stdout advance under per-frame backpressure, so neither side can accumulate
-//! an unbounded frame queue.
+//! One process owns decode, exact CFR selection, source-over composition, and
+//! the selected terminal output. Foreground stdin is always backpressured;
+//! worker artifacts additionally return canonical RGBA through a capacity-one
+//! frame channel, while local video stays entirely inside `FFmpeg`.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -39,14 +39,21 @@ const STDERR_READER_FAILURE: TaskFailure = TaskFailure {
     timeout: "layered FFmpeg stderr reader missed its cleanup deadline",
 };
 
-/// Output retained from each canonical composed frame.
+/// Exact pixels retained from one canonical distributed-composition frame.
 #[derive(Debug)]
-pub(crate) enum CanonicalFrame {
-    Consumed,
-    Pixels {
-        bytes: Box<[u8]>,
-        fingerprint: RawRgbaHash,
-    },
+pub(crate) struct CanonicalFrame {
+    bytes: Box<[u8]>,
+    fingerprint: RawRgbaHash,
+}
+
+impl CanonicalFrame {
+    pub(super) const fn new(bytes: Box<[u8]>, fingerprint: RawRgbaHash) -> Self {
+        Self { bytes, fingerprint }
+    }
+
+    pub(crate) fn into_parts(self) -> (Box<[u8]>, RawRgbaHash) {
+        (self.bytes, self.fingerprint)
+    }
 }
 
 /// Whether the compositor publishes video or returns lossless worker pixels.
@@ -92,12 +99,33 @@ impl LayeredJob {
     }
 }
 
+struct FrameOutput {
+    receiver: mpsc::Receiver<CanonicalFrame>,
+    reader: JoinHandle<io::Result<()>>,
+}
+
+fn start_frame_output(
+    runtime: &Handle,
+    child: &mut Child,
+    job: &LayeredJob,
+) -> Result<Option<FrameOutput>, EncodeError> {
+    if !job.destination.retains_pixels() {
+        return Ok(None);
+    }
+
+    let stdout = take_pipe(child.stdout.take(), &job.diagnostic_path, "frame output")?;
+    let frame_bytes = frame_bytes(job.profile, &job.diagnostic_path)?;
+    let (sender, receiver) = mpsc::channel(1);
+    let reader = runtime.spawn(read_frames(stdout, frame_bytes, job.frame_count(), sender));
+
+    Ok(Some(FrameOutput { receiver, reader }))
+}
+
 /// One owned native decode/composition process.
 pub(crate) struct LayeredSession {
     child: Child,
     input: Option<ChildStdin>,
-    frames: mpsc::Receiver<CanonicalFrame>,
-    frame_reader: Option<JoinHandle<io::Result<()>>>,
+    frame_output: Option<FrameOutput>,
     stderr: Option<JoinHandle<io::Result<CapturedStderr>>>,
     destination: LayeredOutput,
     diagnostic_path: PathBuf,
@@ -131,30 +159,19 @@ impl LayeredSession {
         })?;
         let mut child = spawn(executable, &job, limits.video_encoder_threads())?;
         let input = take_pipe(child.stdin.take(), &job.diagnostic_path, "input")?;
-        let stdout = take_pipe(child.stdout.take(), &job.diagnostic_path, "frame output")?;
         let stderr = take_pipe(
             child.stderr.take(),
             &job.diagnostic_path,
             "diagnostic output",
         )?;
         let expected_frames = job.frame_count();
-        let frame_bytes = frame_bytes(job.profile, &job.diagnostic_path)?;
-        let (frame_sender, frames) = mpsc::channel(1);
-        let retains_pixels = job.destination.retains_pixels();
-        let frame_reader = runtime.spawn(read_frames(
-            stdout,
-            frame_bytes,
-            expected_frames,
-            retains_pixels,
-            frame_sender,
-        ));
+        let frame_output = start_frame_output(&runtime, &mut child, &job)?;
         let stderr = runtime.spawn(capture_stderr(stderr, limits.max_stderr_bytes()));
 
         Ok(Self {
             child,
             input: Some(input),
-            frames,
-            frame_reader: Some(frame_reader),
+            frame_output,
             stderr: Some(stderr),
             destination: job.destination,
             diagnostic_path: job.diagnostic_path,
@@ -167,15 +184,17 @@ impl LayeredSession {
         })
     }
 
-    pub(crate) async fn write_frame(
+    pub(crate) async fn write_artifact_frame(
         &mut self,
         foreground: &DecodedRgba,
     ) -> Result<Option<CanonicalFrame>, EncodeError> {
-        self.check_input(foreground)?;
-        self.write_foreground(foreground).await?;
-        self.submitted_frames += 1;
-        self.input_bytes += u64::try_from(foreground.as_bytes().len())
-            .expect("the checked foreground size fits the encoder accounting domain");
+        if !self.destination.retains_pixels() {
+            return Err(self.error(
+                EncodeErrorKind::FrameRead,
+                "video composition cannot return canonical frame pixels",
+            ));
+        }
+        self.submit_foreground(foreground).await?;
 
         // FFmpeg framesync releases a foreground only after seeing the next
         // timestamp. Keep that single-frame lookahead explicit and bounded.
@@ -185,17 +204,26 @@ impl LayeredSession {
         self.receive_frame().await.map(Some)
     }
 
+    async fn submit_foreground(&mut self, foreground: &DecodedRgba) -> Result<(), EncodeError> {
+        self.check_input(foreground)?;
+        self.write_foreground(foreground).await?;
+        self.submitted_frames += 1;
+        self.input_bytes += u64::try_from(foreground.as_bytes().len())
+            .expect("the checked foreground size fits the encoder accounting domain");
+        Ok(())
+    }
+
     pub(crate) async fn write_video_frame(
         &mut self,
         foreground: &DecodedRgba,
     ) -> Result<(), EncodeError> {
-        match self.write_frame(foreground).await? {
-            None | Some(CanonicalFrame::Consumed) => Ok(()),
-            Some(CanonicalFrame::Pixels { .. }) => Err(self.error(
+        if self.destination.retains_pixels() {
+            return Err(self.error(
                 EncodeErrorKind::FrameRead,
-                "local layered composition unexpectedly retained frame pixels",
-            )),
+                "frame-artifact composition cannot publish encoded video",
+            ));
         }
+        self.submit_foreground(foreground).await
     }
 
     async fn write_foreground(&mut self, foreground: &DecodedRgba) -> Result<(), EncodeError> {
@@ -223,7 +251,13 @@ impl LayeredSession {
     }
 
     async fn receive_frame(&mut self) -> Result<CanonicalFrame, EncodeError> {
-        let frame = match timeout(self.limits.inactivity_timeout(), self.frames.recv()).await {
+        let Some(output) = &mut self.frame_output else {
+            return Err(self.error(
+                EncodeErrorKind::FrameRead,
+                "layered composition has no canonical frame output",
+            ));
+        };
+        let frame = match timeout(self.limits.inactivity_timeout(), output.receiver.recv()).await {
             Ok(Some(frame)) => frame,
             Ok(None) => return Err(self.early_frame_end().await),
             Err(_) => {
@@ -248,7 +282,11 @@ impl LayeredSession {
         }
 
         self.input.take();
-        let final_frame = self.receive_frame().await?;
+        let final_frame = if self.destination.retains_pixels() {
+            Some(self.receive_frame().await?)
+        } else {
+            None
+        };
         let status = self.wait_for_exit().await?;
         let stderr = self.finish_process_output().await?;
         if !status.success() {
@@ -264,19 +302,17 @@ impl LayeredSession {
         }
 
         let completion = match (&self.destination, final_frame) {
-            (LayeredOutput::Video(path), CanonicalFrame::Consumed) => LayeredCompletion::Video(
+            (LayeredOutput::Video(path), None) => LayeredCompletion::Video(
                 EncodedVideo::completed(path.to_owned(), self.submitted_frames),
             ),
-            (LayeredOutput::Frames, frame @ CanonicalFrame::Pixels { .. }) => {
-                LayeredCompletion::Frames(frame)
-            }
-            (LayeredOutput::Video(_), CanonicalFrame::Pixels { .. }) => {
+            (LayeredOutput::Frames, Some(frame)) => LayeredCompletion::Frames(frame),
+            (LayeredOutput::Video(_), Some(_)) => {
                 return Err(self.error(
                     EncodeErrorKind::FrameRead,
                     "local layered composition unexpectedly retained frame pixels",
                 ));
             }
-            (LayeredOutput::Frames, CanonicalFrame::Consumed) => {
+            (LayeredOutput::Frames, None) => {
                 return Err(self.error(
                     EncodeErrorKind::FrameRead,
                     "layered worker composition did not retain final frame pixels",
@@ -290,7 +326,7 @@ impl LayeredSession {
     pub(crate) async fn abort(mut self) -> Result<(), EncodeError> {
         self.input.take();
         let process = self.abort_process().await;
-        let frames = self.abort_frame_reader().await;
+        let frames = self.finish_frame_output().await;
         let stderr = self.abort_stderr().await;
 
         process?;
@@ -320,13 +356,6 @@ impl LayeredSession {
                 "aborted layered FFmpeg composition missed its cleanup deadline",
             )),
         }
-    }
-
-    async fn abort_frame_reader(&mut self) -> Result<(), EncodeError> {
-        if self.frame_reader.is_none() {
-            return Ok(());
-        }
-        self.finish_frame_reader().await
     }
 
     async fn abort_stderr(&mut self) -> Result<(), EncodeError> {
@@ -363,7 +392,7 @@ impl LayeredSession {
     }
 
     async fn finish_process_output(&mut self) -> Result<CapturedStderr, EncodeError> {
-        let frame_result = self.finish_frame_reader().await;
+        let frame_result = self.finish_frame_output().await;
         let stderr_result = self.finish_stderr().await;
         if let Err(source) = frame_result {
             let message = observed_failure(source.message(), stderr_result.ok().as_ref());
@@ -408,14 +437,11 @@ impl LayeredSession {
         EncodeError::new(kind, &self.diagnostic_path, message)
     }
 
-    async fn finish_frame_reader(&mut self) -> Result<(), EncodeError> {
-        let Some(reader) = self.frame_reader.take() else {
-            return Err(self.error(
-                EncodeErrorKind::FrameRead,
-                "layered frame reader is already closed",
-            ));
+    async fn finish_frame_output(&mut self) -> Result<(), EncodeError> {
+        let Some(output) = self.frame_output.take() else {
+            return Ok(());
         };
-        finish_task(reader, &self.diagnostic_path, FRAME_READER_FAILURE).await
+        finish_task(output.reader, &self.diagnostic_path, FRAME_READER_FAILURE).await
     }
 
     async fn finish_stderr(&mut self) -> Result<CapturedStderr, EncodeError> {
@@ -430,9 +456,9 @@ impl LayeredSession {
 
     async fn terminate(&mut self) {
         self.stop_child().await;
-        if let Some(reader) = self.frame_reader.take() {
-            reader.abort();
-            let _ = reader.await;
+        if let Some(output) = self.frame_output.take() {
+            output.reader.abort();
+            let _ = output.reader.await;
         }
         if let Some(stderr) = self.stderr.take() {
             stderr.abort();
@@ -441,7 +467,7 @@ impl LayeredSession {
     }
 
     async fn early_frame_end(&mut self) -> EncodeError {
-        let frame_error = self.finish_frame_reader().await.err();
+        let frame_error = self.finish_frame_output().await.err();
         self.stop_child().await;
         let stderr = self.finish_stderr().await.ok();
         let message = frame_error
@@ -476,9 +502,9 @@ impl LayeredSession {
 
     async fn stop_with_diagnostics(&mut self, message: &str) -> String {
         self.stop_child().await;
-        if let Some(reader) = self.frame_reader.take() {
-            reader.abort();
-            let _ = reader.await;
+        if let Some(output) = self.frame_output.take() {
+            output.reader.abort();
+            let _ = output.reader.await;
         }
         let stderr = self.finish_stderr().await.ok();
         observed_failure(message, stderr.as_ref())
@@ -531,8 +557,8 @@ impl Drop for LayeredSession {
         if !self.reaped {
             let _ = self.child.start_kill();
         }
-        if let Some(reader) = self.frame_reader.take() {
-            reader.abort();
+        if let Some(output) = self.frame_output.take() {
+            output.reader.abort();
         }
         if let Some(stderr) = self.stderr.take() {
             stderr.abort();

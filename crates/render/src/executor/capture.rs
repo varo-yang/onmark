@@ -328,9 +328,10 @@ async fn capture_frame(
 
 /// The two bounded destinations for a captured browser frame.
 ///
-/// Direct local rendering streams one PNG into `FFmpeg`; worker capture also
-/// records its canonical raw-pixel fingerprint. This closed policy avoids an
-/// unbounded callback or channel at the capture boundary.
+/// Browser-composited video streams PNG directly into `FFmpeg`. Layered sinks
+/// decode the transparent foreground once; local video consumes it directly,
+/// while worker capture retains canonical composed pixels and their hash. This
+/// closed policy avoids an unbounded callback or channel at the boundary.
 pub(super) enum FrameSink<'a> {
     Encoder(&'a mut FfmpegSession),
     Artifact(&'a mut FrameArtifactWriter),
@@ -392,7 +393,7 @@ async fn write_layered_artifact(
     let foreground = decode_foreground(foreground, profile, metrics, output)?;
     let started = Instant::now();
     let frame = compositor
-        .write_frame(&foreground)
+        .write_artifact_frame(&foreground)
         .await
         .map_err(|source| RenderError::encoder(output, source))?;
     if let Some(frame) = frame {
@@ -422,12 +423,7 @@ pub(super) async fn write_canonical_artifact(
     frame: CanonicalFrame,
     output: &Path,
 ) -> Result<(), RenderError> {
-    let CanonicalFrame::Pixels { bytes, fingerprint } = frame else {
-        return Err(invalid_plan(
-            output,
-            "layered worker composition did not retain canonical pixels",
-        ));
-    };
+    let (bytes, fingerprint) = frame.into_parts();
     artifact
         .write_rgba_frame(&bytes, fingerprint, profile)
         .await
