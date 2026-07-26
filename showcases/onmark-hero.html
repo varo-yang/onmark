@@ -1,0 +1,521 @@
+<!doctype html>
+<om-film>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body,
+    om-film,
+    om-scene,
+    om-shot {
+      display: block;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      width: 100%;
+    }
+
+    body {
+      background: #08090b;
+      color: #111214;
+      font-family: "Instrument Sans", sans-serif;
+    }
+
+    .hero {
+      background:
+        radial-gradient(circle at center, #27292f 0%, #111216 38%, #060709 78%),
+        #060709;
+      height: 100%;
+      overflow: hidden;
+      perspective: 1800px;
+      position: relative;
+    }
+
+    .world {
+      height: min(70vh, 760px);
+      left: 50%;
+      opacity: 0;
+      position: absolute;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      transform-style: preserve-3d;
+      width: min(72vw, 1320px);
+      z-index: 2;
+    }
+
+    .card,
+    .face,
+    .layer {
+      inset: 0;
+      position: absolute;
+      transform-style: preserve-3d;
+    }
+
+    .face {
+      backface-visibility: hidden;
+      border-radius: 28px;
+      overflow: hidden;
+    }
+
+    .source {
+      background: #eee7d9;
+      box-shadow:
+        0 42px 120px rgb(0 0 0 / 46%),
+        inset 0 0 0 1px rgb(17 18 20 / 14%);
+      padding: clamp(26px, 3vw, 58px);
+    }
+
+    .source-header,
+    .source-footer {
+      display: flex;
+      font-size: clamp(10px, 0.68vw, 14px);
+      font-weight: 700;
+      justify-content: space-between;
+      letter-spacing: 0.13em;
+      position: absolute;
+      text-transform: uppercase;
+    }
+
+    .source-header {
+      left: clamp(26px, 3vw, 58px);
+      right: clamp(26px, 3vw, 58px);
+      top: clamp(24px, 2.6vw, 50px);
+    }
+
+    .source-header span:last-child {
+      color: #f04d32;
+    }
+
+    .source-footer {
+      bottom: clamp(24px, 2.6vw, 50px);
+      color: rgb(17 18 20 / 54%);
+      left: clamp(26px, 3vw, 58px);
+      right: clamp(26px, 3vw, 58px);
+    }
+
+    .authored {
+      left: 8%;
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+    }
+
+    .tag {
+      color: rgb(17 18 20 / 50%);
+      display: block;
+      font-size: clamp(13px, 0.9vw, 18px);
+      font-weight: 700;
+      letter-spacing: 0.05em;
+    }
+
+    .authored strong {
+      display: block;
+      font-size: clamp(70px, 8.2vw, 156px);
+      letter-spacing: -0.065em;
+      line-height: 0.78;
+      margin: 4.8vh 0;
+    }
+
+    .authored em {
+      color: #f04d32;
+      font-family: "Instrument Serif", serif;
+      font-weight: 400;
+    }
+
+    .ticks {
+      background: repeating-linear-gradient(
+        90deg,
+        rgb(17 18 20 / 40%) 0 1px,
+        transparent 1px 2.6%
+      );
+      bottom: 0;
+      height: 9px;
+      left: 0;
+      position: absolute;
+      right: 0;
+    }
+
+    .composition {
+      background: #101114;
+      box-shadow: 0 42px 120px rgb(0 0 0 / 54%);
+      transform: rotateY(180deg);
+    }
+
+    .layer {
+      border-radius: 22px;
+      left: 6%;
+      overflow: hidden;
+      right: 6%;
+    }
+
+    .color-layer {
+      background: #2447ff;
+      bottom: 6%;
+      top: 6%;
+    }
+
+    .grid-layer {
+      background:
+        repeating-linear-gradient(
+          0deg,
+          rgb(17 18 20 / 20%) 0 1px,
+          transparent 1px 44px
+        ),
+        repeating-linear-gradient(
+          90deg,
+          rgb(17 18 20 / 20%) 0 1px,
+          transparent 1px 44px
+        ),
+        #eee7d9;
+      bottom: 10%;
+      left: 10%;
+      right: 2%;
+      top: 2%;
+    }
+
+    .type-layer {
+      align-items: center;
+      color: #111214;
+      display: flex;
+      justify-content: center;
+      text-align: center;
+    }
+
+    .type-layer strong {
+      font-size: clamp(76px, 10vw, 190px);
+      letter-spacing: -0.07em;
+      line-height: 0.7;
+      text-transform: uppercase;
+    }
+
+    .type-layer span {
+      color: #ff5639;
+      display: block;
+      font-family: "Instrument Serif", serif;
+      font-weight: 400;
+    }
+
+    .register {
+      background: #ff5639;
+      border-radius: 50%;
+      bottom: 10%;
+      box-shadow: 0 0 0 10px rgb(255 86 57 / 14%);
+      height: clamp(28px, 2.6vw, 50px);
+      opacity: 0;
+      position: absolute;
+      right: 10%;
+      transform: scale(0);
+      width: clamp(28px, 2.6vw, 50px);
+      z-index: 4;
+    }
+
+    .brand-stage {
+      align-items: center;
+      background: #ff5639;
+      clip-path: circle(0% at 76% 68%);
+      display: flex;
+      inset: 0;
+      justify-content: center;
+      position: absolute;
+      text-align: center;
+      z-index: 5;
+    }
+
+    .wordmark {
+      display: block;
+      font-size: clamp(130px, 20vw, 390px);
+      font-weight: 700;
+      letter-spacing: -0.05em;
+      line-height: 0.72;
+      opacity: 0;
+      transform: translateY(24px);
+    }
+
+    .tagline {
+      display: block;
+      font-family: "Instrument Serif", serif;
+      font-size: clamp(19px, 1.6vw, 32px);
+      letter-spacing: -0.01em;
+      margin-top: 34px;
+      opacity: 0;
+    }
+
+    .frame-mark {
+      color: rgb(17 18 20 / 62%);
+      font-size: clamp(10px, 0.68vw, 14px);
+      font-weight: 700;
+      left: 30px;
+      letter-spacing: 0.13em;
+      opacity: 0;
+      position: absolute;
+      text-transform: uppercase;
+      top: 28px;
+      z-index: 6;
+    }
+  </style>
+
+  <om-scene>
+    <om-shot duration="15s">
+      <div class="hero">
+        <div class="world">
+          <div class="card">
+            <section class="face source">
+              <header class="source-header">
+                <span>Onmark source</span>
+                <span>Intent, not coordinates</span>
+              </header>
+
+              <div class="authored">
+                <span class="tag">&lt;om-title&gt;</span>
+                <strong>Motion,<br /><em>written.</em></strong>
+                <span class="tag">&lt;/om-title&gt;</span>
+              </div>
+
+              <footer class="source-footer">
+                <span>Screenplay</span>
+                <span>Compile →</span>
+              </footer>
+              <i class="ticks"></i>
+            </section>
+
+            <section class="face composition">
+              <div class="layer color-layer"></div>
+              <div class="layer grid-layer"></div>
+              <div class="layer type-layer">
+                <strong>Motion<span>written.</span></strong>
+              </div>
+              <i class="register"></i>
+            </section>
+          </div>
+        </div>
+
+        <om-title class="brand-stage">
+          <span>
+            <strong class="wordmark">onmark</strong>
+            <small class="tagline">Write the film. Own every frame.</small>
+          </span>
+        </om-title>
+        <span class="frame-mark">Screenplay-first video</span>
+      </div>
+    </om-shot>
+  </om-scene>
+
+  <script type="module" data-om-motion>
+    import { combineMotion, createFontResource } from "onmark/authoring";
+    import { gsapMotion } from "onmark/motion/gsap";
+    import sansUrl from "./assets/fonts/instrument-sans.woff2";
+    import sansBoldUrl from "./assets/fonts/instrument-sans-bold.woff2";
+    import serifUrl from "./assets/fonts/instrument-serif.woff2";
+
+    const typography = {
+      bind() {
+        return {
+          effects: [],
+          resources: [
+            fontResource("Instrument Sans", sansUrl, "400", "sans-regular"),
+            fontResource("Instrument Sans", sansBoldUrl, "700", "sans-bold"),
+            fontResource("Instrument Serif", serifUrl, "400", "serif"),
+          ],
+        };
+      },
+    };
+
+    const choreography = gsapMotion({
+      shot({ element, timeline }) {
+        arrive(timeline, element);
+        compile(timeline, element);
+        resolve(timeline, element);
+      },
+    });
+
+    export const motion = combineMotion(typography, choreography);
+
+    function fontResource(family, source, weight, id) {
+      const face = new FontFace(family, `url(${source}) format("woff2")`, {
+        weight,
+      });
+      return createFontResource({ face, fonts: document.fonts, id });
+    }
+
+    function arrive(timeline, element) {
+      const authored = element.querySelector(".authored");
+      const world = element.querySelector(".world");
+
+      timeline
+        .fromTo(
+          world,
+          {
+            opacity: 0,
+            rotateX: 18,
+            rotateY: -28,
+            rotateZ: 7,
+            scale: 0.58,
+            xPercent: 46,
+          },
+          {
+            duration: 2.5,
+            ease: "expo.out",
+            opacity: 1,
+            rotateX: 2,
+            rotateY: -7,
+            rotateZ: -2,
+            scale: 1,
+            xPercent: 0,
+          },
+          0,
+        )
+        .from(
+          authored,
+          {
+            duration: 1.2,
+            ease: "power3.out",
+            opacity: 0,
+            x: -54,
+          },
+          0.8,
+        );
+    }
+
+    function compile(timeline, element) {
+      const card = element.querySelector(".card");
+      const color = element.querySelector(".color-layer");
+      const grid = element.querySelector(".grid-layer");
+      const register = element.querySelector(".register");
+      const type = element.querySelector(".type-layer");
+      const world = element.querySelector(".world");
+
+      timeline
+        .to(card, { duration: 2.1, ease: "expo.inOut", rotateY: 180 }, 2.6)
+        .to(
+          world,
+          {
+            duration: 2.1,
+            ease: "expo.inOut",
+            rotateX: -3,
+            rotateY: 6,
+            rotateZ: 2,
+            scale: 1.06,
+          },
+          2.6,
+        )
+        .to(
+          color,
+          {
+            duration: 2.8,
+            ease: "expo.inOut",
+            rotateZ: -7,
+            xPercent: -15,
+            yPercent: -10,
+            z: -160,
+          },
+          4.8,
+        )
+        .to(
+          grid,
+          {
+            duration: 2.8,
+            ease: "expo.inOut",
+            rotateZ: 4,
+            xPercent: 13,
+            yPercent: 8,
+            z: 30,
+          },
+          4.8,
+        )
+        .to(
+          type,
+          {
+            duration: 2.8,
+            ease: "expo.inOut",
+            scale: 1.06,
+            z: 190,
+          },
+          4.8,
+        )
+        .to(
+          register,
+          {
+            duration: 0.8,
+            ease: "back.out(2.2)",
+            opacity: 1,
+            scale: 1,
+          },
+          6.1,
+        )
+        .to(
+          world,
+          {
+            duration: 2.5,
+            ease: "sine.inOut",
+            rotateX: 5,
+            rotateY: -9,
+            rotateZ: -1,
+            scale: 1.12,
+          },
+          6.8,
+        );
+    }
+
+    function resolve(timeline, element) {
+      const brand = element.querySelector(".brand-stage");
+      const card = element.querySelector(".card");
+      const frameMark = element.querySelector(".frame-mark");
+      const hero = element.querySelector(".hero");
+      const tagline = element.querySelector(".tagline");
+      const wordmark = element.querySelector(".wordmark");
+      const world = element.querySelector(".world");
+
+      timeline
+        .to(
+          card.querySelectorAll(".layer"),
+          {
+            duration: 1.4,
+            ease: "expo.inOut",
+            rotateZ: 0,
+            scale: 1,
+            xPercent: 0,
+            yPercent: 0,
+            z: 0,
+          },
+          8.8,
+        )
+        .to(
+          world,
+          {
+            duration: 1.5,
+            ease: "expo.in",
+            rotateX: 0,
+            rotateY: 0,
+            rotateZ: 0,
+            scale: 1.34,
+          },
+          9,
+        )
+        .to(
+          brand,
+          {
+            clipPath: "circle(150% at 76% 68%)",
+            duration: 1.7,
+            ease: "expo.inOut",
+          },
+          9.8,
+        )
+        .to(
+          wordmark,
+          {
+            duration: 1,
+            ease: "expo.out",
+            opacity: 1,
+            y: 0,
+          },
+          10.9,
+        )
+        .to(tagline, { duration: 0.7, ease: "power3.out", opacity: 1 }, 11.6)
+        .to(frameMark, { duration: 0.7, ease: "power2.out", opacity: 1 }, 11.8)
+        .set(world, { opacity: 0 }, 11.8)
+        .to(hero, { duration: 0.6, ease: "power2.in", opacity: 0 }, 14.4);
+    }
+  </script>
+</om-film>

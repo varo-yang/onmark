@@ -1,177 +1,112 @@
-# Onmark
+<h1 align="center">Onmark</h1>
 
-Onmark is a screenplay-first video compiler and rendering engine for people and
-agents.
+<p align="center"><strong>Write the film. Own every frame.</strong></p>
+
+<p align="center">
+  <a href="https://www.npmjs.com/package/@onmark/cli"><img src="https://img.shields.io/npm/v/%40onmark%2Fcli?color=111214" alt="npm version"></a>
+  <a href="https://github.com/varo-yang/onmark/actions/workflows/ci.yml"><img src="https://github.com/varo-yang/onmark/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-f04d32" alt="MIT license"></a>
+</p>
+
+<p align="center">
+  <a href="https://onmark-cdn-1313593665.cos.ap-guangzhou.myqcloud.com/onmark-hero-compiled-draft-v2.mp4">
+    <img src="docs/onmark-hero.gif" alt="Onmark screenplay compiling into a rendered composition" width="720">
+  </a>
+</p>
+
+Onmark is a screenplay-first video compiler for people and agents. Write one
+HTML document with semantic film elements, ordinary CSS, and optional seekable
+motion. Onmark compiles the authored intent into an exact timeline, renders it
+through Chromium, mixes media with FFmpeg, and writes an MP4.
 
 ```text
-screenplay → deterministic Timeline IR → browser frames + audio plan → MP4
+screenplay → Timeline IR → Render Units → browser frames + audio → MP4
 ```
 
-Delivery gates one through seven and distributed incremental reuse are
-complete. No later delivery gate is currently active. Gate one renders and
-independently verifies one real screenplay through the compiler, browser
-protocol, Chromium, and FFmpeg. Gate two partitions one media-bearing two-shot
-film into two local Render Units and
-proves that their assembled decoded video and audio match the whole-film
-baseline. Gate three sends those
-same portable units to two concurrent arm64 Lambda workers, verifies their
-immutable S3 frame artifacts against a remote whole-film capture by canonical
-raw-RGBA pixels, and assembles the partitions through the shared H.264/AAC
-path. Gate four carries authored music, shot-local effects, voice-over, and
-imported SRT/WebVTT/ASS captions through the same local whole-film and
-partitioned paths, with both canonical raw-RGBA frames and decoded audio
-checked for equivalence.
+## Quick start
 
-Gate five admits exact-frame effects and a closed presentation temporal
-capability after bounded WAAPI, GSAP, and Three.js experiments. Its exit
-conformance proves that the effect-bearing presentation produces identical
-canonical pixels as one whole-film unit or two independent units. Unknown
-presentation code remains sequential. Deployment work remains frozen.
-
-Gate six carries content-addressed local image, SVG, and font resources through
-bounded browser readiness that names the resource still pending. It also gives
-film, scene, shot, and content facts Rust-owned node identity and ownership.
-Authored IDs retain semantic identity across unit projections. Its Linux exit
-conformance proves equal pixels across cold browsers and whole-film versus
-partitioned execution without adding a general props channel, new screenplay
-spelling, or a second timing system.
-
-Gate seven admits transparent browser presentation over persistent native media
-decode and composition for an explicitly separable visual capability. Its
-locked experiment passes at 4.18× the Chromium-media baseline speed and 79.73%
-of its peak RSS. The production executor preserves a bounded stream, exact
-whole-film/partition equivalence, declared color conformance, and the existing
-Chromium-media path for presentations without the capability. The real-process
-exit fixture passes; this is neither new screenplay syntax nor a hidden
-fallback.
-
-The executor now also carries an independent, proved browser-frame behavior.
-For placement-bounded foregrounds it captures only the first frame and solved
-placement changes, then shares the immutable PNG between intervening output
-frames. The real-process layered control reduces browser evaluation from 75
-authored frames to one while retaining exact canonical raw-RGBA output;
-browser-owned video and unknown authored effects remain per-frame.
-
-The completed foundation includes the pure compiler and versioned wire types in
-`onmark-core`; bounded ffprobe and strict SubRip/WebVTT/ASS normalization in
-`onmark-media`; deterministic video and overlay presentation in
-`@onmark/runtime`; authored-HTML bindings in `@onmark/authoring`; immutable
-presentation artifacts in `@onmark/bundler`; the typed Chromium-to-FFmpeg
-executor in `onmark-render`; and the `onmark-cli` composition root. A production
-deployment workflow and infrastructure definition remain deliberately absent;
-there is still no queue, lease system, scheduler, or coordinator.
-
-## Render
-
-The native command needs one authored HTML document and writes a no-clobber
-`renders/<name>.mp4` by default. Onmark custom elements carry screenplay intent;
-ordinary HTML and inline CSS carry presentation. An optional inline
-`type="module" data-om-motion` script exports vendor-neutral motion
-assembled from adapters such as `onmark/motion/gsap`:
+Install the desktop CLI on macOS arm64, Linux x64, or Windows x64:
 
 ```bash
 npm install --global @onmark/cli
-onmark render film.html
-onmark render film.html --output review.mp4
-onmark render film.html --fps 30000/1001 --width 1920 --height 1080
-onmark render film.html --subtitle captions.vtt
 ```
 
-`--subtitle` imports strict UTF-8 `.srt`, `.vtt`, or `.ass` files without adding
-external-format syntax to the screenplay. Invalid files produce diagnostics
-against their own path and byte spans before browser or media processes start.
+Create `film.html`:
 
-Presentation capabilities are not inferred from source text or observed pixel
-equality. The production authored-HTML adapter is admitted as random-access,
-browser-composited, and per-frame; unknown future components remain sequential
-until their own conformance proves otherwise. Immutable bundle metadata carries
-the admitted facts into Render Graph planning.
+```html
+<om-film>
+  <om-scene>
+    <om-shot duration="3s">
+      <om-title>Hello, motion.</om-title>
+    </om-shot>
+  </om-scene>
+</om-film>
+```
 
-The desktop command projects each shot into an isolated browser region and
-reuses verified contract-addressed frame artifacts across processes. Editing one
-shot leaves unrelated region artifacts intact; final encoding and audio mixing
-still use the same assembler as a cold render. Every completed command reports
-the exact reused region and frame counts plus pipeline phase timings, so
-incremental work is visible without inspecting the cache.
-
-The Lambda adapter applies the same artifact identity before materializing
-inputs or preparing Chromium. A verified S3 hit skips capture; a corrupt object
-is conditionally repaired through the ordinary worker path. This closes
-distributed incremental reuse without adding a coordinator or durable progress
-service.
-
-## Showcases
-
-[`showcases/`](showcases/) contains twenty self-contained films rendered through
-the public CLI. They cover native media, imported captions, audio, GSAP, Canvas
-2D, raw WebGL, Three.js, spatial CSS, editorial typography, and continuous
-brand motion without relying on a shared visual template or remote assets.
-Rendered outputs remain untracked; each checked-in source and exact render
-command stays reproducible.
-
-The desktop artifact is admitted on macOS arm64, Linux x64, and Windows x64. It
-exposes one `@onmark/cli` package and `onmark` command, carries the native CLI,
-`ffmpeg`, and `ffprobe` in a platform sidecar, and installs the pinned browser
-into a verified private cache. Linux uses Chrome for Testing's
-`chrome-headless-shell` with CDP BeginFrameControl; macOS and Windows use
-ordinary Chrome's portable screenshot backend. macOS selects Metal and verifies
-the active renderer through CDP; Linux and Windows retain `SwiftShader`. Every
-target renders the same admitted screenplay twice in an empty consumer before
-release artifacts are retained. After the initial package bootstrap, merging a
-`release/vX.Y.Z` pull request admits and publishes the same archives through npm
-Trusted Publishing, then creates the matching GitHub Release. Execution
-overrides remain explicit:
-`--graphics software` selects the canonical software control, and
-`--video-encoder-threads` can replace the stable four-thread local default with
-a bounded value from 1 through 64.
-Deterministic comparisons apply within the same locked browser environment,
-capture mode, and graphics backend.
-
-## Worker capture
-
-Gate three introduced a narrow local worker entry point for already-composed
-visual work:
+Render it:
 
 ```bash
-onmark worker capture --input worker-input --output opening.onmark-frames \
-  --browser /path/to/chrome-headless-shell --ffmpeg /path/to/ffmpeg
+onmark render film.html
 ```
 
-`worker-input` contains a versioned `request.json`, including the locked
-capture-environment identity, the `bundle/` payload files named by that
-request's manifest, and any frozen `assets/sha256/` bytes. The worker accepts no
-screenplay and does not compile source. It publishes one checksum-verified,
-no-clobber frame artifact; retry reuse requires both the planned unit and the
-declared capture environment to match. This is the same portable interchange
-used by the Lambda adapter; it is not a cloud coordinator or a replacement for
-`onmark render`.
+The command writes `renders/film.mp4` without overwriting an existing file.
+Resolution, exact rational frame rates, and imported subtitles stay explicit:
 
-## Lambda capture adapter
+```bash
+onmark render film.html \
+  --output launch.mp4 \
+  --width 1920 \
+  --height 1080 \
+  --fps 30000/1001 \
+  --subtitle captions.vtt
+```
 
-`deploy/aws-lambda` wraps that same worker contract with a bounded S3 download
-and conditional artifact publication. Its V1 invocation and result schemas are
-checked in under `schemas/`; its required environment, IAM scope, limits, and
-intentional non-goals are documented in
-[its deployment README](deploy/aws-lambda/README.md). The real arm64 Lambda ZIP
-experiment and deterministic package command are recorded there. Infrastructure
-provisioning remains outside this gate; desktop npm publication is a separate
-release boundary.
+## Why screenplay-first
 
-## Repository map
+- **Intent before coordinates.** Source describes scenes, shots, content, cues,
+  and relationships. Rust owns absolute frame placement and timing provenance.
+- **The browser remains the canvas.** Use HTML, CSS, Canvas, WebGL, Three.js,
+  GSAP, media, fonts, and SVG without introducing a second layout engine.
+- **One execution model.** Whole-film, partitioned, local, Lambda, and
+  incremental renders consume the same verified Render Units and assembler.
+- **Failures stay explainable.** Authored mistakes are diagnostics with source
+  spans; browser, media, and infrastructure faults remain typed errors.
 
-- `crates/` contains Rust product code.
-- `packages/` contains browser and Node product packages.
-- `conformance/` groups compiler, media, browser, CLI, wire, and admission evidence.
-- `evals/` contains frozen language-admission experiments and raw model output.
-- `schemas/` contains the five generated, versioned wire contracts.
-- `scripts/` contains the `xtask` entry point plus evaluation, schema,
-  TypeScript-quality, and release tooling; release npm and media toolchains have
-  separate process-owned subdirectories.
+## Authoring
+
+An Onmark film is one self-contained HTML document. Custom elements carry
+screenplay meaning; ordinary HTML and inline CSS carry presentation. Optional
+`data-om-motion` code exports seekable animation through adapters such as
+`onmark/motion/gsap`.
+
+The compiler supports authored video, audio, voice-over, music, sound effects,
+titles, calls to action, cues, and imported SRT, WebVTT, or ASS captions.
+Unknown browser components remain sequential until conformance proves that they
+are safe to seek or partition.
+
+Browse [`showcases/`](showcases/) for complete films using native media, CSS 3D,
+GSAP, Canvas 2D, raw WebGL, Three.js, captions, and audio.
+
+## Architecture
+
+Rust owns compilation, planning, media normalization, browser control, encoding,
+and artifact verification. TypeScript owns authoring bindings and browser
+presentation. The compiler core has no filesystem, network, clock, Chromium,
+FFmpeg, or cloud dependency.
+
+The repository contains four Rust crates:
+
+- `onmark-core` — model, parser, diagnostics, compiler, IR, and wire contracts;
+- `onmark-media` — bounded media and subtitle normalization;
+- `onmark-render` — Chromium, FFmpeg, Render Units, and verified artifacts;
+- `onmark-cli` — the desktop command and composition root.
+
+Browser packages live under [`packages/`](packages/). Rust wire types generate
+the checked-in schemas and TypeScript codecs; CI rejects generated drift.
 
 ## Development
 
-Rust 1.97.0, Node.js 26.4.0, and pnpm 11.9.0 are pinned for reproducible
-development.
+Rust 1.97.0, Node.js 26.4.0, and pnpm 11.9.0 are pinned.
 
 ```bash
 cargo test --workspace
@@ -183,20 +118,14 @@ pnpm lint
 pnpm typecheck
 pnpm test
 cargo xtask schema --check
-cargo xtask eval audio
-cargo xtask eval html
 ```
 
-## Design documents
+Design contracts:
 
 - [Architecture](docs/en/architecture.md)
 - [Language specification](docs/en/language-specification.md)
 - [Presentation contract](docs/en/presentation-contract.md)
 - [Competitive pipeline review](docs/en/competitive-pipeline-review.md)
-- [Rust style guide](docs/en/rust-style-guide.md)
-- [TypeScript style guide](docs/en/typescript-style-guide.md)
 - [中文文档](docs/zh-CN/)
 
-The design documents remain the project contract. Code and documentation
-disagreements must be resolved explicitly rather than silently choosing one
-side.
+Onmark is available under the [MIT License](LICENSE).
