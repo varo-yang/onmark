@@ -1886,7 +1886,7 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
 name = "onmark-aws-lambda"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "aws-config",
  "aws-sdk-s3",
@@ -1907,7 +1907,7 @@ dependencies = [
 
 [[package]]
 name = "onmark-cli"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "clap",
  "onmark-core",
@@ -1922,7 +1922,7 @@ dependencies = [
 
 [[package]]
 name = "onmark-core"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "html5gum",
  "proptest",
@@ -1934,7 +1934,7 @@ dependencies = [
 
 [[package]]
 name = "onmark-media"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "onmark-core",
  "serde",
@@ -1943,7 +1943,7 @@ dependencies = [
 
 [[package]]
 name = "onmark-render"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "base64",
  "chromiumoxide",
@@ -1962,7 +1962,7 @@ dependencies = [
 
 [[package]]
 name = "onmark-xtask"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "onmark-aws-lambda",
  "onmark-core",
