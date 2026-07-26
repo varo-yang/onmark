@@ -530,10 +530,10 @@ async fn isolates_one_authored_html_edit_to_its_render_partition() {
 
 #[tokio::test]
 #[ignore = "requires ONMARK_BUNDLER, ONMARK_FFMPEG, and a supported browser"]
-async fn retains_gsap_playheads_across_partition_evaluations() {
+async fn retains_exact_motion_across_partition_evaluations() {
     let directory = tempdir().expect("the experiment workspace must be available");
     let source = directory.path().join("continuous-motion.html");
-    fs::write(&source, gsap_partition_source())
+    fs::write(&source, exact_motion_partition_source())
         .expect("the continuous-motion source must be writable");
     let bundle = FixtureBundle::build_from(
         directory.path(),
@@ -555,7 +555,7 @@ async fn retains_gsap_playheads_across_partition_evaluations() {
         &captured.partitions,
     )
     .await
-    .expect("partition evaluations must retain the whole-film GSAP playhead");
+    .expect("partition evaluations must retain exact local motion");
 }
 
 #[tokio::test]
@@ -633,7 +633,7 @@ fn isolation_source(closing: &str) -> String {
     static_partition_source("", "", closing)
 }
 
-fn gsap_partition_source() -> &'static str {
+fn exact_motion_partition_source() -> &'static str {
     r#"<!doctype html>
 <html><head><style>
 html, body, om-film, om-scene, om-shot {
@@ -654,18 +654,34 @@ om-title { color: white; font: 700 28px sans-serif; }
   <om-shot duration="1s"><om-title>Motion</om-title></om-shot>
 </om-scene></om-film>
 <script type="module" data-om-motion>
+import {
+  combineMotion,
+  frameMotion,
+  interpolate,
+  spring,
+} from "onmark/authoring";
 import { gsapMotion } from "onmark/motion/gsap";
 
-export const motion = gsapMotion({
-  scene({ element, timeline }) {
-    timeline.fromTo(
-      element,
-      { x: -80 },
-      { duration: 2, ease: "none", force3D: false, x: 0 },
-      0,
-    );
-  },
-});
+export const motion = combineMotion(
+  gsapMotion({
+    scene({ element, timeline }) {
+      timeline.fromTo(
+        element,
+        { x: -80 },
+        { duration: 2, ease: "none", force3D: false, x: 0 },
+        0,
+      );
+    },
+  }),
+  frameMotion({
+    scene(context) {
+      const progress = spring(context, { damping: 20 });
+      context.element.style.opacity = String(
+        interpolate(progress, [0, 1], [0.5, 1]),
+      );
+    },
+  }),
+);
 </script>
 </body></html>
 "#

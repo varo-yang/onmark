@@ -57,6 +57,43 @@ CSS 直接写在普通 HTML 中：
 先于命中的 selector 执行，所有 handler 写入同一条 target-owned paused timeline，作者
 不需要再写 element-ID switch。
 
+GSAP 不是必需依赖。原生 HTML、SVG、Canvas 与 WebGL effect 可以直接消费精确局部帧：
+
+```html
+<script type="module" data-om-motion>
+  import { frameMotion, interpolate, spring } from "onmark/authoring";
+
+  export const motion = frameMotion({
+    title(context) {
+      const progress = spring(context, { damping: 18, stiffness: 160 });
+      const y = interpolate(progress, [0, 1], [40, 0]);
+      context.element.style.opacity = String(
+        interpolate(progress, [0, 1], [0, 1]),
+      );
+      context.element.style.transform = `translateY(${y}px)`;
+    },
+  });
+</script>
+```
+
+每个 `frameMotion` sample 包含 authored element、从零开始的 `localFrame`、target 的
+`durationFrames`、有理 `frameRate` 与 `progress`。progress 是与 solved interval 一致的
+半开比值 `localFrame / durationFrames`：第一帧为零，exclusive end 到达时元素已不再
+active。每次 sample 都从本次 runtime frame 独立推导，因此倒序、重复与分片求值不依赖
+此前调用。
+
+`interpolate(...)` 映射分段数值区间，默认 clamp 两端，只有显式请求 `extend` 才会外推。
+`easing` 集合提供无状态 linear 与 cubic 曲线。`spring(context, options)` 直接从
+`localFrame` 和有理帧率求解阻尼弹簧方程，不逐帧推进，也不选择 target 时长。它们只生成
+视觉值，不构成第二套 scheduler。
+
+Onmark 当前不把 `Element.animate()` 包装成 random-access adapter。一次 wrapper 实验发现：
+即使 pause 或把 playback rate 固定为零，在同一份 locked Chrome environment 中，
+whole-film 与 region-projected capture 仍出现了不确定的文字像素。底层 paused-WAAPI
+实验仍证明了同一 document scope 内的重复与乱序 seek；它没有证明一个 region-safe 的公开
+adapter。原生 exact-frame effect 应使用 `frameMotion`，ambient browser animation 仍不属于
+确定性 contract。
+
 元素内部动效只能消费该语义 target 自带的 interval。当前不准入跨 shot
 转场；它的窗口与相邻依赖必须先成为 Rust-owned Render Graph fact，不能在
 TypeScript 中再造一套 timing policy。
@@ -240,8 +277,9 @@ stateful frame accumulation 都违反 contract。未知的未来 browser compone
 conformance artifact，仍要求显式 capability。
 
 低层 `FrameEffect` 与 `PresentationResource` boundary 由 `@onmark/runtime` 拥有。
-`@onmark/authoring` 暴露 vendor-neutral 的 `PresentationExtension` contract。单个 adapter
-直接导出；只有组合彼此独立的多个 adapter 时才使用 `combineMotion(...)`，并按声明顺序执行。
+`@onmark/authoring` 暴露 vendor-neutral 的 `PresentationExtension` contract；
+`frameMotion(...)` 拥有 native procedural exact-frame effect。只有组合彼此独立的多个
+adapter 时才使用 `combineMotion(...)`，并按声明顺序执行。
 `onmark/motion/gsap` 是由内部依赖包承载的可选 adapter：它把 semantic hook 转成 paused
 GSAP timeline，但不让 GSAP 进入 runtime 或 authoring。Three.js、Lottie 或应用本地引擎都可
 实现同一 contract；bundler 与 runtime 不包含 vendor branch。每个 GSAP hook 只收到 semantic element、compiler-owned
