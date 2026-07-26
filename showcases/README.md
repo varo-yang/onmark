@@ -43,6 +43,7 @@ exact command remain reviewable here.
 | `neon-transit`        | deep neon tunnel                     | CSS 3D, GSAP                |
 | `network-pulse`       | distributed graph visualization      | Canvas 2D, GSAP             |
 | `noir-shadows`        | cinematic light and silhouette       | HTML, CSS, GSAP             |
+| `onmark-hero`         | screenplay-to-composition ident      | HTML, CSS 3D, GSAP          |
 | `onmark-manifesto`    | continuous brand manifesto           | music, HTML, CSS, GSAP      |
 | `particle-current`    | 4,800-path procedural field          | Canvas 2D, GSAP             |
 | `ribbon-sculpture`    | parametric line sculpture            | Canvas 2D, GSAP             |
@@ -50,6 +51,6 @@ exact command remain reviewable here.
 | `sports-broadcast`    | live scoreboard graphics             | HTML, CSS, GSAP             |
 | `three-constellation` | spatial star system                  | Three.js, GSAP              |
 
-All twenty films are one continuous semantic shot rather than a sequence of
+All twenty-one films are one continuous semantic shot rather than a sequence of
 presentation cards. Their checked-in inputs use no remote assets, ambient
 clocks, unseeded randomness, or self-advancing image containers.
