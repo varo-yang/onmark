@@ -1,6 +1,12 @@
 name: Desktop release
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/desktop-release.yml
+      - rust-toolchain.toml
+      - scripts/release/media-toolchain/**
   pull_request_target:
     branches: [main]
     types: [closed]
@@ -17,6 +23,7 @@ jobs:
   source:
     name: Resolve release source
     if: >-
+      github.event_name == 'push' ||
       github.event_name == 'workflow_dispatch' ||
       (github.event.pull_request.merged == true &&
        startsWith(github.event.pull_request.head.ref, 'release/v'))
@@ -91,7 +98,9 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             .release/cargo-target
-          key: desktop-cargo-${{ matrix.target }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          key: desktop-cargo-${{ matrix.target }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            desktop-cargo-${{ matrix.target }}-${{ hashFiles('rust-toolchain.toml') }}-
 
       - name: Install pinned Rust toolchain
         run: rustup show active-toolchain
@@ -239,7 +248,7 @@ jobs:
 
       - name: Save release media tools
         if: >-
-          github.event_name == 'workflow_dispatch' &&
+          (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
           steps.media-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
@@ -248,7 +257,7 @@ jobs:
 
       - name: Save release Cargo artifacts
         if: >-
-          github.event_name == 'workflow_dispatch' &&
+          (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
           steps.cargo-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
@@ -256,7 +265,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             .release/cargo-target
-          key: desktop-cargo-${{ matrix.target }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          key: desktop-cargo-${{ matrix.target }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock') }}
 
   publish:
     name: Publish npm release

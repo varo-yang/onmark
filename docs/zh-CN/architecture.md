@@ -778,13 +778,16 @@ sample，不是 release threshold。cross-compilation 和 binary-format 检查�
 
 release build cache 只是可丢弃的 accelerator，不是 artifact authority。media-tool
 cache 由 target、已准入 source manifest 与 build script 共同寻址；cache miss 会重新
-拉取并构建固定源码。Cargo cache 由 target、lockfile 与 toolchain 寻址。恢复出的
-output 在发布前仍需通过相同的 manifest 校验、package assembly、空 consumer 安装与
-真实 render admission；冷构建与缓存构建不会获得不同的发布路径。
+拉取并构建固定源码。Cargo cache 由 target、lockfile 与 toolchain 寻址；精确 key
+变化时，可以先恢复同 target、同 toolchain 最新的 cache，再由 Cargo 逐项复核
+fingerprint，并只增量重建变化后的依赖图。恢复出的 output 在发布前仍需通过相同的
+manifest 校验、package assembly、空 consumer 安装与真实 render admission；冷构建与
+缓存构建不会获得不同的发布路径。
 merged release path 只恢复 cache，不尝试写入：GitHub 会刻意让
-`pull_request_target` run 以只读方式访问 default branch 的 cache scope。可信的手动
-admission 可以填充缺失 cache，供后续 release 使用；publication 的正确性与可用性不依赖
-这条可选 warm path。
+`pull_request_target` run 以只读方式访问 default branch 的 cache scope。release
+workflow、media toolchain 或 Rust toolchain 发生变化的可信 `main` push 会执行同一条
+admission path，并刷新缺失 cache；手动 admission 也可以执行相同预热。publication 的
+正确性与可用性不依赖任一 warm path。
 
 只有 merged release-PR path 可以跨越 npm publication boundary。受保护的
 `npm-release` environment 与 npm Trusted Publishing 会把该 job 绑定到 reviewed
@@ -795,6 +798,10 @@ sidecar、公开 package 的顺序发布；只有 npm 返回的 integrity 与 ad
 同一版本获得不同 bytes。npm 接受完整集合后，同一个 job 才会在 admitted `main`
 revision 创建对应 tag 与 GitHub Release。publication step 会先移除 `setup-node`
 注入的 placeholder `NODE_AUTH_TOKEN`，使 npm 只能消费 job 的短效 OIDC identity。
+外部 publication 失败时，只重跑同一 workflow run 的失败 publication job；GitHub 会
+复用已留存的 admitted archive，不会重建任何平台。只有 admission input 发生变化时，
+才重跑完整 workflow；已经存在的 npm version 仍必须与 admitted integrity 完全相同，
+因此 publication retry 保持幂等。
 npm 只允许为已存在的 package 配置 Trusted Publishing，因此第一个公开版本仍需
 operator 使用同一组 admitted archive 做一次 bootstrap。
 
