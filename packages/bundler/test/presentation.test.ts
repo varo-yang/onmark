@@ -355,10 +355,12 @@ test("bundles the public authoring facade from the inline module", async () => {
       workspace,
       film("<om-title>Motion</om-title>"),
       [
-        'import { combineMotion } from "onmark/authoring";',
-        'import { gsapMotion } from "onmark/motion/gsap";',
-        "const empty = { bind() { return { effects: [], resources: [] }; } };",
-        "export const motion = combineMotion(empty, gsapMotion({}));",
+        'import { frameMotion } from "onmark/authoring";',
+        "export const motion = frameMotion({",
+        "  title({ element, progress }) {",
+        "    element.style.opacity = String(progress);",
+        "  },",
+        "});",
       ].join("\n"),
     );
     const artifact = await bundlePresentation({

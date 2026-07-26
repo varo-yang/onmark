@@ -59,6 +59,50 @@ matching authored IDs or classes. The kind handler runs before matching
 selectors, and all handlers contribute to one target-owned paused timeline, so
 authors do not need an element-ID switch.
 
+GSAP is optional. Native HTML, SVG, Canvas, and WebGL effects can consume exact
+local frames directly:
+
+```html
+<script type="module" data-om-motion>
+  import { frameMotion, interpolate, spring } from "onmark/authoring";
+
+  export const motion = frameMotion({
+    title(context) {
+      const progress = spring(context, { damping: 18, stiffness: 160 });
+      const y = interpolate(progress, [0, 1], [40, 0]);
+      context.element.style.opacity = String(
+        interpolate(progress, [0, 1], [0, 1]),
+      );
+      context.element.style.transform = `translateY(${y}px)`;
+    },
+  });
+</script>
+```
+
+Each `frameMotion` sample contains the authored element, its zero-based
+`localFrame`, the target's `durationFrames`, rational `frameRate`, and
+`progress`. Progress is the half-open ratio `localFrame / durationFrames`,
+matching the solved interval: the first active frame is zero and an element is
+no longer active at its exclusive end. Samples are derived independently from
+the requested runtime frame, so backward, repeated, and partitioned evaluation
+do not depend on prior calls.
+
+`interpolate(...)` maps piecewise numeric ranges and clamps both edges unless
+`extend` is requested explicitly. The `easing` collection provides stateless
+linear and cubic curves. `spring(context, options)` evaluates the damped spring
+equation directly from `localFrame` and the rational frame rate; it does not
+step through earlier frames or choose the target's duration. These are visual
+value functions, not another scheduler.
+
+Onmark does not currently wrap `Element.animate()` as a random-access adapter.
+An attempted wrapper produced nondeterministic text pixels between whole-film
+and region-projected captures in the same locked Chrome environment, even with
+paused or zero-rate playheads. The lower-level paused-WAAPI experiment still
+proves repeated and out-of-order seeks within one document scope; it does not
+prove a region-safe public adapter. Native exact-frame effects should use
+`frameMotion`, and ambient browser animations remain outside the deterministic
+contract.
+
 Element-local motion may consume only the interval attached to its semantic
 target. Cross-shot transitions are not admitted: their windows and neighbor
 dependencies must first become Rust-owned Render Graph facts rather than a
@@ -277,9 +321,9 @@ constructs already-proved conformance artifacts.
 
 The low-level `FrameEffect` and `PresentationResource` boundaries are owned by
 `@onmark/runtime`. `@onmark/authoring` exposes the vendor-neutral
-`PresentationExtension` contract. A single adapter is exported directly;
-`combineMotion(...)` exists only when independent adapters must be composed in
-declaration order.
+`PresentationExtension` contract. `frameMotion(...)` owns native procedural
+exact-frame effects. `combineMotion(...)` exists only when independent adapters
+must be composed in declaration order.
 `onmark/motion/gsap` is one optional adapter backed by an internal dependency
 package: it turns semantic hooks into paused GSAP timelines without introducing
 GSAP into runtime or authoring.
