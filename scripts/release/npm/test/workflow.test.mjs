@@ -8,6 +8,7 @@ import test from "node:test";
 const WORKFLOW = fileURLToPath(
   new URL("../../../../.github/workflows/desktop-release.yml", import.meta.url),
 );
+const PUBLISHER = fileURLToPath(new URL("../publish.mjs", import.meta.url));
 
 test("releases the merged main revision from the protected base context", async () => {
   const source = await readFile(WORKFLOW, "utf8");
@@ -40,4 +41,11 @@ test("builds the CLI and release driver in one native profile", async () => {
   );
   assert.match(source, /if: matrix\.target == 'linux-x64'/u);
   assert.doesNotMatch(source, /cargo xtask release sidecar/u);
+});
+
+test("inspects archives without consulting publication state", async () => {
+  const source = await readFile(PUBLISHER, "utf8");
+
+  assert.match(source, /\["pack", "--dry-run", "--json", archive\]/u);
+  assert.doesNotMatch(source, /\["publish", "--dry-run", "--json", archive\]/u);
 });

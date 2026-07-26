@@ -98,7 +98,7 @@ async function inspectArchives(request) {
 async function inspectArchive(npmCli, directory, archive) {
   const result = await invokeNpm(
     npmCli,
-    ["publish", "--dry-run", "--json", archive],
+    ["pack", "--dry-run", "--json", archive],
     directory,
   );
   requireSuccess(result, `inspect ${archive}`);
