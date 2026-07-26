@@ -26,10 +26,16 @@ test("reuses content-addressed release build artifacts", async () => {
   const source = await readFile(WORKFLOW, "utf8");
 
   assert.match(source, /id: media-cache/u);
+  assert.match(source, /id: cargo-cache/u);
+  assert.equal(source.split("uses: actions/cache/restore@").length - 1, 2);
+  assert.equal(source.split("uses: actions/cache/save@").length - 1, 2);
   assert.match(source, /desktop-media-\$\{\{ matrix\.target \}\}/u);
   assert.match(source, /steps\.media-cache\.outputs\.cache-hit != 'true'/u);
   assert.match(source, /desktop-cargo-\$\{\{ matrix\.target \}\}/u);
+  assert.match(source, /steps\.cargo-cache\.outputs\.cache-hit != 'true'/u);
+  assert.match(source, /github\.event_name == 'workflow_dispatch'/u);
   assert.match(source, /CARGO_TARGET_DIR: \.release\/cargo-target/u);
+  assert.doesNotMatch(source, /^\s+cache: pnpm$/mu);
 });
 
 test("builds the CLI and release driver in one native profile", async () => {
