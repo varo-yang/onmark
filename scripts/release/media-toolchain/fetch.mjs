@@ -10,9 +10,14 @@ import { withObservedCleanup } from "../observed-cleanup.mjs";
 
 const MAX_SOURCE_BYTES = 16 * 1024 * 1024;
 const MAX_DOWNLOAD_REDIRECTS = 5;
-const DOWNLOAD_TIMEOUT_MILLISECONDS = 2 * 60_000;
+const DOWNLOAD_ATTEMPT_TIMEOUT_MILLISECONDS = 30_000;
+const DOWNLOAD_RETRY_DELAYS_MILLISECONDS = Object.freeze([
+  1_000, 4_000, 12_000,
+]);
 const REDIRECT_STATUSES = Object.freeze([301, 302, 303, 307, 308]);
 const MANIFEST_PATH = fileURLToPath(new URL("./sources.json", import.meta.url));
+
+class DownloadContractError extends Error {}
 
 async function main() {
   const output = process.argv[2];
@@ -100,14 +105,39 @@ async function admitSource(directory, source) {
   );
 }
 
-async function fetchSource(source) {
-  const signal = AbortSignal.timeout(DOWNLOAD_TIMEOUT_MILLISECONDS);
+export async function fetchSource(
+  source,
+  request = globalThis.fetch,
+  pause = wait,
+) {
+  for (let attempt = 0; ; attempt += 1) {
+    const retryDelay = DOWNLOAD_RETRY_DELAYS_MILLISECONDS[attempt];
+    try {
+      const response = await fetchSourceAttempt(source, request);
+      if (!isRetryableStatus(response.status) || retryDelay === undefined) {
+        return response;
+      }
+      await response.body?.cancel();
+    } catch (error) {
+      if (error instanceof DownloadContractError) {
+        throw error;
+      }
+      if (retryDelay === undefined) {
+        throw downloadError(source, error);
+      }
+    }
+    await pause(retryDelay);
+  }
+}
+
+async function fetchSourceAttempt(source, request) {
+  const signal = AbortSignal.timeout(DOWNLOAD_ATTEMPT_TIMEOUT_MILLISECONDS);
   let url = new URL(source.url);
 
   for (let redirects = 0; redirects <= MAX_DOWNLOAD_REDIRECTS; redirects += 1) {
     // GitLab's archive API rejects CORS fetch metadata even for a direct
     // server-side download. Each redirect becomes a new same-origin request.
-    const response = await fetch(url, {
+    const response = await request(url, {
       mode: "same-origin",
       redirect: "manual",
       signal,
@@ -119,17 +149,39 @@ async function fetchSource(source) {
     const location = response.headers.get("location");
     await response.body?.cancel();
     if (location === null) {
-      throw new Error(`${source.name} redirects without a location`);
+      throw new DownloadContractError(
+        `${source.name} redirects without a location`,
+      );
     }
     url = new URL(location, url);
     if (url.protocol !== "https:") {
-      throw new Error(`${source.name} redirects outside HTTPS`);
+      throw new DownloadContractError(`${source.name} redirects outside HTTPS`);
     }
   }
 
-  throw new Error(
+  throw new DownloadContractError(
     `${source.name} exceeds its ${MAX_DOWNLOAD_REDIRECTS}-redirect limit`,
   );
+}
+
+function isRetryableStatus(status) {
+  return (
+    status === 408 ||
+    status === 425 ||
+    status === 429 ||
+    (status >= 500 && status <= 599)
+  );
+}
+
+function downloadError(source, cause) {
+  const detail = cause instanceof Error ? cause.message : String(cause);
+  return new Error(`cannot download ${source.name}: ${detail}`, { cause });
+}
+
+function wait(milliseconds) {
+  return new Promise((resolvePromise) => {
+    setTimeout(resolvePromise, milliseconds);
+  });
 }
 
 async function readBounded(response, source) {
@@ -201,8 +253,13 @@ function isErrno(error, code) {
   );
 }
 
-main().catch((error) => {
-  const message = error instanceof Error ? error.message : String(error);
-  process.stderr.write(`fetch-release-media: ${message}\n`);
-  process.exitCode = 1;
-});
+if (
+  process.argv[1] !== undefined &&
+  resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+) {
+  main().catch((error) => {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`fetch-release-media: ${message}\n`);
+    process.exitCode = 1;
+  });
+}
