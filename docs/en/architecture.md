@@ -1616,6 +1616,11 @@ lease service, cloud workflow, infrastructure definition, or provider adapter.
 Agent integration is a thin skill over stable CLI diagnostics and inspection;
 it may teach the workflow but may not hide retries, silently update itself, or
 replace compiler policy with prompt text.
+The checked-in `skills/onmark-video` skill is distributed from the repository
+through the open Agent Skills layout. It contains no executable helper,
+template, copied language specification, or private render path: the installed
+agent must close its feedback loop through the released CLI and treat versioned
+JSON diagnostics and inspection as authoritative.
 
 Every gate uses the final-direction contracts but implements only fields
 consumed by that gate. A failed gate blocks construction of the next gate's

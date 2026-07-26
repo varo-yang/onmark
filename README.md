@@ -106,6 +106,13 @@ onmark render film.html \
   --subtitle captions.vtt
 ```
 
+Install the optional agent skill for a product-owned create/check/inspect/render
+loop:
+
+```bash
+npx skills add varo-yang/onmark --skill onmark-video
+```
+
 ## Why screenplay-first
 
 - **Intent before coordinates.** Source describes scenes, shots, content, cues,

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Onmark Video"
+  short_description: "Create, validate, inspect, and render Onmark videos"
+  default_prompt: "Use $onmark-video to create and verify an Onmark video."

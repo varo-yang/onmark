@@ -1610,6 +1610,9 @@ remote authoring command、coordinator、database、queue、lease service、clou
 infrastructure definition 或新的 provider adapter。Agent integration 只是稳定 CLI diagnostic
 与 inspection 之上的薄 skill；它可以教授工作流，但不能隐藏重试、静默自更新，或用 prompt 文本替代
 compiler policy。
+仓库中的 `skills/onmark-video` 通过开放 Agent Skills 目录布局分发。它不包含 executable
+helper、模板、复制的语言规范或私有 render path；安装它的 agent 必须通过已发布 CLI 闭合
+反馈循环，并把 versioned JSON diagnostics 与 inspection 视为权威事实。
 
 每一关都使用最终方向的 IR 和协议，但只实现本关真实消费的部分。上一关没有稳定通过，不创建下一关的空架子。
 
