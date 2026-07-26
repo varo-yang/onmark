@@ -1,0 +1,219 @@
+<!doctype html>
+<om-film>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body,
+    om-film,
+    om-scene,
+    om-shot {
+      display: block;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      width: 100%;
+    }
+
+    body {
+      background: #071410;
+      color: #eaffca;
+      font-family: "Avenir Next", "Helvetica Neue", sans-serif;
+    }
+
+    .composition {
+      height: 100%;
+      overflow: hidden;
+      position: relative;
+    }
+
+    canvas {
+      height: 100%;
+      inset: 0;
+      position: absolute;
+      width: 100%;
+    }
+
+    .label {
+      left: 48px;
+      position: absolute;
+      top: 42px;
+      z-index: 2;
+    }
+
+    .label span {
+      display: block;
+      font-size: 14px;
+      letter-spacing: 0.26em;
+      margin-bottom: 12px;
+      text-transform: uppercase;
+    }
+
+    .label strong {
+      display: block;
+      font-size: clamp(74px, 9vw, 180px);
+      letter-spacing: -0.07em;
+      line-height: 0.82;
+      max-width: 900px;
+    }
+
+    .readout {
+      bottom: 40px;
+      display: flex;
+      font-size: 14px;
+      gap: 42px;
+      left: 48px;
+      letter-spacing: 0.12em;
+      position: absolute;
+      text-transform: uppercase;
+      z-index: 2;
+    }
+  </style>
+
+  <om-scene>
+    <om-shot duration="10s">
+      <div class="composition">
+        <canvas></canvas>
+        <om-title class="label">
+          <span>Generative frame field</span>
+          <strong>Every particle<br />knows the time.</strong>
+        </om-title>
+        <div class="readout">
+          <span>4,800 paths</span>
+          <span>zero ambient clocks</span>
+          <span>04 / 20</span>
+        </div>
+      </div>
+    </om-shot>
+  </om-scene>
+
+  <script type="module" data-om-motion>
+    import { combineMotion } from "onmark/authoring";
+    import { gsapMotion } from "onmark/motion/gsap";
+
+    const particles = Array.from({ length: 4800 }, (_, index) => {
+      const angle = index * 2.399963229728653;
+      const radius = Math.sqrt((index + 0.5) / 4800);
+      return { angle, radius };
+    });
+
+    const field = {
+      bind(context) {
+        const shot = context.targets.find((target) => target.kind === "shot");
+        const canvas = shot?.element.querySelector("canvas");
+        if (!(canvas instanceof HTMLCanvasElement) || shot === undefined) {
+          return { effects: [], resources: [] };
+        }
+
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+        canvas.width = width;
+        canvas.height = height;
+        const drawing = canvas.getContext("2d");
+        if (drawing === null) {
+          throw new Error("particle showcase requires a 2D canvas");
+        }
+
+        return {
+          effects: [
+            {
+              apply(frame) {
+                const seconds =
+                  ((frame.index - shot.interval.start) *
+                    context.frameRate.denominator) /
+                  context.frameRate.numerator;
+                drawField(drawing, width, height, seconds);
+              },
+              dispose() {},
+            },
+          ],
+          resources: [],
+        };
+      },
+    };
+
+    const typography = gsapMotion({
+      title({ element, timeline }) {
+        timeline
+          .from(
+            element.querySelector("strong"),
+            {
+              duration: 1.25,
+              ease: "expo.out",
+              filter: "blur(16px)",
+              opacity: 0,
+              x: -90,
+            },
+            0.2,
+          )
+          .from(
+            element.querySelector("span"),
+            {
+              duration: 0.8,
+              ease: "power3.out",
+              letterSpacing: "0.7em",
+              opacity: 0,
+            },
+            0.75,
+          )
+          .to(
+            element,
+            {
+              duration: 1,
+              ease: "expo.in",
+              filter: "blur(14px)",
+              opacity: 0,
+              y: -60,
+            },
+            8.75,
+          );
+      },
+      shot({ element, timeline }) {
+        timeline.from(
+          element.querySelector(".readout"),
+          {
+            duration: 0.8,
+            ease: "power3.out",
+            opacity: 0,
+            y: 24,
+          },
+          1.15,
+        );
+      },
+    });
+
+    export const motion = combineMotion(field, typography);
+
+    function drawField(drawing, width, height, seconds) {
+      const centerX = width * (0.57 + Math.sin(seconds * 0.31) * 0.05);
+      const centerY = height * (0.54 + Math.cos(seconds * 0.27) * 0.06);
+      const reach = Math.min(width, height) * 0.69;
+
+      drawing.fillStyle = "#071410";
+      drawing.fillRect(0, 0, width, height);
+      drawing.globalCompositeOperation = "lighter";
+
+      for (let index = 0; index < particles.length; index += 1) {
+        const particle = particles[index];
+        const wave =
+          Math.sin(particle.angle * 3 + seconds * 1.3) * 0.085 +
+          Math.cos(particle.radius * 11 - seconds * 0.9) * 0.05;
+        const angle =
+          particle.angle + seconds * (0.11 + particle.radius * 0.12) + wave;
+        const radius = reach * particle.radius * (0.74 + wave);
+        const x = centerX + Math.cos(angle) * radius * 1.35;
+        const y = centerY + Math.sin(angle) * radius;
+        const hue = 74 + particle.radius * 90 + Math.sin(seconds) * 18;
+        const alpha = 0.12 + (1 - particle.radius) * 0.55;
+        const size = 0.7 + (1 - particle.radius) * 2.4;
+
+        drawing.fillStyle = `hsl(${hue} 92% 62% / ${alpha})`;
+        drawing.fillRect(x, y, size, size);
+      }
+
+      drawing.globalCompositeOperation = "source-over";
+    }
+  </script>
+</om-film>

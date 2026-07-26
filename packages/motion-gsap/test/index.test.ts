@@ -40,6 +40,26 @@ test("seeks a paused local timeline from exact runtime frames", async () => {
   await effect.dispose();
 });
 
+test("renders timeline state when the first requested frame is local zero", async () => {
+  const state = { value: 0 };
+  const motion = gsapMotion({
+    shot({ timeline }) {
+      timeline.set(state, { value: 100 }, 0);
+    },
+  });
+  const extension = await motion.bind(CONTEXT);
+  const [effect] = extension.effects;
+  assert.ok(effect);
+
+  await effect.apply({ index: 30, timeSeconds: 1 });
+
+  assert.equal(state.value, 100);
+  state.value = 0;
+  await effect.apply({ index: 30, timeSeconds: 1 });
+  assert.equal(state.value, 100);
+  await effect.dispose();
+});
+
 test("rejects motion that escapes its compiler-owned interval", async () => {
   const motion = gsapMotion({
     shot({ timeline }) {

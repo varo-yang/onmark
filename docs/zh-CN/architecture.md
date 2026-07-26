@@ -82,7 +82,9 @@ Chromium 不求时间、不发现素材、不选择分片。它只接收已求�
 
 冻结素材和 bundle payload 用内容哈希；渲染单元与任务用 canonical input
 identity；worker frame artifact 用 capture-contract identity，并保留内部 payload
-checksum 和 raw-pixel evidence。缓存正确性来自这些可验证身份，不来自文件名约定。
+checksum 和 raw-pixel evidence。capture-contract identity 同时提交 browser plan、
+bundle、render profile、实际选择的 visual-execution path 与 locked capture environment；
+缓存正确性来自这些可验证身份，不来自文件名约定。
 
 ## 3. TS 与 Rust 怎么分
 
@@ -620,6 +622,11 @@ identity 前移除。修改既有 audio 或 compiler timing fact 不会使 visua
 presentation-global byte、selected semantic subtree 与其他真实 browser input 仍全部进入
 对应 identity。
 
+完整 solved film interval 是 Browser Plan fact，因为 film/scene 级 motion 可以读取它。
+只要 duration edit 改变该 interval，所有携带它的 region plan 都必须失效，即便部分 pixel
+碰巧未变。Onmark 不从 JavaScript 猜测更窄的 temporal dependency；若要获得更细粒度复用，
+必须先引入显式且有 conformance 证据的 capability，不能从 cache identity 偷删输入。
+
 desktop launcher 用 pinned browser artifact、OS/architecture 与有界 system-font inventory
 命名保守 host seed；native 再加入 capture mode、graphics backend 与 composition version。
 显式 custom browser 不属于 launcher-owned browser identity，因此关闭 persistent reuse。
@@ -1013,8 +1020,10 @@ portable worker 保持单线程，两条路径都不从 ambient CPU count 推导
 不消耗 encoder inactivity budget。浏览器导航会分别等待 document load 与 runtime
 host；不能把 transport 的 navigation 返回误当成完整生命周期屏障。
 
-browser capture 最多只保留一张 PNG，捕获后直接写入 `FFmpeg image2pipe`；layered
-path 同样使用 capacity-one stream，不存在整段视频 frame buffer。固定的 H.264 `yuv420p`
+browser capture 最多只保留一张 PNG，捕获后直接写入 `FFmpeg image2pipe`。分布式
+layered capture 因 frame artifact 需要拥有 canonical RGBA 与 hash，使用一条 capacity-one
+stream 返回像素；本地 layered video 只把透明前景送入 encoder process，不会 split 已合成帧，
+也不会在写 MP4 前把 raw RGBA 再复制回 Rust。不存在整段视频 frame buffer。固定的 H.264 `yuv420p`
 profile 会在进程启动前拒绝奇数 viewport 尺寸。browser capture 在共享 runtime
 protocol 下只有两个封闭 backend：Linux `chrome-headless-shell` 用 `BeginFrame`
 原子提交并读取 compositor transaction；macOS 与 Windows 用 `Screenshot`，在同一个
@@ -1023,6 +1032,12 @@ post-capture `Confirm` 与 placement-boundary reconciliation。portable backend
 不会引入第二套 clock、timing solver、plan、encoder 或 media-selection path。所选
 backend 会显式报告并进入 capture-environment identity；只有等价的 locked environment
 与 backend 之间才断言相等。
+
+capture capability 属于经过准入的 browser artifact，而不是它的文件名。managed Linux
+browser package 显式声明 `BeginFrame`，managed desktop package 显式声明
+`Screenshot`。通过 `--browser` 传入的任意路径，即使 basename 看起来像 headless
+shell，也只获得 portable screenshot contract。底层 executor 显式接收 mode，因此
+symlink 或重命名 binary 不会悄悄改变 compositor protocol。
 
 conformance 会启动固定版本的 Chrome for Testing browser 与 `FFmpeg`，加载 production presentation
 adapter，走过类型化 `Load`/`Prepare`/`Seek`/`Confirm` 握手，probe 最终 H.264
@@ -1103,6 +1118,10 @@ observed process peak RSS 分别约为 533–541、545、561–577、605–615 M
 比较：x264 是有损编码，同一 canonical input 也可能产生细微不同的 decoded pixels，因此
 确定性 visual oracle 仍是 raw RGBA。
 
+direct screenshot encoder 与 layered media encoder 共同拥有同一份标准 H.264 policy：
+x264 `medium`、CRF 18、`yuv420p` 与 BT.709 limited-range metadata。该 policy 必须显式
+声明，不能继承 FFmpeg default；FFmpeg 升级不得悄悄改变文字、渐变或运动画质。
+
 本地 capture 保留 Chromium 的标准 multi-process
 topology；只有独立审计过的外层 container 或 microVM 承担等价的 process
 isolation 时，adapter 才能选择
@@ -1164,11 +1183,16 @@ contract 的生成结果，不在 TypeScript 手写第二份。构建显式限�
 directory 写入，并拒绝构建前或发布前已存在的输出路径。最后一次 directory
 rename 能防止读者看到正常完成过程中的半成品，但 Node 的可移植文件系统 API 无法把此前的 absent
 check 变成跨进程 no-clobber transaction。Gate 六首个 resource slice 为本地 AVIF、GIF、JPEG、PNG、
-SVG、WebP、OTF、TTF、WOFF 与 WOFF2 import 配置一份封闭的 `file` loader 集合。Esbuild 把原始 bytes
-写到不透明的 `resources/<hash>.<extension>` 路径；bundler 会在同一边界把 esbuild 的大写 Base32 名
-归一为 bundle contract 的小写 portable spelling，并同步改写 generated reference。随后由既有 manifest
-独占 canonical SHA-256 与 retained-byte bound；本步骤不解码 image/font，也不构成 browser readiness 证据。当前边界刻意不提供
-watch、plugin API、cache、development server、external fetch 或通用 asset transformation policy。
+SVG、WebP、OTF、TTF、WOFF 与 WOFF2 import 配置一份封闭集合。Esbuild 把 module 与 CSS import
+写到不透明的 `resources/<hash>.<extension>` 路径。bundler 也会冻结原生 HTML `img[src]` bytes，
+把引用改写成 SHA-256 resource path，并让每个 projected shot document 只保留自身引用的 image。
+browser adapter 会自动把这些原生 image 纳入有界 decode-readiness 生命周期。bundler 用一份共享的
+byte-level admission 拒绝会由 browser wall time 自行推进的 image container 或 SVG 能力；本地
+`src`、data URL 与 generated image import 共用这条规则。随后 bundler 归一 generated reference，
+由既有 manifest 独占 canonical SHA-256 与 retained-byte bound。本步骤不做 image/font decode，
+也不构成 browser-readiness 证据；它只识别拒绝 ambient playhead 所需的封闭 container 与 markup
+特征，不转换 image bytes。当前边界刻意不提供 watch、plugin API、cache、development server、
+external fetch 或通用 asset transformation policy。
 Esbuild 内部工作内存仍由固定的第三方实现管理，不受 retained-output ceiling 约束。
 
 `@onmark/launcher` 是公开桌面 artifact 内部的 Node/npm boundary。它只允许依赖
@@ -1278,8 +1302,10 @@ version 并带 migration/conformance fixture。Rust 本身直接使用原始领�
 types，不再从 schema 反向生成第二套 Rust 类型。
 
 `BrowserPlan` 现在携带 production presentation adapter 已真实消费的 output frame
-rate、evaluation/output interval、film/scene/shot structure、primary-video
-placement，以及 title、call-to-action 或导入 caption overlay。每个投影 node 都记录 dense
+rate、完整 solved film interval、evaluation/output interval、film/scene/shot structure、
+primary-video placement，以及 title、call-to-action 或导入 caption overlay。与 unit
+相交的 structure 和 overlay 保留完整 solved interval；evaluation 只定义执行窗口，output
+只定义发布窗口，两者都不能改写 presentation time。每个投影 node 都记录 dense
 unit-local compiler-owned identity 与可选 authored identity；跨 projection 的语义身份由
 authored identity 承担，content 显式指向其 structural parent。video placement 另记录 immutable asset identity 与验证 decoded-frame
 selection 所需的 admitted CFR source rate；overlay placement 记录封闭的语义角色与 decoded
@@ -1431,10 +1457,10 @@ owned effect。当前 bundle manifest 把封闭 capability 纳入 content identi
 authored-HTML surface 已准入 random access：其 contract 禁止隐藏时钟，并要求每个 frame
 effect 只根据 immutable input 与请求 frame 推导状态。未知的未来 browser component 仍默认
 sequential，直至单独准入；低层 bundler 因为还要构造 conformance artifact，仍要求显式
-capability。固定 Linux
-退出 conformance 会 bundle 这条带 effect 的 presentation，让同一组 media、audio 与 caption fact
-分别作为 whole-film unit 和两个独立 unit 渲染，在通过 canonical raw-RGBA frame sequence
-等价检查后再用共享路径组装最终输出。
+capability。real-process conformance 会 bundle 一条跨 scene 的 GSAP presentation，分别作为
+whole-film unit 与两个独立 unit 渲染，并比较完整 canonical raw-RGBA sequence。另一条
+media、audio 与 caption fixture 会独立证明视觉与 decoded-audio 等价，再用共享路径组装最终
+输出。
 
 ### 第六关（已完成）：确定性视觉资源与组件绑定
 
@@ -1442,12 +1468,14 @@ capability。固定 Linux
 bytes 作为带稳定 identity、明确 resource fact、字节上限且不依赖 ambient network fetch 的 frozen bundle
 resource 进入既有管线。browser runtime 为 video、image decode、font load、texture upload 与显式注册的
 custom resource 提供一条 typed、bounded readiness boundary；超时必须指出仍未就绪的 resource 与 phase，
-不能退化为匿名 presentation promise。
+不能退化为匿名 presentation promise。static image admission 会在 resource 到达本地或 worker
+Chromium 前，拒绝会自行推进的 raster container 与 SVG behavior。
 
 native browser adapter 会通过 CDP request interception 执行这条约束，而不是依赖 presentation
 自觉。Chromium 只允许读取 materialized private Unit Root 下 canonical file，以及内存中的 `data:`、
-`blob:` URL；ambient network scheme 和逃出该 root 的 file path 都会在解析前被拒绝。本地与 worker
-执行共用同一条策略。
+`blob:` URL；ambient network scheme 和逃出该 root 的 file path 都会在解析前被拒绝。Chromium
+可能在 policy reply 到达前让一条 paused media request 失效；resource guard 只退役这条 stale
+request，不会随之终止，其他 CDP failure 仍保持 terminal。本地与 worker 执行共用同一条策略。
 
 Presentation binding 同时获得由 Rust 分配的 unit-local node identity、authored semantic
 identity 与 parent relationship，以及通过 protocol 校验的封闭 properties、solved interval
@@ -1515,8 +1543,10 @@ fixture。任何一项失败，实验继续保持 opt-in，production path 不�
 
 经过 review 的准入测量、production commits 与 closing CI 证据统一归
 [`conformance/evidence/layered-media-admission.md`](../../conformance/evidence/layered-media-admission.md)
-所有。production branch 在一个 local render sequence 内保留同一 compositor、一条容量为一的
-frame queue 和一个显式 `FFmpeg` framesync lookahead；历史样本与准入 revision 不再复制进长期架构合约。
+所有。production branch 在一个 local render sequence 内保留同一 compositor。分布式
+frame-artifact capture 拥有一条容量为一的 output queue 与一个显式 `FFmpeg` framesync
+lookahead；本地 MP4 encoding 依靠有界 stdin pipe 提供 backpressure，不会物化第二路 raw
+frame output。历史样本与准入 revision 不再复制进长期架构合约。
 
 Gate 七当时没有加入 VFR、新 codec、HDR、hardware acceleration、lossy screenshot transport、parallel browser
 capture、transition、playback-rate control、Studio、component marketplace 或新的 screenplay

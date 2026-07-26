@@ -39,7 +39,23 @@ const TWO_UNIT_FRAME_COUNT: u64 = 60;
 const UNIT_ROOT_FILE_LIMIT: usize = 16;
 const TEMPORAL_SEEK_SEQUENCE: [u64; 4] = [17, 3, 29, 17];
 const MICROS_PER_SECOND: i64 = 1_000_000;
+const OUTPUT_AUDIO_SAMPLE_RATE: u64 = 48_000;
 const AUDIO_TIMESTAMP_TOLERANCE_MICROS: u64 = 25_000;
+
+#[test]
+fn render_executor_uses_the_environment_owned_capture_mode() {
+    let limits = EncodeLimits::new(Duration::from_secs(1), 2, 2, 2)
+        .expect("the fixture encoding limits are bounded");
+    let ffmpeg = Ffmpeg::new("ffmpeg", limits).expect("the fixture executable path is present");
+    let executor = RenderExecutor::new(
+        "misleading/chrome-headless-shell",
+        BrowserCaptureMode::Screenshot,
+        browser_limits(Duration::from_secs(1)),
+        ffmpeg,
+    );
+
+    assert_eq!(executor.capture_mode(), BrowserCaptureMode::Screenshot);
+}
 
 #[tokio::test]
 async fn rejects_units_that_do_not_match_the_partition_plan_before_launching_browser() {
@@ -61,7 +77,12 @@ async fn rejects_units_that_do_not_match_the_partition_plan_before_launching_bro
     let limits = EncodeLimits::new(Duration::from_secs(1), 2, 2, 2)
         .expect("the fixture encoding limits are bounded");
     let ffmpeg = Ffmpeg::new("ffmpeg", limits).expect("the fixture executable path is present");
-    let executor = RenderExecutor::new("browser", browser_limits(Duration::from_secs(1)), ffmpeg);
+    let executor = RenderExecutor::new(
+        "browser",
+        BrowserCaptureMode::Screenshot,
+        browser_limits(Duration::from_secs(1)),
+        ffmpeg,
+    );
 
     let error = executor
         .render_partitioned(&partitions, Vec::new(), &output)
@@ -243,6 +264,28 @@ async fn renders_the_browser_plan_to_a_verified_mp4() {
 }
 
 #[tokio::test]
+#[ignore = "requires ONMARK_PORTABLE_CHROME, ONMARK_FFMPEG, and ONMARK_FFPROBE"]
+async fn renders_decoded_video_through_the_portable_screenshot_backend() {
+    let directory = tempdir().expect("the test output directory must be available");
+    let source = directory.path().join("source.mp4");
+    let output = directory.path().join("portable-video.mp4");
+    generate_source_video(&source, "2.5").await;
+    let frozen = freeze_asset(&source).await;
+    let bundle = FixtureBundle::checked_in();
+    let unit = executable_video_unit(&bundle, frozen, source);
+
+    let executor = portable_executor(FRAME_COUNT);
+    let video = executor
+        .render(unit, &output)
+        .await
+        .expect("portable Chrome must render decoded video");
+
+    assert_eq!(video.frames(), FRAME_COUNT);
+    assert_video_stream(&output, FRAME_COUNT).await;
+    assert_decodable_motion(&output).await;
+}
+
+#[tokio::test]
 #[ignore = "requires ONMARK_BUNDLER, ONMARK_HEADLESS_SHELL or ONMARK_PORTABLE_CHROME, ONMARK_FFMPEG, and ONMARK_FFPROBE"]
 async fn renders_and_repeats_the_production_layered_path() {
     let directory = tempdir().expect("the test output directory must be available");
@@ -330,14 +373,14 @@ async fn renders_and_repeats_the_production_layered_path() {
 }
 
 #[tokio::test]
-#[ignore = "requires ONMARK_HEADLESS_SHELL, ONMARK_FFMPEG, and ONMARK_FFPROBE"]
+#[ignore = "requires ONMARK_BUNDLER, ONMARK_FFMPEG, ONMARK_FFPROBE, and a supported browser"]
 async fn renders_random_access_media_equally_as_one_or_two_units() {
     let directory = tempdir().expect("the test output directory must be available");
     let bundle = FixtureBundle::build_audio_subtitle(directory.path()).await;
     let fixture = AudioSubtitleFixture::materialize(directory.path(), &bundle).await;
     let whole_output = directory.path().join("whole.mp4");
     let partitioned_output = directory.path().join("partitioned.mp4");
-    let executor = real_executor(TWO_UNIT_FRAME_COUNT);
+    let executor = layered_executor(TWO_UNIT_FRAME_COUNT);
 
     let whole = executor
         .render(fixture.whole_film, &whole_output)
@@ -367,14 +410,14 @@ async fn renders_random_access_media_equally_as_one_or_two_units() {
 }
 
 #[tokio::test]
-#[ignore = "requires ONMARK_BUNDLER, ONMARK_HEADLESS_SHELL, ONMARK_FFMPEG, and ONMARK_FFPROBE"]
+#[ignore = "requires ONMARK_BUNDLER, ONMARK_FFMPEG, ONMARK_FFPROBE, and a supported browser"]
 async fn assembles_temporal_frame_artifacts_equivalently_to_the_whole_film() {
     let directory = tempdir().expect("the test output directory must be available");
     let bundle = FixtureBundle::build_audio_subtitle(directory.path()).await;
     let fixture = AudioSubtitleFixture::materialize(directory.path(), &bundle).await;
     let whole_artifact_path = directory.path().join("whole-film.onmark-frames");
     let assembled_output = directory.path().join("assembled-from-artifacts.mp4");
-    let executor = real_executor(TWO_UNIT_FRAME_COUNT);
+    let executor = layered_executor(TWO_UNIT_FRAME_COUNT);
 
     let whole = executor
         .capture_frame_artifact(
@@ -486,6 +529,36 @@ async fn isolates_one_authored_html_edit_to_its_render_partition() {
 }
 
 #[tokio::test]
+#[ignore = "requires ONMARK_BUNDLER, ONMARK_FFMPEG, and a supported browser"]
+async fn retains_gsap_playheads_across_partition_evaluations() {
+    let directory = tempdir().expect("the experiment workspace must be available");
+    let source = directory.path().join("continuous-motion.html");
+    fs::write(&source, gsap_partition_source())
+        .expect("the continuous-motion source must be writable");
+    let bundle = FixtureBundle::build_from(
+        directory.path(),
+        "continuous-motion-bundle",
+        &source,
+        "randomAccess",
+        "browserComposite",
+        "perFrame",
+    )
+    .await;
+    let fixture = StaticPartitionFixture::materialize(&source, &bundle);
+    let executor = layered_executor(TWO_UNIT_FRAME_COUNT);
+
+    let captured =
+        capture_static_fixture(&executor, directory.path(), "continuous-motion", &fixture).await;
+
+    FrameArtifact::verify_raw_rgba_equivalence(
+        std::slice::from_ref(&captured.whole),
+        &captured.partitions,
+    )
+    .await
+    .expect("partition evaluations must retain the whole-film GSAP playhead");
+}
+
+#[tokio::test]
 #[ignore = "requires ONMARK_BUNDLER, ONMARK_HEADLESS_SHELL, and ONMARK_FFMPEG"]
 async fn shot_projection_blocks_cross_partition_css_observation() {
     let directory = tempdir().expect("the experiment workspace must be available");
@@ -539,6 +612,11 @@ async fn shot_projection_blocks_cross_partition_css_observation() {
 async fn inspect_audio_subtitle_output(output: &Path) -> DecodedOutput {
     assert_video_stream(output, TWO_UNIT_FRAME_COUNT).await;
     let output = inspect_output(output).await;
+    assert_eq!(
+        output.audio_presentation_samples,
+        TWO_UNIT_FRAME_COUNT * OUTPUT_AUDIO_SAMPLE_RATE / 30,
+        "the AAC presentation timeline must end with the visual frame range",
+    );
     assert!(
         output.has_motion(),
         "the audio-and-subtitle video must contain motion"
@@ -553,6 +631,44 @@ async fn inspect_audio_subtitle_output(output: &Path) -> DecodedOutput {
 
 fn isolation_source(closing: &str) -> String {
     static_partition_source("", "", closing)
+}
+
+fn gsap_partition_source() -> &'static str {
+    r#"<!doctype html>
+<html><head><style>
+html, body, om-film, om-scene, om-shot {
+  display: block; height: 100%; margin: 0; overflow: hidden; width: 100%;
+}
+body { background: #070b15; }
+om-scene {
+  background: linear-gradient(110deg, #356dff, #ad4cff);
+  width: calc(100% + 80px);
+}
+om-shot {
+  align-items: center; display: flex; justify-content: center;
+}
+om-title { color: white; font: 700 28px sans-serif; }
+</style></head><body>
+<om-film><om-scene>
+  <om-shot duration="1s"><om-title>Continuous</om-title></om-shot>
+  <om-shot duration="1s"><om-title>Motion</om-title></om-shot>
+</om-scene></om-film>
+<script type="module" data-om-motion>
+import { gsapMotion } from "onmark/motion/gsap";
+
+export const motion = gsapMotion({
+  scene({ element, timeline }) {
+    timeline.fromTo(
+      element,
+      { x: -80 },
+      { duration: 2, ease: "none", force3D: false, x: 0 },
+      0,
+    );
+  },
+});
+</script>
+</body></html>
+"#
 }
 
 fn dependency_source(closing_class: &str, closing: &str) -> String {
@@ -961,6 +1077,7 @@ struct DecodedOutput {
     video_hashes: Vec<String>,
     audio_hashes: Vec<String>,
     audio_start_micros: i64,
+    audio_presentation_samples: u64,
 }
 
 impl DecodedOutput {
@@ -977,6 +1094,7 @@ async fn inspect_output(output: &Path) -> DecodedOutput {
         video_hashes: decoded_hashes(output, "0:v:0").await,
         audio_hashes: decoded_hashes(output, "0:a:0").await,
         audio_start_micros: first_audio_packet_micros(output).await,
+        audio_presentation_samples: audio_presentation_samples(output).await,
     }
 }
 
@@ -1043,6 +1161,42 @@ async fn first_audio_packet_micros(output: &Path) -> i64 {
         .expect("the output audio stream must have a first packet");
 
     timestamp_micros(&packet.pts_time)
+}
+
+async fn audio_presentation_samples(output: &Path) -> u64 {
+    let probe = Command::new(required_path("ONMARK_FFPROBE"))
+        .args([
+            "-v",
+            "error",
+            "-select_streams",
+            "a:0",
+            "-show_entries",
+            "stream=duration_ts,time_base",
+            "-of",
+            "json",
+            "--",
+        ])
+        .arg(output)
+        .output();
+    let probe = timeout(Duration::from_secs(10), probe)
+        .await
+        .expect("audio duration probing must finish before its deadline")
+        .expect("ffprobe must inspect the output audio");
+    assert!(
+        probe.status.success(),
+        "{}",
+        String::from_utf8_lossy(&probe.stderr),
+    );
+    let response: AudioDurationProbe =
+        serde_json::from_slice(&probe.stdout).expect("ffprobe must emit its JSON response");
+    let [stream] = response.streams.as_slice() else {
+        panic!("ffprobe must report exactly one audio stream");
+    };
+    assert_eq!(
+        stream.time_base, "1/48000",
+        "the final audio stream must retain the fixed output sample grid",
+    );
+    stream.duration_ts
 }
 
 fn assert_audio_starts_at(output: &DecodedOutput, frame: u64) {
@@ -1118,18 +1272,36 @@ fn capture_environment() -> CaptureEnvironmentId {
 }
 
 fn real_executor(max_frames: u64) -> RenderExecutor {
-    render_executor(headless_shell(), max_frames)
+    render_executor(headless_shell(), BrowserCaptureMode::BeginFrame, max_frames)
+}
+
+fn portable_executor(max_frames: u64) -> RenderExecutor {
+    render_executor(
+        required_path("ONMARK_PORTABLE_CHROME"),
+        BrowserCaptureMode::Screenshot,
+        max_frames,
+    )
 }
 
 fn layered_executor(max_frames: u64) -> RenderExecutor {
-    let browser = env::var_os("ONMARK_HEADLESS_SHELL")
-        .or_else(|| env::var_os("ONMARK_PORTABLE_CHROME"))
+    if let Some(browser) = env::var_os("ONMARK_HEADLESS_SHELL") {
+        return render_executor(
+            PathBuf::from(browser),
+            BrowserCaptureMode::BeginFrame,
+            max_frames,
+        );
+    }
+    let browser = env::var_os("ONMARK_PORTABLE_CHROME")
         .map(PathBuf::from)
         .expect("ONMARK_HEADLESS_SHELL or ONMARK_PORTABLE_CHROME must name an executable");
-    render_executor(browser, max_frames)
+    render_executor(browser, BrowserCaptureMode::Screenshot, max_frames)
 }
 
-fn render_executor(browser: PathBuf, max_frames: u64) -> RenderExecutor {
+fn render_executor(
+    browser: PathBuf,
+    capture_mode: BrowserCaptureMode,
+    max_frames: u64,
+) -> RenderExecutor {
     let limits = EncodeLimits::new(
         Duration::from_secs(30),
         max_frames,
@@ -1140,7 +1312,12 @@ fn render_executor(browser: PathBuf, max_frames: u64) -> RenderExecutor {
     let ffmpeg = Ffmpeg::new(required_path("ONMARK_FFMPEG"), limits)
         .expect("the FFmpeg executable path is present");
 
-    RenderExecutor::new(browser, browser_limits(Duration::from_secs(10)), ffmpeg)
+    RenderExecutor::new(
+        browser,
+        capture_mode,
+        browser_limits(Duration::from_secs(10)),
+        ffmpeg,
+    )
 }
 
 fn frame_artifact_limits() -> FrameArtifactLimits {
@@ -1653,6 +1830,17 @@ struct AudioPacketProbe {
 #[derive(Debug, Deserialize)]
 struct AudioPacket {
     pts_time: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct AudioDurationProbe {
+    streams: Vec<AudioDurationStream>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AudioDurationStream {
+    duration_ts: u64,
+    time_base: String,
 }
 
 #[test]

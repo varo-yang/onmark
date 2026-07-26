@@ -1,0 +1,253 @@
+<!doctype html>
+<om-film>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body,
+    om-film,
+    om-scene,
+    om-shot {
+      display: block;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      width: 100%;
+    }
+
+    body {
+      background: #101114;
+      color: #e7e4db;
+      font-family: "Courier New", monospace;
+    }
+
+    .compiler {
+      height: 100%;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .source {
+      font-size: clamp(19px, 2vw, 38px);
+      left: 6%;
+      line-height: 1.45;
+      position: absolute;
+      top: 14%;
+      width: 58%;
+    }
+
+    .line {
+      display: block;
+      white-space: pre;
+    }
+
+    .tag {
+      color: #ff6c52;
+    }
+    .attribute {
+      color: #a6e56d;
+    }
+    .value {
+      color: #6fc9ff;
+    }
+
+    .pixels {
+      display: grid;
+      gap: 7px;
+      grid-template-columns: repeat(12, 18px);
+      position: absolute;
+      right: 7%;
+      top: 23%;
+    }
+
+    .pixels i {
+      background: #e7e4db;
+      height: 18px;
+      opacity: 0.18;
+      width: 18px;
+    }
+
+    .pixels i:nth-child(3n) {
+      background: #ff6c52;
+    }
+    .pixels i:nth-child(4n) {
+      background: #a6e56d;
+    }
+    .pixels i:nth-child(7n) {
+      background: #6fc9ff;
+    }
+
+    .arrow {
+      background: #e7e4db;
+      height: 2px;
+      left: 61%;
+      position: absolute;
+      top: 51%;
+      transform-origin: left center;
+      width: 12%;
+    }
+
+    .arrow::after {
+      border-right: 2px solid;
+      border-top: 2px solid;
+      content: "";
+      height: 12px;
+      position: absolute;
+      right: 0;
+      top: -6px;
+      transform: rotate(45deg);
+      width: 12px;
+    }
+
+    .headline {
+      bottom: 38px;
+      display: flex;
+      font-family: "Helvetica Neue", Arial, sans-serif;
+      justify-content: space-between;
+      left: 42px;
+      position: absolute;
+      right: 42px;
+    }
+
+    .headline strong {
+      font-size: clamp(54px, 6vw, 118px);
+      letter-spacing: -0.07em;
+      line-height: 0.84;
+    }
+
+    .headline span {
+      font-family: "Courier New", monospace;
+      font-size: 13px;
+      letter-spacing: 0.16em;
+      text-align: right;
+      text-transform: uppercase;
+    }
+  </style>
+
+  <om-scene>
+    <om-shot duration="9s">
+      <div class="compiler">
+        <div class="source">
+          <span class="line"
+            ><b class="tag">&lt;om-shot</b> <b class="attribute">duration</b>=<b
+              class="value"
+              >"9s"</b
+            ><b class="tag">&gt;</b></span
+          >
+          <span class="line">
+            <b class="tag">&lt;om-title&gt;</b>Write intent.<b class="tag"
+              >&lt;/om-title&gt;</b
+            ></span
+          >
+          <span class="line">
+            <b class="tag">&lt;video</b> <b class="attribute">src</b>=<b
+              class="value"
+              >"story.mp4"</b
+            ><b class="tag">&gt;</b></span
+          >
+          <span class="line"><b class="tag">&lt;/om-shot&gt;</b></span>
+        </div>
+        <div class="arrow"></div>
+        <div class="pixels">
+          <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i
+          ><i></i><i></i> <i></i><i></i><i></i><i></i><i></i><i></i><i></i
+          ><i></i><i></i><i></i><i></i><i></i> <i></i><i></i><i></i><i></i
+          ><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i> <i></i
+          ><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i
+          ><i></i> <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i
+          ><i></i><i></i><i></i><i></i> <i></i><i></i><i></i><i></i><i></i
+          ><i></i><i></i><i></i><i></i><i></i><i></i><i></i> <i></i><i></i
+          ><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i
+          ><i></i> <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i
+          ><i></i><i></i><i></i><i></i>
+        </div>
+        <om-title class="headline">
+          <strong>Meaning in.<br />Pixels out.</strong>
+          <span>Pure compiler<br />18 / 20</span>
+        </om-title>
+      </div>
+    </om-shot>
+  </om-scene>
+
+  <script type="module" data-om-motion>
+    import { gsapMotion } from "onmark/motion/gsap";
+
+    export const motion = gsapMotion({
+      shot({ element, timeline }) {
+        const lines = element.querySelectorAll(".line");
+        const pixels = element.querySelectorAll(".pixels i");
+
+        timeline
+          .from(
+            lines,
+            {
+              duration: 0.8,
+              ease: "power3.out",
+              opacity: 0,
+              stagger: 0.13,
+              x: -45,
+            },
+            0.2,
+          )
+          .fromTo(
+            ".arrow",
+            { scaleX: 0 },
+            { duration: 0.9, ease: "expo.inOut", scaleX: 1 },
+            1,
+          )
+          .from(
+            pixels,
+            {
+              duration: 0.75,
+              ease: "back.out(1.8)",
+              opacity: 0,
+              scale: 0,
+              stagger: {
+                amount: 1.2,
+                from: "center",
+              },
+            },
+            1.45,
+          )
+          .from(
+            ".headline > *",
+            {
+              duration: 0.9,
+              ease: "expo.out",
+              opacity: 0,
+              stagger: 0.1,
+              y: 45,
+            },
+            1.8,
+          )
+          .to(
+            pixels,
+            {
+              duration: 5.7,
+              ease: "sine.inOut",
+              opacity: (index) => 0.25 + ((index * 13) % 10) / 12,
+              rotation: (index) => ((index % 3) - 1) * 90,
+              scale: (index) => 0.65 + ((index * 7) % 8) / 8,
+              stagger: {
+                amount: 0.8,
+                from: "center",
+              },
+            },
+            2.5,
+          )
+          .to(
+            ".compiler",
+            {
+              duration: 0.8,
+              ease: "expo.in",
+              filter: "blur(15px)",
+              scale: 1.16,
+            },
+            8.15,
+          );
+      },
+    });
+  </script>
+</om-film>

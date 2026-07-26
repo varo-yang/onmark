@@ -1,0 +1,13 @@
+WEBVTT
+
+00:00.300 --> 00:02.500
+The browser is not the timeline.
+
+00:02.700 --> 00:05.200
+It receives one exact frame at a time.
+
+00:05.400 --> 00:07.700
+Media stays decoded. Motion stays free.
+
+00:07.900 --> 00:09.700
+The result is a fact, not a guess.

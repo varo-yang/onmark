@@ -375,8 +375,9 @@ necessary even when an outer caller later prunes known hits.
 Gate three starts with a deliberately narrower interchange: a worker captures a
 whole planned output interval into one bounded, checksummed frame artifact. The
 artifact is a single versioned file containing an exact output interval,
-render-profile, visual-plan, and locked capture-environment identities, plus an
-ordered PNG stream with canonical raw-RGBA fingerprints. It is published through
+render profile, selected visual-execution path, browser plan, bundle, and locked
+capture-environment identities, plus an ordered PNG stream with canonical
+raw-RGBA fingerprints. It is published through
 a sibling staging file and no-clobber link, so a retry can verify or reuse an
 existing immutable result without ever exposing a partial one. The assembler
 verifies that each artifact belongs to its planned unit and capture environment,
@@ -479,6 +480,14 @@ audio or compiler-timing fact therefore preserves visual artifacts unless it
 changes solved Browser Plan facts or Render Graph boundaries. Media bytes,
 profile, presentation-global bytes, the selected semantic subtree, and every
 other actual browser input remain in the relevant identity.
+
+The complete solved film interval is a Browser Plan fact because film- and
+scene-level motion may observe it. A duration edit that changes that interval
+therefore invalidates every region plan that carries it, even when some pixels
+would happen to remain equal. Onmark does not infer narrower temporal
+dependencies from JavaScript. More granular reuse requires an explicit,
+conformance-backed capability rather than omitting an input from cache
+identity.
 
 The desktop launcher names a conservative host seed from the pinned browser
 artifact, OS and architecture, and bounded system-font inventory. Native code
@@ -904,8 +913,11 @@ the runtime host because the transport's navigation call does not itself
 establish that lifecycle barrier.
 
 Browser capture retains at most one PNG at a time and writes it directly to
-`FFmpeg`'s `image2pipe`; the layered path similarly uses a capacity-one stream.
-There is no whole-video frame buffer. The fixed H.264
+`FFmpeg`'s `image2pipe`. Distributed layered capture returns canonical RGBA
+through one capacity-one stream because the frame artifact owns those pixels
+and their hashes. Local layered video sends the transparent foreground only
+into the encoder process; it neither splits composed frames nor copies raw RGBA
+back through Rust before writing MP4. There is no whole-video frame buffer. The fixed H.264
 `yuv420p` profile rejects odd viewport dimensions before either process starts.
 Browser capture has one closed backend choice beneath the shared runtime
 protocol. `BeginFrame` atomically commits and reads a compositor transaction on
@@ -917,6 +929,13 @@ available. It does not introduce a second clock, timing solver, plan, encoder,
 or media-selection path. The selected backend is reported and belongs to the
 capture-environment identity; equality is asserted only within an equivalent
 locked environment and backend.
+
+Capture capability belongs to the admitted browser artifact, not its filename.
+The managed Linux browser package declares `BeginFrame`; managed desktop
+packages declare `Screenshot`. An arbitrary path supplied with `--browser`
+receives the portable screenshot contract even when its basename resembles
+headless shell. Lower-level executors accept the mode explicitly, so a symlink
+or renamed binary cannot silently change the compositor protocol.
 
 Conformance launches a pinned Chrome for Testing browser and `FFmpeg` against
 the production presentation adapter, crosses the typed
@@ -1018,6 +1037,11 @@ identity comparison: x264 is lossy and may produce slightly different decoded
 pixels even from the same canonical input, so raw RGBA remains the
 deterministic visual oracle.
 
+Both the direct screenshot encoder and the layered media encoder own the same
+standard H.264 policy: x264 `medium`, CRF 18, `yuv420p`, and BT.709 limited-range
+metadata. The policy is explicit rather than inherited from FFmpeg defaults, so
+an FFmpeg upgrade cannot silently change text, gradient, or motion quality.
+
 Local capture retains Chromium's normal multiprocess topology. An adapter may
 select `BrowserLaunchPolicy::isolated_worker()` only when an independently
 audited outer container or microVM owns equivalent process isolation. That
@@ -1085,16 +1109,22 @@ directory, and refuses an output path observed to exist before compilation or
 publication. The final directory rename prevents readers from observing a
 normally completed partial build, but portable Node filesystem APIs do not make
 the preceding absence check a cross-process no-clobber transaction. The current
-Gate-six resource slice configures one closed `file`-loader set for local AVIF,
-GIF, JPEG, PNG, SVG, WebP, OTF, TTF, WOFF, and WOFF2 imports. Esbuild emits
-their original bytes beneath an opaque `resources/<hash>.<extension>` path.
-The bundler normalizes esbuild's uppercase Base32 names to the bundle contract's
-lowercase portable spelling and rewrites generated references at that same
-boundary; the existing manifest then owns the canonical SHA-256 and
-retained-byte bound.
+Gate-six resource slice configures one closed set for local AVIF, GIF, JPEG,
+PNG, SVG, WebP, OTF, TTF, WOFF, and WOFF2 imports. Esbuild emits module and CSS
+imports beneath opaque `resources/<hash>.<extension>` paths. The bundler also
+freezes native HTML `img[src]` bytes, rewrites their references to SHA-256
+resource paths, and retains only the image files referenced by each projected
+shot document. The browser adapter automatically places those native images
+under its bounded decode-readiness lifecycle. Before publication, one shared
+byte-level admission rejects image containers or SVG features that can advance
+from browser wall time; local `src`, data URLs, and generated image imports use
+the same rule. The bundler normalizes generated references at the same boundary;
+the existing manifest then owns the canonical SHA-256 and retained-byte bound.
 This step performs no image or font decoding and is not browser-readiness
-evidence. The boundary deliberately has no watch mode, plugin API, cache,
-development server, external fetch, or general asset-transformation policy.
+evidence. It recognizes only the closed animation-bearing container and markup
+features needed to reject ambient playheads; it does not transform image bytes.
+The boundary deliberately has no watch mode, plugin API, cache, development
+server, external fetch, or general asset-transformation policy.
 Esbuild's internal working memory remains governed by the pinned third-party
 implementation rather than the retained-output ceiling.
 
@@ -1118,9 +1148,13 @@ own schema. Before the first external product release, v1 is refined in place
 so the initial public contract does not preserve experimental fields; after
 publication, an incompatible wire change requires a new protocol version and
 migration fixture. The `BrowserPlan` carries the output frame rate,
-evaluation/output intervals, film, scene, and shot structure, primary-video
-placements, and title, call-to-action, or imported-caption overlays consumed by
-the production presentation adapter. Every projected node has a dense
+the complete solved film interval, evaluation/output intervals, film, scene,
+and shot structure, primary-video placements, and title, call-to-action, or
+imported-caption overlays consumed by the production presentation adapter.
+Projected structure and overlays keep their complete solved intervals when
+they intersect a unit. Evaluation is only the execution window, and output is
+only the publication window; neither rewrites presentation time. Every
+projected node has a dense
 compiler-owned unit-local identity and an optional authored identity; content
 names its structural parent. Authored IDs retain semantic identity across unit
 projections. Video placements additionally identify
@@ -1361,11 +1395,11 @@ contract forbids hidden clocks and requires every frame effect to derive state
 from immutable inputs and the requested frame. Unknown future browser
 components remain sequential until separately admitted. The low-level bundler
 still requires an explicit capability because it also constructs conformance
-artifacts. The pinned Linux exit conformance
-bundles that effect-bearing presentation, renders the same media, audio, and
-caption facts as one whole-film
-unit and two independent units, and compares their canonical raw-RGBA frame
-sequences before assembling the shared final output.
+artifacts. Real-process conformance bundles a scene-spanning GSAP presentation,
+renders it as one whole-film unit and two independent units, and compares their
+complete canonical raw-RGBA sequences. A separate media, audio, and caption
+fixture proves equal visual and decoded-audio output before assembling the
+shared final output.
 
 **Gate six (completed): deterministic visual resources and component binding.**
 This gate closed the browser-resource gap before performance work changes the
@@ -1374,13 +1408,18 @@ with stable identities, declared resource facts, byte limits, and no ambient
 network fetch. The browser runtime owns one typed, bounded readiness boundary
 for video, image decode, font load, texture upload, and explicitly registered
 custom resources. A timeout names the pending resource and phase instead of
-collapsing into an anonymous presentation promise.
+collapsing into an anonymous presentation promise. Static image admission
+rejects self-advancing raster containers and SVG behavior before those
+resources reach either local or worker Chromium.
 
 The native browser adapter enforces that promise with CDP request interception,
 not presentation convention. Chromium may read only canonical files beneath
 the materialized private Unit Root plus in-memory `data:` and `blob:` URLs;
 ambient network schemes and file paths outside that root are rejected before
-resolution. The same policy runs in local and worker execution.
+resolution. Chromium may invalidate a paused media request before the policy
+reply arrives. That stale request is retired without terminating the resource
+guard; every other CDP failure remains terminal. The same policy runs in local
+and worker execution.
 
 Presentation bindings also receive Rust-assigned unit-local node identities,
 authored semantic identities, and parent relationships, alongside
@@ -1476,9 +1515,11 @@ and other pixel-affecting host facts.
 The reviewed admission measurements, production commits, and closing CI evidence
 live in
 [`conformance/evidence/layered-media-admission.md`](../../conformance/evidence/layered-media-admission.md).
-The production branch retains one compositor across a local render sequence,
-one capacity-one frame queue, and one explicit `FFmpeg` framesync lookahead; the
-evidence record owns the historical samples and revisions that admitted it.
+The production branch retains one compositor across a local render sequence.
+Distributed frame-artifact capture owns one capacity-one output queue and one
+explicit `FFmpeg` framesync lookahead. Local MP4 encoding relies on the bounded
+stdin pipe for backpressure and does not materialize a second raw-frame output.
+The evidence record owns the historical samples and revisions that admitted it.
 
 Gate seven did not add VFR, new codecs, HDR, hardware acceleration, lossy
 screenshot transport, parallel browser capture, transitions, playback-rate

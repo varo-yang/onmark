@@ -31,6 +31,7 @@ pub struct BrowserPlan {
     #[cfg_attr(feature = "schema", schemars(extend("const" = 1)))]
     timeline_version: u16,
     frame_rate: WireFrameRate,
+    timeline: WireInterval,
     evaluation: WireInterval,
     output: WireInterval,
     film: BrowserNode,
@@ -68,10 +69,10 @@ impl BrowserPlan {
 
     /// Projects one evaluated and published unit from solved Timeline IR.
     ///
-    /// Every browser placement must lie wholly inside `evaluation`. A later
-    /// graph capability that needs a placement across a unit boundary must
-    /// widen that region before projection; silently clipping a video would
-    /// change its source-frame mapping.
+    /// Browser facts retain their complete Timeline intervals while
+    /// `evaluation` selects the frames executed by this unit. Primary video
+    /// must still lie wholly inside `evaluation`: clipping it would change its
+    /// source-frame mapping.
     ///
     /// # Errors
     ///
@@ -100,6 +101,7 @@ impl BrowserPlan {
         Self::checked(BrowserPlanWire {
             timeline_version: timeline.version().get(),
             frame_rate: timeline.timebase().frame_rate().into(),
+            timeline: WireInterval::try_from(timeline.interval())?,
             evaluation: evaluation_wire,
             output: output_wire,
             film: projection.film,
@@ -120,6 +122,12 @@ impl BrowserPlan {
     #[must_use]
     pub const fn frame_rate(&self) -> WireFrameRate {
         self.frame_rate
+    }
+
+    /// Returns the complete solved film interval.
+    #[must_use]
+    pub const fn timeline(&self) -> WireInterval {
+        self.timeline
     }
 
     /// Returns frames that must be evaluated by this unit.
@@ -173,6 +181,7 @@ impl BrowserPlan {
     pub fn foreground_only(&self) -> Self {
         let mut foreground = self.clone();
         foreground.videos.clear();
+        foreground.compact_node_ids();
         foreground
     }
 
@@ -218,6 +227,9 @@ impl BrowserPlan {
         if wire.shots.len() > MAX_BROWSER_SHOTS {
             return Err(InvalidBrowserPlan::TooManyShots);
         }
+        if !wire.timeline.contains_interval(wire.evaluation) {
+            return Err(InvalidBrowserPlan::EvaluationOutsideTimeline);
+        }
         validate_structure(&wire)?;
         if overlay_text_bytes(&wire.overlays) > MAX_BROWSER_OVERLAY_TEXT_BYTES {
             return Err(InvalidBrowserPlan::OverlayTextBudget);
@@ -232,30 +244,16 @@ impl BrowserPlan {
             return Err(InvalidBrowserPlan::EmptyVideo);
         }
         if wire
-            .overlays
-            .iter()
-            .any(|overlay| overlay.interval().is_empty())
-        {
-            return Err(InvalidBrowserPlan::EmptyOverlay);
-        }
-        if wire
             .videos
             .iter()
             .any(|video| !wire.evaluation.contains_interval(video.interval()))
         {
             return Err(InvalidBrowserPlan::VideoCrossesEvaluation);
         }
-        if wire
-            .overlays
-            .iter()
-            .any(|overlay| !wire.evaluation.contains_interval(overlay.interval()))
-        {
-            return Err(InvalidBrowserPlan::OverlayCrossesEvaluation);
-        }
-
         Ok(Self {
             timeline_version: wire.timeline_version,
             frame_rate: wire.frame_rate,
+            timeline: wire.timeline,
             evaluation: wire.evaluation,
             output: wire.output,
             film: wire.film,
@@ -264,6 +262,36 @@ impl BrowserPlan {
             videos: wire.videos,
             overlays: wire.overlays,
         })
+    }
+
+    fn compact_node_ids(&mut self) {
+        let retained = std::iter::once(self.film.node_id)
+            .chain(self.scenes.iter().map(|scene| scene.node.node_id))
+            .chain(self.shots.iter().map(|shot| shot.node.node_id))
+            .chain(self.overlays.iter().map(|overlay| overlay.node.node_id))
+            .collect::<BTreeSet<_>>();
+        let replacements = retained
+            .into_iter()
+            .enumerate()
+            .map(|(next, original)| {
+                let next = u32::try_from(next)
+                    .expect("browser collection limits fit the node-identity domain");
+                (original, BrowserNodeId::new(next))
+            })
+            .collect::<BTreeMap<_, _>>();
+
+        self.film.node_id = replacements[&self.film.node_id];
+        for scene in &mut self.scenes {
+            scene.node.node_id = replacements[&scene.node.node_id];
+        }
+        for shot in &mut self.shots {
+            shot.node.node_id = replacements[&shot.node.node_id];
+            shot.scene_id = replacements[&shot.scene_id];
+        }
+        for overlay in &mut self.overlays {
+            overlay.node.node_id = replacements[&overlay.node.node_id];
+            overlay.shot_id = overlay.shot_id.map(|id| replacements[&id]);
+        }
     }
 }
 
@@ -280,14 +308,14 @@ fn validate_structure(wire: &BrowserPlanWire) -> Result<(), InvalidBrowserPlan> 
     let mut scene_intervals = BTreeMap::new();
     for scene in &wire.scenes {
         validate_node(scene.node(), &mut node_ids, &mut authored_ids)?;
-        validate_structural_interval(scene.interval(), wire.evaluation)?;
+        validate_structural_interval(scene.interval(), wire.timeline, wire.evaluation)?;
         scene_intervals.insert(scene.node().id(), scene.interval());
     }
 
     let mut shot_intervals = BTreeMap::new();
     for shot in &wire.shots {
         validate_node(shot.node(), &mut node_ids, &mut authored_ids)?;
-        validate_structural_interval(shot.interval(), wire.evaluation)?;
+        validate_structural_interval(shot.interval(), wire.timeline, wire.evaluation)?;
         let parent = scene_intervals
             .get(&shot.scene_id())
             .ok_or(InvalidBrowserPlan::UnknownParentNode)?;
@@ -305,6 +333,7 @@ fn validate_structure(wire: &BrowserPlanWire) -> Result<(), InvalidBrowserPlan> 
 
     for overlay in &wire.overlays {
         validate_node(overlay.node(), &mut node_ids, &mut authored_ids)?;
+        validate_overlay_interval(overlay.interval(), wire.timeline, wire.evaluation)?;
         match (overlay.kind(), overlay.shot_id()) {
             (BrowserOverlayKind::Caption, None) => {}
             (BrowserOverlayKind::Title | BrowserOverlayKind::CallToAction, Some(shot_id)) => {
@@ -364,15 +393,40 @@ fn validate_node<'a>(
 
 fn validate_structural_interval(
     interval: WireInterval,
+    timeline: WireInterval,
     evaluation: WireInterval,
 ) -> Result<(), InvalidBrowserPlan> {
     if interval.is_empty() {
         return Err(InvalidBrowserPlan::EmptyStructure);
     }
-    if !evaluation.contains_interval(interval) {
-        return Err(InvalidBrowserPlan::StructureCrossesEvaluation);
+    if !timeline.contains_interval(interval) {
+        return Err(InvalidBrowserPlan::StructureOutsideTimeline);
+    }
+    if !intervals_intersect(interval, evaluation) {
+        return Err(InvalidBrowserPlan::StructureOutsideEvaluation);
     }
     Ok(())
+}
+
+fn validate_overlay_interval(
+    interval: WireInterval,
+    timeline: WireInterval,
+    evaluation: WireInterval,
+) -> Result<(), InvalidBrowserPlan> {
+    if interval.is_empty() {
+        return Err(InvalidBrowserPlan::EmptyOverlay);
+    }
+    if !timeline.contains_interval(interval) {
+        return Err(InvalidBrowserPlan::OverlayOutsideTimeline);
+    }
+    if !intervals_intersect(interval, evaluation) {
+        return Err(InvalidBrowserPlan::OverlayOutsideEvaluation);
+    }
+    Ok(())
+}
+
+fn intervals_intersect(left: WireInterval, right: WireInterval) -> bool {
+    left.start() < right.end() && right.start() < left.end()
 }
 
 fn validate_child_interval(
@@ -403,6 +457,7 @@ impl<'de> Deserialize<'de> for BrowserPlan {
 struct BrowserPlanWire {
     timeline_version: u16,
     frame_rate: WireFrameRate,
+    timeline: WireInterval,
     evaluation: WireInterval,
     output: WireInterval,
     film: BrowserNode,
@@ -465,7 +520,7 @@ impl BrowserNode {
     }
 }
 
-/// One scene container projected for the current evaluation interval.
+/// One scene container intersecting this unit, with its complete Timeline interval.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
@@ -485,14 +540,14 @@ impl BrowserScene {
         &self.node
     }
 
-    /// Returns the scene frames that intersect this unit.
+    /// Returns the complete solved scene interval.
     #[must_use]
     pub const fn interval(&self) -> WireInterval {
         self.interval
     }
 }
 
-/// One shot container projected for the current evaluation interval.
+/// One shot container intersecting this unit, with its complete Timeline interval.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
@@ -527,7 +582,7 @@ impl BrowserShot {
         self.scene_id
     }
 
-    /// Returns the shot frames that intersect this unit.
+    /// Returns the complete solved shot interval.
     #[must_use]
     pub const fn interval(&self) -> WireInterval {
         self.interval
@@ -707,7 +762,7 @@ impl BrowserOverlay {
         &self.text
     }
 
-    /// Returns the absolute frames during which the overlay is visible.
+    /// Returns the complete solved visibility interval.
     #[must_use]
     pub const fn interval(&self) -> WireInterval {
         self.interval
@@ -781,10 +836,14 @@ pub enum InvalidBrowserPlan {
     EmptyStructure,
     /// A video would need clipping at the unit evaluation boundary.
     VideoCrossesEvaluation,
-    /// An overlay would need clipping at the unit evaluation boundary.
-    OverlayCrossesEvaluation,
-    /// A projected scene or shot lies outside the unit evaluation boundary.
-    StructureCrossesEvaluation,
+    /// A projected overlay lies outside the solved film.
+    OverlayOutsideTimeline,
+    /// A projected overlay does not intersect this unit.
+    OverlayOutsideEvaluation,
+    /// A projected scene or shot lies outside the solved film.
+    StructureOutsideTimeline,
+    /// A projected scene or shot does not intersect this unit.
+    StructureOutsideEvaluation,
     /// The plan contains more scene containers than the current contract can carry.
     TooManyScenes,
     /// The plan contains more shot containers than the current contract can carry.
@@ -842,11 +901,17 @@ impl fmt::Display for InvalidBrowserPlan {
             Self::VideoCrossesEvaluation => {
                 formatter.write_str("browser video crosses the evaluation boundary")
             }
-            Self::OverlayCrossesEvaluation => {
-                formatter.write_str("browser overlay crosses the evaluation boundary")
+            Self::OverlayOutsideTimeline => {
+                formatter.write_str("browser overlay lies outside the solved film")
             }
-            Self::StructureCrossesEvaluation => {
-                formatter.write_str("browser structure crosses the evaluation boundary")
+            Self::OverlayOutsideEvaluation => {
+                formatter.write_str("browser overlay does not intersect evaluation")
+            }
+            Self::StructureOutsideTimeline => {
+                formatter.write_str("browser structure lies outside the solved film")
+            }
+            Self::StructureOutsideEvaluation => {
+                formatter.write_str("browser structure does not intersect evaluation")
             }
             Self::TooManyScenes => {
                 formatter.write_str("browser plan exceeds the scene-container limit")
@@ -915,8 +980,10 @@ impl Error for InvalidBrowserPlan {
             | Self::EmptyOverlay
             | Self::EmptyStructure
             | Self::VideoCrossesEvaluation
-            | Self::OverlayCrossesEvaluation
-            | Self::StructureCrossesEvaluation
+            | Self::OverlayOutsideTimeline
+            | Self::OverlayOutsideEvaluation
+            | Self::StructureOutsideTimeline
+            | Self::StructureOutsideEvaluation
             | Self::TooManyScenes
             | Self::TooManyShots
             | Self::TooManyVideos
@@ -958,8 +1025,9 @@ mod tests {
     };
 
     use super::{
-        BrowserOverlayKind, BrowserPlan, InvalidBrowserPlan, MAX_BROWSER_OVERLAY_TEXT_BYTES,
-        MAX_BROWSER_OVERLAY_TEXT_CHARACTERS, MAX_BROWSER_OVERLAYS, MAX_BROWSER_VIDEOS, WireFrame,
+        BrowserNodeId, BrowserOverlayKind, BrowserPlan, InvalidBrowserPlan,
+        MAX_BROWSER_OVERLAY_TEXT_BYTES, MAX_BROWSER_OVERLAY_TEXT_CHARACTERS, MAX_BROWSER_OVERLAYS,
+        MAX_BROWSER_VIDEOS, WireFrame,
     };
 
     #[test]
@@ -967,6 +1035,7 @@ mod tests {
         let plan = r#"{
             "timelineVersion":1,
             "frameRate":{"numerator":30,"denominator":1},
+            "timeline":{"start":0,"end":1},
             "evaluation":{"start":0,"end":1},
             "output":{"start":0,"end":1},
             "film":{"nodeId":0,"authoredId":null},
@@ -998,6 +1067,7 @@ mod tests {
         let plan = r#"{
             "timelineVersion":1,
             "frameRate":{"numerator":30,"denominator":1},
+            "timeline":{"start":0,"end":1},
             "evaluation":{"start":0,"end":1},
             "output":{"start":0,"end":1},
             "film":{"nodeId":0,"authoredId":null},
@@ -1018,6 +1088,7 @@ mod tests {
         let plan = r#"{
             "timelineVersion":1,
             "frameRate":{"numerator":30,"denominator":1},
+            "timeline":{"start":0,"end":1},
             "evaluation":{"start":0,"end":1},
             "output":{"start":0,"end":1},
             "film":{"nodeId":0,"authoredId":null},
@@ -1040,6 +1111,7 @@ mod tests {
         let plan = r#"{
             "timelineVersion":1,
             "frameRate":{"numerator":30,"denominator":1},
+            "timeline":{"start":0,"end":4},
             "evaluation":{"start":0,"end":4},
             "output":{"start":0,"end":4},
             "film":{"nodeId":0,"authoredId":null},
@@ -1057,6 +1129,7 @@ mod tests {
         let plan = r#"{
             "timelineVersion":1,
             "frameRate":{"numerator":30,"denominator":1},
+            "timeline":{"start":0,"end":4},
             "evaluation":{"start":0,"end":4},
             "output":{"start":0,"end":4},
             "film":{"nodeId":0,"authoredId":null},
@@ -1101,8 +1174,17 @@ mod tests {
 
         let foreground = plan.foreground_only();
         assert!(foreground.videos().is_empty());
-        assert_eq!(foreground.overlays(), plan.overlays());
         assert_eq!(foreground.output(), plan.output());
+        assert_eq!(foreground.overlays()[0].node().id(), wire_node_id(3));
+        assert_eq!(foreground.overlays()[0].kind(), plan.overlays()[0].kind());
+        assert_eq!(foreground.overlays()[0].text(), plan.overlays()[0].text());
+        assert_eq!(
+            foreground.overlays()[0].interval(),
+            plan.overlays()[0].interval(),
+        );
+        let encoded = serde_json::to_string(&foreground).expect("the foreground plan serializes");
+        serde_json::from_str::<BrowserPlan>(&encoded)
+            .expect("a Rust-produced foreground plan satisfies its own wire contract");
     }
 
     #[test]
@@ -1110,6 +1192,7 @@ mod tests {
         let plan = r#"{
             "timelineVersion":1,
             "frameRate":{"numerator":30,"denominator":1},
+            "timeline":{"start":0,"end":4},
             "evaluation":{"start":0,"end":4},
             "output":{"start":0,"end":4},
             "film":{"nodeId":0,"authoredId":null},
@@ -1167,7 +1250,7 @@ mod tests {
     }
 
     #[test]
-    fn clips_caption_overlays_to_each_unit_evaluation() {
+    fn retains_caption_timing_across_unit_evaluations() {
         let mut timeline = timeline_with_content_in(Vec::new(), interval(0, 4));
         timeline.replace_captions(vec![caption(interval(1, 3), "Caption")]);
 
@@ -1177,12 +1260,29 @@ mod tests {
             interval(0, 2),
             interval(0, 2),
         )
-        .expect("a crossing caption is clipped without widening evaluation");
+        .expect("a crossing caption remains exactly evaluable inside the unit");
 
         assert_eq!(plan.overlays().len(), 1);
         assert_eq!(plan.overlays()[0].kind(), BrowserOverlayKind::Caption);
         assert_eq!(plan.overlays()[0].interval().start().get(), 1);
-        assert_eq!(plan.overlays()[0].interval().end().get(), 2);
+        assert_eq!(plan.overlays()[0].interval().end().get(), 3);
+    }
+
+    #[test]
+    fn retains_structural_timing_across_unit_evaluations() {
+        let timeline = timeline_with_shots(vec![
+            shot_with_content(Vec::new(), interval(0, 2)),
+            shot_with_content(Vec::new(), interval(2, 4)),
+        ]);
+        let unit = interval(2, 4);
+
+        let plan = BrowserPlan::from_timeline_for_unit(&timeline, &BTreeMap::new(), unit, unit)
+            .expect("the second shot remains exactly evaluable");
+
+        assert_eq!(plan.scenes()[0].interval().start().get(), 0);
+        assert_eq!(plan.scenes()[0].interval().end().get(), 4);
+        assert_eq!(plan.shots()[0].interval().start().get(), 2);
+        assert_eq!(plan.shots()[0].interval().end().get(), 4);
     }
 
     #[test]
@@ -1391,5 +1491,9 @@ mod tests {
 
     fn wire_frame(value: u64) -> WireFrame {
         WireFrame::new(value).expect("the fixture frame is browser-safe")
+    }
+
+    const fn wire_node_id(value: u32) -> BrowserNodeId {
+        BrowserNodeId::new(value)
     }
 }

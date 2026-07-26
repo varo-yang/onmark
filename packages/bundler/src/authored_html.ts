@@ -6,6 +6,8 @@ import { dirname, resolve } from "node:path";
 
 import { parse, type DefaultTreeAdapterTypes, type ParserError } from "parse5";
 
+import { freezeHtmlImages, type HtmlImageResource } from "./html_image.js";
+
 const MAX_HTML_BYTES = 8 * 1024 * 1024;
 const MOTION_ATTRIBUTE = "data-om-motion";
 const RUNTIME_SCRIPT =
@@ -17,6 +19,7 @@ const RUNTIME_SCRIPT =
 export interface AuthoredHtml {
   readonly document: string;
   readonly motion: string | undefined;
+  readonly resources: readonly HtmlImageResource[];
   readonly regions: readonly AuthoredHtmlRegion[];
   readonly regionStructure: AuthoredHtmlRegionStructure;
   readonly resolveDirectory: string;
@@ -56,17 +59,26 @@ export class AuthoredHtmlError extends Error {
 /** Reads one bounded UTF-8 document and isolates its motion module. */
 export async function readAuthoredHtml(
   path: string,
+  maxOutputBytes: number,
   resolveDirectory?: string,
 ): Promise<AuthoredHtml> {
   const absolute = resolve(path);
   const source = await readBoundedSource(absolute);
-  const extracted = extractMotion(source);
+  const directory =
+    resolveDirectory === undefined
+      ? dirname(absolute)
+      : resolve(resolveDirectory);
+  const browserSource = projectBrowserDocument(source);
+  const frozen = await freezeHtmlImages(
+    browserSource,
+    directory,
+    maxOutputBytes,
+  );
+  const extracted = extractMotion(frozen.document);
   return Object.freeze({
     ...extracted,
-    resolveDirectory:
-      resolveDirectory === undefined
-        ? dirname(absolute)
-        : resolve(resolveDirectory),
+    resources: frozen.resources,
+    resolveDirectory: directory,
   });
 }
 
@@ -131,10 +143,9 @@ interface HtmlProjection extends InstalledHtml {
 }
 
 function extractMotion(source: string): HtmlProjection {
-  // Reparse after projection because source edits invalidate parse5 offsets.
-  // The second tree owns runtime insertion; no code translates stale ranges.
-  const browserSource = projectBrowserDocument(source);
-  const installed = installRuntime(browserSource);
+  // Reparse after each source edit because parse5 offsets are not transferable.
+  // The final tree owns runtime insertion and projected shot ranges.
+  const installed = installRuntime(source);
   const projection = projectShotStructure(installed.document);
   return {
     ...installed,
@@ -322,15 +333,17 @@ function findElement(
   node: DefaultTreeAdapterTypes.Node,
   name: string,
 ): DefaultTreeAdapterTypes.Element | undefined {
-  if ("tagName" in node && node.tagName === name) {
-    return node;
-  }
-  if ("childNodes" in node) {
-    for (const child of node.childNodes) {
-      const found = findElement(child, name);
-      if (found !== undefined) {
-        return found;
-      }
+  const pending = [node];
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (current === undefined) {
+      break;
+    }
+    if ("tagName" in current && current.tagName === name) {
+      return current;
+    }
+    if ("childNodes" in current) {
+      pushChildren(pending, current.childNodes);
     }
   }
   return undefined;
@@ -350,12 +363,29 @@ function visit(
   node: DefaultTreeAdapterTypes.Node,
   visitor: (element: DefaultTreeAdapterTypes.Element) => void,
 ): void {
-  if ("tagName" in node) {
-    visitor(node);
+  const pending = [node];
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (current === undefined) {
+      break;
+    }
+    if ("tagName" in current) {
+      visitor(current);
+    }
+    if ("childNodes" in current) {
+      pushChildren(pending, current.childNodes);
+    }
   }
-  if ("childNodes" in node) {
-    for (const child of node.childNodes) {
-      visit(child, visitor);
+}
+
+function pushChildren(
+  pending: DefaultTreeAdapterTypes.Node[],
+  children: readonly DefaultTreeAdapterTypes.Node[],
+): void {
+  for (let index = children.length - 1; index >= 0; index -= 1) {
+    const child = children[index];
+    if (child !== undefined) {
+      pending.push(child);
     }
   }
 }
@@ -403,16 +433,21 @@ function collectCompilerFacts(
   source: string,
   ranges: SourceRange[],
 ): void {
-  if ("tagName" in node) {
-    if (isCompilerOnlyElement(node.tagName)) {
-      ranges.push(removableElementRange(source, node));
-      return;
+  const pending = [node];
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (current === undefined) {
+      break;
     }
-    collectCompilerAttributes(node, source, ranges);
-  }
-  if ("childNodes" in node) {
-    for (const child of node.childNodes) {
-      collectCompilerFacts(child, source, ranges);
+    if ("tagName" in current) {
+      if (isCompilerOnlyElement(current.tagName)) {
+        ranges.push(removableElementRange(source, current));
+        continue;
+      }
+      collectCompilerAttributes(current, source, ranges);
+    }
+    if ("childNodes" in current) {
+      pushChildren(pending, current.childNodes);
     }
   }
 }

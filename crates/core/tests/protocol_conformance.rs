@@ -84,6 +84,14 @@ fn browser_plan_retains_solved_structure_and_content_ownership() {
         serde_json::to_value(browser_plan_fixture()).expect("the browser plan must serialize");
 
     assert_eq!(
+        plan["timeline"],
+        serde_json::json!({ "start": 0, "end": 75 }),
+    );
+    assert_eq!(
+        plan["evaluation"],
+        serde_json::json!({ "start": 0, "end": 75 }),
+    );
+    assert_eq!(
         plan["film"],
         serde_json::json!({ "nodeId": 0, "authoredId": null }),
     );

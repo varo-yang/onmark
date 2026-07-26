@@ -42,14 +42,13 @@ impl RenderExecutor {
     #[must_use]
     pub fn new(
         browser_executable: impl Into<PathBuf>,
+        capture_mode: BrowserCaptureMode,
         browser_limits: BrowserLimits,
         ffmpeg: Ffmpeg,
     ) -> Self {
-        let browser_executable = browser_executable.into();
-        let capture_mode = BrowserCaptureMode::for_executable(&browser_executable);
         Self {
             capture: FrameCaptureExecutor::new(
-                browser_executable,
+                browser_executable.into(),
                 BrowserLaunchPolicy::local(),
                 capture_mode,
                 browser_limits,

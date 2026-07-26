@@ -16,7 +16,7 @@ test("binds solved structure without replacing authored HTML", () => {
   const browser = new FakeDocument();
   const bindings = bindingsFor(browser);
 
-  const film = bindings.bindFilm(PLAN.film);
+  const film = bindings.bindFilm(PLAN);
   const scene = bindings.bindScene(PLAN.scenes[0]!);
   const shot = bindings.bindShot(PLAN.shots[0]!);
   const video = bindings.bindVideo(PLAN.videos[0]!);
@@ -69,10 +69,85 @@ test("binds solved structure without replacing authored HTML", () => {
   );
 });
 
+test("projects native video out of dense foreground identity", () => {
+  const browser = new FakeDocument();
+  const bindings = bindingsFor(browser);
+  const foreground: RuntimePlan = {
+    ...PLAN,
+    videos: [],
+    overlays: [
+      {
+        ...PLAN.overlays[0]!,
+        node: { ...PLAN.overlays[0]!.node, nodeId: 3 },
+      },
+    ],
+  };
+
+  bindings.bindFilm(foreground);
+  bindings.bindScene(foreground.scenes[0]!);
+  bindings.bindShot(foreground.shots[0]!);
+  const overlay = bindings.bindOverlay(foreground.overlays[0]!);
+
+  assert.equal(overlay.element, browser.authored.title);
+  assert.equal(browser.authored.video.dataset["omNode"], undefined);
+});
+
+test("owns readiness for native authored images", async () => {
+  const browser = new FakeDocument();
+  const image = new FakeElement("img");
+  image.src = "./resources/poster.svg";
+  browser.images.push(image);
+  const bindings = bindingsFor(browser);
+
+  const extensions = await bindings.bindExtensions(PLAN);
+  assert.equal(extensions.resources.length, 1);
+  assert.equal(extensions.resources[0]?.kind, "image");
+
+  await extensions.resources[0]?.prepare();
+  assert.equal(image.decodeCalls, 1);
+
+  await extensions.resources[0]?.dispose();
+  assert.equal(image.sourceRemoved, true);
+});
+
+test("allocates native image identities around extension-owned resources", async () => {
+  const browser = new FakeDocument();
+  const image = new FakeElement("img");
+  image.src = "./resources/poster.svg";
+  browser.images.push(image);
+  const extensionResource = disposableResource(() => {});
+  const bindings = createDomPresentationBindings({
+    document: browser as unknown as Document,
+    motion: {
+      bind() {
+        return {
+          effects: [],
+          resources: [
+            {
+              ...extensionResource,
+              id: "authored-image-0",
+              kind: "image",
+            },
+          ],
+        };
+      },
+    },
+    videoSource: () => "./video.mp4",
+  });
+
+  bindings.bindFilm(PLAN);
+  const extensions = await bindings.bindExtensions(PLAN);
+  const identities = extensions.resources.map(
+    ({ id, kind }) => `${kind}:${id}`,
+  );
+
+  assert.equal(new Set(identities).size, identities.length);
+});
+
 test("owns bound and omitted semantic visibility independently of authored CSS", () => {
   const browser = new FakeDocument();
   const bindings = bindingsFor(browser);
-  const film = bindings.bindFilm(PLAN.film);
+  const film = bindings.bindFilm(PLAN);
 
   const visibility = browser.head.children[0];
   assert.equal(
@@ -98,7 +173,7 @@ test("maps every overlay role to one stable semantic element", () => {
   const browser = new FakeDocument();
   browser.authored.shot.append(new FakeElement("om-cta"));
   const bindings = bindingsFor(browser);
-  bindings.bindFilm(PLAN.film);
+  bindings.bindFilm(PLAN);
   bindings.bindScene(PLAN.scenes[0]!);
   bindings.bindShot(PLAN.shots[0]!);
 
@@ -132,7 +207,32 @@ test("binds dense local node identity in a projected region document", () => {
   browser.authored.film.append(later.scene);
   const bindings = bindingsFor(browser);
 
-  bindings.bindFilm(PLAN.film);
+  bindings.bindFilm({
+    ...PLAN,
+    scenes: [
+      {
+        node: { nodeId: 1, authoredId: "later" },
+        interval: { start: 60, end: 120 },
+      },
+    ],
+    shots: [
+      {
+        node: { nodeId: 2, authoredId: "later-shot" },
+        sceneId: 1,
+        interval: { start: 60, end: 120 },
+      },
+    ],
+    videos: [],
+    overlays: [
+      {
+        node: { nodeId: 3, authoredId: null },
+        shotId: 2,
+        kind: "title",
+        text: "Later",
+        interval: { start: 60, end: 120 },
+      },
+    ],
+  });
   const scene = bindings.bindScene({
     node: { nodeId: 1, authoredId: "later" },
     interval: { start: 60, end: 120 },
@@ -162,7 +262,7 @@ test("does not give presentation wrappers screenplay ownership", () => {
   browser.body.append(wrapper);
   const bindings = bindingsFor(browser);
 
-  const film = bindings.bindFilm(PLAN.film);
+  const film = bindings.bindFilm(PLAN);
 
   assert.equal(film.element, browser.authored.film);
 });
@@ -182,14 +282,14 @@ test("delivers one immutable semantic view to local motion", async () => {
       bind(context) {
         targetKinds = context.targets.map(({ kind }) => kind);
         assert.equal(Object.isFrozen(context.targets), true);
-        assert.deepEqual(context.targets[0]?.interval, PLAN.evaluation);
+        assert.deepEqual(context.targets[0]?.interval, PLAN.timeline);
         return { effects: [effect], resources: [] };
       },
     },
     videoSource: () => "unused",
   });
 
-  bindings.bindFilm(PLAN.film);
+  bindings.bindFilm(PLAN);
   bindings.bindScene(PLAN.scenes[0]!);
   bindings.bindShot(PLAN.shots[0]!);
   bindings.bindVideo(PLAN.videos[0]!);
@@ -220,7 +320,7 @@ test("binds one immutable resource collection through motion", async () => {
     videoSource: () => "unused",
   });
 
-  bindings.bindFilm(PLAN.film);
+  bindings.bindFilm(PLAN);
   const extensions = await bindings.bindExtensions(PLAN);
 
   assert.equal(extensions.resources[0]?.id, resource.id);
@@ -259,7 +359,7 @@ test("releases prior extensions when later motion binding fails", async () => {
     videoSource: () => "unused",
   });
 
-  bindings.bindFilm(PLAN.film);
+  bindings.bindFilm(PLAN);
   await assert.rejects(bindings.bindExtensions(PLAN), AggregateError);
   assert.deepEqual(released, ["effect", "resource"]);
 });
@@ -269,6 +369,7 @@ test("releases prior extensions when later motion binding fails", async () => {
 const PLAN: RuntimePlan = {
   timelineVersion: 1,
   frameRate: { numerator: 30, denominator: 1 },
+  timeline: { start: 0, end: 90 },
   evaluation: { start: 0, end: 60 },
   output: { start: 0, end: 60 },
   film: { nodeId: 0, authoredId: "film" },
@@ -336,6 +437,7 @@ function authoredScene(sceneId: string, shotId: string, title: string) {
 class FakeDocument {
   readonly body = new FakeElement("body");
   readonly head = new FakeElement("head");
+  readonly images: FakeElement[] = [];
   readonly created: FakeElement[] = [];
   readonly authored = authoredTree();
   readonly authoredNodes = Object.values(this.authored);
@@ -355,12 +457,15 @@ class FakeElement {
   readonly children: FakeElement[] = [];
   readonly dataset: Record<string, string> = {};
   className = "";
+  decodeCalls = 0;
   hidden = false;
   id = "";
   muted = false;
   parent: FakeElement | undefined;
   playsInline = false;
   removed = false;
+  sourceRemoved = false;
+  src = "";
   textContent: string | null = null;
 
   constructor(readonly localName: string) {}
@@ -369,11 +474,20 @@ class FakeElement {
     return this.localName.toUpperCase();
   }
 
+  hasAttribute(name: string): boolean {
+    assert.equal(name, "src");
+    return this.src.length > 0;
+  }
+
   append(...elements: FakeElement[]): void {
     for (const element of elements) {
       element.parent = this;
       this.children.push(element);
     }
+  }
+
+  async decode(): Promise<void> {
+    this.decodeCalls += 1;
   }
 
   matches(selector: string): boolean {
@@ -390,6 +504,12 @@ class FakeElement {
         this.parent.children.splice(index, 1);
       }
     }
+  }
+
+  removeAttribute(name: string): void {
+    assert.equal(name, "src");
+    this.sourceRemoved = true;
+    this.src = "";
   }
 }
 

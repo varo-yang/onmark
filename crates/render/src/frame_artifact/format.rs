@@ -14,7 +14,9 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sha2::{Digest as _, Sha256};
 
 use super::{FrameArtifactError, FrameArtifactErrorKind, FrameArtifactLimits};
-use crate::{CaptureEnvironmentId, ExecutableUnit, RawRgbaHash, RenderProfile};
+use crate::{
+    CaptureEnvironmentId, ExecutableUnit, RawRgbaHash, RenderProfile, VisualExecutionPlan,
+};
 
 pub(super) const HEADER_BYTES: usize = 156;
 pub(super) const FRAME_LENGTH_BYTES: u64 = 8;
@@ -77,9 +79,17 @@ impl FrameArtifactId {
         plan: &BrowserPlan,
         bundle_id: &str,
         profile: RenderProfile,
+        visual_execution: &VisualExecutionPlan,
         capture_environment: CaptureEnvironmentId,
     ) -> Self {
-        FrameArtifactDescriptor::from_facts(plan, bundle_id, profile, capture_environment).id()
+        FrameArtifactDescriptor::from_facts(
+            plan,
+            bundle_id,
+            profile,
+            visual_execution,
+            capture_environment,
+        )
+        .id()
     }
 
     fn from_descriptor(descriptor: &FrameArtifactDescriptor) -> Self {
@@ -171,6 +181,7 @@ impl FrameArtifactDescriptor {
             unit.browser_plan(),
             unit.bundle_id(),
             unit.profile(),
+            unit.visual_execution(),
             capture_environment,
         )
     }
@@ -179,11 +190,12 @@ impl FrameArtifactDescriptor {
         plan: &BrowserPlan,
         bundle_id: &str,
         profile: RenderProfile,
+        visual_execution: &VisualExecutionPlan,
         capture_environment: CaptureEnvironmentId,
     ) -> Self {
         let output = frame_interval(plan.output());
         let frame_rate = frame_rate(plan);
-        let visual_plan_digest = visual_plan_digest(plan, bundle_id, profile);
+        let visual_plan_digest = visual_plan_digest(plan, bundle_id, profile, visual_execution);
 
         Self {
             output,
@@ -207,15 +219,22 @@ struct UnitIdentity<'a> {
     bundle_id: &'a str,
     width: u32,
     height: u32,
+    visual_execution: &'a VisualExecutionPlan,
     browser_plan: &'a BrowserPlan,
 }
 
-fn visual_plan_digest(plan: &BrowserPlan, bundle_id: &str, profile: RenderProfile) -> [u8; 32] {
+fn visual_plan_digest(
+    plan: &BrowserPlan,
+    bundle_id: &str,
+    profile: RenderProfile,
+    visual_execution: &VisualExecutionPlan,
+) -> [u8; 32] {
     let identity = UnitIdentity {
         version: VERSION,
         bundle_id,
         width: profile.width(),
         height: profile.height(),
+        visual_execution,
         browser_plan: plan,
     };
     let mut writer = DigestWriter(Sha256::new());

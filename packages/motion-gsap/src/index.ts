@@ -138,7 +138,10 @@ function bindGsapEffect(
       ) {
         return;
       }
-      timeline.time(localSeconds(frame, target, context), true);
+      // A fresh GSAP timeline already reports time zero, and `time(0)` is a
+      // no-op. Force rendering so a first-frame `.set()` and a repeated exact
+      // frame both restore the authored state.
+      timeline.render(localSeconds(frame, target, context), true, true);
     },
     dispose(): void {
       timeline.kill();

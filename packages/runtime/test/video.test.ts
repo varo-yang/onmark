@@ -20,7 +20,11 @@ const selection = {
 
 test("stages a seek before confirming the compositor-presented frame", async () => {
   const element = new FakeVideoElement();
-  const video = new DecodedVideo(element, 100);
+  const video = new DecodedVideo({
+    element,
+    nodeId: 0,
+    readinessTimeoutMilliseconds: 100,
+  });
 
   const loading = video.load("./assets/sha256/source");
   assert.equal(element.src, "./assets/sha256/source");
@@ -88,16 +92,33 @@ test("reports bounded readiness failures and cleans the pending frame wait", asy
     (error: unknown) =>
       error instanceof RuntimeAdapterError &&
       error.kind === "readinessTimeout" &&
-      error.pendingResources.includes("video-frame"),
+      error.pendingResources.includes("video:0:frame"),
   );
   assert.equal(element.listenerCount, 0);
   assert.equal(element.pendingFrameCallbacks, 0);
 });
 
+test("identifies the video whose seek misses its readiness deadline", async () => {
+  const element = new FakeVideoElement();
+  const video = await loadedVideo(element, 5, 7);
+
+  await assert.rejects(
+    video.stage(selection),
+    (error: unknown) =>
+      error instanceof RuntimeAdapterError &&
+      error.kind === "readinessTimeout" &&
+      error.pendingResources.includes("video:7:seeked"),
+  );
+});
+
 test("cleans media observers after synchronous browser failures", async () => {
   const loadingElement = new FakeVideoElement();
   loadingElement.loadError = new Error("browser load failed");
-  const loadingVideo = new DecodedVideo(loadingElement, 100);
+  const loadingVideo = new DecodedVideo({
+    element: loadingElement,
+    nodeId: 0,
+    readinessTimeoutMilliseconds: 100,
+  });
 
   await assert.rejects(
     loadingVideo.load("./assets/sha256/source"),
@@ -108,7 +129,11 @@ test("cleans media observers after synchronous browser failures", async () => {
 
   const eventThenErrorElement = new FakeVideoElement();
   eventThenErrorElement.loadErrorAfterReadiness = new Error("load rejected");
-  const eventThenErrorVideo = new DecodedVideo(eventThenErrorElement, 100);
+  const eventThenErrorVideo = new DecodedVideo({
+    element: eventThenErrorElement,
+    nodeId: 0,
+    readinessTimeoutMilliseconds: 100,
+  });
 
   await assert.rejects(
     eventThenErrorVideo.load("./assets/sha256/source"),
@@ -120,7 +145,11 @@ test("cleans media observers after synchronous browser failures", async () => {
   const cleanupErrorElement = new FakeVideoElement();
   cleanupErrorElement.loadError = new Error("load rejected");
   cleanupErrorElement.releaseError = new Error("release rejected");
-  const cleanupErrorVideo = new DecodedVideo(cleanupErrorElement, 100);
+  const cleanupErrorVideo = new DecodedVideo({
+    element: cleanupErrorElement,
+    nodeId: 0,
+    readinessTimeoutMilliseconds: 100,
+  });
 
   await assert.rejects(
     cleanupErrorVideo.load("./assets/sha256/source"),
@@ -165,10 +194,32 @@ test("releases media bytes and makes disposal terminal", async () => {
   await assert.rejects(video.stage(selection), RuntimeAdapterError);
 });
 
-test("rejects readiness deadlines outside the browser timer budget", () => {
-  assert.throws(() => new DecodedVideo(new FakeVideoElement(), 0), TypeError);
+test("rejects invalid video identity and readiness policy", () => {
   assert.throws(
-    () => new DecodedVideo(new FakeVideoElement(), 86_400_001),
+    () =>
+      new DecodedVideo({
+        element: new FakeVideoElement(),
+        nodeId: -1,
+        readinessTimeoutMilliseconds: 100,
+      }),
+    TypeError,
+  );
+  assert.throws(
+    () =>
+      new DecodedVideo({
+        element: new FakeVideoElement(),
+        nodeId: 0,
+        readinessTimeoutMilliseconds: 0,
+      }),
+    TypeError,
+  );
+  assert.throws(
+    () =>
+      new DecodedVideo({
+        element: new FakeVideoElement(),
+        nodeId: 0,
+        readinessTimeoutMilliseconds: 86_400_001,
+      }),
     TypeError,
   );
 });
@@ -194,8 +245,13 @@ test("derives the materialized source from the Rust-owned bundle layout", () => 
 async function loadedVideo(
   element: FakeVideoElement,
   timeoutMilliseconds = 100,
+  nodeId = 0,
 ): Promise<DecodedVideo> {
-  const video = new DecodedVideo(element, timeoutMilliseconds);
+  const video = new DecodedVideo({
+    element,
+    nodeId,
+    readinessTimeoutMilliseconds: timeoutMilliseconds,
+  });
   const loading = video.load("./assets/sha256/source");
   element.emit("loadeddata");
   await loading;

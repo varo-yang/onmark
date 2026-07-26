@@ -345,6 +345,12 @@ declaration、native audio element，以及 `src`、`duration`、`delay`、`cue`
 fact，不能根据 compiler spelling 选择 CSS 或 motion behavior。ID、class、普通 HTML
 attribute、嵌套 markup、inline style 与 authored overlay text 仍是 presentation input。
 
+普通 `<img src>` 属于 presentation markup，不是 screenplay image element，也不提供
+duration。其本地 AVIF、GIF、JPEG、PNG、SVG 或 WebP bytes 会被冻结进 browser bundle，
+并且必须在捕获前完成 decode；remote URL 与 `srcset` 会被拒绝。嵌套在单个 shot 内的 image
+只属于该 shot 的 projected region；位于所有 shot 之外的 image 会留在仍保有其
+presentation wrapper 的每个 projected region 中。
+
 独立 Render Graph region 的 browser document 只包含 selected shot 及其 owning scene/film
 shell；presentation-global style、motion 与 imported resource 仍是每个 region 的输入。
 authored ID 在 projection 后保持不变；protocol node ID 是 dense unit-local binding key。

@@ -6,5 +6,6 @@ dist/
 /.turbo/
 /.onmark/cache/
 /.onmark/tmp/
+/showcases/renders/
 *.log
 .DS_Store

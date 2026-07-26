@@ -138,6 +138,7 @@ impl WorkerCaptureRequest {
             &self.browser_plan,
             self.bundle.bundle_id(),
             self.profile,
+            &self.visual_execution,
             self.capture_environment,
         )
     }

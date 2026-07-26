@@ -10,6 +10,7 @@ const FRAME_TOLERANCE_SECONDS = 0.000_001;
 
 type VideoEvent = "error" | "loadeddata" | "seeked";
 type ReadinessEvent = Exclude<VideoEvent, "error">;
+type VideoResourcePhase = ReadinessEvent | "frame";
 type FrameCallback = (
   now: number,
   metadata: { readonly mediaTime: number },
@@ -18,21 +19,18 @@ type FrameCallback = (
 interface ReadinessContract {
   readonly event: ReadinessEvent;
   readonly failureMessage: string;
-  readonly pendingResource: string;
   readonly timeoutMessage: string;
 }
 
 const LOAD_READINESS: ReadinessContract = {
   event: "loadeddata",
   failureMessage: "video data failed to load",
-  pendingResource: "video:loadeddata",
   timeoutMessage: "video data did not load before its readiness deadline",
 };
 
 const SEEK_READINESS: ReadinessContract = {
   event: "seeked",
   failureMessage: "video seek failed",
-  pendingResource: "video:seeked",
   timeoutMessage: "video seek did not finish before its readiness deadline",
 };
 
@@ -50,18 +48,29 @@ export interface BrowserVideoElement {
 
 type VideoState = "empty" | "loaded" | "disposed";
 
+/** Browser capability and bounded identity owned by one decoded video. */
+export interface DecodedVideoOptions {
+  readonly element: BrowserVideoElement;
+  readonly nodeId: number;
+  readonly readinessTimeoutMilliseconds: number;
+}
+
 /** One decoded-video resource with exact-frame readiness and terminal cleanup. */
 export class DecodedVideo {
   readonly #element: BrowserVideoElement;
+  readonly #nodeId: number;
   readonly #timeoutMilliseconds: number;
   #pendingFrame: StagedFrame | undefined;
   #presentedMediaTime: number | undefined;
   #state: VideoState = "empty";
 
-  constructor(element: BrowserVideoElement, timeoutMilliseconds: number) {
-    requireReadinessTimeout(timeoutMilliseconds);
+  constructor(options: DecodedVideoOptions) {
+    const { element, nodeId, readinessTimeoutMilliseconds } = options;
+    requireVideoNodeId(nodeId);
+    requireReadinessTimeout(readinessTimeoutMilliseconds);
     this.#element = element;
-    this.#timeoutMilliseconds = timeoutMilliseconds;
+    this.#nodeId = nodeId;
+    this.#timeoutMilliseconds = readinessTimeoutMilliseconds;
   }
 
   /** Loads one materialized source and waits for decoded data. */
@@ -75,6 +84,7 @@ export class DecodedVideo {
       this.#element,
       this.#timeoutMilliseconds,
       LOAD_READINESS,
+      videoResource(this.#nodeId, LOAD_READINESS.event),
     );
     try {
       await readiness.waitAfter(() => {
@@ -108,11 +118,16 @@ export class DecodedVideo {
       );
     }
 
-    const pending = StagedFrame.observe(this.#element, selection);
+    const pending = StagedFrame.observe(
+      this.#element,
+      selection,
+      videoResource(this.#nodeId, "frame"),
+    );
     const readiness = new MediaEventReadiness(
       this.#element,
       this.#timeoutMilliseconds,
       SEEK_READINESS,
+      videoResource(this.#nodeId, SEEK_READINESS.event),
     );
     this.#pendingFrame = pending;
     try {
@@ -231,6 +246,7 @@ class MediaEventReadiness {
   readonly #deadline: ReturnType<typeof setTimeout>;
   readonly #contract: ReadinessContract;
   readonly #element: BrowserVideoElement;
+  readonly #pendingResource: string;
   readonly #promise: Promise<void>;
   readonly #reject: (error: RuntimeAdapterError) => void;
   readonly #resolve: () => void;
@@ -240,9 +256,11 @@ class MediaEventReadiness {
     element: BrowserVideoElement,
     timeoutMilliseconds: number,
     contract: ReadinessContract,
+    pendingResource: string,
   ) {
     this.#element = element;
     this.#contract = contract;
+    this.#pendingResource = pendingResource;
     const pending = Promise.withResolvers<void>();
     this.#promise = pending.promise;
     this.#reject = pending.reject;
@@ -292,7 +310,7 @@ class MediaEventReadiness {
         new RuntimeAdapterError(
           "readinessTimeout",
           this.#contract.timeoutMessage,
-          [this.#contract.pendingResource],
+          [this.#pendingResource],
         ),
       );
     }
@@ -317,6 +335,7 @@ type FrameObservation =
 class StagedFrame {
   readonly #element: BrowserVideoElement;
   readonly #observation: Promise<FrameObservation>;
+  readonly #pendingResource: string;
   readonly #resolve: (observation: FrameObservation) => void;
   readonly #selection: VideoFrameSelection;
   #frameCallback: number | undefined;
@@ -325,9 +344,11 @@ class StagedFrame {
   private constructor(
     element: BrowserVideoElement,
     selection: VideoFrameSelection,
+    pendingResource: string,
   ) {
     this.#element = element;
     this.#selection = selection;
+    this.#pendingResource = pendingResource;
     const pending = Promise.withResolvers<FrameObservation>();
     this.#observation = pending.promise;
     this.#resolve = pending.resolve;
@@ -337,8 +358,9 @@ class StagedFrame {
   static observe(
     element: BrowserVideoElement,
     selection: VideoFrameSelection,
+    pendingResource: string,
   ): StagedFrame {
-    const staged = new StagedFrame(element, selection);
+    const staged = new StagedFrame(element, selection, pendingResource);
     try {
       staged.#requestFrame();
       return staged;
@@ -362,6 +384,7 @@ class StagedFrame {
     const observation = await observedBeforeDeadline(
       this.#observation,
       timeoutMilliseconds,
+      this.#pendingResource,
     );
     if (observation.kind === "failed") {
       throw observation.error;
@@ -439,6 +462,7 @@ class StagedFrame {
 async function observedBeforeDeadline(
   observation: Promise<FrameObservation>,
   timeoutMilliseconds: number,
+  pendingResource: string,
 ): Promise<FrameObservation> {
   let deadline: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<FrameObservation>((resolve) => {
@@ -448,7 +472,7 @@ async function observedBeforeDeadline(
         error: new RuntimeAdapterError(
           "readinessTimeout",
           "decoded video frame did not become ready",
-          ["video-frame"],
+          [pendingResource],
         ),
       });
     }, timeoutMilliseconds);
@@ -459,6 +483,16 @@ async function observedBeforeDeadline(
   } finally {
     clearTimeout(deadline);
   }
+}
+
+function requireVideoNodeId(nodeId: number): void {
+  if (!Number.isSafeInteger(nodeId) || nodeId < 0) {
+    throw new TypeError("video node ID must be a nonnegative safe integer");
+  }
+}
+
+function videoResource(nodeId: number, phase: VideoResourcePhase): string {
+  return `video:${nodeId}:${phase}`;
 }
 
 function requireSelection(selection: VideoFrameSelection): void {

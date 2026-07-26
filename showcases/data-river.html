@@ -1,0 +1,271 @@
+<!doctype html>
+<om-film>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body,
+    om-film,
+    om-scene,
+    om-shot {
+      display: block;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      width: 100%;
+    }
+
+    body {
+      background: #f7f4ee;
+      color: #181d2c;
+      font-family: "Helvetica Neue", Arial, sans-serif;
+    }
+
+    .river {
+      height: 100%;
+      overflow: hidden;
+      position: relative;
+    }
+
+    canvas {
+      height: 100%;
+      inset: 0;
+      position: absolute;
+      width: 100%;
+    }
+
+    .header {
+      align-items: start;
+      display: flex;
+      justify-content: space-between;
+      left: 42px;
+      position: absolute;
+      right: 42px;
+      top: 36px;
+      z-index: 2;
+    }
+
+    .header strong {
+      font-size: clamp(60px, 7vw, 134px);
+      letter-spacing: -0.065em;
+      line-height: 0.85;
+    }
+
+    .header span {
+      font-family: "Courier New", monospace;
+      font-size: 14px;
+      letter-spacing: 0.14em;
+      text-align: right;
+      text-transform: uppercase;
+    }
+
+    .legend {
+      bottom: 36px;
+      display: flex;
+      font-family: "Courier New", monospace;
+      font-size: 13px;
+      gap: 34px;
+      left: 42px;
+      letter-spacing: 0.1em;
+      position: absolute;
+      text-transform: uppercase;
+      z-index: 2;
+    }
+
+    .legend i {
+      border-radius: 50%;
+      display: inline-block;
+      height: 9px;
+      margin-right: 8px;
+      width: 9px;
+    }
+
+    .legend span:nth-child(1) i {
+      background: #ff5a36;
+    }
+    .legend span:nth-child(2) i {
+      background: #6f5cff;
+    }
+    .legend span:nth-child(3) i {
+      background: #00a98f;
+    }
+  </style>
+
+  <om-scene>
+    <om-shot duration="10s">
+      <div class="river">
+        <canvas></canvas>
+        <om-title class="header">
+          <strong>Facts<br />flow forward.</strong>
+          <span>Timeline IR<br />07 / 20</span>
+        </om-title>
+        <div class="legend">
+          <span><i></i>Compile</span>
+          <span><i></i>Capture</span>
+          <span><i></i>Assemble</span>
+        </div>
+      </div>
+    </om-shot>
+  </om-scene>
+
+  <script type="module" data-om-motion>
+    import { combineMotion } from "onmark/authoring";
+    import { gsapMotion } from "onmark/motion/gsap";
+
+    const colors = ["#ff5a36", "#6f5cff", "#00a98f"];
+    const data = [
+      [0.14, 0.2, 0.31, 0.27, 0.45, 0.54, 0.48, 0.67, 0.75],
+      [0.24, 0.38, 0.34, 0.52, 0.47, 0.63, 0.71, 0.69, 0.84],
+      [0.08, 0.12, 0.2, 0.32, 0.29, 0.43, 0.58, 0.64, 0.72],
+    ];
+
+    const chart = {
+      bind(context) {
+        const shot = context.targets.find((target) => target.kind === "shot");
+        const canvas = shot?.element.querySelector("canvas");
+        if (!(canvas instanceof HTMLCanvasElement) || shot === undefined) {
+          return { effects: [], resources: [] };
+        }
+
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+        canvas.width = width;
+        canvas.height = height;
+        const drawing = canvas.getContext("2d");
+        if (drawing === null) {
+          throw new Error("data-river showcase requires a 2D canvas");
+        }
+
+        return {
+          effects: [
+            {
+              apply(frame) {
+                const progress =
+                  (frame.index - shot.interval.start) /
+                  (shot.interval.end - shot.interval.start);
+                drawChart(drawing, width, height, progress);
+              },
+              dispose() {},
+            },
+          ],
+          resources: [],
+        };
+      },
+    };
+
+    const labels = gsapMotion({
+      title({ element, timeline }) {
+        timeline
+          .from(
+            element.querySelector("strong"),
+            {
+              duration: 1.1,
+              ease: "expo.out",
+              opacity: 0,
+              x: -70,
+            },
+            0.15,
+          )
+          .from(
+            element.querySelector("span"),
+            {
+              duration: 0.65,
+              ease: "power3.out",
+              opacity: 0,
+              y: -20,
+            },
+            0.8,
+          );
+      },
+      shot({ element, timeline }) {
+        timeline
+          .from(
+            element.querySelector(".legend"),
+            {
+              duration: 0.8,
+              ease: "power3.out",
+              opacity: 0,
+              y: 22,
+            },
+            1.1,
+          )
+          .to(
+            element.querySelector(".header"),
+            {
+              duration: 1,
+              ease: "expo.in",
+              filter: "blur(12px)",
+              opacity: 0,
+              y: -60,
+            },
+            8.8,
+          );
+      },
+    });
+
+    export const motion = combineMotion(chart, labels);
+
+    function drawChart(drawing, width, height, progress) {
+      drawing.clearRect(0, 0, width, height);
+      drawing.lineCap = "round";
+      drawing.lineJoin = "round";
+
+      const reveal = Math.min(1, progress * 1.5);
+      const left = width * 0.08;
+      const right = width * 0.94;
+      const top = height * 0.31;
+      const bottom = height * 0.82;
+
+      drawing.strokeStyle = "rgb(24 29 44 / 0.1)";
+      drawing.lineWidth = 1;
+      for (let row = 0; row < 6; row += 1) {
+        const y = top + ((bottom - top) * row) / 5;
+        drawing.beginPath();
+        drawing.moveTo(left, y);
+        drawing.lineTo(right, y);
+        drawing.stroke();
+      }
+
+      data.forEach((series, seriesIndex) => {
+        const points = series.map((value, index) => ({
+          x: left + ((right - left) * index) / (series.length - 1),
+          y:
+            bottom -
+            (bottom - top) *
+              (value + Math.sin(progress * 8 + index + seriesIndex) * 0.025),
+        }));
+
+        drawing.save();
+        drawing.beginPath();
+        drawing.rect(
+          left,
+          top - 20,
+          (right - left) * reveal,
+          bottom - top + 40,
+        );
+        drawing.clip();
+        drawing.strokeStyle = colors[seriesIndex];
+        drawing.lineWidth = 12 - seriesIndex * 2;
+        drawing.beginPath();
+        drawing.moveTo(points[0].x, points[0].y);
+        for (let index = 1; index < points.length; index += 1) {
+          const previous = points[index - 1];
+          const point = points[index];
+          const middle = (previous.x + point.x) / 2;
+          drawing.bezierCurveTo(
+            middle,
+            previous.y,
+            middle,
+            point.y,
+            point.x,
+            point.y,
+          );
+        }
+        drawing.stroke();
+        drawing.restore();
+      });
+    }
+  </script>
+</om-film>

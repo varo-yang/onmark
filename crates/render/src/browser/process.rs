@@ -147,24 +147,6 @@ pub enum BrowserCaptureMode {
 }
 
 impl BrowserCaptureMode {
-    /// Selects the capture contract carried by a local browser artifact.
-    ///
-    /// Linux headless shell owns `BeginFrame`; macOS, Windows, ordinary Chrome,
-    /// and Chromium use the portable screenshot path.
-    #[must_use]
-    pub fn for_executable(executable: &Path) -> Self {
-        let name = executable.file_name().and_then(|name| name.to_str());
-        let is_headless_shell = matches!(
-            name,
-            Some("chrome-headless-shell" | "chrome-headless-shell.exe")
-        );
-        if cfg!(target_os = "linux") && is_headless_shell {
-            Self::BeginFrame
-        } else {
-            Self::Screenshot
-        }
-    }
-
     pub(super) const fn uses_begin_frame(self) -> bool {
         matches!(self, Self::BeginFrame)
     }
@@ -623,6 +605,10 @@ mod tests {
 
         assert!(has_argument(&arguments, "--headless=new"));
         assert!(has_argument(&arguments, "--use-angle=swiftshader"));
+        assert!(has_argument(
+            &arguments,
+            "--run-all-compositor-stages-before-draw"
+        ));
         assert!(!has_argument(&arguments, "--no-sandbox"));
     }
 
@@ -641,42 +627,6 @@ mod tests {
         assert!(has_argument(&arguments, "--use-angle=metal"));
         assert!(!has_argument(&arguments, "--use-angle=swiftshader"));
         assert!(!has_argument(&arguments, "--enable-unsafe-swiftshader"));
-    }
-
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn selects_begin_frame_for_linux_headless_shell_names() {
-        for executable in [
-            "/tools/chrome-headless-shell",
-            "C:/tools/chrome-headless-shell.exe",
-        ] {
-            assert_eq!(
-                BrowserCaptureMode::for_executable(Path::new(executable)),
-                BrowserCaptureMode::BeginFrame,
-            );
-        }
-    }
-
-    #[cfg(not(target_os = "linux"))]
-    #[test]
-    fn keeps_non_linux_headless_shell_names_on_portable_capture() {
-        for executable in [
-            "/tools/chrome-headless-shell",
-            "C:/tools/chrome-headless-shell.exe",
-        ] {
-            assert_eq!(
-                BrowserCaptureMode::for_executable(Path::new(executable)),
-                BrowserCaptureMode::Screenshot,
-            );
-        }
-    }
-
-    #[test]
-    fn keeps_ordinary_chrome_on_portable_capture() {
-        assert_eq!(
-            BrowserCaptureMode::for_executable(Path::new("/Applications/Google Chrome")),
-            BrowserCaptureMode::Screenshot,
-        );
     }
 
     #[test]

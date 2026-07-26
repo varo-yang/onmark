@@ -73,9 +73,10 @@ impl<'a> ProjectionBuilder<'a> {
     }
 
     fn project_scene(&mut self, scene: &TimelineScene) -> Result<(), InvalidBrowserPlan> {
-        let Some(interval) = intersection(scene.timing().interval(), self.evaluation) else {
+        let interval = scene.timing().interval();
+        if !interval.intersects(self.evaluation) {
             return Ok(());
-        };
+        }
         let node = self.node(scene.element())?;
         let scene_id = node.id();
         if self.scenes.len() >= MAX_BROWSER_SCENES {
@@ -94,9 +95,10 @@ impl<'a> ProjectionBuilder<'a> {
         shot: &TimelineShot,
         scene_id: BrowserNodeId,
     ) -> Result<(), InvalidBrowserPlan> {
-        let Some(interval) = intersection(shot.timing().interval(), self.evaluation) else {
+        let interval = shot.timing().interval();
+        if !interval.intersects(self.evaluation) {
             return Ok(());
-        };
+        }
         let node = self.node(shot.element())?;
         let shot_id = node.id();
         if self.shots.len() >= MAX_BROWSER_SHOTS {
@@ -159,18 +161,16 @@ impl<'a> ProjectionBuilder<'a> {
         if !interval.intersects(self.evaluation) {
             return Ok(());
         }
-        if !self.evaluation.contains_interval(interval) {
-            return Err(InvalidBrowserPlan::OverlayCrossesEvaluation);
-        }
         let node = self.node(overlay.element())?;
         let overlay = browser_overlay(overlay, node, shot_id)?;
         push_browser_overlay(&mut self.overlays, &mut self.overlay_text_bytes, overlay)
     }
 
     fn project_caption(&mut self, caption: &TimelineCaption) -> Result<(), InvalidBrowserPlan> {
-        let Some(interval) = intersection(caption.interval(), self.evaluation) else {
+        let interval = caption.interval();
+        if !interval.intersects(self.evaluation) {
             return Ok(());
-        };
+        }
         let node = self.synthetic_node()?;
         let caption = browser_caption(caption, node, interval)?;
         push_browser_overlay(&mut self.overlays, &mut self.overlay_text_bytes, caption)
@@ -212,14 +212,6 @@ fn push_browser_overlay(
     }
     overlays.push(overlay);
     Ok(())
-}
-
-fn intersection(left: FrameInterval, right: FrameInterval) -> Option<FrameInterval> {
-    let start = left.start().max(right.start());
-    let end = left.end().min(right.end());
-    (start < end).then(|| {
-        FrameInterval::new(start, end).expect("ordered intersection bounds form an interval")
-    })
 }
 
 fn browser_video(

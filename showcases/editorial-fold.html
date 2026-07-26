@@ -1,0 +1,214 @@
+<!doctype html>
+<om-film>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body,
+    om-film,
+    om-scene,
+    om-shot {
+      display: block;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      width: 100%;
+    }
+
+    body {
+      background: #f1eadb;
+      color: #181713;
+      font-family: "Courier New", monospace;
+    }
+
+    .page {
+      background:
+        linear-gradient(
+          90deg,
+          transparent 49.9%,
+          rgb(24 23 19 / 20%) 50%,
+          transparent 50.1%
+        ),
+        #f1eadb;
+      height: 100%;
+      overflow: hidden;
+      padding: 36px 42px;
+      position: relative;
+    }
+
+    .masthead {
+      align-items: center;
+      border-bottom: 2px solid;
+      display: flex;
+      font-size: 15px;
+      justify-content: space-between;
+      padding-bottom: 14px;
+      text-transform: uppercase;
+    }
+
+    .headline {
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: clamp(118px, 15vw, 286px);
+      font-weight: 400;
+      left: 4%;
+      letter-spacing: -0.055em;
+      line-height: 0.75;
+      margin: 0;
+      position: absolute;
+      top: 18%;
+      width: 92%;
+    }
+
+    .headline em {
+      color: #ff481f;
+      display: inline-block;
+      font-weight: 400;
+    }
+
+    .column {
+      bottom: 42px;
+      font-size: 16px;
+      line-height: 1.55;
+      max-width: 370px;
+      position: absolute;
+      right: 48px;
+    }
+
+    .folio {
+      bottom: 42px;
+      font-size: 86px;
+      font-weight: 600;
+      left: 42px;
+      line-height: 0.8;
+      position: absolute;
+    }
+
+    .rule {
+      background: #181713;
+      height: 2px;
+      left: 0;
+      position: absolute;
+      top: 66%;
+      transform-origin: left center;
+      width: 100%;
+    }
+
+    .fold {
+      background: #181713;
+      height: 150%;
+      left: 50%;
+      position: absolute;
+      top: -25%;
+      transform: translateX(-50%) rotate(10deg);
+      width: 12%;
+      z-index: 4;
+    }
+
+    .accent {
+      background: #ff481f;
+      border-radius: 50%;
+      height: 28vw;
+      left: 50%;
+      mix-blend-mode: multiply;
+      position: absolute;
+      top: 52%;
+      transform: translate(-50%, -50%);
+      width: 28vw;
+    }
+  </style>
+
+  <om-scene>
+    <om-shot duration="8s">
+      <article class="page">
+        <header class="masthead">
+          <span>Onmark Quarterly</span>
+          <span>Frame / Fact / Feeling</span>
+          <span>Vol. 01</span>
+        </header>
+        <div class="accent"></div>
+        <om-title class="headline"
+          >The frame<br />becomes <em>fact.</em></om-title
+        >
+        <div class="rule"></div>
+        <div class="folio">08</div>
+        <p class="column">
+          A screenplay names intent. The compiler resolves time. The browser
+          owns appearance. Every layer stays legible, exact, and free to move.
+        </p>
+        <div class="fold"></div>
+      </article>
+    </om-shot>
+  </om-scene>
+
+  <script type="module" data-om-motion>
+    import { gsapMotion } from "onmark/motion/gsap";
+
+    export const motion = gsapMotion({
+      shot({ element, timeline }) {
+        const headline = element.querySelector(".headline");
+        const fold = element.querySelector(".fold");
+
+        timeline
+          .fromTo(
+            fold,
+            { rotation: 10, xPercent: -750 },
+            { duration: 1.05, ease: "expo.inOut", xPercent: 750 },
+            0,
+          )
+          .fromTo(
+            headline,
+            { clipPath: "inset(0 0 100% 0)", y: 150 },
+            {
+              clipPath: "inset(0 0 0% 0)",
+              duration: 1.15,
+              ease: "expo.out",
+              y: 0,
+            },
+            0.55,
+          )
+          .from(
+            [".masthead", ".folio", ".column"],
+            {
+              duration: 0.7,
+              ease: "power3.out",
+              opacity: 0,
+              stagger: 0.12,
+              y: 30,
+            },
+            1.15,
+          )
+          .fromTo(
+            ".rule",
+            { scaleX: 0 },
+            { duration: 1.2, ease: "expo.inOut", scaleX: 1 },
+            1.35,
+          )
+          .to(
+            ".accent",
+            {
+              duration: 6.5,
+              ease: "sine.inOut",
+              rotation: 35,
+              scale: 1.65,
+              xPercent: 55,
+              yPercent: -25,
+            },
+            1,
+          )
+          .to(
+            ".accent",
+            {
+              duration: 0.9,
+              ease: "expo.in",
+              scale: 8,
+              xPercent: 0,
+              yPercent: 0,
+            },
+            7.05,
+          );
+      },
+    });
+  </script>
+</om-film>

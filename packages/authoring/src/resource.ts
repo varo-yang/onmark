@@ -36,7 +36,9 @@ export interface FontResource extends PresentationResource {
 export function createImageResource(
   options: ImageResourceOptions,
 ): ImageResource {
-  return new OwnedImageResource(options);
+  const element = options.document.createElement("img");
+  element.src = options.source;
+  return new DecodedImageResource(element, options.id, () => element.remove());
 }
 
 /** Creates one font resource installed only after its exact face loads. */
@@ -44,16 +46,37 @@ export function createFontResource(options: FontResourceOptions): FontResource {
   return new OwnedFontResource(options);
 }
 
-class OwnedImageResource implements ImageResource {
+/** Collects static authored images under the runtime readiness boundary. */
+export function authoredImageResources(
+  elements: readonly HTMLImageElement[],
+  reserved: readonly PresentationResource[],
+): readonly PresentationResource[] {
+  const identities = new Set(
+    reserved.filter(({ kind }) => kind === "image").map(({ id }) => id),
+  );
+  let candidate = 0;
+  return elements.map((element) => {
+    while (identities.has(`authored-image-${candidate}`)) {
+      candidate += 1;
+    }
+    const id = `authored-image-${candidate}`;
+    identities.add(id);
+    candidate += 1;
+    return new DecodedImageResource(element, id);
+  });
+}
+
+class DecodedImageResource implements ImageResource {
   readonly element: HTMLImageElement;
   readonly id: string;
   readonly kind = "image" as const;
+  readonly #release: (() => void) | undefined;
   #disposed = false;
 
-  constructor({ document, id, source }: ImageResourceOptions) {
-    this.element = document.createElement("img");
-    this.element.src = source;
+  constructor(element: HTMLImageElement, id: string, release?: () => void) {
+    this.element = element;
     this.id = id;
+    this.#release = release;
   }
 
   async prepare(): Promise<void> {
@@ -68,7 +91,7 @@ class OwnedImageResource implements ImageResource {
     }
     this.#disposed = true;
     this.element.removeAttribute("src");
-    this.element.remove();
+    this.#release?.();
   }
 
   #requireActive(): void {

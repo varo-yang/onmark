@@ -1,0 +1,225 @@
+<!doctype html>
+<om-film>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body,
+    om-film,
+    om-scene,
+    om-shot {
+      display: block;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      width: 100%;
+    }
+
+    body {
+      background: #050505;
+      color: #eee9df;
+      font-family: Georgia, "Times New Roman", serif;
+    }
+
+    .room {
+      background: radial-gradient(
+        ellipse at 72% 38%,
+        #bdb9ae 0 3%,
+        #4b4a46 24%,
+        #111 58%,
+        #030303 82%
+      );
+      height: 100%;
+      overflow: hidden;
+      perspective: 900px;
+      position: relative;
+    }
+
+    .blinds {
+      inset: -25%;
+      mix-blend-mode: multiply;
+      position: absolute;
+      transform: rotate(-18deg);
+    }
+
+    .blinds i {
+      background: rgb(0 0 0 / 82%);
+      display: block;
+      height: 7%;
+      margin-bottom: 4%;
+      width: 140%;
+    }
+
+    .figure {
+      background: #030303;
+      bottom: -8%;
+      clip-path: polygon(38% 0, 62% 0, 69% 20%, 83% 100%, 17% 100%, 31% 20%);
+      filter: blur(1px);
+      height: 78%;
+      position: absolute;
+      right: 17%;
+      width: 25%;
+      z-index: 2;
+    }
+
+    .figure::before {
+      background: #030303;
+      border-radius: 50%;
+      content: "";
+      height: 22%;
+      left: 31%;
+      position: absolute;
+      top: -13%;
+      width: 38%;
+    }
+
+    .smoke {
+      background: radial-gradient(
+        ellipse,
+        rgb(255 255 255 / 24%),
+        transparent 65%
+      );
+      filter: blur(26px);
+      height: 340px;
+      position: absolute;
+      right: 10%;
+      top: 12%;
+      width: 440px;
+    }
+
+    .copy {
+      bottom: 40px;
+      left: 44px;
+      max-width: 650px;
+      position: absolute;
+      z-index: 4;
+    }
+
+    .copy span {
+      color: #d14b37;
+      display: block;
+      font-family: "Courier New", monospace;
+      font-size: 13px;
+      letter-spacing: 0.22em;
+      margin-bottom: 12px;
+      text-transform: uppercase;
+    }
+
+    .copy strong {
+      display: block;
+      font-size: clamp(64px, 8vw, 150px);
+      font-style: italic;
+      font-weight: 400;
+      letter-spacing: -0.055em;
+      line-height: 0.83;
+    }
+
+    .grain {
+      background: repeating-radial-gradient(
+        circle at 17% 23%,
+        rgb(255 255 255 / 10%) 0 1px,
+        transparent 1px 4px
+      );
+      inset: 0;
+      mix-blend-mode: soft-light;
+      opacity: 0.22;
+      pointer-events: none;
+      position: absolute;
+      z-index: 5;
+    }
+  </style>
+
+  <om-scene>
+    <om-shot duration="9s">
+      <div class="room">
+        <div class="blinds">
+          <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+        </div>
+        <div class="smoke"></div>
+        <div class="figure"></div>
+        <om-title class="copy">
+          <span>Noir study / 17</span>
+          <strong>What light<br />doesn’t say.</strong>
+        </om-title>
+        <div class="grain"></div>
+      </div>
+    </om-shot>
+  </om-scene>
+
+  <script type="module" data-om-motion>
+    import { gsapMotion } from "onmark/motion/gsap";
+
+    export const motion = gsapMotion({
+      shot({ element, timeline }) {
+        timeline
+          .from(
+            ".figure",
+            {
+              duration: 1.7,
+              ease: "power3.out",
+              filter: "blur(18px)",
+              opacity: 0,
+              x: 120,
+            },
+            0.2,
+          )
+          .from(
+            ".copy > *",
+            {
+              duration: 1,
+              ease: "expo.out",
+              opacity: 0,
+              stagger: 0.12,
+              x: -60,
+            },
+            0.8,
+          )
+          .to(
+            ".blinds",
+            {
+              duration: 8.5,
+              ease: "sine.inOut",
+              rotation: -8,
+              xPercent: 18,
+              yPercent: -10,
+            },
+            0.3,
+          )
+          .to(
+            ".smoke",
+            {
+              duration: 7.8,
+              ease: "sine.inOut",
+              opacity: 0.7,
+              scale: 1.6,
+              x: -180,
+              y: 90,
+            },
+            1,
+          )
+          .to(
+            ".figure",
+            {
+              duration: 6.5,
+              ease: "sine.inOut",
+              scale: 1.06,
+              x: -60,
+            },
+            1.5,
+          )
+          .to(
+            ".room",
+            {
+              duration: 0.9,
+              ease: "expo.in",
+              filter: "blur(16px) brightness(0.15)",
+              scale: 1.15,
+            },
+            8,
+          );
+      },
+    });
+  </script>
+</om-film>

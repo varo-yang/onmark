@@ -178,13 +178,13 @@ it can enter an encoder or frame artifact.
 
 The boundary is strict:
 
-| Owner                                    | Owns                                                                       |
-| ---------------------------------------- | -------------------------------------------------------------------------- |
-| Screenplay and imported captions         | authored structure, text, media references, cues, local delays             |
-| Rust compiler                            | parsing, normalization, reference resolution, exact timing, Timeline IR    |
-| Runtime                                  | protocol state, frame clock, decoded video readiness, visibility intervals |
-| Authored HTML and motion                  | DOM shape, layout, typography, and browser effects                         |
-| Renderer                                 | materialized asset paths, Chromium, capture, encoding                      |
+| Owner                            | Owns                                                                       |
+| -------------------------------- | -------------------------------------------------------------------------- |
+| Screenplay and imported captions | authored structure, text, media references, cues, local delays             |
+| Rust compiler                    | parsing, normalization, reference resolution, exact timing, Timeline IR    |
+| Runtime                          | protocol state, frame clock, decoded video readiness, visibility intervals |
+| Authored HTML and motion         | DOM shape, layout, typography, and browser effects                         |
+| Renderer                         | materialized asset paths, Chromium, capture, encoding                      |
 
 The presentation receives placements that already contain absolute frame
 intervals. It may decide how a title looks, where a CTA sits, or how a video is
@@ -209,30 +209,39 @@ or derive a new media duration from the DOM.
   unit-local binding key, not a persistent whole-film address.
 - Semantic siblings outside a region are omitted rather than merely hidden, so
   selectors cannot create an undeclared cross-region dependency.
+- When native composition owns the primary video, `bindFilm(plan)` projects that
+  unbound video out of the dense foreground identity before any content binds.
+  The authored `<video>` remains hidden and Chromium never loads or seeks it.
 - Imported captions are the only DOM nodes created by the facade because they
   do not exist in the authored document.
 - The runtime toggles container and content visibility from solved intervals;
   CSS owns layout and visual design.
 
-More precisely, the production adapter binds film, scene, and shot containers
-before content, then calls `bindVideo(placement)`, `bindOverlay(placement)`, and
-the asynchronous `bindExtensions(plan)` once during `load`. An extension returns
+More precisely, the production adapter calls `bindFilm(plan)` to establish the
+complete projection, then binds scene and shot containers before content and
+calls `bindVideo(placement)`, `bindOverlay(placement)`, and the asynchronous
+`bindExtensions(plan)` once during `load`. An extension returns
 the resources it needs prepared and the exact-frame effects it owns. A video
 binding supplies the browser element, its materialized source, visibility
 effect, and terminal cleanup. An overlay binding supplies visibility and
 terminal cleanup. Node identity is complete and canonical within each accepted
 plan. On every `seek`, the runtime first hides videos, selects an admitted source frame from
 the authoritative output frame, presents ready videos, then applies solved
-overlay visibility. Bindings own those effects, not interval arithmetic.
+overlay visibility. A video readiness timeout names its unit-local node and
+phase as `video:<nodeId>:loadeddata`, `video:<nodeId>:seeked`, or
+`video:<nodeId>:frame`. Bindings own those effects, not interval arithmetic.
 
 ## Plan facts, component selection, and props
 
 The current language does **not** have `presents`, `definePresentation`, or a
 separate screenplay-to-presentation props channel. The dynamic facts delivered
 to authored HTML are the Rust-owned `BrowserPlan` facts
-sent by `Load(plan)`: frame rate, evaluation and output intervals, semantic
-structure and ownership, video placements, and title, CTA, or imported-caption
-overlay placements. Stylesheet
+sent by `Load(plan)`: frame rate, the complete solved film interval, evaluation
+and output intervals, semantic structure and ownership, video placements, and
+title, CTA, or imported-caption overlay placements. Structural and overlay
+placements retain their complete solved intervals when they intersect a unit;
+`evaluation` selects frames executed by that unit and `output` selects frames
+it publishes. Stylesheet
 rules and static values imported by the inline module are presentation code,
 not screenplay props.
 
@@ -278,7 +287,10 @@ Three.js, Lottie, or an application-local engine can implement the same
 contract; neither the bundler nor the runtime contains a vendor branch. Each
 GSAP hook receives a semantic element, its compiler-owned duration, and an
 adapter-owned paused timeline measured in local seconds. The adapter seeks that
-timeline with callbacks suppressed and owns terminal cleanup. On each
+timeline with callbacks suppressed, forces rendering even when the requested
+local time equals its current playhead, and owns terminal cleanup. This makes a
+time-zero `.set()` and repeated exact-frame requests observable instead of
+letting GSAP treat them as no-ops. On each
 `Seek(frame)`, effects apply
 in declaration order after solved video and overlay placement, and all returned
 promises resolve before `FrameStaged(frame)`. Effects receive the exact
@@ -288,7 +300,10 @@ even when one cleanup operation fails.
 
 Implementing the lifecycle does not let an arbitrary component claim random
 access. The production adapter has separate conformance for out-of-order WAAPI,
-GSAP, and Three.js playheads and whole-film/partition raw-RGBA equality. Future
+GSAP, and Three.js playheads. A real-process GSAP conformance renders one
+scene-spanning timeline as a whole film and as two independent units, then
+compares their complete raw-RGBA sequences. That proof depends on the Browser
+Plan retaining complete solved intervals across evaluation windows. Future
 adapters require equivalent evidence. Capability is immutable build metadata,
 never inferred from source tokens or screenplay spelling. The bundle manifest
 includes it in canonical identity, and Rust consumes it before Render Graph
@@ -397,12 +412,22 @@ the Rust-owned browser plan. Presentations should not reconstruct native paths,
 read source files, or assume a working directory. The renderer verifies bytes
 before the browser sees them.
 
-The inline motion module may import local AVIF, GIF, JPEG, PNG, SVG, WebP, OTF,
-TTF, WOFF, WOFF2, or a local CSS module that references those formats. The
-bundler copies imported bytes under opaque `resources/` paths and includes them
-in the bounded, content-addressed manifest. A raw relative URL in authored HTML
-or inline `<style>` is not a bundle import. Bundling proves byte identity only;
-browser readiness requires explicit registration:
+Native `<img src>` may reference local AVIF, GIF, JPEG, PNG, SVG, or WebP bytes.
+The bundler freezes those bytes, rewrites the URL to an opaque `resources/`
+path, and retains only the images present in each shot projection. The runtime
+automatically waits for every such authored image to decode. Remote URLs and
+`srcset` are rejected rather than escaping the frozen resource boundary.
+Self-advancing image bytes are rejected at the same boundary: multi-frame GIF,
+APNG, animated WebP or AVIF, and SVG animation, script, event, or embedded-image
+features may not introduce a wall-clock playhead. Animation belongs in an
+Onmark frame effect. This admission applies equally to local `src`, data URLs,
+and image imports.
+
+The inline motion module may additionally import those image formats, OTF, TTF,
+WOFF, WOFF2, or a local CSS module that references them. Raw relative URLs in
+inline `<style>` remain outside the import boundary. Bundling proves byte
+identity for imported resources; dynamically constructed browser resources
+still require explicit registration:
 
 ```ts
 interface PresentationResource {
@@ -439,9 +464,11 @@ satisfy this contract.
 
 `@onmark/authoring` provides `createImageResource({ document, id, source })`
 and `createFontResource({ face, fonts, id })`. The image helper exposes its
-owned element for authored layout and gates readiness on `decode()`. The font
-helper loads the exact `FontFace` before adding it to the supplied
-`FontFaceSet`; a completion after disposal cannot add the face back.
+owned element for dynamically constructed layout and gates readiness on
+`decode()`; static native `<img>` elements receive that lifecycle
+automatically. The font helper loads the exact `FontFace` before adding it to
+the supplied `FontFaceSet`; a completion after disposal cannot add the face
+back.
 
 ## Determinism rules
 

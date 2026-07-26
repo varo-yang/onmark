@@ -12,8 +12,9 @@ use tokio::process::{Child, Command};
 use tokio::sync::mpsc;
 
 use super::error::{EncodeError, EncodeErrorKind};
-use super::layered::{CanonicalFrame, LayeredJob};
+use super::layered::{CanonicalFrame, LayeredJob, LayeredOutput};
 use super::limits::EncodeLimits;
+use super::process::configure_h264_output;
 use crate::{RawRgbaHash, RenderProfile};
 
 const MAX_MEDIA_INPUTS: usize = 64;
@@ -100,22 +101,30 @@ pub(super) fn spawn(
         "pipe:0",
         "-filter_complex",
         &filter,
-        "-map",
-        "[canonical]",
-        "-frames:v",
-        &frames,
-        "-f",
-        "rawvideo",
-        "-pix_fmt",
-        "rgba",
-        "pipe:1",
     ]);
-    if let Some(output) = job.destination.video_path() {
-        configure_video_output(&mut command, output, &frames, video_encoder_threads);
+    match &job.destination {
+        LayeredOutput::Frames => {
+            command
+                .args([
+                    "-map",
+                    "[canonical]",
+                    "-frames:v",
+                    &frames,
+                    "-f",
+                    "rawvideo",
+                    "-pix_fmt",
+                    "rgba",
+                    "pipe:1",
+                ])
+                .stdout(Stdio::piped());
+        }
+        LayeredOutput::Video(output) => {
+            configure_video_output(&mut command, output, &frames, video_encoder_threads);
+            command.stdout(Stdio::null());
+        }
     }
     command
         .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true)
         .spawn()
@@ -135,35 +144,8 @@ fn configure_video_output(
     frames: &str,
     video_encoder_threads: usize,
 ) {
-    let video_encoder_threads = video_encoder_threads.to_string();
-    command
-        .args([
-            "-map",
-            "[encoded]",
-            "-frames:v",
-            frames,
-            "-an",
-            "-c:v",
-            "libx264",
-            "-threads",
-            &video_encoder_threads,
-            "-pix_fmt",
-            "yuv420p",
-            "-movflags",
-            "+faststart",
-            "-colorspace",
-            "bt709",
-            "-color_primaries",
-            "bt709",
-            "-color_trc",
-            "bt709",
-            "-color_range",
-            "tv",
-            "-f",
-            "mp4",
-            "-n",
-        ])
-        .arg(output);
+    command.args(["-map", "[encoded]", "-frames:v", frames]);
+    configure_h264_output(command, output, video_encoder_threads);
 }
 
 fn composition_filter(job: &LayeredJob) -> String {
@@ -172,10 +154,9 @@ fn composition_filter(job: &LayeredJob) -> String {
         append_media_filter(&mut filter, index, media, job.output_frame_rate);
     }
     let base = append_concat_filter(&mut filter, job.media.len());
-    let output = if job.destination.video_path().is_some() {
-        "format=rgba,split=2[canonical][encoded]"
-    } else {
-        "format=rgba[canonical]"
+    let output = match job.destination {
+        LayeredOutput::Video(_) => "format=rgba[encoded]",
+        LayeredOutput::Frames => "format=rgba[canonical]",
     };
     write!(
         filter,
@@ -242,16 +223,19 @@ pub(super) async fn read_frames(
     mut output: tokio::process::ChildStdout,
     frame_bytes: usize,
     frame_count: u64,
-    retains_pixels: bool,
     sender: mpsc::Sender<CanonicalFrame>,
 ) -> io::Result<()> {
-    let receiver_open = if retains_pixels {
-        retain_frames(&mut output, frame_bytes, frame_count, &sender).await?
-    } else {
-        drain_frames(&mut output, frame_bytes, frame_count, &sender).await?
-    };
-    if !receiver_open {
-        return Ok(());
+    for _ in 0..frame_count {
+        let mut pixels = vec![0; frame_bytes];
+        output.read_exact(&mut pixels).await?;
+        let fingerprint = RawRgbaHash::from_bytes(Sha256::digest(&pixels).into());
+        if sender
+            .send(CanonicalFrame::new(pixels.into_boxed_slice(), fingerprint))
+            .await
+            .is_err()
+        {
+            return Ok(());
+        }
     }
 
     let mut trailing = [0];
@@ -262,43 +246,6 @@ pub(super) async fn read_frames(
         ));
     }
     Ok(())
-}
-
-async fn retain_frames(
-    output: &mut tokio::process::ChildStdout,
-    frame_bytes: usize,
-    frame_count: u64,
-    sender: &mpsc::Sender<CanonicalFrame>,
-) -> io::Result<bool> {
-    for _ in 0..frame_count {
-        let mut pixels = vec![0; frame_bytes];
-        output.read_exact(&mut pixels).await?;
-        let fingerprint = RawRgbaHash::from_bytes(Sha256::digest(&pixels).into());
-        let frame = CanonicalFrame::Pixels {
-            bytes: pixels.into_boxed_slice(),
-            fingerprint,
-        };
-        if sender.send(frame).await.is_err() {
-            return Ok(false);
-        }
-    }
-    Ok(true)
-}
-
-async fn drain_frames(
-    output: &mut tokio::process::ChildStdout,
-    frame_bytes: usize,
-    frame_count: u64,
-    sender: &mpsc::Sender<CanonicalFrame>,
-) -> io::Result<bool> {
-    let mut pixels = vec![0; frame_bytes];
-    for _ in 0..frame_count {
-        output.read_exact(&mut pixels).await?;
-        if sender.send(CanonicalFrame::Consumed).await.is_err() {
-            return Ok(false);
-        }
-    }
-    Ok(true)
 }
 
 pub(super) fn frame_bytes(profile: RenderProfile, output: &Path) -> Result<usize, EncodeError> {
@@ -372,6 +319,25 @@ mod tests {
         assert!(
             filter.ends_with("[base][2:v]overlay=shortest=1:format=rgb,format=rgba[canonical]")
         );
+    }
+
+    #[test]
+    fn video_output_does_not_duplicate_frames_onto_stdout() {
+        let rate = FrameRate::new(30, 1).expect("the fixture rate is valid");
+        let job = LayeredJob {
+            media: vec![media("film.mp4", 30, rate)],
+            output_frame_rate: rate.into(),
+            frames: 30,
+            profile: RenderProfile::new(320, 180).expect("the fixture profile is valid"),
+            destination: LayeredOutput::Video(PathBuf::from("output.mp4")),
+            diagnostic_path: PathBuf::from("output.mp4"),
+        };
+
+        let filter = composition_filter(&job);
+
+        assert!(filter.ends_with("[base0][1:v]overlay=shortest=1:format=rgb,format=rgba[encoded]"));
+        assert!(!filter.contains("split="));
+        assert!(!filter.contains("[canonical]"));
     }
 
     fn media(path: &str, frames: u64, rate: FrameRate) -> LayeredMediaInput {

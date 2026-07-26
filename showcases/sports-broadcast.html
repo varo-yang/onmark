@@ -1,0 +1,240 @@
+<!doctype html>
+<om-film>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body,
+    om-film,
+    om-scene,
+    om-shot {
+      display: block;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      width: 100%;
+    }
+
+    body {
+      background: #071a33;
+      color: white;
+      font-family: "Arial Black", "Helvetica Neue", sans-serif;
+    }
+
+    .arena {
+      background:
+        radial-gradient(ellipse at 50% 105%, #2a8d75 0 22%, transparent 23%),
+        radial-gradient(
+          circle at 48% 28%,
+          rgb(87 213 255 / 32%),
+          transparent 32%
+        ),
+        linear-gradient(#071a33, #031020);
+      height: 100%;
+      overflow: hidden;
+      perspective: 1000px;
+      position: relative;
+    }
+
+    .rings {
+      border: 3px solid rgb(107 246 212 / 65%);
+      border-radius: 50%;
+      height: 620px;
+      left: 50%;
+      position: absolute;
+      top: 54%;
+      transform: translate(-50%, -50%) rotateX(66deg);
+      transform-style: preserve-3d;
+      width: 920px;
+    }
+
+    .rings::before,
+    .rings::after {
+      border: 3px solid rgb(107 246 212 / 42%);
+      border-radius: 50%;
+      content: "";
+      inset: 70px;
+      position: absolute;
+    }
+
+    .rings::after {
+      inset: 155px;
+    }
+
+    .ball {
+      background: #ffca35;
+      border-radius: 50%;
+      box-shadow:
+        0 0 0 8px rgb(255 255 255 / 18%),
+        0 0 55px #ffca35;
+      height: 72px;
+      left: 50%;
+      position: absolute;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      width: 72px;
+      z-index: 3;
+    }
+
+    .score {
+      align-items: center;
+      display: flex;
+      font-size: clamp(110px, 14vw, 270px);
+      justify-content: space-between;
+      left: 5%;
+      letter-spacing: -0.08em;
+      line-height: 0.8;
+      position: absolute;
+      right: 5%;
+      top: 13%;
+      z-index: 2;
+    }
+
+    .score small {
+      color: #6bf6d4;
+      font-family: "Courier New", monospace;
+      font-size: 16px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+    }
+
+    .ticker {
+      background: #6bf6d4;
+      bottom: 0;
+      color: #071a33;
+      display: flex;
+      font-family: "Courier New", monospace;
+      font-size: 17px;
+      font-weight: 700;
+      gap: 80px;
+      left: 0;
+      letter-spacing: 0.12em;
+      padding: 15px 0;
+      position: absolute;
+      text-transform: uppercase;
+      white-space: nowrap;
+      width: 220%;
+      z-index: 4;
+    }
+
+    .live {
+      background: #ff3d39;
+      border-radius: 999px;
+      font-family: "Courier New", monospace;
+      font-size: 14px;
+      left: 34px;
+      letter-spacing: 0.15em;
+      padding: 10px 15px;
+      position: absolute;
+      text-transform: uppercase;
+      top: 30px;
+      z-index: 5;
+    }
+  </style>
+
+  <om-scene>
+    <om-shot duration="8s">
+      <div class="arena">
+        <div class="live">Live / exact</div>
+        <div class="rings"></div>
+        <div class="ball"></div>
+        <om-title class="score"
+          ><span>03</span><small>Frame league · 16 / 20</small
+          ><span>02</span></om-title
+        >
+        <div class="ticker">
+          <span>Every frame counts</span><span>No clock drift</span>
+          <span>Canonical replay</span><span>Every frame counts</span>
+        </div>
+      </div>
+    </om-shot>
+  </om-scene>
+
+  <script type="module" data-om-motion>
+    import { gsapMotion } from "onmark/motion/gsap";
+
+    export const motion = gsapMotion({
+      shot({ element, timeline }) {
+        timeline
+          .from(
+            ".rings",
+            {
+              duration: 1.3,
+              ease: "expo.out",
+              opacity: 0,
+              rotationZ: -45,
+              scale: 0.4,
+            },
+            0.1,
+          )
+          .from(
+            ".score > *",
+            {
+              duration: 0.9,
+              ease: "back.out(1.7)",
+              opacity: 0,
+              scale: 1.8,
+              stagger: 0.1,
+            },
+            0.65,
+          )
+          .from(
+            ".live",
+            {
+              duration: 0.55,
+              ease: "power3.out",
+              opacity: 0,
+              x: -35,
+            },
+            1.1,
+          )
+          .to(
+            ".rings",
+            {
+              duration: 6.8,
+              ease: "none",
+              rotationZ: 110,
+              scale: 1.15,
+            },
+            1,
+          )
+          .to(
+            ".ball",
+            {
+              duration: 6.2,
+              ease: "sine.inOut",
+              keyframes: [
+                { x: -360, y: 80 },
+                { x: -120, y: -160 },
+                { x: 260, y: -80 },
+                { x: 360, y: 130 },
+              ],
+              rotation: 720,
+            },
+            1.1,
+          )
+          .to(
+            ".ticker",
+            {
+              duration: 7.8,
+              ease: "none",
+              xPercent: -48,
+            },
+            0,
+          )
+          .to(
+            ".arena",
+            {
+              duration: 0.75,
+              ease: "expo.in",
+              filter: "blur(14px)",
+              scale: 1.2,
+            },
+            7.2,
+          );
+      },
+    });
+  </script>
+</om-film>

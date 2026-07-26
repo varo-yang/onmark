@@ -725,7 +725,8 @@ mod tests {
 
     use super::{
         BundleManifest, CaptureEnvironmentId, InvalidRenderUnit, MAX_AUDIO_TRACKS,
-        MaterializedAsset, RenderAudio, RenderProfile, RenderUnit, WorkerCaptureRequest,
+        MaterializedAsset, RenderAudio, RenderProfile, RenderUnit, VisualExecutionPlan,
+        WorkerCaptureRequest,
     };
     use crate::BrowserCaptureCadence;
 
@@ -811,7 +812,7 @@ mod tests {
     }
 
     #[test]
-    fn scopes_compiler_timing_identity_to_one_random_access_partition() {
+    fn invalidates_partitions_that_observe_complete_film_timing() {
         let before = concat!(
             "<om-film><om-scene>",
             r#"<om-shot duration="1s"><om-title>Opening</om-title></om-shot>"#,
@@ -827,7 +828,7 @@ mod tests {
         let before = partition_artifact_ids(before);
         let after = partition_artifact_ids(after);
 
-        assert_eq!(before[0], after[0]);
+        assert_ne!(before[0], after[0]);
         assert_ne!(before[1], after[1]);
     }
 
@@ -872,6 +873,28 @@ mod tests {
             only_audio(&second).asset().id()
         );
         assert_eq!(artifact_id(&first), artifact_id(&second));
+    }
+
+    #[test]
+    fn visual_execution_path_participates_in_artifact_identity() {
+        let frozen = layered_video_asset(video_dimensions(), true);
+        let timeline = video_timeline(frozen.clone());
+        let materialized = MaterializedAsset::new(frozen, "/tmp/opening.mp4")
+            .expect("the fixture path is present");
+        let layered = RenderUnit::whole_film(
+            &timeline,
+            bundle_manifest_with(PresentationVisualCapability::SeparableOverlay),
+            render_profile(),
+            [materialized],
+        )
+        .expect("the fixture admits native layering");
+        let mut browser = layered.clone();
+        browser.visual_execution = VisualExecutionPlan::browser_composite(
+            browser.bundle_manifest.frame_behavior(),
+            &browser.browser_plan,
+        );
+
+        assert_ne!(artifact_id(&layered), artifact_id(&browser));
     }
 
     #[test]

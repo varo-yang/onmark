@@ -19,6 +19,7 @@ export {
   DecodedVideo,
   materializedVideoSource,
   type BrowserVideoElement,
+  type DecodedVideoOptions,
 } from "./video.js";
 export {
   MAX_PRESENTATION_EFFECTS,

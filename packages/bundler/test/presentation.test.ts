@@ -48,8 +48,30 @@ test("preserves authored DOM and inline styles", async () => {
   });
 });
 
+test("handles deeply nested authored HTML without recursive traversal", async () => {
+  await withWorkspace(async (workspace) => {
+    const depth = 10_000;
+    const document = await authoredDocument(
+      workspace,
+      film(`${"<div>".repeat(depth)}Deep${"</div>".repeat(depth)}`),
+    );
+
+    const artifact = await bundlePresentation({
+      ...options(document, join(workspace, "deep")),
+      maxOutputBytes: 2_000_000,
+    });
+    const bundled = await readFile(
+      join(artifact.directory, BUNDLE_ENTRY_POINT),
+      "utf8",
+    );
+
+    assert.match(bundled, />Deep</u);
+  });
+});
+
 test("excludes compiler-only facts from presentation identity", async () => {
   await withWorkspace(async (workspace) => {
+    await writeFile(join(workspace, "texture.png"), "texture fixture");
     const firstDocument = await authoredDocument(
       workspace,
       [
@@ -58,7 +80,7 @@ test("excludes compiler-only facts from presentation identity", async () => {
         '  <om-music src="first.mp3" gain="50%"></om-music>',
         '  <om-scene><om-shot duration="2s">',
         '    <om-sfx src="first.wav" delay="250ms"></om-sfx>',
-        '    <om-vo src="first-voice.mp3">Narration</om-vo>',
+        '    <om-vo src="first-voice.mp3">Narration <img src="ignored.png"></om-vo>',
         '    <video id="hero" class="media" src="first.mp4" delay="100ms"></video>',
         '    <om-title id="headline" data-delay="authored" cue="reveal">',
         '      Keep <img src="texture.png" alt="texture"> me',
@@ -80,7 +102,7 @@ test("excludes compiler-only facts from presentation identity", async () => {
         '  <om-music src="second.mp3" gain="25%"></om-music>',
         '  <om-scene><om-shot duration="3s">',
         '    <om-sfx src="second.wav" delay="750ms"></om-sfx>',
-        '    <om-vo src="second-voice.mp3">Narration</om-vo>',
+        '    <om-vo src="second-voice.mp3">Narration <img src="ignored.png"></om-vo>',
         '    <video id="hero" class="media" src="second.mp4" delay="200ms"></video>',
         '    <om-title id="headline" data-delay="authored" delay="1s">',
         '      Keep <img src="texture.png" alt="texture"> me',
@@ -106,7 +128,10 @@ test("excludes compiler-only facts from presentation identity", async () => {
     );
     assert.match(html, /<video id="hero" class="media"\s*><\/video>/u);
     assert.match(html, /<om-title id="headline" data-delay="authored"\s*>/u);
-    assert.match(html, /<img src="texture\.png" alt="texture">/u);
+    assert.match(
+      html,
+      /<img src="\.\/resources\/[a-f0-9]{64}\.png" alt="texture">/u,
+    );
   });
 });
 
@@ -324,6 +349,27 @@ test("bundles public motion adapters from the inline module", async () => {
   });
 });
 
+test("bundles the public authoring facade from the inline module", async () => {
+  await withWorkspace(async (workspace) => {
+    const document = await authoredDocument(
+      workspace,
+      film("<om-title>Motion</om-title>"),
+      [
+        'import { combineMotion } from "onmark/authoring";',
+        'import { gsapMotion } from "onmark/motion/gsap";',
+        "const empty = { bind() { return { effects: [], resources: [] }; } };",
+        "export const motion = combineMotion(empty, gsapMotion({}));",
+      ].join("\n"),
+    );
+    const artifact = await bundlePresentation({
+      ...options(document, join(workspace, "bundle")),
+      temporalCapability: "randomAccess",
+    });
+
+    assert.equal(artifact.manifest.temporalCapability, "randomAccess");
+  });
+});
+
 // ── Artifact contract
 
 test("builds deterministic artifacts with capability-owned identity", async () => {
@@ -475,6 +521,182 @@ test("carries imported visual resources into the immutable bundle", async () => 
       options(document, join(workspace, "changed-resource")),
     );
     assert.notEqual(changed.manifest.bundleId, first.manifest.bundleId);
+  });
+});
+
+test("freezes native HTML images within their shot regions", async () => {
+  await withWorkspace(async (workspace) => {
+    await writeFile(join(workspace, "opening.svg"), "<svg>opening</svg>");
+    await writeFile(join(workspace, "closing.png"), "closing image");
+    const document = await authoredDocument(
+      workspace,
+      [
+        "<om-film><om-scene>",
+        '  <om-shot><img src="./opening.svg" alt="Opening"></om-shot>',
+        '  <om-shot><img src="closing.png" alt="Closing"></om-shot>',
+        "</om-scene></om-film>",
+      ].join("\n"),
+    );
+    const artifact = await bundlePresentation({
+      ...options(document, join(workspace, "bundle")),
+      temporalCapability: "randomAccess",
+    });
+
+    const whole = await readFile(
+      join(artifact.directory, BUNDLE_ENTRY_POINT),
+      "utf8",
+    );
+    const imageReferences = [
+      ...whole.matchAll(/\.\/resources\/([a-f0-9]{64}\.(?:png|svg))/gu),
+    ].map((match) => match[1]!);
+    assert.equal(imageReferences.length, 2);
+
+    for (const [index, reference] of imageReferences.entries()) {
+      const region = artifact.regions[index]!;
+      const html = await readFile(
+        join(region.directory, BUNDLE_ENTRY_POINT),
+        "utf8",
+      );
+      const resources = region.manifest.files.filter((file) =>
+        file.path.startsWith("resources/"),
+      );
+      assert.match(html, new RegExp(`src="\\./resources/${reference}"`, "u"));
+      assert.equal(resources.length, 1);
+      assert.equal(resources[0]?.path, `resources/${reference}`);
+    }
+  });
+});
+
+test("rejects unfrozen or unbounded native image inputs", async () => {
+  await withWorkspace(async (workspace) => {
+    const remote = await authoredDocument(
+      workspace,
+      film('<img src="https://example.com/poster.png">'),
+    );
+    await assert.rejects(
+      bundlePresentation(options(remote, join(workspace, "remote"))),
+      (error: unknown) =>
+        error instanceof BundleError && error.kind === "configuration",
+    );
+
+    const responsive = await authoredDocument(
+      workspace,
+      film('<img src="poster.png" srcset="poster@2x.png 2x">'),
+    );
+    await assert.rejects(
+      bundlePresentation(options(responsive, join(workspace, "responsive"))),
+      (error: unknown) =>
+        error instanceof BundleError && error.kind === "configuration",
+    );
+
+    await writeFile(join(workspace, "poster.png"), Buffer.alloc(32));
+    const oversized = await authoredDocument(
+      workspace,
+      film('<img src="poster.png">'),
+    );
+    await assert.rejects(
+      bundlePresentation({
+        ...options(oversized, join(workspace, "oversized")),
+        maxOutputBytes: 16,
+      }),
+      (error: unknown) =>
+        error instanceof BundleError && error.kind === "outputLimit",
+    );
+
+    await writeFile(
+      join(workspace, "animated.svg"),
+      '<svg xmlns="http://www.w3.org/2000/svg"><circle><animate attributeName="r" dur="1s" /></circle></svg>',
+    );
+    const animated = await authoredDocument(
+      workspace,
+      film('<img src="animated.svg">'),
+    );
+    await assert.rejects(
+      bundlePresentation(options(animated, join(workspace, "animated"))),
+      (error: unknown) =>
+        error instanceof BundleError &&
+        error.kind === "configuration" &&
+        error.message.includes("ambient animation"),
+    );
+
+    const inlineAnimation = encodeURIComponent(
+      '<svg xmlns="http://www.w3.org/2000/svg"><animate attributeName="opacity" dur="1s" /></svg>',
+    );
+    const inline = await authoredDocument(
+      workspace,
+      film(`<img src="data:image/svg+xml,${inlineAnimation}">`),
+    );
+    await assert.rejects(
+      bundlePresentation(options(inline, join(workspace, "inline-animation"))),
+      (error: unknown) =>
+        error instanceof BundleError &&
+        error.kind === "configuration" &&
+        error.message.includes("ambient animation"),
+    );
+  });
+});
+
+test("rejects self-advancing raster image containers", async () => {
+  await withWorkspace(async (workspace) => {
+    for (const [index, fixture] of ambientImageFixtures().entries()) {
+      const name = `animated${fixture.extension}`;
+      await writeFile(join(workspace, name), fixture.contents);
+      const document = await authoredDocument(
+        workspace,
+        film(`<img src="${name}">`),
+      );
+
+      await assert.rejects(
+        bundlePresentation(
+          options(document, join(workspace, `bundle-${index}`)),
+        ),
+        (error: unknown) =>
+          error instanceof BundleError &&
+          error.kind === "configuration" &&
+          error.message.includes("ambient animation"),
+      );
+    }
+
+    const disguised = ambientImageFixtures()[0]!;
+    await writeFile(join(workspace, "disguised.jpg"), disguised.contents);
+    const disguisedDocument = await authoredDocument(
+      workspace,
+      film('<img src="disguised.jpg">'),
+    );
+    await assert.rejects(
+      bundlePresentation(
+        options(disguisedDocument, join(workspace, "disguised")),
+      ),
+      (error: unknown) =>
+        error instanceof BundleError &&
+        error.kind === "configuration" &&
+        error.message.includes("ambient animation"),
+    );
+
+    await writeFile(
+      join(workspace, "imported.svg"),
+      '<svg xmlns="http://www.w3.org/2000/svg"><set attributeName="opacity" to="0" /></svg>',
+    );
+    const imported = await authoredDocument(
+      workspace,
+      film(""),
+      [
+        'import image from "./imported.svg";',
+        "export const motion = {",
+        "  bind() {",
+        "    document.body.dataset.image = image;",
+        "    return { effects: [], resources: [] };",
+        "  },",
+        "};",
+      ].join("\n"),
+    );
+    await assert.rejects(
+      bundlePresentation(options(imported, join(workspace, "imported"))),
+      (error: unknown) =>
+        error instanceof BundleError &&
+        error.kind === "configuration" &&
+        error.message.includes("ambient animation"),
+    );
   });
 });
 
@@ -673,6 +895,58 @@ function markingMotion(value: string): string {
     };
   },
 };`;
+}
+
+function ambientImageFixtures(): readonly {
+  readonly contents: Uint8Array;
+  readonly extension: string;
+}[] {
+  return [
+    { extension: ".gif", contents: animatedGif() },
+    { extension: ".png", contents: animatedPng() },
+    { extension: ".webp", contents: animatedWebp() },
+    { extension: ".avif", contents: animatedAvif() },
+  ];
+}
+
+function animatedGif(): Uint8Array {
+  return bytes(
+    "GIF89a",
+    [1, 0, 1, 0, 0x80, 0, 0, 0, 0, 0, 0xff, 0xff, 0xff],
+    gifImageBlock(),
+    gifImageBlock(),
+    [0x3b],
+  );
+}
+
+function animatedPng(): Uint8Array {
+  return bytes(
+    [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a],
+    [0, 0, 0, 8],
+    "acTL",
+    [0, 0, 0, 2, 0, 0, 0, 0],
+    [0, 0, 0, 0],
+  );
+}
+
+function animatedWebp(): Uint8Array {
+  return bytes("RIFF", [4, 0, 0, 0], "WEBP", "ANIM", [0, 0, 0, 0]);
+}
+
+function animatedAvif(): Uint8Array {
+  return bytes([0, 0, 0, 20], "ftyp", "avis", [0, 0, 0, 0], "avis");
+}
+
+function gifImageBlock(): readonly number[] {
+  return [0x2c, 0, 0, 0, 0, 1, 0, 1, 0, 0, 2, 2, 0x44, 1, 0];
+}
+
+function bytes(...parts: readonly (string | readonly number[])[]): Uint8Array {
+  return Uint8Array.from(
+    parts.flatMap((part) =>
+      typeof part === "string" ? [...Buffer.from(part, "ascii")] : [...part],
+    ),
+  );
 }
 
 function bundleIdentity(manifest: BundleManifest): string {

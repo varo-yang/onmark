@@ -26,6 +26,9 @@ import {
 
 /** Maximum exact-frame effects retained by one presentation adapter. */
 export const MAX_PRESENTATION_EFFECTS = 10_000;
+// Decoder work overlaps, but a large plan must not fan out thousands of media
+// operations into one browser turn.
+const MAX_CONCURRENT_VIDEO_OPERATIONS = 4;
 
 /** Immutable overlay placement projected from Timeline IR. */
 export type RuntimeOverlay = RuntimePlan["overlays"][number];
@@ -74,7 +77,8 @@ export interface PresentationExtensions {
 
 /** Browser effects supplied by one presentation entry point. */
 export interface PresentationBindings {
-  bindFilm(node: RuntimeNode): ContainerPresentation;
+  /** Begins one dense DOM projection and binds its film root. */
+  bindFilm(plan: RuntimePlan): ContainerPresentation;
   bindScene(scene: RuntimeScene): ContainerPresentation;
   bindShot(shot: RuntimeShot): ContainerPresentation;
   bindVideo(placement: RuntimeVideo): VideoPresentation;
@@ -133,6 +137,10 @@ interface StagedPresentation {
   readonly frame: RuntimeFrame;
   readonly videos: readonly StagedVideo[];
 }
+
+type VideoWorkOutcome<Output> =
+  | { readonly kind: "completed"; readonly value: Output }
+  | { readonly kind: "failed"; readonly cause: unknown };
 
 type PresentationState =
   | { readonly kind: "empty" }
@@ -300,7 +308,7 @@ export class PresentationRuntimeAdapter implements RuntimeAdapter {
     plan: RuntimePlan,
     structure: PendingStructure,
   ): BoundStructure {
-    const film = this.#bindings.bindFilm(plan.film);
+    const film = this.#bindings.bindFilm(plan);
     structure.film = { placement: plan.film, presentation: film };
     film.setVisible(true);
 
@@ -325,10 +333,11 @@ export class PresentationRuntimeAdapter implements RuntimeAdapter {
   #bindVideos(plan: RuntimePlan, videos: BoundVideo[]): void {
     for (const placement of plan.videos) {
       const presentation = this.#bindings.bindVideo(placement);
-      const resource = new DecodedVideo(
-        presentation.element,
-        this.#readinessTimeoutMilliseconds,
-      );
+      const resource = new DecodedVideo({
+        element: presentation.element,
+        nodeId: placement.node.nodeId,
+        readinessTimeoutMilliseconds: this.#readinessTimeoutMilliseconds,
+      });
       const video = { placement, presentation, resource };
       videos.push(video);
       presentation.setVisible(false);
@@ -379,16 +388,16 @@ function validateFrameEffects(effects: readonly FrameEffect[]): void {
 }
 
 async function loadVideos(videos: readonly BoundVideo[]): Promise<void> {
-  for (const video of videos) {
+  await mapVideoWork(videos, async (video) => {
     await video.resource.load(video.presentation.source);
-  }
+  });
 }
 
 async function stageVideos(
   frame: RuntimeFrame,
   state: LoadedPresentation,
 ): Promise<readonly StagedVideo[]> {
-  const staged: StagedVideo[] = [];
+  const active: StagedVideo[] = [];
   for (const video of state.videos) {
     const selection = videoFrameSelection(
       frame,
@@ -398,13 +407,66 @@ async function stageVideos(
     if (selection === undefined) {
       continue;
     }
-    await video.resource.stage(selection);
-    staged.push({ video, selection });
+    active.push({ video, selection });
   }
+  const staged = await mapVideoWork(active, async (candidate) => {
+    await candidate.video.resource.stage(candidate.selection);
+    return candidate;
+  });
   for (const { video } of staged) {
     video.presentation.setVisible(true);
   }
   return staged;
+}
+
+async function mapVideoWork<Input, Output>(
+  inputs: readonly Input[],
+  operation: (input: Input) => Promise<Output>,
+): Promise<readonly Output[]> {
+  const outcomes: (VideoWorkOutcome<Output> | undefined)[] = Array.from({
+    length: inputs.length,
+  });
+  const pending = inputs.entries();
+
+  async function worker(): Promise<void> {
+    for (;;) {
+      const next = pending.next();
+      if (next.done) {
+        return;
+      }
+      const [index, input] = next.value;
+      try {
+        outcomes[index] = {
+          kind: "completed",
+          value: await operation(input),
+        };
+      } catch (error) {
+        outcomes[index] = { kind: "failed", cause: error };
+      }
+    }
+  }
+
+  const workers = Array.from(
+    { length: Math.min(inputs.length, MAX_CONCURRENT_VIDEO_OPERATIONS) },
+    worker,
+  );
+  await Promise.all(workers);
+  return outcomes.map(requireVideoWorkOutcome);
+}
+
+function requireVideoWorkOutcome<Output>(
+  outcome: VideoWorkOutcome<Output> | undefined,
+): Output {
+  if (outcome === undefined) {
+    throw new RuntimeAdapterError(
+      "operation",
+      "browser video work completed without one of its results",
+    );
+  }
+  if (outcome.kind === "failed") {
+    throw outcome.cause;
+  }
+  return outcome.value;
 }
 
 async function confirmVideos(videos: readonly StagedVideo[]): Promise<void> {

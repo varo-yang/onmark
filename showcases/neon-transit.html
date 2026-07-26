@@ -1,0 +1,221 @@
+<!doctype html>
+<om-film>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body,
+    om-film,
+    om-scene,
+    om-shot {
+      display: block;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      width: 100%;
+    }
+
+    body {
+      background: #05040a;
+      color: #f5f4ff;
+      font-family: "Avenir Next", "Helvetica Neue", sans-serif;
+    }
+
+    .space {
+      height: 100%;
+      overflow: hidden;
+      perspective: 900px;
+      position: relative;
+      width: 100%;
+    }
+
+    .tunnel {
+      height: 100%;
+      left: 50%;
+      position: absolute;
+      top: 50%;
+      transform-style: preserve-3d;
+      width: 100%;
+    }
+
+    .gate {
+      border: 3px solid;
+      border-image: linear-gradient(135deg, #00f0ff, #ff2ad4, #8dff52) 1;
+      height: 58vh;
+      left: 50%;
+      position: absolute;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      width: 58vh;
+    }
+
+    .gate:nth-child(1) {
+      transform: translate(-50%, -50%) translateZ(-900px);
+    }
+    .gate:nth-child(2) {
+      transform: translate(-50%, -50%) translateZ(-700px) rotate(8deg);
+    }
+    .gate:nth-child(3) {
+      transform: translate(-50%, -50%) translateZ(-500px) rotate(16deg);
+    }
+    .gate:nth-child(4) {
+      transform: translate(-50%, -50%) translateZ(-300px) rotate(24deg);
+    }
+    .gate:nth-child(5) {
+      transform: translate(-50%, -50%) translateZ(-100px) rotate(32deg);
+    }
+    .gate:nth-child(6) {
+      transform: translate(-50%, -50%) translateZ(100px) rotate(40deg);
+    }
+
+    .horizon {
+      background:
+        linear-gradient(rgb(0 240 255 / 35%) 1px, transparent 1px),
+        linear-gradient(90deg, rgb(0 240 255 / 35%) 1px, transparent 1px);
+      background-size: 70px 70px;
+      bottom: -45%;
+      height: 100%;
+      left: -20%;
+      position: absolute;
+      transform: rotateX(72deg);
+      transform-origin: center top;
+      width: 140%;
+    }
+
+    .copy {
+      left: 50%;
+      position: absolute;
+      text-align: center;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      width: 90%;
+      z-index: 3;
+    }
+
+    .copy small {
+      color: #8dff52;
+      display: block;
+      font-size: 18px;
+      letter-spacing: 0.34em;
+      margin-bottom: 18px;
+      text-transform: uppercase;
+    }
+
+    .copy h1 {
+      font-size: clamp(80px, 11vw, 210px);
+      letter-spacing: -0.075em;
+      line-height: 0.82;
+      margin: 0;
+      text-transform: uppercase;
+    }
+
+    .copy h1 span {
+      color: transparent;
+      -webkit-text-stroke: 2px #f5f4ff;
+    }
+
+    .flare {
+      background: #ff2ad4;
+      border-radius: 50%;
+      box-shadow: 0 0 90px 45px #ff2ad4;
+      height: 5px;
+      left: 50%;
+      opacity: 0.7;
+      position: absolute;
+      top: 50%;
+      width: 5px;
+    }
+  </style>
+
+  <om-scene>
+    <om-shot duration="9s">
+      <div class="space">
+        <div class="horizon"></div>
+        <div class="tunnel">
+          <i class="gate"></i><i class="gate"></i><i class="gate"></i>
+          <i class="gate"></i><i class="gate"></i><i class="gate"></i>
+        </div>
+        <div class="flare"></div>
+        <om-title class="copy">
+          <small>Deterministic velocity</small>
+          <h1>Enter the<br /><span>exact frame</span></h1>
+        </om-title>
+      </div>
+    </om-shot>
+  </om-scene>
+
+  <script type="module" data-om-motion>
+    import { gsapMotion } from "onmark/motion/gsap";
+
+    export const motion = gsapMotion({
+      shot({ element, timeline }) {
+        const gates = element.querySelectorAll(".gate");
+
+        timeline
+          .from(
+            ".copy h1",
+            {
+              duration: 1.25,
+              ease: "expo.out",
+              filter: "blur(20px)",
+              scale: 2.2,
+              z: -400,
+            },
+            0.15,
+          )
+          .from(
+            ".copy small",
+            {
+              duration: 0.8,
+              ease: "power3.out",
+              letterSpacing: "1em",
+              opacity: 0,
+            },
+            0.8,
+          )
+          .to(
+            gates,
+            {
+              duration: 8.7,
+              ease: "none",
+              rotationZ: "+=155",
+              stagger: 0.03,
+              z: "+=1350",
+            },
+            0,
+          )
+          .to(
+            ".horizon",
+            {
+              backgroundPosition: "0 420px",
+              duration: 8.7,
+              ease: "none",
+            },
+            0,
+          )
+          .to(
+            ".flare",
+            {
+              duration: 6,
+              ease: "power2.in",
+              scale: 32,
+            },
+            2.2,
+          )
+          .to(
+            ".copy",
+            {
+              duration: 1.1,
+              ease: "expo.in",
+              filter: "blur(18px)",
+              opacity: 0,
+              scale: 4,
+            },
+            7.7,
+          );
+      },
+    });
+  </script>
+</om-film>

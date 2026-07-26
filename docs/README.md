@@ -4,18 +4,19 @@ English documents are the normative project-facing specification. Chinese
 documents mirror the same decisions and may retain fuller design rationale.
 Semantic divergence between the two languages is a documentation bug.
 
-| Document | Purpose |
-| --- | --- |
-| [`en/rust-style-guide.md`](en/rust-style-guide.md) | The code constitution for Rust crates |
-| [`zh-CN/rust-style-guide.md`](zh-CN/rust-style-guide.md) | Chinese mirror |
-| [`en/typescript-style-guide.md`](en/typescript-style-guide.md) | The code constitution for TypeScript and JavaScript |
-| [`zh-CN/typescript-style-guide.md`](zh-CN/typescript-style-guide.md) | 中文 TypeScript/JavaScript 代码宪法 |
-| [`en/presentation-contract.md`](en/presentation-contract.md) | Browser presentation authoring contract |
-| [`zh-CN/presentation-contract.md`](zh-CN/presentation-contract.md) | 浏览器 presentation authoring 合约 |
-| [`en/architecture.md`](en/architecture.md) | Current architecture, execution model, and deferred work |
-| [`zh-CN/architecture.md`](zh-CN/architecture.md) | 中文架构设计与完整渲染链路 |
-| [`en/language-specification.md`](en/language-specification.md) | Screenplay language semantics and diagnostics |
-| [`zh-CN/language-specification.md`](zh-CN/language-specification.md) | 剧本语言语义、求时规则与诊断规范 |
+| Document                                                                 | Purpose                                                       |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------- |
+| [`en/rust-style-guide.md`](en/rust-style-guide.md)                       | The code constitution for Rust crates                         |
+| [`zh-CN/rust-style-guide.md`](zh-CN/rust-style-guide.md)                 | Chinese mirror                                                |
+| [`en/typescript-style-guide.md`](en/typescript-style-guide.md)           | The code constitution for TypeScript and JavaScript           |
+| [`zh-CN/typescript-style-guide.md`](zh-CN/typescript-style-guide.md)     | 中文 TypeScript/JavaScript 代码宪法                           |
+| [`en/presentation-contract.md`](en/presentation-contract.md)             | Browser presentation authoring contract                       |
+| [`zh-CN/presentation-contract.md`](zh-CN/presentation-contract.md)       | 浏览器 presentation authoring 合约                            |
+| [`en/architecture.md`](en/architecture.md)                               | Current architecture, execution model, and deferred work      |
+| [`zh-CN/architecture.md`](zh-CN/architecture.md)                         | 中文架构设计与完整渲染链路                                    |
+| [`en/language-specification.md`](en/language-specification.md)           | Screenplay language semantics and diagnostics                 |
+| [`zh-CN/language-specification.md`](zh-CN/language-specification.md)     | 剧本语言语义、求时规则与诊断规范                              |
+| [`en/competitive-pipeline-review.md`](en/competitive-pipeline-review.md) | Audited HyperFrames, Remotion, and Onmark pipeline comparison |
 
 Current audited baseline: Rust 1.97.0, language edition 2024, style edition 2024; TypeScript 7.0.2, Node.js 26.4.0, pnpm 11.9.0 (2026-07-11).
 

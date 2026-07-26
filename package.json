@@ -21,8 +21,8 @@
   "scripts": {
     "generate": "cargo xtask schema",
     "generate:check": "cargo xtask schema --check",
-    "format": "prettier --write \"packages/**/*.{ts,js,mjs,json}\" \"scripts/**/*.{js,mjs,json}\" \"conformance/browser/**/*.{ts,js,mjs,json,css,html}\" \"*.{js,mjs,json}\" \".github/workflows/*.{yml,yaml}\" pnpm-workspace.yaml",
-    "format:check": "prettier --check \"packages/**/*.{ts,js,mjs,json}\" \"scripts/**/*.{js,mjs,json}\" \"conformance/browser/**/*.{ts,js,mjs,json,css,html}\" \"*.{js,mjs,json}\" \".github/workflows/*.{yml,yaml}\" pnpm-workspace.yaml",
+    "format": "prettier --write \"packages/**/*.{ts,js,mjs,json}\" \"scripts/**/*.{js,mjs,json}\" \"conformance/browser/**/*.{ts,js,mjs,json,css,html}\" \"showcases/**/*.{html,json,md}\" \"*.{js,mjs,json}\" \".github/workflows/*.{yml,yaml}\" pnpm-workspace.yaml",
+    "format:check": "prettier --check \"packages/**/*.{ts,js,mjs,json}\" \"scripts/**/*.{js,mjs,json}\" \"conformance/browser/**/*.{ts,js,mjs,json,css,html}\" \"showcases/**/*.{html,json,md}\" \"*.{js,mjs,json}\" \".github/workflows/*.{yml,yaml}\" pnpm-workspace.yaml",
     "lint": "oxlint packages scripts conformance/browser --ignore-pattern \"**/node_modules/**\" --ignore-pattern \"packages/runtime/src/generated/**\" --deny-warnings && node scripts/typescript/shape.mjs",
     "test": "pnpm --recursive test && node --test scripts/release/npm/test/*.test.mjs",
     "typecheck": "pnpm --recursive typecheck"

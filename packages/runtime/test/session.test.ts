@@ -21,6 +21,7 @@ import {
 const plan: BrowserPlan = {
   timelineVersion: 1,
   frameRate: { numerator: 30, denominator: 1 },
+  timeline: { start: 0, end: 30 },
   evaluation: { start: 10, end: 20 },
   output: { start: 10, end: 20 },
   film: { nodeId: 0, authoredId: "film" },
@@ -326,6 +327,7 @@ test("takes ownership of plan facts and makes disposal terminal", async () => {
   const mutablePlan = structuredClone(plan);
 
   await session.dispatch(request(1, { type: "load", plan: mutablePlan }));
+  mutablePlan.timeline.end = 21;
   mutablePlan.evaluation.start = 12;
   await session.dispatch(request(2, { type: "prepare", evaluationStart: 10 }));
   adapter.disposeError = new RuntimeAdapterError(
@@ -342,7 +344,25 @@ test("takes ownership of plan facts and makes disposal terminal", async () => {
   assert.deepEqual(adapter.loadedPlan, plan);
 });
 
+test("retains complete structural timing across an evaluation window", async () => {
+  const projected = structuredClone(plan);
+  projected.scenes[0]!.interval = { start: 0, end: 30 };
+  projected.shots[0]!.interval = { start: 0, end: 30 };
+  firstOverlay(projected).interval = { start: 5, end: 25 };
+  const adapter = new RecordingAdapter();
+  const session = new RuntimeSession(adapter);
+
+  const loaded = await session.dispatch(
+    request(1, { type: "load", plan: projected }),
+  );
+
+  assert.equal(loaded.event.type, "loaded");
+  assert.deepEqual(adapter.loadedPlan, projected);
+});
+
 test("rejects interval relationships outside the browser plan contract", async () => {
+  const escapedEvaluation = structuredClone(plan);
+  escapedEvaluation.timeline = { start: 11, end: 20 };
   const reversedEvaluation = structuredClone(plan);
   reversedEvaluation.evaluation = { start: 20, end: 10 };
   const reversedOutput = structuredClone(plan);
@@ -357,6 +377,7 @@ test("rejects interval relationships outside the browser plan contract", async (
   escapedVideo.shots[0]!.interval = { start: 13, end: 17 };
 
   for (const invalidPlan of [
+    escapedEvaluation,
     reversedEvaluation,
     reversedOutput,
     emptyOutput,
@@ -429,7 +450,9 @@ test("rejects invalid browser overlay facts before adapter loading", async () =>
   const emptyOverlay = structuredClone(plan);
   firstOverlay(emptyOverlay).interval = { start: 12, end: 12 };
   const escapedOverlay = structuredClone(plan);
-  firstOverlay(escapedOverlay).interval = { start: 9, end: 18 };
+  firstOverlay(escapedOverlay).interval = { start: 9, end: 31 };
+  const unrelatedOverlay = structuredClone(plan);
+  firstOverlay(unrelatedOverlay).interval = { start: 0, end: 5 };
   const duplicateComponent = structuredClone(plan);
   duplicateComponent.overlays.push({ ...firstOverlay(duplicateComponent) });
   const noncanonicalComponent = structuredClone(plan);
@@ -442,6 +465,7 @@ test("rejects invalid browser overlay facts before adapter loading", async () =>
   for (const invalidPlan of [
     emptyOverlay,
     escapedOverlay,
+    unrelatedOverlay,
     duplicateComponent,
     noncanonicalComponent,
   ]) {

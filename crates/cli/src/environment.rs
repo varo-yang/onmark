@@ -8,6 +8,8 @@ use std::error::Error;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
+use onmark_render::BrowserCaptureMode;
+
 use crate::arguments::RenderArgs;
 use crate::browser_install::{self, BrowserInstallError};
 use crate::bundler::BundlerProcess;
@@ -27,7 +29,7 @@ const MACOS_BROWSERS: &[&str] = &[
 /// Validated browser, `FFmpeg`, ffprobe, and bundler paths for one command.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct Executables {
-    pub(super) browser: PathBuf,
+    pub(super) browser: BrowserExecutable,
     pub(super) bundler: BundlerProcess,
     pub(super) ffmpeg: PathBuf,
     pub(super) ffprobe: PathBuf,
@@ -49,9 +51,31 @@ impl Executables {
     }
 }
 
-async fn browser(requested: Option<&Path>) -> Result<PathBuf, EnvironmentError> {
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct BrowserExecutable {
+    pub(super) capture_mode: BrowserCaptureMode,
+    pub(super) path: PathBuf,
+}
+
+impl BrowserExecutable {
+    fn explicit(path: PathBuf) -> Self {
+        Self {
+            capture_mode: BrowserCaptureMode::Screenshot,
+            path,
+        }
+    }
+
+    fn managed(path: PathBuf) -> Self {
+        Self {
+            capture_mode: managed_capture_mode(),
+            path,
+        }
+    }
+}
+
+async fn browser(requested: Option<&Path>) -> Result<BrowserExecutable, EnvironmentError> {
     if let Some(requested) = requested {
-        return locate("browser", requested);
+        return locate("browser", requested).map(BrowserExecutable::explicit);
     }
 
     match (
@@ -64,16 +88,26 @@ async fn browser(requested: Option<&Path>) -> Result<PathBuf, EnvironmentError> 
             let browser_path = browser_install::provision(&provisioner, &entry)
                 .await
                 .map_err(EnvironmentError::Provision)?;
-            return locate("browser", &browser_path);
+            return locate("browser", &browser_path).map(BrowserExecutable::managed);
         }
         (None, None) => {}
         _ => return Err(EnvironmentError::IncompleteBrowserProvisioner),
     }
 
-    default_browser().ok_or_else(|| EnvironmentError::Missing {
-        role: "browser",
-        requested: PathBuf::from(default_browser_name()),
-    })
+    default_browser()
+        .map(BrowserExecutable::managed)
+        .ok_or_else(|| EnvironmentError::Missing {
+            role: "browser",
+            requested: PathBuf::from(default_browser_name()),
+        })
+}
+
+const fn managed_capture_mode() -> BrowserCaptureMode {
+    if cfg!(target_os = "linux") {
+        BrowserCaptureMode::BeginFrame
+    } else {
+        BrowserCaptureMode::Screenshot
+    }
 }
 
 fn bundler(requested: &Path) -> Result<BundlerProcess, EnvironmentError> {
@@ -214,9 +248,39 @@ fn executable_path(requested: &Path) -> Option<PathBuf> {
         return is_executable_file(requested).then(|| requested.to_owned());
     }
     let path = env::var_os("PATH")?;
-    env::split_paths(&path)
-        .map(|directory| directory.join(requested))
-        .find(|candidate| is_executable_file(candidate))
+    env::split_paths(&path).find_map(|directory| executable_in_directory(&directory, requested))
+}
+
+fn executable_in_directory(directory: &Path, requested: &Path) -> Option<PathBuf> {
+    let candidate = directory.join(requested);
+    if is_executable_file(&candidate) {
+        return Some(candidate);
+    }
+
+    #[cfg(target_os = "windows")]
+    if requested.extension().is_none() {
+        for extension in windows_executable_extensions() {
+            let mut candidate = candidate.clone();
+            candidate.set_extension(extension);
+            if is_executable_file(&candidate) {
+                return Some(candidate);
+            }
+        }
+    }
+
+    None
+}
+
+#[cfg(target_os = "windows")]
+fn windows_executable_extensions() -> Vec<String> {
+    env::var("PATHEXT")
+        .unwrap_or_else(|_| String::from(".COM;.EXE;.BAT;.CMD"))
+        .split(';')
+        .filter_map(|extension| {
+            let extension = extension.trim().trim_start_matches('.');
+            (!extension.is_empty()).then(|| extension.to_owned())
+        })
+        .collect()
 }
 
 #[cfg(unix)]
@@ -236,7 +300,11 @@ fn is_executable_file(path: &Path) -> bool {
 mod tests {
     use std::path::Path;
 
-    use super::{default_browser_candidates, executable_path};
+    use onmark_render::BrowserCaptureMode;
+
+    use super::{
+        BrowserExecutable, default_browser_candidates, executable_path, managed_capture_mode,
+    };
 
     #[test]
     fn accepts_an_explicit_existing_file() {
@@ -248,8 +316,45 @@ mod tests {
         assert!(executable_path(Path::new("definitely-not-an-onmark-tool")).is_none());
     }
 
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn resolves_path_commands_through_windows_executable_extensions() {
+        let current_executable = std::env::current_exe().expect("the test executable has a path");
+        let directory = current_executable
+            .parent()
+            .expect("the test executable has a parent directory");
+        let command = current_executable
+            .file_stem()
+            .map(Path::new)
+            .expect("the test executable has a file stem");
+
+        assert_eq!(
+            super::executable_in_directory(directory, command),
+            Some(current_executable),
+        );
+    }
+
     #[test]
     fn local_browser_discovery_has_a_platform_default() {
         assert!(!default_browser_candidates().is_empty());
+    }
+
+    #[test]
+    fn explicit_browser_paths_never_invent_capture_capabilities() {
+        let browser =
+            BrowserExecutable::explicit(Path::new("/tools/chrome-headless-shell").to_owned());
+
+        assert_eq!(browser.capture_mode, BrowserCaptureMode::Screenshot);
+    }
+
+    #[test]
+    fn managed_browser_artifacts_own_the_platform_capture_contract() {
+        let expected = if cfg!(target_os = "linux") {
+            BrowserCaptureMode::BeginFrame
+        } else {
+            BrowserCaptureMode::Screenshot
+        };
+
+        assert_eq!(managed_capture_mode(), expected);
     }
 }

@@ -86,6 +86,7 @@ export interface BrowserPlan {
    * @maxItems 10000
    */
   shots: BrowserShot[];
+  timeline: WireInterval;
   timelineVersion: 1;
   /**
    * @maxItems 10000
@@ -124,14 +125,14 @@ export interface BrowserOverlay {
   text: string;
 }
 /**
- * One scene container projected for the current evaluation interval.
+ * One scene container intersecting this unit, with its complete Timeline interval.
  */
 export interface BrowserScene {
   interval: WireInterval;
   node: BrowserNode;
 }
 /**
- * One shot container projected for the current evaluation interval.
+ * One shot container intersecting this unit, with its complete Timeline interval.
  */
 export interface BrowserShot {
   interval: WireInterval;

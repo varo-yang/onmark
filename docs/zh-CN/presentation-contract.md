@@ -159,13 +159,13 @@ frame artifact 前就会被丢弃。
 
 边界必须清楚：
 
-| Owner                                    | Owns                                                                |
-| ---------------------------------------- | ------------------------------------------------------------------- |
-| Screenplay 与导入字幕                    | authored 结构、文本、素材引用、cue、局部 delay                      |
-| Rust compiler                            | parse、normalize、reference resolution、精确求时、Timeline IR       |
-| Runtime                                  | protocol 状态、frame clock、视频解码 readiness、visibility interval |
-| Authored HTML 与 motion                  | DOM shape、layout、字体与 browser effect                            |
-| Renderer                                 | materialized asset path、Chromium、capture、encoding                |
+| Owner                   | Owns                                                                |
+| ----------------------- | ------------------------------------------------------------------- |
+| Screenplay 与导入字幕   | authored 结构、文本、素材引用、cue、局部 delay                      |
+| Rust compiler           | parse、normalize、reference resolution、精确求时、Timeline IR       |
+| Runtime                 | protocol 状态、frame clock、视频解码 readiness、visibility interval |
+| Authored HTML 与 motion | DOM shape、layout、字体与 browser effect                            |
+| Renderer                | materialized asset path、Chromium、capture、encoding                |
 
 presentation 收到的 placement 已经包含绝对帧区间。它可以决定 title 长什么样、CTA 放在哪里、video 怎么被 CSS 布局；它不能把 title 提前、延长 overlay、重新解释
 `delay`，也不能从 DOM 里重新推导媒体时长。
@@ -185,25 +185,33 @@ presentation 收到的 placement 已经包含绝对帧区间。它可以决定 t
   selector；protocol `nodeId` 只是 unit-local binding key，不是持久 whole-film address；
 - region 外的 semantic sibling 会被省略而不是仅仅隐藏，因此 selector 无法制造未声明的
   cross-region dependency；
+- native composition 拥有 primary video 时，`bindFilm(plan)` 会在任何 content
+  binding 之前把该 video 从 dense foreground identity 中投影掉；authored
+  `<video>` 保持隐藏，Chromium 不会加载或 seek 它；
 - 导入 caption 是 facade 唯一创建的 DOM node，因为它不在 authored document 中；
 - runtime 根据已求解 interval 切换 container 与 content visibility，CSS 独占 layout
   与视觉设计。
 
-更精确地说，production adapter 会先绑定 film、scene、shot container，再在 `load` 时
-调用 `bindVideo(placement)`、`bindOverlay(placement)` 与异步的
+更精确地说，production adapter 会先调用 `bindFilm(plan)` 建立完整 projection，再绑定
+scene、shot container，并在 `load` 时调用 `bindVideo(placement)`、
+`bindOverlay(placement)` 与异步的
 `bindExtensions(plan)`。extension 返回其待准备 resource 和拥有的精确逐帧 effect。video binding 提供浏览器 element、已 materialize 的 source、visibility effect
 和终止性 cleanup；overlay binding 提供 visibility 与终止性 cleanup。compiler-owned
 node identity 在每个 projection 内形成独立的 dense unit-local 顺序；跨 projection 的语义身份由
 authored ID 承担。每次 `seek` 时，runtime 先隐藏 video，再根据权威 output frame 选择已准入的
 source frame、呈现 ready video，最后应用已求解 overlay 的 visibility。
+video readiness timeout 以 `video:<nodeId>:loadeddata`、
+`video:<nodeId>:seeked` 或 `video:<nodeId>:frame` 指出 unit-local node 与 phase。
 binding 拥有效果，不拥有 interval arithmetic。
 
 ## Plan facts、组件选择与 props
 
 当前语言**没有** `presents`、`definePresentation`，也没有独立的 screenplay 到
 presentation props 通道。authored HTML 收到的动态事实只有 `Load(plan)` 传入的
-Rust-owned `BrowserPlan`：帧率、evaluation/output interval、semantic structure
-与 ownership、video placement，以及 title、CTA 或导入 caption 的 overlay placement。
+Rust-owned `BrowserPlan`：帧率、完整 solved film interval、evaluation/output interval、
+semantic structure 与 ownership、video placement，以及 title、CTA 或导入 caption 的
+overlay placement。与 unit 相交的 structure 与 overlay 会保留完整 solved interval；
+`evaluation` 只选择该 unit 执行的 frame，`output` 只选择其发布的 frame。
 stylesheet rule 与 inline module 静态 import 的值都是 presentation code，不是
 screenplay props。
 
@@ -238,16 +246,20 @@ conformance artifact，仍要求显式 capability。
 GSAP timeline，但不让 GSAP 进入 runtime 或 authoring。Three.js、Lottie 或应用本地引擎都可
 实现同一 contract；bundler 与 runtime 不包含 vendor branch。每个 GSAP hook 只收到 semantic element、compiler-owned
 duration，以及一条由 adapter 拥有、以局部秒计量的 paused timeline；adapter 在 seek 时
-抑制 callback 并拥有 terminal cleanup。每次 `Seek(frame)` 中，effect 会在 solved video 与 overlay placement
+抑制 callback，而且即使请求的 local time 与当前 playhead 相同也会强制 render，并拥有
+terminal cleanup。这样零时刻 `.set()` 与重复的 exact-frame 请求不会被 GSAP 当作 no-op。
+每次 `Seek(frame)` 中，effect 会在 solved video 与 overlay placement
 之后按声明顺序 apply，所有返回 promise 都必须在 `FrameStaged(frame)`
 前完成。effect 只获得精确 immutable `RuntimeFrame`，不会得到 scheduler 或 mutable
 timeline。effect 按所有权逆序释放；单个 cleanup 失败后仍会尝试 dispose 全部 effect。
 
 实现这条 lifecycle 并不会让任意 component 自动取得 random access。production adapter
-另有 WAAPI、GSAP、Three.js 乱序 playhead 与 whole-film/partition raw-RGBA 等价
-conformance；未来 adapter 也必须提供同等级证据。能力是 immutable build metadata，不从
-source token 或 screenplay spelling 猜测。当前 bundle manifest 把它纳入 canonical
-identity，Rust 在 Render Graph 分片前消费它。
+另有 WAAPI、GSAP 与 Three.js 乱序 playhead conformance；一条 real-process GSAP
+conformance 会把跨 scene 的 timeline 分别作为 whole-film 与两个独立 unit 渲染，再比较完整
+raw-RGBA sequence。该证明依赖 Browser Plan 跨 evaluation window 保留完整 solved interval。
+未来 adapter 也必须提供同等级证据。能力是 immutable build metadata，不从 source token 或
+screenplay spelling 猜测。当前 bundle manifest 把它纳入 canonical identity，Rust 在 Render
+Graph 分片前消费它。
 
 ## Document scope 与 region projection
 
@@ -332,11 +344,17 @@ materializedVideoSource(placement);
 path、读取源码文件或假设 working
 directory。renderer 会在浏览器看到素材前验证字节。
 
-inline motion module 可以 import 本地 AVIF、GIF、JPEG、PNG、SVG、WebP、OTF、TTF、WOFF、
-WOFF2，或引用这些格式的本地 CSS module。bundler 会把 imported bytes 写入不透明的
-`resources/` 路径，并纳入有界、content-addressed manifest。authored HTML 或 inline
-`<style>` 中的裸相对 URL 不属于 bundle import。bundle 只证明 byte identity；browser
-readiness 还必须显式注册：
+原生 `<img src>` 可以引用本地 AVIF、GIF、JPEG、PNG、SVG 或 WebP。bundler 会冻结这些
+bytes，把 URL 改写为不透明的 `resources/` 路径，并让每个 shot projection 只保留自己实际
+引用的 image；runtime 会自动等待这些 authored image 完成 decode。remote URL 与 `srcset`
+会被拒绝，不允许逃出 frozen resource boundary。同一边界也会拒绝会自行推进的 image bytes：
+multi-frame GIF、APNG、animated WebP/AVIF，以及带 animation、script、event 或嵌套 image
+能力的 SVG 都不能引入 wall-clock playhead；动画必须由 Onmark frame effect 驱动。这条准入同时
+覆盖本地 `src`、data URL 与 image import。
+
+inline motion module 还可以 import 上述 image 格式、OTF、TTF、WOFF、WOFF2，或引用这些格式的
+本地 CSS module。inline `<style>` 中的裸相对 URL 仍不属于 import boundary。bundle 会证明
+imported resource 的 byte identity；动态构造的 browser resource 仍必须显式注册：
 
 ```ts
 interface PresentationResource {
@@ -364,9 +382,10 @@ ready 的具体含义由 resource 自己拥有：image 等待成功 decode，fon
 只注册一个不拥有 browser resource 的任意 promise 不满足本合约。
 
 `@onmark/authoring` 提供 `createImageResource({ document, id, source })`
-与 `createFontResource({ face, fonts, id })`。image helper 暴露自有 element 供 authored
-layout 使用，并以 `decode()` 作为 readiness；font helper 先加载精确 `FontFace`，再把它加入传入的
-`FontFaceSet`，dispose 之后迟到的 completion 不会重新加入该 face。
+与 `createFontResource({ face, fonts, id })`。image helper 暴露自有 element 供动态 layout
+使用，并以 `decode()` 作为 readiness；静态原生 `<img>` 会自动获得同一生命周期。font helper
+先加载精确 `FontFace`，再把它加入传入的 `FontFaceSet`，dispose 之后迟到的 completion
+不会重新加入该 face。
 
 ## 确定性规则
 

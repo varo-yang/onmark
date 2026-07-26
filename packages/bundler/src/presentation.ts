@@ -12,7 +12,15 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import {
+  dirname,
+  extname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+  sep,
+} from "node:path";
 
 import {
   build,
@@ -46,6 +54,13 @@ import {
   readAuthoredHtml,
   type AuthoredHtml,
 } from "./authored_html.js";
+import {
+  HtmlImageError,
+  HtmlImageLimitError,
+  projectedImageResources,
+  type HtmlImageResource,
+} from "./html_image.js";
+import { hasAmbientImageAnimation } from "./image_admission.js";
 
 // Authored files live outside the package tree, so public facades resolve from
 // Onmark's own export map rather than from the temporary source directory.
@@ -55,6 +70,10 @@ const resolveOnmarkExport = createRequire(
 const AUTHORING_ENTRY = resolveOnmarkExport("#onmark-authoring");
 const MOTION_GSAP_ENTRY = resolveOnmarkExport("#onmark-motion-gsap");
 const RUNTIME_ENTRY = resolveOnmarkExport("#onmark-runtime");
+const PUBLIC_ONMARK_IMPORTS: Readonly<Record<string, string>> = Object.freeze({
+  "onmark/authoring": AUTHORING_ENTRY,
+  "onmark/motion/gsap": MOTION_GSAP_ENTRY,
+});
 const VISUAL_RESOURCE_LOADERS = {
   ".avif": "file",
   ".gif": "file",
@@ -150,11 +169,19 @@ type NonEmpty<T> = readonly [T, ...T[]];
 export async function bundlePresentation(
   options: BundleOptions,
 ): Promise<BundleArtifact> {
+  const maxOutputBytes = validateOutputByteLimit(options.maxOutputBytes);
   let html;
   try {
-    html = await readAuthoredHtml(options.document, options.resolveDirectory);
+    html = await readAuthoredHtml(
+      options.document,
+      maxOutputBytes,
+      options.resolveDirectory,
+    );
   } catch (error) {
-    if (error instanceof AuthoredHtmlError) {
+    if (error instanceof HtmlImageLimitError) {
+      throw new BundleError("outputLimit", error.message, error);
+    }
+    if (error instanceof AuthoredHtmlError || error instanceof HtmlImageError) {
       throw new BundleError("configuration", error.message, error);
     }
     throw error;
@@ -162,7 +189,7 @@ export async function bundlePresentation(
 
   return bundle({
     html,
-    maxOutputBytes: options.maxOutputBytes,
+    maxOutputBytes,
     outputDirectory: options.outputDirectory,
     temporalCapability: options.temporalCapability,
     visualCapability: options.visualCapability,
@@ -193,7 +220,14 @@ async function buildArtifact(
 ): Promise<BundleArtifact> {
   const outputFiles = await compilePresentation(input.html, staging);
   const generated = generatedPresentationFiles(outputFiles, staging);
-  const pending = presentationFiles(generated, input.html);
+  const resources = projectedImageResources(
+    input.html.document,
+    input.html.resources,
+  );
+  const pending = presentationFiles(
+    [...generated, ...authoredResourceFiles(resources)],
+    input.html,
+  );
   const manifest = createManifest(
     pending,
     "wholeFilm",
@@ -210,6 +244,7 @@ async function buildArtifact(
     staging,
     input,
     generated,
+    resources,
     remaining,
   );
   await requireAbsent(input.outputDirectory);
@@ -266,6 +301,16 @@ function validateInput(options: BundleInput): BundleInput {
     visualCapability,
     frameBehavior,
   });
+}
+
+function validateOutputByteLimit(value: number): number {
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new BundleError(
+      "configuration",
+      "maximum output bytes must be a positive safe integer",
+    );
+  }
+  return value;
 }
 
 function validateTemporalCapability(
@@ -356,8 +401,9 @@ function publicOnmarkImports(): Plugin {
 }
 
 function resolvePublicImport(args: OnResolveArgs): OnResolveResult {
-  if (args.path === "onmark/motion/gsap") {
-    return { path: MOTION_GSAP_ENTRY };
+  const path = PUBLIC_ONMARK_IMPORTS[args.path];
+  if (path !== undefined) {
+    return { path };
   }
   return {
     errors: [{ text: `cannot resolve public Onmark import ${args.path}` }],
@@ -408,6 +454,7 @@ function generatedPresentationFiles(
     path: artifactPath(staging, file.path),
   }));
   const generated = canonicalResourcePaths(emitted);
+  rejectAmbientImageResources(generated);
   const scripts = generated.filter((file) => file.path.endsWith(".js"));
   if (scripts.length !== 1 || scripts[0]?.path !== "presentation.js") {
     throw new BundleError(
@@ -416,6 +463,18 @@ function generatedPresentationFiles(
     );
   }
   return generated;
+}
+
+function rejectAmbientImageResources(files: readonly PendingFile[]): void {
+  for (const file of files) {
+    const extension = extname(file.path).toLowerCase();
+    if (hasAmbientImageAnimation(extension, file.contents)) {
+      throw new BundleError(
+        "configuration",
+        `image ${file.path} contains ambient animation; use an Onmark frame effect`,
+      );
+    }
+  }
 }
 
 function presentationFiles(
@@ -434,6 +493,12 @@ function presentationFiles(
   requireDistinctPaths(files);
 
   return canonicalFiles(files);
+}
+
+function authoredResourceFiles(
+  resources: readonly HtmlImageResource[],
+): readonly PendingFile[] {
+  return resources.map(({ contents, path }) => ({ contents, path }));
 }
 
 function presentationDocument(
@@ -576,19 +641,29 @@ async function writeRegionArtifacts(
   staging: string,
   input: BundleInput,
   generated: readonly PendingFile[],
+  resources: readonly HtmlImageResource[],
   initialBudget: number,
 ): Promise<readonly PendingRegion[]> {
   if (input.temporalCapability !== "randomAccess") {
     return [];
   }
-  validateRegionCount(input.html.regions.length, generated.length);
+  validateRegionCount(
+    input.html.regions.length,
+    generated.length + resources.length,
+  );
 
   let remaining = initialBudget;
   const regions: PendingRegion[] = [];
   for (const [index, region] of input.html.regions.entries()) {
+    const document = projectShotDocument(input.html, region);
     const files = presentationFiles(
-      generated,
-      projectShotDocument(input.html, region),
+      [
+        ...generated,
+        ...authoredResourceFiles(
+          projectedImageResources(document.document, resources),
+        ),
+      ],
+      document,
     );
     const manifest = createManifest(
       files,

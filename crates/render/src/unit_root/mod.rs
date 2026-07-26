@@ -218,6 +218,7 @@ impl ExecutableUnit {
             &self.browser_plan,
             &self.bundle_id,
             self.profile,
+            &self.visual_execution,
             capture_environment,
         )
     }

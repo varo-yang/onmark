@@ -1,11 +1,23 @@
 <om-film>
+  <style>
+    .partition-mark {
+      position: fixed;
+      top: 8px;
+      right: 8px;
+      z-index: 1;
+      width: 16px;
+      height: 16px;
+    }
+  </style>
   <om-scene>
     <om-shot>
       <video src="source.mp4"></video>
+      <img class="partition-mark" src="./partition-mark.svg" alt="">
       <om-title>Opening unit</om-title>
     </om-shot>
     <om-shot>
       <video src="source.mp4"></video>
+      <img class="partition-mark" src="./partition-mark.svg" alt="">
       <om-vo src="voice.m4a">A partitioned voice-over.</om-vo>
       <om-cta>Closing unit</om-cta>
     </om-shot>

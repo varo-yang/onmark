@@ -418,20 +418,7 @@ impl BrowserSession {
         &mut self,
         screenshot: impl AsRef<str>,
     ) -> Result<EncodedPng, BrowserError> {
-        let encoded: &str = screenshot.as_ref();
-        if encoded.len() > maximum_base64_length(self.limits.max_capture_bytes()) {
-            return Err(BrowserError::without_source(
-                BrowserErrorKind::CaptureTooLarge,
-            ));
-        }
-        let bytes = BASE64.decode(encoded).map_err(BrowserError::base64)?;
-
-        if bytes.len() > self.limits.max_capture_bytes() {
-            return Err(BrowserError::without_source(
-                BrowserErrorKind::CaptureTooLarge,
-            ));
-        }
-        let capture = EncodedPng::new(bytes);
+        let capture = decode_screenshot(screenshot, self.limits.max_capture_bytes())?;
         self.last_capture = Some(capture.clone());
         Ok(capture)
     }
@@ -636,6 +623,25 @@ fn portable_screenshot_parameters() -> CaptureScreenshotParams {
         .capture_beyond_viewport(false)
         .optimize_for_speed(true)
         .build()
+}
+
+fn decode_screenshot(
+    screenshot: impl AsRef<str>,
+    max_capture_bytes: usize,
+) -> Result<EncodedPng, BrowserError> {
+    let encoded = screenshot.as_ref();
+    if encoded.len() > maximum_base64_length(max_capture_bytes) {
+        return Err(BrowserError::without_source(
+            BrowserErrorKind::CaptureTooLarge,
+        ));
+    }
+    let bytes = BASE64.decode(encoded).map_err(BrowserError::base64)?;
+    if bytes.len() > max_capture_bytes {
+        return Err(BrowserError::without_source(
+            BrowserErrorKind::CaptureTooLarge,
+        ));
+    }
+    Ok(EncodedPng::new(bytes))
 }
 
 fn maximum_base64_length(decoded_bytes: usize) -> usize {
