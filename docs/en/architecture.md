@@ -1,8 +1,8 @@
 # Onmark Architecture
 
-> Status: current architecture through Gate seven and distributed incremental
-> rendering. Completed gates are retained as historical acceptance evidence;
-> unimplemented work is marked deferred.
+> Status: Gate eight is active after completion of Gate seven and distributed
+> incremental rendering. Completed gates are retained as historical acceptance
+> evidence; unimplemented work is marked deferred.
 
 This document is paired with the Onmark Language Specification. The language
 defines authored meaning; this document defines execution. Their only contract
@@ -708,7 +708,13 @@ semantics.
 
 ### Product commands and language evidence
 
-The authored native command is deliberately narrow: `onmark render <film.html>`.
+The authored native surface stays narrow: `onmark check <film.html>` validates
+through Render Unit planning without Chromium, `onmark inspect <film.html>`
+explains the solved and planned facts, and `onmark render <film.html>` executes
+them. `onmark doctor` validates the admitted local toolchain, while `onmark
+info` reports the installed product and host identity. Machine-readable command
+reports carry an explicit version and preserve stable diagnostic codes and byte
+spans.
 The authored HTML contains both screenplay custom elements and presentation
 DOM/CSS. At most one inline module marked `type="module" data-om-motion`
 exports the declarative `motion` value; the generated infrastructure entry owns
@@ -723,7 +729,10 @@ unless `--output` is supplied, and exposes only exact frame rate and viewport
 dimensions as ordinary render controls. Process paths are execution overrides,
 not screenplay facts. Authored diagnostics are emitted before executable
 preflight so an invalid screenplay never requires Chromium, Node, or `FFmpeg`
-merely to explain itself. Gate three adds the deliberately separate worker entry
+merely to explain itself. Check and inspect use the same compiler, asset,
+bundler, Render Graph, and Render Unit constructors as rendering; they stop
+before private unit-root materialization, Chromium, and encoding rather than
+reimplementing those phases. Gate three adds the deliberately separate worker entry
 point `onmark worker capture`: it accepts one versioned `request.json`,
 including the deployment-owned SHA-256 identity of its locked capture
 environment, the `bundle/` payload files named by that manifest, and frozen
@@ -1548,6 +1557,42 @@ Gate seven did not add VFR, new codecs, HDR, hardware acceleration, lossy
 screenshot transport, parallel browser capture, transitions, playback-rate
 control, Studio, component marketplace, or new screenplay spelling.
 Those remain separate measured or language gates.
+
+**Gate eight (active): close the authoring loop and broaden measured media
+delivery.** The gate begins with product surfaces that expose facts the existing
+compiler and renderer already own. `check` validates authored source, assets,
+presentation resources, and render planning without launching Chromium.
+`inspect` renders the solved timeline, dependency regions, execution choices,
+and cache identity in stable human and versioned machine-readable forms.
+`doctor` reports the admitted browser, media tools, capture mode, and platform
+policy. Render progress and benchmark reports use the same named phases and
+bounded measurements; none of these commands creates a second compiler or
+planner.
+
+The second slice admits broader media inputs, output profiles, and native
+placements only through typed facts and locked evidence. Input normalization
+may accept VFR and additional codecs by freezing their exact normalized bytes
+before compilation; it may not let browser or `FFmpeg` defaults choose source
+frames. Transparent or alternate-container outputs must preserve the requested
+pixel contract end to end. Native crop, scale, picture-in-picture, and
+multi-video placement require explicit layout facts plus whole-film,
+partitioned, and distributed raw-pixel equivalence before they may bypass
+Chromium.
+
+Media treatment, transitions, dynamic author inputs, caption presentation, and
+multiple subtitle tracks are language work when they change authored meaning.
+Each such addition starts with the checked-in cases, prompts, grader, raw model
+outputs, and baseline required by the language admission rule. Rust then owns
+the resulting trim, rate, gain, fade, dependency, or transition interval;
+TypeScript may only realize the already-solved visual effect. No JavaScript
+timeline, CLI flag, or `FFmpeg` filter string may become an alternate scheduler.
+
+Gate eight does not add a Player, Studio, preview server, source-mutation API,
+component marketplace, remote authoring command, coordinator, database, queue,
+lease service, cloud workflow, infrastructure definition, or provider adapter.
+Agent integration is a thin skill over stable CLI diagnostics and inspection;
+it may teach the workflow but may not hide retries, silently update itself, or
+replace compiler policy with prompt text.
 
 Every gate uses the final-direction contracts but implements only fields
 consumed by that gate. A failed gate blocks construction of the next gate's

@@ -12,16 +12,119 @@ use crate::execution::LOCAL_VIDEO_ENCODER_THREADS;
 #[derive(Debug, Parser)]
 #[command(name = "onmark", version, about)]
 pub(super) struct Cli {
+    /// Emit versioned JSON instead of human-oriented command output.
+    #[arg(long, global = true)]
+    pub(super) json: bool,
+
     #[command(subcommand)]
     pub(super) command: Command,
 }
 
 #[derive(Debug, Subcommand)]
 pub(super) enum Command {
+    /// Validate one screenplay without launching Chromium or encoding video.
+    Check(CheckArgs),
+    /// Validate the local browser and media toolchain.
+    Doctor(DoctorArgs),
+    /// Print the installed Onmark and host identities.
+    Info,
+    /// Explain the solved timeline and render regions without rendering.
+    Inspect(InspectArgs),
     /// Compile and render one screenplay into an H.264 MP4.
     Render(RenderArgs),
     /// Execute one already-planned worker task without recompiling source.
     Worker(WorkerArgs),
+}
+
+#[derive(Debug, Args)]
+pub(super) struct DoctorArgs {
+    /// Browser executable. Defaults to headless shell on Linux and Chrome elsewhere.
+    #[arg(long, help_heading = "Execution overrides")]
+    pub(super) browser: Option<PathBuf>,
+
+    /// Presentation bundler executable.
+    #[arg(
+        long,
+        env = "ONMARK_BUNDLER",
+        hide_env = true,
+        default_value = "onmark-bundle",
+        help_heading = "Execution overrides"
+    )]
+    pub(super) bundler: PathBuf,
+
+    /// `FFmpeg` executable.
+    #[arg(
+        long,
+        env = "ONMARK_FFMPEG",
+        hide_env = true,
+        default_value = "ffmpeg",
+        help_heading = "Execution overrides"
+    )]
+    pub(super) ffmpeg: PathBuf,
+
+    /// ffprobe executable.
+    #[arg(
+        long,
+        env = "ONMARK_FFPROBE",
+        hide_env = true,
+        default_value = "ffprobe",
+        help_heading = "Execution overrides"
+    )]
+    pub(super) ffprobe: PathBuf,
+}
+
+#[derive(Debug, Args)]
+pub(super) struct CheckArgs {
+    #[command(flatten)]
+    pub(super) validation: ValidationArgs,
+}
+
+#[derive(Debug, Args)]
+pub(super) struct InspectArgs {
+    #[command(flatten)]
+    pub(super) validation: ValidationArgs,
+}
+
+#[derive(Debug, Args)]
+pub(super) struct ValidationArgs {
+    /// Authored HTML document to validate.
+    pub(super) screenplay: PathBuf,
+
+    /// Exact output frame rate, such as 30 or 30000/1001.
+    #[arg(long = "fps", default_value = "30", value_parser = parse_frame_rate)]
+    pub(super) frame_rate: FrameRate,
+
+    /// Output width in CSS pixels.
+    #[arg(long, default_value_t = 1_920)]
+    pub(super) width: u32,
+
+    /// Output height in CSS pixels.
+    #[arg(long, default_value_t = 1_080)]
+    pub(super) height: u32,
+
+    /// Presentation bundler executable.
+    #[arg(
+        long,
+        env = "ONMARK_BUNDLER",
+        hide_env = true,
+        default_value = "onmark-bundle",
+        help_heading = "Execution overrides"
+    )]
+    pub(super) bundler: PathBuf,
+
+    /// ffprobe executable.
+    #[arg(
+        long,
+        env = "ONMARK_FFPROBE",
+        hide_env = true,
+        default_value = "ffprobe",
+        help_heading = "Execution overrides"
+    )]
+    pub(super) ffprobe: PathBuf,
+
+    /// Standalone SRT, `WebVTT`, or ASS file.
+    #[arg(long = "subtitle", value_name = "FILE")]
+    pub(super) subtitle: Option<PathBuf>,
 }
 
 #[derive(Debug, Args)]
@@ -225,6 +328,20 @@ mod tests {
         assert_eq!(args.frame_rate.denominator(), 1);
         assert_eq!(args.graphics_backend(), None);
         assert_eq!(args.video_encoder_threads(), LOCAL_VIDEO_ENCODER_THREADS);
+    }
+
+    #[test]
+    fn accepts_a_browser_free_check_command() {
+        let cli = Cli::try_parse_from(["onmark", "check", "project/film.html", "--json"])
+            .expect("the check command accepts one authored document");
+        let Command::Check(args) = cli.command else {
+            panic!("the fixture must parse as a check command");
+        };
+
+        assert_eq!(args.validation.screenplay, Path::new("project/film.html"));
+        assert_eq!(args.validation.frame_rate.numerator(), 30);
+        assert_eq!(args.validation.frame_rate.denominator(), 1);
+        assert!(cli.json);
     }
 
     #[test]

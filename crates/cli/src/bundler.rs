@@ -151,7 +151,7 @@ impl BundlerProcess {
         }
     }
 
-    fn executable(&self) -> &Path {
+    pub(super) fn executable(&self) -> &Path {
         match self {
             Self::Direct(executable) | Self::Node { executable, .. } => executable.as_path(),
         }

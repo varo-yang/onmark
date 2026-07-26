@@ -1,6 +1,6 @@
 # Onmark 架构设计
 
-> 状态：当前架构已覆盖 Gate 一至 Gate 七及分布式增量渲染。已完成关卡保留为历史验收证据；尚未实现的能力会明确标为延期。
+> 状态：Gate 八已在 Gate 一至 Gate 七及分布式增量渲染完成后启动。已完成关卡保留为历史验收证据；尚未实现的能力会明确标为延期。
 
 本文与《Onmark 语言规格书》平级。语言规格负责“创作者如何表达影片”，本文负责“已编译的影片如何成为成片”，两者只通过 versioned
 Timeline IR 接合。
@@ -1565,6 +1565,34 @@ frame output。历史样本与准入 revision 不再复制进长期架构合约�
 Gate 七当时没有加入 VFR、新 codec、HDR、hardware acceleration、lossy screenshot transport、parallel browser
 capture、transition、playback-rate control、Studio、component marketplace 或新的 screenplay
 拼写；它们仍属于独立的 measured gate 或 language gate。
+
+### 第八关（进行中）：闭合创作反馈，并扩展经过测量的媒体交付能力
+
+本关先把现有 compiler 与 renderer 已经拥有的事实变成正式产品表面。`check`
+在不启动 Chromium 的前提下验证作者源码、素材、presentation resource 与 render planning；
+`inspect` 以稳定的人类文本和带版本的机器格式呈现 solved timeline、dependency region、
+execution choice 与 cache identity；`doctor` 报告准入的 browser、媒体工具、capture mode
+与平台策略。render progress 与 benchmark 使用同一组具名阶段和有界测量；这些命令都不能创建第二套
+compiler 或 planner。
+
+第二个切片只通过 typed fact 与锁定证据接纳更广的媒体输入、输出 profile 与 native placement。
+输入归一化可以把 VFR 或额外 codec 冻结成具有精确 identity 的规范字节，但不能让 browser 或
+`FFmpeg` 默认值选择 source frame。透明或其他 container 输出必须端到端保留请求的 pixel
+contract。native crop、scale、picture-in-picture 与 multi-video placement 必须先具有显式
+layout fact，并通过 whole-film、partitioned 与 distributed raw-pixel equivalence，才能绕过
+Chromium。
+
+media treatment、transition、dynamic author input、caption presentation 与 multiple subtitle
+track 一旦改变作者语义，就属于语言工作。每项新增能力都必须先提交语言准入规则要求的 cases、
+prompts、grader、raw model outputs 与 baseline。之后 trim、rate、gain、fade、dependency 或
+transition interval 由 Rust 独占；TypeScript 只能实现已经求解的视觉 effect。JavaScript
+timeline、CLI flag 或 `FFmpeg` filter string 都不能成为另一套 scheduler。
+
+Gate 八不加入 Player、Studio、preview server、source-mutation API、component marketplace、
+remote authoring command、coordinator、database、queue、lease service、cloud workflow、
+infrastructure definition 或新的 provider adapter。Agent integration 只是稳定 CLI diagnostic
+与 inspection 之上的薄 skill；它可以教授工作流，但不能隐藏重试、静默自更新，或用 prompt 文本替代
+compiler policy。
 
 每一关都使用最终方向的 IR 和协议，但只实现本关真实消费的部分。上一关没有稳定通过，不创建下一关的空架子。
 

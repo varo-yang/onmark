@@ -14,6 +14,7 @@ use onmark_core::render_graph::InvalidRenderGraph;
 use onmark_render::{
     InvalidFfmpeg, InvalidRenderProfile, InvalidRenderUnit, RenderError, UnitRootError,
 };
+use serde::Serialize;
 use tokio::task::JoinError;
 
 use crate::artifact_cache::ArtifactCacheError;
@@ -256,6 +257,41 @@ pub(super) fn write(writer: &mut impl Write, error: &CliError) -> io::Result<Exi
         source = cause.source();
     }
     Ok(ExitCode::from(2))
+}
+
+pub(super) fn write_json(writer: &mut impl Write, error: &CliError) -> io::Result<ExitCode> {
+    let report = JsonFailure {
+        version: 1,
+        kind: "infrastructure",
+        message: error.to_string(),
+        causes: causes(error),
+    };
+    serde_json::to_writer_pretty(&mut *writer, &report)?;
+    writeln!(writer)?;
+    Ok(ExitCode::from(2))
+}
+
+fn causes(error: &CliError) -> Vec<String> {
+    let mut causes = Vec::new();
+    let mut previous = error.to_string();
+    let mut source = error.source();
+    while let Some(cause) = source {
+        let message = cause.to_string();
+        if message != previous {
+            causes.push(message.clone());
+        }
+        previous = message;
+        source = cause.source();
+    }
+    causes
+}
+
+#[derive(Serialize)]
+struct JsonFailure {
+    version: u16,
+    kind: &'static str,
+    message: String,
+    causes: Vec<String>,
 }
 
 #[cfg(test)]

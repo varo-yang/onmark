@@ -79,6 +79,14 @@ onmark render film.html
 ```
 
 The command writes `renders/film.mp4` without overwriting an existing file.
+Validate or inspect the same production plan without launching Chromium:
+
+```bash
+onmark check film.html
+onmark inspect film.html --json
+onmark doctor
+```
+
 Resolution, exact rational frame rates, and imported subtitles stay explicit:
 
 ```bash

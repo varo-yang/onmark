@@ -20,13 +20,14 @@ use onmark_render::{
     BrowserCaptureMode, BrowserGraphicsBackend, EncodedVideo, ExecutableUnit, Ffmpeg,
     RenderExecutor, RenderProfile, RenderUnit,
 };
+use serde::Serialize;
 
 use crate::arguments::{RenderArgs, source_directory};
 use crate::artifact_cache::{ArtifactCache, ArtifactReuse, CacheAdmission};
 use crate::assets::FrozenCatalog;
 use crate::bundler::{BundleArtifact, BundleRegion, PresentationBundler};
 use crate::compilation;
-use crate::diagnostic;
+use crate::diagnostic::{self, JsonDiagnostic};
 use crate::environment::Executables;
 use crate::execution;
 use crate::failure::CliError;
@@ -91,6 +92,7 @@ impl fmt::Display for RenderTimings {
 pub(super) enum RenderOutcome {
     Rejected {
         report: AuthoredReport,
+        json: bool,
     },
     Completed {
         screenplay: AuthoredReport,
@@ -98,21 +100,28 @@ pub(super) enum RenderOutcome {
         graphics_backend: BrowserGraphicsBackend,
         summary: LocalRenderSummary,
         video: EncodedVideo,
+        json: bool,
     },
 }
 
 impl RenderOutcome {
-    fn rejected(source_path: PathBuf, source: String, diagnostics: Vec<Diagnostic>) -> Self {
+    fn rejected(
+        source_path: PathBuf,
+        source: String,
+        diagnostics: Vec<Diagnostic>,
+        json: bool,
+    ) -> Self {
         Self::Rejected {
             report: AuthoredReport {
                 path: source_path,
                 source,
                 diagnostics,
             },
+            json,
         }
     }
 
-    fn rejected_subtitle(rejected: crate::subtitle::RejectedSubtitle) -> Self {
+    fn rejected_subtitle(rejected: crate::subtitle::RejectedSubtitle, json: bool) -> Self {
         let (path, source, diagnostics) = rejected.into_parts();
         Self::Rejected {
             report: AuthoredReport {
@@ -120,12 +129,19 @@ impl RenderOutcome {
                 source,
                 diagnostics,
             },
+            json,
         }
     }
 
     pub(super) fn write(self) -> ExitCode {
         let result = match self {
-            Self::Rejected { report } => {
+            Self::Rejected { report, json: true } => {
+                write_json(&report, None).map(|()| ExitCode::FAILURE)
+            }
+            Self::Rejected {
+                report,
+                json: false,
+            } => {
                 let mut stderr = io::stderr().lock();
                 write_report(&mut stderr, &report).map(|()| ExitCode::FAILURE)
             }
@@ -135,13 +151,31 @@ impl RenderOutcome {
                 graphics_backend,
                 summary,
                 video,
+                json: true,
+            } => write_json(
+                &screenplay,
+                Some(JsonCompleted::new(
+                    capture_mode,
+                    graphics_backend,
+                    summary,
+                    &video,
+                )),
+            )
+            .map(|()| ExitCode::SUCCESS),
+            Self::Completed {
+                screenplay,
+                capture_mode,
+                graphics_backend,
+                summary,
+                video,
+                json: false,
             } => write_completed(&screenplay, capture_mode, graphics_backend, summary, &video),
         };
         result.unwrap_or(ExitCode::FAILURE)
     }
 }
 
-pub(super) async fn run(args: RenderArgs) -> Result<RenderOutcome, CliError> {
+pub(super) async fn run(args: RenderArgs, json: bool) -> Result<RenderOutcome, CliError> {
     let total_started = Instant::now();
     let output = args.output();
     let cache_admission = match args.browser.as_ref() {
@@ -149,12 +183,7 @@ pub(super) async fn run(args: RenderArgs) -> Result<RenderOutcome, CliError> {
         None => CacheAdmission::Persistent,
     };
     let profile = RenderProfile::new(args.width, args.height)?;
-    let source = input::read_utf8(
-        &args.screenplay,
-        u64::try_from(onmark_core::syntax::MAX_SCREENPLAY_BYTES)
-            .expect("the screenplay byte limit fits in u64"),
-    )
-    .map_err(|error| CliError::read_screenplay(&args.screenplay, error))?;
+    let source = read_screenplay(&args)?;
 
     let resolved = compilation::resolve(&source);
     let (film, diagnostics) = resolved.into_parts();
@@ -163,6 +192,7 @@ pub(super) async fn run(args: RenderArgs) -> Result<RenderOutcome, CliError> {
             args.screenplay,
             source,
             diagnostics,
+            json,
         ));
     };
     let caption_track = match args
@@ -173,7 +203,7 @@ pub(super) async fn run(args: RenderArgs) -> Result<RenderOutcome, CliError> {
     {
         Some(SubtitleImport::Track(track)) => Some(track),
         Some(SubtitleImport::Rejected(rejected)) => {
-            return Ok(RenderOutcome::rejected_subtitle(rejected));
+            return Ok(RenderOutcome::rejected_subtitle(rejected, json));
         }
         None => None,
     };
@@ -195,6 +225,7 @@ pub(super) async fn run(args: RenderArgs) -> Result<RenderOutcome, CliError> {
             args.screenplay,
             source,
             diagnostics,
+            json,
         ));
     };
     let timeline = compiler::import_captions(timeline, caption_track)?;
@@ -243,7 +274,15 @@ pub(super) async fn run(args: RenderArgs) -> Result<RenderOutcome, CliError> {
         graphics_backend: executed.graphics_backend,
         summary,
         video: executed.video,
+        json,
     })
+}
+
+fn read_screenplay(args: &RenderArgs) -> Result<String, CliError> {
+    let limit = u64::try_from(onmark_core::syntax::MAX_SCREENPLAY_BYTES)
+        .expect("the screenplay byte limit fits in u64");
+    input::read_utf8(&args.screenplay, limit)
+        .map_err(|error| CliError::read_screenplay(&args.screenplay, error))
 }
 
 fn materialize_units(
@@ -407,4 +446,90 @@ fn write_completed(
     )?;
     writeln!(stdout, "Timing: {}", summary.timings)?;
     Ok(ExitCode::SUCCESS)
+}
+
+fn write_json(report: &AuthoredReport, completed: Option<JsonCompleted>) -> io::Result<()> {
+    let document = JsonRenderReport {
+        version: 1,
+        command: "render",
+        rendered: completed.is_some(),
+        source: report.path.display().to_string(),
+        diagnostics: report
+            .diagnostics
+            .iter()
+            .map(JsonDiagnostic::from)
+            .collect(),
+        completed,
+    };
+    let mut stdout = io::stdout().lock();
+    serde_json::to_writer_pretty(&mut stdout, &document)?;
+    writeln!(stdout)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct JsonRenderReport<'a> {
+    version: u16,
+    command: &'static str,
+    rendered: bool,
+    source: String,
+    diagnostics: Vec<JsonDiagnostic<'a>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    completed: Option<JsonCompleted>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct JsonCompleted {
+    output: String,
+    frames: u64,
+    capture_mode: String,
+    graphics_backend: String,
+    reused_regions: usize,
+    regions: usize,
+    reused_frames: u64,
+    timing_milliseconds: JsonTimings,
+}
+
+impl JsonCompleted {
+    fn new(
+        capture_mode: BrowserCaptureMode,
+        graphics_backend: BrowserGraphicsBackend,
+        summary: LocalRenderSummary,
+        video: &EncodedVideo,
+    ) -> Self {
+        Self {
+            output: video.path().display().to_string(),
+            frames: video.frames(),
+            capture_mode: capture_mode.to_string(),
+            graphics_backend: graphics_backend.to_string(),
+            reused_regions: summary.reuse.reused_regions(),
+            regions: summary.reuse.regions(),
+            reused_frames: summary.reuse.reused_frames(),
+            timing_milliseconds: summary.timings.into(),
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct JsonTimings {
+    prepare: u128,
+    bundle: u128,
+    plan: u128,
+    capture: u128,
+    assemble: u128,
+    total: u128,
+}
+
+impl From<RenderTimings> for JsonTimings {
+    fn from(timings: RenderTimings) -> Self {
+        Self {
+            prepare: timings.prepare.as_millis(),
+            bundle: timings.bundle.as_millis(),
+            plan: timings.plan.as_millis(),
+            capture: timings.capture.as_millis(),
+            assemble: timings.assemble.as_millis(),
+            total: timings.total.as_millis(),
+        }
+    }
 }

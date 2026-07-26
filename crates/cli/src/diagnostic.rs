@@ -6,8 +6,9 @@
 use std::io::{self, Write};
 use std::path::Path;
 
-use onmark_core::diagnostics::Diagnostic;
+use onmark_core::diagnostics::{Diagnostic, RelatedDiagnostic, Severity};
 use onmark_core::model::{ByteOffset, SourceSpan};
+use serde::Serialize;
 
 pub(super) fn write_all(
     writer: &mut impl Write,
@@ -87,6 +88,69 @@ fn location(source: &str, offset: ByteOffset) -> Location {
     Location {
         line: prefix.bytes().filter(|byte| *byte == b'\n').count() + 1,
         column: source[line_start..offset].chars().count() + 1,
+    }
+}
+
+/// Machine-readable diagnostic retained by versioned CLI reports.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct JsonDiagnostic<'a> {
+    code: &'static str,
+    severity: &'static str,
+    message: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    help: Option<&'a str>,
+    span: JsonSpan,
+    related: Vec<JsonRelated<'a>>,
+}
+
+impl<'a> From<&'a Diagnostic> for JsonDiagnostic<'a> {
+    fn from(diagnostic: &'a Diagnostic) -> Self {
+        Self {
+            code: diagnostic.code().as_str(),
+            severity: match diagnostic.severity() {
+                Severity::Error => "error",
+                Severity::Warning => "warning",
+            },
+            message: diagnostic.message(),
+            help: diagnostic.help(),
+            span: diagnostic.primary().into(),
+            related: diagnostic.related().iter().map(JsonRelated::from).collect(),
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct JsonRelated<'a> {
+    message: &'a str,
+    span: JsonSpan,
+}
+
+impl<'a> From<&'a RelatedDiagnostic> for JsonRelated<'a> {
+    fn from(related: &'a RelatedDiagnostic) -> Self {
+        Self {
+            message: related.message(),
+            span: related.span().into(),
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct JsonSpan {
+    source_id: u32,
+    start_byte: u64,
+    end_byte: u64,
+}
+
+impl From<SourceSpan> for JsonSpan {
+    fn from(span: SourceSpan) -> Self {
+        Self {
+            source_id: span.source().get(),
+            start_byte: span.start().get(),
+            end_byte: span.end().get(),
+        }
     }
 }
 
