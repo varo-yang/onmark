@@ -34,11 +34,14 @@ exact command remain reviewable here.
 | `code-morph`          | source-to-pixel transformation       | HTML, CSS, GSAP             |
 | `data-river`          | animated data narrative              | Canvas 2D, GSAP             |
 | `editorial-fold`      | newspaper-scale typography           | HTML, CSS, GSAP             |
+| `exact-system`        | black-and-lime system narrative      | HTML, CSS, GSAP             |
 | `fashion-rhythm`      | high-contrast fashion film           | HTML, CSS, GSAP             |
 | `glass-product`       | spatial product interface            | CSS 3D, GSAP                |
 | `isometric-machine`   | mechanical isometric scene           | CSS 3D, GSAP                |
+| `instrument-one`      | exploded-view product study          | HTML, CSS 3D, GSAP          |
 | `kinetic-signal`      | typographic broadcast signal         | HTML, CSS, GSAP             |
 | `liquid-type`         | fluid kinetic typography             | CSS gradients, GSAP         |
+| `luminous-story`      | atmospheric chromatic narrative      | HTML, CSS, GSAP             |
 | `media-mosaic`        | picture-in-picture media composition | native video, music, CSS 3D |
 | `neon-transit`        | deep neon tunnel                     | CSS 3D, GSAP                |
 | `network-pulse`       | distributed graph visualization      | Canvas 2D, GSAP             |
@@ -46,11 +49,12 @@ exact command remain reviewable here.
 | `onmark-hero`         | screenplay-to-composition ident      | HTML, CSS 3D, GSAP          |
 | `onmark-manifesto`    | continuous brand manifesto           | music, HTML, CSS, GSAP      |
 | `particle-current`    | 4,800-path procedural field          | Canvas 2D, GSAP             |
+| `printed-motion`      | monochrome print choreography        | HTML, CSS, GSAP             |
 | `ribbon-sculpture`    | parametric line sculpture            | Canvas 2D, GSAP             |
 | `shader-aurora`       | fragment-shader light field          | raw WebGL, GSAP             |
 | `sports-broadcast`    | live scoreboard graphics             | HTML, CSS, GSAP             |
 | `three-constellation` | spatial star system                  | Three.js, GSAP              |
 
-All twenty-one films are one continuous semantic shot rather than a sequence of
+All twenty-five films are one continuous semantic shot rather than a sequence of
 presentation cards. Their checked-in inputs use no remote assets, ambient
 clocks, unseeded randomness, or self-advancing image containers.

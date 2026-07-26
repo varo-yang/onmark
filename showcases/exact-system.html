@@ -1,0 +1,412 @@
+<!doctype html>
+<om-film>
+  <!-- Presentation -->
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body,
+    om-film,
+    om-scene,
+    om-shot {
+      display: block;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      width: 100%;
+    }
+
+    body {
+      background: #050906;
+      color: #edf2e8;
+      font-family: "Instrument Sans", sans-serif;
+    }
+
+    .system {
+      background:
+        radial-gradient(
+          circle at 55% 48%,
+          rgb(90 255 82 / 8%),
+          transparent 36%
+        ),
+        #050906;
+      height: 100%;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .scan {
+      background: linear-gradient(
+        90deg,
+        transparent,
+        rgb(139 255 83 / 16%),
+        transparent
+      );
+      height: 100%;
+      left: -22%;
+      position: absolute;
+      top: 0;
+      width: 22%;
+    }
+
+    .rule {
+      background: #8bff53;
+      height: 1px;
+      left: 30px;
+      position: absolute;
+      right: 30px;
+      transform: scaleX(0);
+      transform-origin: left;
+    }
+
+    .rule-top {
+      top: 32px;
+    }
+
+    .rule-bottom {
+      bottom: 32px;
+    }
+
+    .frames {
+      height: min(54vh, 590px);
+      left: 50%;
+      position: absolute;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      width: min(50vw, 960px);
+    }
+
+    .frame {
+      border: 1px solid rgb(139 255 83 / 26%);
+      inset: 0;
+      opacity: 0;
+      position: absolute;
+    }
+
+    .frame:nth-child(2) {
+      inset: 8%;
+    }
+
+    .frame:nth-child(3) {
+      inset: 16%;
+    }
+
+    .frame:nth-child(4) {
+      inset: 24%;
+    }
+
+    .code {
+      color: rgb(237 242 232 / 48%);
+      font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+      font-size: clamp(10px, 0.7vw, 14px);
+      left: 8%;
+      line-height: 1.7;
+      opacity: 0;
+      position: absolute;
+      top: 16%;
+      white-space: pre;
+    }
+
+    .code b {
+      color: #8bff53;
+      font-weight: 400;
+    }
+
+    .phrases {
+      inset: 0;
+      position: absolute;
+      z-index: 3;
+    }
+
+    .phrase {
+      left: 8%;
+      opacity: 0;
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 84%;
+    }
+
+    .phrase span {
+      display: block;
+      font-size: clamp(78px, 9.6vw, 184px);
+      font-weight: 700;
+      letter-spacing: -0.055em;
+      line-height: 0.82;
+      word-spacing: 0.06em;
+    }
+
+    .phrase em {
+      color: #8bff53;
+      font-style: normal;
+    }
+
+    .phrase-two,
+    .phrase-four {
+      text-align: right;
+    }
+
+    .cells {
+      bottom: 9%;
+      display: grid;
+      gap: 5px;
+      grid-template-columns: repeat(12, 1fr);
+      left: 8%;
+      position: absolute;
+      right: 8%;
+      z-index: 2;
+    }
+
+    .cells i {
+      background: rgb(237 242 232 / 12%);
+      height: clamp(28px, 4.8vh, 52px);
+      transform: scaleY(0);
+      transform-origin: bottom;
+    }
+
+    .meta {
+      display: flex;
+      font-size: clamp(9px, 0.62vw, 12px);
+      font-weight: 700;
+      justify-content: space-between;
+      left: 30px;
+      letter-spacing: 0.16em;
+      position: absolute;
+      right: 30px;
+      text-transform: uppercase;
+      z-index: 4;
+    }
+
+    .meta-top {
+      top: 14px;
+    }
+
+    .meta-bottom {
+      bottom: 14px;
+    }
+  </style>
+
+  <!-- Screenplay -->
+  <om-scene>
+    <om-shot duration="15s">
+      <div class="system">
+        <div class="scan"></div>
+        <i class="rule rule-top"></i>
+        <i class="rule rule-bottom"></i>
+
+        <div class="frames">
+          <i class="frame"></i><i class="frame"></i> <i class="frame"></i
+          ><i class="frame"></i>
+        </div>
+
+        <div class="code">
+          &lt;om-film&gt; &lt;om-scene&gt; &lt;om-shot&gt;
+          <b>intent → frames</b>
+          &lt;/om-shot&gt; &lt;/om-scene&gt; &lt;/om-film&gt;
+        </div>
+
+        <om-title class="phrases">
+          <strong class="phrase phrase-one">
+            <span>Intent</span><span><em>enters.</em></span>
+          </strong>
+          <strong class="phrase phrase-two">
+            <span>Structure</span><span><em>locks.</em></span>
+          </strong>
+          <strong class="phrase phrase-three">
+            <span>Frames</span><span><em>resolve.</em></span>
+          </strong>
+          <strong class="phrase phrase-four">
+            <span>Only change</span><span><em>moves.</em></span>
+          </strong>
+        </om-title>
+
+        <div class="cells">
+          <i></i><i></i><i></i><i></i><i></i><i></i> <i></i><i></i><i></i><i></i
+          ><i></i><i></i>
+        </div>
+
+        <div class="meta meta-top">
+          <span>Onmark / deterministic system</span><span>Frame 000—359</span>
+        </div>
+        <div class="meta meta-bottom">
+          <span>Source → IR → Pixels</span><span>Change remains local</span>
+        </div>
+      </div>
+    </om-shot>
+  </om-scene>
+
+  <!-- Motion -->
+  <script type="module" data-om-motion>
+    import { combineMotion, createFontResource } from "onmark/authoring";
+    import { gsapMotion } from "onmark/motion/gsap";
+    import sansUrl from "./assets/fonts/instrument-sans.woff2";
+    import sansBoldUrl from "./assets/fonts/instrument-sans-bold.woff2";
+
+    const typography = {
+      bind() {
+        return {
+          effects: [],
+          resources: [
+            fontResource("Instrument Sans", sansUrl, "400", "sans-regular"),
+            fontResource("Instrument Sans", sansBoldUrl, "700", "sans-bold"),
+          ],
+        };
+      },
+    };
+
+    const choreography = gsapMotion({
+      shot({ element, timeline }) {
+        animateSystem(timeline, element);
+        animatePhrase(timeline, element, ".phrase-one", 0.2, 2.7, -1);
+        animatePhrase(timeline, element, ".phrase-two", 3.45, 6.3, 1);
+        animatePhrase(timeline, element, ".phrase-three", 7.05, 9.9, -1);
+        animatePhrase(timeline, element, ".phrase-four", 10.65, 13.6, 1);
+        timeline.to(
+          element,
+          { duration: 0.55, ease: "power2.in", opacity: 0 },
+          14.45,
+        );
+      },
+    });
+
+    export const motion = combineMotion(typography, choreography);
+
+    function fontResource(family, source, weight, id) {
+      const face = new FontFace(family, `url(${source}) format("woff2")`, {
+        weight,
+      });
+      return createFontResource({ face, fonts: document.fonts, id });
+    }
+
+    function animateSystem(timeline, element) {
+      const cells = element.querySelectorAll(".cells i");
+      const frames = element.querySelectorAll(".frame");
+
+      timeline
+        .to(
+          element.querySelector(".scan"),
+          {
+            duration: 14.4,
+            ease: "none",
+            x: "145vw",
+          },
+          0.2,
+        )
+        .to(
+          element.querySelectorAll(".rule"),
+          {
+            duration: 1,
+            ease: "expo.out",
+            scaleX: 1,
+          },
+          0.1,
+        )
+        .to(
+          frames,
+          {
+            duration: 1.3,
+            ease: "expo.out",
+            opacity: 1,
+            scale: (index) => 1 + index * 0.08,
+            stagger: 0.12,
+          },
+          3.3,
+        )
+        .to(
+          element.querySelector(".code"),
+          {
+            duration: 1,
+            ease: "power3.out",
+            opacity: 1,
+            x: 24,
+          },
+          3.6,
+        )
+        .to(
+          cells,
+          {
+            backgroundColor: (index) =>
+              index === 8 ? "#8bff53" : "rgb(237 242 232 / 20%)",
+            duration: 0.7,
+            ease: "back.out(1.5)",
+            scaleY: 1,
+            stagger: 0.06,
+          },
+          6.8,
+        )
+        .to(
+          frames,
+          {
+            duration: 2.6,
+            ease: "sine.inOut",
+            opacity: 0.42,
+            scale: (index) => 1.1 + index * 0.14,
+          },
+          7.4,
+        )
+        .to(
+          cells,
+          {
+            duration: 1.6,
+            ease: "expo.inOut",
+            opacity: (index) => (index === 8 ? 1 : 0.12),
+            scaleY: (index) => (index === 8 ? 1.7 : 0.55),
+          },
+          10.4,
+        );
+    }
+
+    function animatePhrase(
+      timeline,
+      element,
+      selector,
+      enter,
+      leave,
+      direction,
+    ) {
+      const phrase = element.querySelector(selector);
+      const lines = phrase.querySelectorAll("span");
+
+      timeline
+        .fromTo(
+          phrase,
+          {
+            filter: "blur(16px)",
+            opacity: 0,
+            x: direction * 70,
+          },
+          {
+            duration: 1,
+            ease: "expo.out",
+            filter: "blur(0px)",
+            opacity: 1,
+            x: 0,
+          },
+          enter,
+        )
+        .from(
+          lines,
+          {
+            duration: 1,
+            ease: "expo.out",
+            stagger: 0.08,
+            yPercent: 28,
+          },
+          enter,
+        )
+        .to(
+          phrase,
+          {
+            duration: 0.8,
+            ease: "expo.in",
+            filter: "blur(14px)",
+            opacity: 0,
+            x: direction * -55,
+          },
+          leave,
+        );
+    }
+  </script>
+</om-film>
