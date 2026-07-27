@@ -8,6 +8,9 @@ import test from "node:test";
 const WORKFLOW = fileURLToPath(
   new URL("../../../../.github/workflows/desktop-release.yml", import.meta.url),
 );
+const CI_WORKFLOW = fileURLToPath(
+  new URL("../../../../.github/workflows/ci.yml", import.meta.url),
+);
 const PUBLISHER = fileURLToPath(new URL("../publish.mjs", import.meta.url));
 
 test("releases a merged release PR from its protected main push", async () => {
@@ -60,6 +63,21 @@ test("restores and refreshes release build caches from trusted main runs", async
   );
   assert.match(source, /CARGO_TARGET_DIR: \.release\/cargo-target/u);
   assert.doesNotMatch(source, /^\s+cache: pnpm$/mu);
+});
+
+test("keeps ordinary CI caches within the release storage budget", async () => {
+  const source = await readFile(CI_WORKFLOW, "utf8");
+  const caches = source
+    .split("- name: Cache Cargo dependencies")
+    .slice(1)
+    .map((section) => section.split("\n      - name:")[0]);
+
+  assert.equal(caches.length, 2);
+  for (const cache of caches) {
+    assert.match(cache, /~\/\.cargo\/registry/u);
+    assert.match(cache, /~\/\.cargo\/git/u);
+    assert.doesNotMatch(cache, /^\s+(?:\.\/)?target\/?$/mu);
+  }
 });
 
 test("warms release caches only after trusted main changes", async () => {

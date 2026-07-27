@@ -785,6 +785,13 @@ cache 由 target、已准入 source manifest 与 build script 共同寻址；cac
 fingerprint，并只增量重建变化后的依赖图。恢复出的 output 在发布前仍需通过相同的
 manifest 校验、package assembly、空 consumer 安装与真实 render admission；冷构建与
 缓存构建不会获得不同的发布路径。
+
+普通 CI 只缓存 Cargo registry 与源码下载，不缓存 workspace `target` 目录。
+workspace build graph 不是有界的 release artifact；缓存它会占满仓库 cache quota，
+并淘汰 release admission 真正依赖的、更小的各平台 media-tool cache。native release
+job 仍保留独立的 target-scoped Cargo cache，因为它的 producer、consumer、失效输入
+与 admission check 都已在上文显式定义。
+
 每条完成 admission 的 `main` push 都可以刷新缺失 cache。product lockfile、固定
 package version、release workflow、media toolchain 或 Rust toolchain 发生变化时，
 都会预热下一次 release 消费的同一条 cache path。手动 admission 也可以在所选 ref

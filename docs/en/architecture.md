@@ -654,6 +654,14 @@ Cargo revalidates every fingerprint and incrementally rebuilds the changed
 graph. Restored outputs still pass the same manifest checks, package assembly,
 clean-consumer installation, and real render admission as cold outputs before
 any archive can be published.
+
+Ordinary CI caches Cargo registry and source downloads, but never the workspace
+`target` directory. The workspace build graph is not a bounded release
+artifact: caching it can consume the repository cache quota and evict the
+smaller platform media-tool caches that release admission needs. Native release
+jobs keep their separate target-scoped Cargo cache because its producer,
+consumers, invalidation inputs, and admission checks are explicit above.
+
 Every admitted `main` push may refresh a missing cache after the complete
 platform admission succeeds. Changes to the product lockfile, fixed package
 versions, release workflow, media toolchain, or Rust toolchain therefore warm
