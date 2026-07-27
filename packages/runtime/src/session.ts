@@ -294,7 +294,7 @@ type OperationFailureCode = Exclude<
 >;
 
 function response(requestId: number, event: BrowserEvent): BrowserResponse {
-  return decodeBrowserResponse({ version: 2, requestId, event });
+  return decodeBrowserResponse({ version: 3, requestId, event });
 }
 
 function invalidRequest(requestId: number, message: string): BrowserResponse {
@@ -612,12 +612,39 @@ function snapshotVideo(
     shotId: video.shotId,
     assetId: video.assetId,
     interval: Object.freeze({ ...video.interval }),
-    sourceFrameRate: Object.freeze({ ...video.sourceFrameRate }),
+    sourceTiming: snapshotSourceTiming(video.sourceTiming),
     source: Object.freeze({
       ...video.source,
       playbackRate: Object.freeze({ ...video.source.playbackRate }),
     }),
   });
+}
+
+function snapshotSourceTiming(
+  timing: BrowserPlan["videos"][number]["sourceTiming"],
+): RuntimePlan["videos"][number]["sourceTiming"] {
+  switch (timing.kind) {
+    case "constant":
+      return Object.freeze({
+        kind: timing.kind,
+        frameRate: Object.freeze({ ...timing.frameRate }),
+      });
+    case "variable":
+      return Object.freeze({
+        kind: timing.kind,
+        timebase: Object.freeze({ ...timing.timebase }),
+        boundaries: snapshotFrameBoundaries(timing.boundaries),
+      });
+  }
+}
+
+function snapshotFrameBoundaries([first, second, third, ...rest]: readonly [
+  string,
+  string,
+  string,
+  ...string[],
+]): readonly [string, string, string, ...string[]] {
+  return Object.freeze([first, second, third, ...rest]);
 }
 
 function snapshotOverlay(

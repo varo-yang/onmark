@@ -6,8 +6,6 @@ import type { RuntimeVideo, VideoFrameSelection } from "./media.js";
 import { requireReadinessTimeout } from "./resource.js";
 import { RuntimeAdapterError } from "./session.js";
 
-const FRAME_TOLERANCE_SECONDS = 0.000_001;
-
 type VideoEvent = "error" | "loadeddata" | "seeked";
 type ReadinessEvent = Exclude<VideoEvent, "error">;
 type VideoResourcePhase = ReadinessEvent | "frame";
@@ -376,7 +374,9 @@ class StagedFrame {
   matches(selection: VideoFrameSelection): boolean {
     return (
       selection.mediaTimeSeconds === this.#selection.mediaTimeSeconds &&
-      selection.seekTimeSeconds === this.#selection.seekTimeSeconds
+      selection.seekTimeSeconds === this.#selection.seekTimeSeconds &&
+      selection.readinessToleranceSeconds ===
+        this.#selection.readinessToleranceSeconds
     );
   }
 
@@ -408,7 +408,7 @@ class StagedFrame {
     this.#frameCallback = undefined;
     const exactFrame =
       Math.abs(metadata.mediaTime - this.#selection.mediaTimeSeconds) <=
-      FRAME_TOLERANCE_SECONDS;
+      this.#selection.readinessToleranceSeconds;
     if (exactFrame) {
       this.#finish({ kind: "presented" });
       return;
@@ -500,7 +500,11 @@ function requireSelection(selection: VideoFrameSelection): void {
     !Number.isFinite(selection.mediaTimeSeconds) ||
     selection.mediaTimeSeconds < 0 ||
     !Number.isFinite(selection.seekTimeSeconds) ||
-    selection.seekTimeSeconds < selection.mediaTimeSeconds
+    selection.seekTimeSeconds <= selection.mediaTimeSeconds ||
+    !Number.isFinite(selection.readinessToleranceSeconds) ||
+    selection.readinessToleranceSeconds <= 0 ||
+    selection.readinessToleranceSeconds >=
+      selection.seekTimeSeconds - selection.mediaTimeSeconds
   ) {
     throw new RuntimeAdapterError(
       "operation",

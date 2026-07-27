@@ -53,10 +53,13 @@ impl StrategyFixture {
         let indices = (0..BENCHMARK_FRAME_COUNT).collect::<Vec<_>>();
         let media = directory.path().join("colors.mp4");
         generate_color_video(&media, frame_rate).await;
-        let admitted = crate::admitted_source_video(&media, crate::FixtureTiming::Constant)
+        let admitted = crate::admitted_source_video(&media)
             .await
             .expect("the color fixture must satisfy layered-media admission");
-        assert_eq!(admitted.frame_rate, frame_rate);
+        assert_eq!(
+            admitted.timing,
+            onmark_core::model::VideoTiming::Constant(frame_rate),
+        );
 
         Self {
             directory,

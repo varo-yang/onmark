@@ -14,6 +14,7 @@ const MAX_VIEWPORT_EDGE: u32 = 8_192;
 pub struct RenderProfile {
     width: u32,
     height: u32,
+    alpha: AlphaMode,
 }
 
 impl<'de> Deserialize<'de> for RenderProfile {
@@ -22,7 +23,9 @@ impl<'de> Deserialize<'de> for RenderProfile {
         D: Deserializer<'de>,
     {
         let wire = RenderProfileWire::deserialize(deserializer)?;
-        Self::new(wire.width, wire.height).map_err(D::Error::custom)
+        Self::new(wire.width, wire.height)
+            .map(|profile| profile.with_alpha(wire.alpha))
+            .map_err(D::Error::custom)
     }
 }
 
@@ -31,6 +34,17 @@ impl<'de> Deserialize<'de> for RenderProfile {
 struct RenderProfileWire {
     width: u32,
     height: u32,
+    alpha: AlphaMode,
+}
+
+/// Alpha contract carried by render units and frame-artifact identity.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AlphaMode {
+    /// Chromium composites authored pixels over its opaque default surface.
+    Opaque,
+    /// Chromium preserves authored alpha through capture and final encoding.
+    Preserve,
 }
 
 impl RenderProfile {
@@ -50,7 +64,18 @@ impl RenderProfile {
         if !width.is_multiple_of(2) || !height.is_multiple_of(2) {
             return Err(InvalidRenderProfile::OddDimensions);
         }
-        Ok(Self { width, height })
+        Ok(Self {
+            width,
+            height,
+            alpha: AlphaMode::Opaque,
+        })
+    }
+
+    /// Selects whether capture and encoding preserve the authored alpha plane.
+    #[must_use]
+    pub const fn with_alpha(mut self, alpha: AlphaMode) -> Self {
+        self.alpha = alpha;
+        self
     }
 
     /// Returns the viewport and encoded width in CSS pixels.
@@ -63,6 +88,12 @@ impl RenderProfile {
     #[must_use]
     pub const fn height(self) -> u32 {
         self.height
+    }
+
+    /// Returns the alpha contract included in portable capture identity.
+    #[must_use]
+    pub const fn alpha(self) -> AlphaMode {
+        self.alpha
     }
 }
 
@@ -91,7 +122,7 @@ impl Error for InvalidRenderProfile {}
 
 #[cfg(test)]
 mod tests {
-    use super::{InvalidRenderProfile, MAX_VIEWPORT_EDGE, RenderProfile};
+    use super::{AlphaMode, InvalidRenderProfile, MAX_VIEWPORT_EDGE, RenderProfile};
 
     #[test]
     fn owns_valid_output_dimensions() {
@@ -110,6 +141,26 @@ mod tests {
         assert_eq!(
             RenderProfile::new(321, 180),
             Err(InvalidRenderProfile::OddDimensions),
+        );
+    }
+
+    #[test]
+    fn makes_alpha_preservation_an_explicit_pixel_fact() {
+        let profile = RenderProfile::new(320, 180)
+            .expect("the output dimensions are valid")
+            .with_alpha(AlphaMode::Preserve);
+
+        assert_eq!(profile.alpha(), AlphaMode::Preserve);
+        assert_eq!(
+            serde_json::to_string(&profile).expect("the profile must serialize"),
+            r#"{"width":320,"height":180,"alpha":"preserve"}"#,
+        );
+        assert_eq!(
+            serde_json::from_str::<RenderProfile>(
+                r#"{"width":320,"height":180,"alpha":"preserve"}"#,
+            )
+            .expect("the serialized profile must decode"),
+            profile,
         );
     }
 }

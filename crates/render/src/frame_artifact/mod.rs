@@ -769,7 +769,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rejects_an_unknown_header_version() {
+    async fn rejects_the_previous_header_version() {
         let directory = tempdir().expect("the fixture directory is available");
         let path = directory.path().join("worker.onmark-frames");
         let mut header = Header {
@@ -779,14 +779,14 @@ mod tests {
             digest: [0; 32],
         }
         .encode();
-        header[8..10].copy_from_slice(&2_u16.to_be_bytes());
+        header[8..10].copy_from_slice(&1_u16.to_be_bytes());
         tokio::fs::write(&path, header)
             .await
             .expect("the old-version fixture is writable");
 
         let error = FrameArtifact::open(&path, limits())
             .await
-            .expect_err("an unknown frame artifact version must not decode");
+            .expect_err("the previous frame artifact version must not decode");
 
         assert_eq!(error.kind(), FrameArtifactErrorKind::InvalidArtifact);
     }

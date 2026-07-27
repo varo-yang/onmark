@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 
 use crate::model::{
     AssetRef, AudioGain, CueId, Duration, ElementKind, EventRef, GeneralAudioKind, MediaTrim,
-    NodeId, PlaybackRate, SourceSpan,
+    NodeId, PlayCount, PlaybackRate, SourceSpan,
 };
 
 /// One typed value together with the authored bytes that produced it.
@@ -419,6 +419,8 @@ pub struct ResolvedVideo {
     media: ResolvedMedia,
     trim: Option<Authored<MediaTrim>>,
     playback_rate: Option<Authored<PlaybackRate>>,
+    plays: Option<Authored<PlayCount>>,
+    hold_last: Option<Authored<Duration>>,
 }
 
 impl ResolvedVideo {
@@ -428,11 +430,15 @@ impl ResolvedVideo {
         delay: Option<Authored<Duration>>,
         trim: Option<Authored<MediaTrim>>,
         playback_rate: Option<Authored<PlaybackRate>>,
+        plays: Option<Authored<PlayCount>>,
+        hold_last: Option<Authored<Duration>>,
     ) -> Self {
         Self {
             media: ResolvedMedia::new(element, src, delay),
             trim,
             playback_rate,
+            plays,
+            hold_last,
         }
     }
 
@@ -468,15 +474,38 @@ impl ResolvedVideo {
             .map_or(PlaybackRate::ONE, |rate| *rate.value())
     }
 
-    pub(super) fn into_parts(
-        self,
-    ) -> (
-        ResolvedMedia,
-        Option<Authored<MediaTrim>>,
-        Option<Authored<PlaybackRate>>,
-    ) {
-        (self.media, self.trim, self.playback_rate)
+    /// Returns the exact number of complete source passes.
+    #[must_use]
+    pub fn plays(&self) -> PlayCount {
+        self.plays
+            .as_ref()
+            .map_or(PlayCount::ONE, |plays| *plays.value())
     }
+
+    /// Returns the exact final-frame hold.
+    #[must_use]
+    pub fn hold_last(&self) -> Duration {
+        self.hold_last
+            .as_ref()
+            .map_or(Duration::ZERO, |hold| *hold.value())
+    }
+
+    pub(super) fn into_parts(self) -> (ResolvedMedia, ResolvedVideoTreatment) {
+        let treatment = ResolvedVideoTreatment {
+            trim: self.trim,
+            playback_rate: self.playback_rate,
+            plays: self.plays,
+            hold_last: self.hold_last,
+        };
+        (self.media, treatment)
+    }
+}
+
+pub(super) struct ResolvedVideoTreatment {
+    pub(super) trim: Option<Authored<MediaTrim>>,
+    pub(super) playback_rate: Option<Authored<PlaybackRate>>,
+    pub(super) plays: Option<Authored<PlayCount>>,
+    pub(super) hold_last: Option<Authored<Duration>>,
 }
 
 /// Voice-over content with typed media facts and authored inscription.

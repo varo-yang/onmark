@@ -13,7 +13,7 @@ use std::sync::Arc;
 use onmark_core::model::{
     AudioChannelLayout, AudioGain, AudioSampleConversionOverflow, AudioSampleCount, FrameInterval,
     FrameRate, FrozenAsset, FrozenAssetId, PresentationDocumentScope, Rounding, VideoColorProfile,
-    VideoDimensions,
+    VideoDimensions, VideoTiming,
 };
 use onmark_core::protocol::{BrowserPlan, BundleManifest, InvalidBrowserPlan};
 use onmark_core::render_graph::{PartitionPlan, RenderPartition};
@@ -108,7 +108,7 @@ pub struct RenderUnit {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RenderVideo {
     asset: MaterializedAsset,
-    source_frame_rate: FrameRate,
+    source_timing: VideoTiming,
     dimensions: VideoDimensions,
     color_profile: Option<VideoColorProfile>,
 }
@@ -120,10 +120,10 @@ impl RenderVideo {
         &self.asset
     }
 
-    /// Returns the exact source rate proved during unit composition.
+    /// Returns the complete source-frame timing proved during composition.
     #[must_use]
-    pub const fn source_frame_rate(&self) -> FrameRate {
-        self.source_frame_rate
+    pub const fn source_timing(&self) -> &VideoTiming {
+        &self.source_timing
     }
 
     /// Returns the frozen source-pixel dimensions.
@@ -362,12 +362,12 @@ impl RenderUnit {
         available: &BTreeMap<FrozenAssetId, MaterializedAsset>,
     ) -> Result<Self, InvalidRenderUnit> {
         let videos = render_videos(timeline, evaluation, available)?;
-        let source_frame_rates = videos
+        let source_timings = videos
             .iter()
-            .map(|(id, video)| (*id, video.source_frame_rate()))
+            .map(|(id, video)| (*id, video.source_timing().clone()))
             .collect();
         let browser_plan =
-            BrowserPlan::from_timeline_for_unit(timeline, &source_frame_rates, evaluation, output)
+            BrowserPlan::from_timeline_for_unit(timeline, &source_timings, evaluation, output)
                 .map_err(InvalidRenderUnit::BrowserPlan)?;
         let audio = audio_plan(timeline, output, available)?;
         let visual_execution = VisualExecutionPlan::select(
@@ -629,14 +629,14 @@ fn render_videos(
             .ok_or(InvalidRenderUnit::MissingAsset(id))?;
         let admitted = AdmittedVideo::admit(asset.frozen().metadata())
             .map_err(|source| InvalidRenderUnit::UnsupportedVideo { id, source })?;
-        let source_frame_rate = admitted.frame_rate();
+        let source_timing = admitted.timing().clone();
         let dimensions = admitted.metadata().dimensions();
         let color_profile = admitted.metadata().color_profile();
         videos.insert(
             id,
             RenderVideo {
                 asset,
-                source_frame_rate,
+                source_timing,
                 dimensions,
                 color_profile,
             },
@@ -721,9 +721,10 @@ mod tests {
     use onmark_core::compiler;
     use onmark_core::model::{
         AssetMetadata, AssetRef, AudioChannelLayout, AudioGain, AudioSampleRate, Duration,
-        FrameRate, FrozenAsset, FrozenAssetId, PresentationDocumentScope,
+        FrameRate, FrozenAsset, FrozenAssetId, MediaTimebase, PresentationDocumentScope,
         PresentationFrameBehavior, PresentationTemporalCapability, PresentationVisualCapability,
-        SourceId, Timebase, VideoColorProfile, VideoDimensions, VideoMetadata, VideoTiming,
+        SourceId, Timebase, VideoColorProfile, VideoDimensions, VideoFrameMap, VideoMetadata,
+        VideoTiming,
     };
     use onmark_core::protocol::BundleFile;
     use onmark_core::render_graph::RenderGraph;
@@ -734,7 +735,7 @@ mod tests {
         MaterializedAsset, RenderAudio, RenderProfile, RenderUnit, VisualExecutionPlan,
         WorkerCaptureRequest,
     };
-    use crate::BrowserCaptureCadence;
+    use crate::{AlphaMode, BrowserCaptureCadence};
 
     #[test]
     fn composes_only_required_admitted_video_assets() {
@@ -765,8 +766,8 @@ mod tests {
             unit.videos()
                 .next()
                 .expect("the unit contains one video")
-                .source_frame_rate(),
-            frame_rate(),
+                .source_timing(),
+            &VideoTiming::Constant(frame_rate()),
         );
     }
 
@@ -796,7 +797,8 @@ mod tests {
         let decoded: WorkerCaptureRequest =
             serde_json::from_str(&encoded).expect("the portable worker request parses once");
 
-        assert_eq!(wire["version"], 2);
+        assert_eq!(wire["version"], 3);
+        assert_eq!(wire["profile"]["alpha"], "opaque");
         assert_eq!(wire["captureEnvironment"], environment.to_string());
         assert_eq!(encoded, repeated);
         assert_eq!(decoded, request);
@@ -936,6 +938,20 @@ mod tests {
     }
 
     #[test]
+    fn alpha_contract_participates_in_artifact_identity() {
+        let timeline = solve_with_assets(
+            r#"<om-film><om-scene><om-shot duration="1s"></om-shot></om-scene></om-film>"#,
+            &BTreeMap::new(),
+        );
+        let opaque = RenderUnit::whole_film(&timeline, bundle_manifest(), render_profile(), [])
+            .expect("the fixture forms one opaque render unit");
+        let mut transparent = opaque.clone();
+        transparent.profile = transparent.profile.with_alpha(AlphaMode::Preserve);
+
+        assert_ne!(artifact_id(&opaque), artifact_id(&transparent));
+    }
+
+    #[test]
     fn composes_a_partition_into_its_own_browser_interval() {
         let frozen = video_asset(VideoTiming::Constant(frame_rate()));
         let timeline = solve(
@@ -988,21 +1004,30 @@ mod tests {
     }
 
     #[test]
-    fn rejects_video_outside_the_browser_profile() {
-        let frozen = video_asset(VideoTiming::Variable);
+    fn admits_complete_variable_timing_only_to_browser_composition() {
+        let frozen = video_asset(variable_timing());
         let timeline = video_timeline(frozen.clone());
         let materialized = MaterializedAsset::new(frozen, "/tmp/opening.mp4")
             .expect("the fixture path is present");
 
-        assert!(matches!(
-            RenderUnit::whole_film(
-                &timeline,
-                bundle_manifest(),
-                render_profile(),
-                [materialized]
-            ),
-            Err(InvalidRenderUnit::UnsupportedVideo { .. }),
-        ));
+        let unit = RenderUnit::whole_film(
+            &timeline,
+            bundle_manifest(),
+            render_profile(),
+            [materialized],
+        )
+        .expect("complete VFR timing remains browser-presentable");
+
+        assert_eq!(
+            unit.visual_execution().capability(),
+            PresentationVisualCapability::BrowserComposite,
+        );
+        assert!(
+            unit.browser_plan().videos()[0]
+                .source_timing()
+                .variable_boundaries()
+                .is_some(),
+        );
     }
 
     #[test]
@@ -1120,7 +1145,7 @@ mod tests {
     }
 
     #[test]
-    fn keeps_source_edited_video_on_browser_composition() {
+    fn admits_exact_source_edits_to_native_layering() {
         let frozen = layered_video_asset(video_dimensions(), true);
         let timeline = solve(
             concat!(
@@ -1139,7 +1164,36 @@ mod tests {
             render_profile(),
             [materialized],
         )
-        .expect("edited source media retains the conservative browser path");
+        .expect("exact source edits retain native layering");
+
+        assert!(unit.visual_execution().layered_media().is_some());
+        assert_eq!(
+            unit.visual_execution().capture_cadence(),
+            BrowserCaptureCadence::PlacementBounded,
+        );
+    }
+
+    #[test]
+    fn keeps_unproved_source_continuity_in_browser_composition() {
+        let frozen = layered_video_asset(video_dimensions(), true);
+        let timeline = solve(
+            concat!(
+                "<om-film><om-scene><om-shot>",
+                r#"<video src="opening.mp4" plays="2" hold-last="500ms"></video>"#,
+                "</om-shot></om-scene></om-film>",
+            ),
+            "opening.mp4",
+            frozen.clone(),
+        );
+        let materialized = MaterializedAsset::new(frozen, "/tmp/opening.mp4")
+            .expect("the fixture path is present");
+        let unit = RenderUnit::whole_film(
+            &timeline,
+            placement_bounded_manifest(PresentationVisualCapability::SeparableOverlay),
+            render_profile(),
+            [materialized],
+        )
+        .expect("source continuity retains the conservative browser path");
 
         assert!(unit.visual_execution().layered_media().is_none());
         assert_eq!(
@@ -1469,6 +1523,14 @@ mod tests {
             VideoDimensions::new(1_920, 1_080).expect("fixture dimensions are positive"),
             None,
         )
+    }
+
+    fn variable_timing() -> VideoTiming {
+        let timebase =
+            MediaTimebase::new(1, 1_000).expect("one millisecond ticks form a valid timebase");
+        let frames = VideoFrameMap::new(timebase, [0, 400, 1_000])
+            .expect("the fixture has two variable frame intervals");
+        VideoTiming::Variable(frames)
     }
 
     fn video_asset_with_identity(identity: u8) -> FrozenAsset {

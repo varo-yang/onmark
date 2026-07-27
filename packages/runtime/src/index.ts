@@ -8,7 +8,7 @@ export {
 } from "./generated/codec.js";
 export type { BrowserRequest } from "./generated/browser-request.js";
 export type { BrowserResponse } from "./generated/browser-response.js";
-export type { BrowserPlan } from "./generated/browser-request.js";
+export type { BrowserPlan, BrowserVideo } from "./generated/browser-request.js";
 export { runtimeFrameAt, type RuntimeFrame } from "./clock.js";
 export {
   videoFrameSelection,

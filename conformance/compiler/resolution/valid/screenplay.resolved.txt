@@ -5,7 +5,7 @@ film id=-
     cue id=cta id@0:81..84 time=7s time@0:92..94
   scene id=sale
     shot id=hero duration=-
-      video id=- src=product.mp4 delay=- trim=- speed=1/1
+      video id=- src=product.mp4 delay=- trim=- speed=1/1 plays=1 hold-last=0s
       om-title id=- start=cue:offer
         text "30% OFF" @0:234..241
       om-cta id=- start=cue:cta

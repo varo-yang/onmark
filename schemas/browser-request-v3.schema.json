@@ -304,8 +304,8 @@
         "source": {
           "$ref": "#/$defs/BrowserVideoSource"
         },
-        "sourceFrameRate": {
-          "$ref": "#/$defs/WireFrameRate"
+        "sourceTiming": {
+          "$ref": "#/$defs/BrowserVideoTiming"
         }
       },
       "required": [
@@ -313,7 +313,7 @@
         "shotId",
         "assetId",
         "interval",
-        "sourceFrameRate",
+        "sourceTiming",
         "source"
       ],
       "type": "object"
@@ -328,6 +328,12 @@
           "pattern": "^(0|[1-9][0-9]*)$",
           "type": "string"
         },
+        "holdLastNanoseconds": {
+          "maxLength": 20,
+          "minLength": 1,
+          "pattern": "^(0|[1-9][0-9]*)$",
+          "type": "string"
+        },
         "naturalEndNanoseconds": {
           "maxLength": 20,
           "minLength": 1,
@@ -336,6 +342,11 @@
         },
         "playbackRate": {
           "$ref": "#/$defs/WirePlaybackRate"
+        },
+        "plays": {
+          "format": "uint32",
+          "minimum": 1,
+          "type": "integer"
         },
         "startNanoseconds": {
           "maxLength": 20,
@@ -348,12 +359,67 @@
         "startNanoseconds",
         "endNanoseconds",
         "naturalEndNanoseconds",
-        "playbackRate"
+        "playbackRate",
+        "plays",
+        "holdLastNanoseconds"
       ],
       "type": "object"
     },
+    "BrowserVideoTiming": {
+      "description": "Exact source-frame timing projected into the browser runtime.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Every source frame has one exact rational rate.",
+          "properties": {
+            "frameRate": {
+              "$ref": "#/$defs/WireFrameRate",
+              "description": "Exact source frames per second."
+            },
+            "kind": {
+              "const": "constant",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "frameRate"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Every source frame carries one half-open timestamp interval.",
+          "properties": {
+            "boundaries": {
+              "description": "Canonical decimal ticks from source zero through terminal end.",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 100000,
+              "minItems": 3,
+              "type": "array"
+            },
+            "kind": {
+              "const": "variable",
+              "type": "string"
+            },
+            "timebase": {
+              "$ref": "#/$defs/WireMediaTimebase",
+              "description": "Exact seconds represented by one source timestamp tick."
+            }
+          },
+          "required": [
+            "kind",
+            "timebase",
+            "boundaries"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "ProtocolVersion": {
-      "const": 2,
+      "const": 3,
       "description": "Version of the native-to-browser message contract.",
       "format": "uint16",
       "maximum": 65535,
@@ -414,6 +480,29 @@
       ],
       "type": "object"
     },
+    "WireMediaTimebase": {
+      "additionalProperties": false,
+      "description": "Exact media timestamp unit represented with browser-safe integers.",
+      "properties": {
+        "denominator": {
+          "format": "uint32",
+          "maximum": 4294967295,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "numerator": {
+          "format": "uint32",
+          "maximum": 4294967295,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "numerator",
+        "denominator"
+      ],
+      "type": "object"
+    },
     "WirePlaybackRate": {
       "additionalProperties": false,
       "description": "Exact canonical playback ratio represented with browser-safe integers.",
@@ -438,7 +527,7 @@
       "type": "object"
     }
   },
-  "$id": "https://onmark.dev/schemas/browser-request-v2.schema.json",
+  "$id": "https://onmark.dev/schemas/browser-request-v3.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "One versioned command sent from the native executor to the browser.",

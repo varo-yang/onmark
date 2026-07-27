@@ -8,8 +8,8 @@ use std::collections::BTreeMap;
 use crate::diagnostics::{Diagnostic, DiagnosticCode, Diagnostics};
 use crate::model::{
     AssetRef, AudioGain, CueId, Duration, ElementKind, EventRef, GeneralAudioKind, InvalidAssetRef,
-    InvalidAudioGain, InvalidDuration, InvalidMediaTrim, InvalidNodeId, InvalidPlaybackRate,
-    MediaTrim, NodeId, PlaybackRate, SourceSpan,
+    InvalidAudioGain, InvalidDuration, InvalidMediaTrim, InvalidNodeId, InvalidPlayCount,
+    InvalidPlaybackRate, MediaTrim, NodeId, PlayCount, PlaybackRate, SourceSpan,
 };
 use crate::syntax::{Attribute, TextNode};
 
@@ -234,9 +234,15 @@ impl Resolver {
         let speed = attributes
             .take("speed")
             .and_then(|attribute| self.resolve_playback_rate(&attribute));
+        let plays = attributes
+            .take("plays")
+            .and_then(|attribute| self.resolve_play_count(&attribute));
+        let hold_last = attributes
+            .take("hold-last")
+            .and_then(|attribute| self.resolve_hold_last(&attribute));
         attributes.reject_unknown(element.kind(), &mut self.diagnostics);
 
-        ResolvedVideo::new(element, src, delay, trim, speed)
+        ResolvedVideo::new(element, src, delay, trim, speed, plays, hold_last)
     }
 
     fn resolve_voice_over(&mut self, voice_over: LinkedVoiceOver) -> ResolvedVoiceOver {
@@ -408,6 +414,26 @@ impl Resolver {
             Err(reason) => {
                 self.diagnostics
                     .push(invalid_playback_rate(attribute, reason));
+                None
+            }
+        }
+    }
+
+    fn resolve_play_count(&mut self, attribute: &Attribute) -> Option<Authored<PlayCount>> {
+        match PlayCount::parse(attribute.value()) {
+            Ok(count) => Some(Authored::new(count, attribute.value_span())),
+            Err(reason) => {
+                self.diagnostics.push(invalid_play_count(attribute, reason));
+                None
+            }
+        }
+    }
+
+    fn resolve_hold_last(&mut self, attribute: &Attribute) -> Option<Authored<Duration>> {
+        match Duration::parse_positive(attribute.value()) {
+            Ok(duration) => Some(Authored::new(duration, attribute.value_span())),
+            Err(reason) => {
+                self.diagnostics.push(invalid_hold_last(attribute, reason));
                 None
             }
         }
@@ -591,6 +617,27 @@ fn invalid_playback_rate(attribute: &Attribute, reason: InvalidPlaybackRate) -> 
         attribute.value_span(),
         format!("video speed \"{}\" is invalid: {reason}", attribute.value()),
         "use an exact positive rate such as 1x, 0.5x, or 2x",
+    )
+}
+
+fn invalid_play_count(attribute: &Attribute, reason: InvalidPlayCount) -> Diagnostic {
+    author_diagnostic(
+        DiagnosticCode::InvalidAttributeValue,
+        attribute.value_span(),
+        format!("video plays \"{}\" is invalid: {reason}", attribute.value()),
+        "use a positive whole number such as plays=\"3\"",
+    )
+}
+
+fn invalid_hold_last(attribute: &Attribute, reason: InvalidDuration) -> Diagnostic {
+    author_diagnostic(
+        DiagnosticCode::InvalidDuration,
+        attribute.value_span(),
+        format!(
+            "video hold-last \"{}\" is invalid: {reason}",
+            attribute.value()
+        ),
+        "use a positive exact duration such as hold-last=\"500ms\"",
     )
 }
 

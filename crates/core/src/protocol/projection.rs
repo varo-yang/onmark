@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::model::{ElementKind, FrameInterval, FrameRate, FrozenAssetId};
+use crate::model::{ElementKind, FrameInterval, FrozenAssetId, VideoTiming};
 use crate::timeline::{
     TimelineCaption, TimelineContent, TimelineElement, TimelineIr, TimelineOverlay, TimelineScene,
     TimelineShot, TimelineText, TimelineVideo,
@@ -11,8 +11,9 @@ use crate::timeline::{
 use super::frame::WireInterval;
 use super::plan::{
     BrowserNode, BrowserNodeId, BrowserOverlay, BrowserOverlayKind, BrowserScene, BrowserShot,
-    BrowserVideo, InvalidBrowserPlan, MAX_BROWSER_OVERLAY_TEXT_BYTES, MAX_BROWSER_OVERLAYS,
-    MAX_BROWSER_SCENES, MAX_BROWSER_SHOTS, MAX_BROWSER_VIDEOS, text_exceeds_limit,
+    BrowserVideo, BrowserVideoTiming, InvalidBrowserPlan, MAX_BROWSER_OVERLAY_TEXT_BYTES,
+    MAX_BROWSER_OVERLAYS, MAX_BROWSER_SCENES, MAX_BROWSER_SHOTS, MAX_BROWSER_VIDEOS,
+    text_exceeds_limit,
 };
 
 pub(super) struct BrowserProjection {
@@ -25,7 +26,7 @@ pub(super) struct BrowserProjection {
 
 pub(super) struct ProjectionBuilder<'a> {
     evaluation: FrameInterval,
-    source_frame_rates: &'a BTreeMap<FrozenAssetId, FrameRate>,
+    source_timings: &'a BTreeMap<FrozenAssetId, VideoTiming>,
     next_node_id: u32,
     scenes: Vec<BrowserScene>,
     shots: Vec<BrowserShot>,
@@ -37,11 +38,11 @@ pub(super) struct ProjectionBuilder<'a> {
 impl<'a> ProjectionBuilder<'a> {
     pub(super) fn new(
         evaluation: FrameInterval,
-        source_frame_rates: &'a BTreeMap<FrozenAssetId, FrameRate>,
+        source_timings: &'a BTreeMap<FrozenAssetId, VideoTiming>,
     ) -> Self {
         Self {
             evaluation,
-            source_frame_rates,
+            source_timings,
             next_node_id: 0,
             scenes: Vec::new(),
             shots: Vec::new(),
@@ -143,12 +144,8 @@ impl<'a> ProjectionBuilder<'a> {
             return Err(InvalidBrowserPlan::TooManyVideos);
         }
         let node = self.node(video.element())?;
-        self.videos.push(browser_video(
-            video,
-            node,
-            shot_id,
-            self.source_frame_rates,
-        )?);
+        self.videos
+            .push(browser_video(video, node, shot_id, self.source_timings)?);
         Ok(())
     }
 
@@ -218,19 +215,18 @@ fn browser_video(
     video: &TimelineVideo,
     node: BrowserNode,
     shot_id: BrowserNodeId,
-    source_frame_rates: &BTreeMap<FrozenAssetId, FrameRate>,
+    source_timings: &BTreeMap<FrozenAssetId, VideoTiming>,
 ) -> Result<BrowserVideo, InvalidBrowserPlan> {
     let asset_id = video.asset_id();
-    let rate = source_frame_rates
+    let timing = source_timings
         .get(&asset_id)
-        .copied()
-        .ok_or(InvalidBrowserPlan::MissingSourceFrameRate(asset_id))?;
+        .ok_or(InvalidBrowserPlan::MissingSourceTiming(asset_id))?;
     Ok(BrowserVideo::new(
         node,
         shot_id,
         asset_id,
         WireInterval::try_from(video.timing().interval())?,
-        rate.into(),
+        BrowserVideoTiming::from_model(timing)?,
         video.source(),
     ))
 }

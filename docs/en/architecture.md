@@ -879,15 +879,15 @@ stream-level facts for every stream. Attached-picture video streams are not
 renderable media. Among the remaining video streams and among audio streams,
 the declared default stream wins; ties and absent defaults resolve to the
 lowest reported stream index. `sample_rate` and `channels` fix the selected
-audio stream's sample grid and normalized channel layout, while `nb_frames`
-identifies stills. It
-prefers a visual stream's duration and falls back to the container duration
-when ffprobe omits that stream field; a malformed explicit stream duration is
-still rejected rather than hidden by the fallback. It
-classifies a visual stream as constant only when ffprobe's parseable
-`avg_frame_rate` and `r_frame_rate` normalize to the same exact rational rate;
-disagreement or unavailable values are conservatively variable. The one-MiB
-stdout ceiling therefore remains independent of media duration.
+audio stream's sample grid and normalized channel layout. A second probe reads
+the complete best-effort timestamp sequence for only the selected visual
+stream, together with its exact media timebase and terminal timestamp. One
+frame is a still; multiple equal timestamp intervals prove a constant rational
+frame rate; unequal intervals become a complete `VideoFrameMap`. Nominal
+stream rates never substitute for this evidence. The visual duration comes
+from the normalized terminal boundary rather than a decimal stream duration.
+The fixed sixteen-MiB stdout/stderr ceiling is sized for the browser contract's
+100,000-boundary map while keeping both process pipes bounded.
 
 Gate four also gives `onmark-media` the standalone-subtitle syntax boundary.
 Its parsers consume caller-owned bytes under explicit input, cue-count, per-cue
@@ -1076,9 +1076,10 @@ deterministic visual oracle.
 Both the direct screenshot encoder and the layered media encoder consume the
 same closed output policy. The delivery profile uses x264 `medium`, CRF 18,
 `yuv420p`, and BT.709 limited-range metadata; the editing profile uses
-`prores_ks` profile 3 and `yuv422p10le` with the same color declaration. These
-facts are explicit rather than inherited from FFmpeg defaults, so an FFmpeg
-upgrade cannot silently choose a codec, pixel format, or container.
+`prores_ks` profile 4, `yuva444p10le`, and a 16-bit alpha plane with the same
+color declaration. These facts are explicit rather than inherited from FFmpeg
+defaults, so an FFmpeg upgrade cannot silently choose a codec, pixel format,
+alpha policy, or container.
 
 Local capture retains Chromium's normal multiprocess topology. An adapter may
 select `BrowserLaunchPolicy::isolated_worker()` only when an independently
@@ -1182,10 +1183,12 @@ diff. A schema with a real TypeScript consumer also generates checked-in
 types/codecs; the browser and bundle contracts do so today, while the Lambda
 invocation deliberately has no speculative TypeScript caller. Generated files
 are never hand-edited, and Rust does not regenerate a second Rust model from its
-own schema. Before the first external product release, v1 is refined in place
-so the initial public contract does not preserve experimental fields; after
-publication, an incompatible wire change requires a new protocol version and
-migration fixture. The `BrowserPlan` carries the output frame rate,
+own schema. Browser and worker contracts are build-coupled internal artifacts:
+an incompatible change increments the current protocol version, replaces its
+checked-in schemas and examples, and rebuilds dependent bundles and worker
+requests. Consumers reject every non-current version rather than retaining
+legacy decoders; the released product version is the migration boundary. The
+`BrowserPlan` carries the output frame rate,
 the complete solved film interval, evaluation/output intervals, film, scene,
 and shot structure, primary-video placements, and title, call-to-action, or
 imported-caption overlays consumed by the production presentation adapter.
@@ -1195,19 +1198,19 @@ only the publication window; neither rewrites presentation time. Every
 projected node has a dense
 compiler-owned unit-local identity and an optional authored identity; content
 names its structural parent. Authored IDs retain semantic identity across unit
-projections. Video placements additionally identify immutable bytes, the
-admitted CFR source rate, the selected source interval, its frozen natural end,
-and the canonical playback ratio needed to verify decoded frame selection.
+projections. Video placements additionally identify immutable bytes, complete
+CFR or VFR source timing, the selected source interval, its frozen natural end,
+and the canonical playback, repetition, and final-frame-hold facts needed to
+verify decoded frame selection.
 Overlays carry their closed semantic role and decoded text.
 Materialized URLs remain render-owned facts, while DOM structure and CSS remain
 presentation-owned effects. This is the browser-facing projection of one Render
 Unit, not the Render Graph or partition plan itself. It may contain only facts
 consumed in the browser; output paths, cache keys, `FFmpeg` arguments, source
-spans, and materialization policy remain outside it. VFR timestamp maps and
-further component facts are added only when the production adapter consumes
-them.
+spans, and materialization policy remain outside it. Further component facts
+are added only when the production adapter consumes them.
 
-Protocol V2 carries at most 10,000 scene containers, shot containers, video
+Protocol V3 carries at most 10,000 scene containers, shot containers, video
 placements, and overlays of each kind; one overlay inscription carries at most
 65,536 Unicode characters.
 Native projection and Rust wire decoding additionally cap their combined UTF-8
@@ -1593,26 +1596,36 @@ median. It calls the production render pipeline directly and cannot substitute
 a reduced benchmark-only executor.
 
 The second slice admits broader media inputs, output profiles, and native
-placements only through typed facts and locked evidence. Input normalization
-may accept VFR and additional codecs by freezing their exact normalized bytes
-before compilation; it may not let browser or `FFmpeg` defaults choose source
-frames. Transparent or alternate-container outputs must preserve the requested
-pixel contract end to end. Native crop, scale, picture-in-picture, and
-multi-video placement require explicit layout facts plus whole-film,
-partitioned, and distributed raw-pixel equivalence before they may bypass
-Chromium.
+placements only through typed facts and locked evidence. VFR input retains its
+frozen source bytes and requires a complete frame-timestamp map; Onmark does not
+transcode it into an implicit CFR surrogate or let browser and `FFmpeg`
+defaults choose source frames. Additional codecs require an admitted decoder
+and color contract over those same frozen bytes. Transparent or
+alternate-container outputs must preserve the requested pixel contract end to
+end. Native crop, scale, picture-in-picture, and multi-video placement require
+explicit layout facts plus whole-film, partitioned, and distributed raw-pixel
+equivalence before they may bypass Chromium.
 
-The first admitted alternate output is the edit-friendly MOV profile:
-`ProRes` 422 HQ (`yuv422p10le`) with 48 kHz stereo 24-bit PCM. The existing
-delivery profile remains x264 H.264 (`yuv420p`) with AAC in MP4. One closed
+The admitted alternate output is the edit-friendly, alpha-preserving MOV
+profile: `ProRes` 4444 (`yuva444p10le`, decoded by the locked toolchain as
+`yuva444p12le`) with 48 kHz stereo 24-bit PCM. The delivery profile remains
+opaque x264 H.264 (`yuv420p`) with AAC in MP4. One closed
 `EncodeProfile` owns each profile's visual codec, audio codec, pixel format,
 container, staging suffix, and machine spelling across direct browser,
 layered-media, local assembly, and distributed-artifact assembly. The CLI
 selects the profile only from the `.mp4` or `.mov` output extension and rejects
 every other spelling; no FFmpeg default changes the encoded bytes. Desktop release
 admission renders and probes both profiles from the installed product.
-Transparent output remains unadmitted until the alpha contract is proved
-through browser capture, native composition, caching, and final muxing.
+
+Alpha preservation is a pixel-affecting `RenderProfile` fact. It selects the
+transparent Chromium root before navigation, enters worker requests and frame
+artifact identity, and survives final encoding without a hidden black
+background. The admission test compares whole-film capture with independent
+partition artifacts, assembles those artifacts through the production encoder,
+requires equal raw-RGBA sequences, probes both MOV outputs as ProRes 4444, and
+requires transparent and translucent decoded pixels. The opaque MP4 path keeps
+its separate browser surface so transparent antialiasing is never flattened
+implicitly by H.264.
 
 Media treatment, transitions, dynamic author inputs, caption presentation, and
 multiple subtitle tracks are language work when they change authored meaning.
@@ -1622,16 +1635,23 @@ the resulting trim, rate, gain, fade, dependency, or transition interval;
 TypeScript may only realize the already-solved visual effect. No JavaScript
 timeline, CLI flag, or `FFmpeg` filter string may become an alternate scheduler.
 
-Gate eight's first admitted video treatment is exact source-local selection.
-Two live-model arms both completed all twenty editing cases without introducing
-film coordinates; the admitted `trim="start..end"` arm used fewer authored
-bytes than separate edge attributes. Resolve parses `trim` and `speed` once,
-solve derives output frames with integer rational arithmetic, Timeline IR owns
-the source mapping, and Browser Plan transports that fact to deterministic
-frame selection. An edited placement remains browser-composited until a native
-path proves equivalent source selection and pixels. The runtime repeats only
-the wire-level duration invariant when admitting an untrusted plan; it does not
-derive or alter authored timing.
+Gate eight's admitted video treatments remain source-local. The first
+live-model comparison admitted `trim="start..end"` and exact `speed`; both arms
+completed all twenty editing cases without film coordinates, and the range arm
+used fewer authored bytes than separate edges. A second 20/20 comparison
+admitted unambiguous total `plays` and final-frame `hold-last`; it rejected
+overloading HTML's boolean `loop` spelling with an integer meaning.
+
+Resolve parses each treatment once, solve derives output frames with integer
+rational arithmetic, Timeline IR owns the complete source mapping, and Browser
+Plan transports that fact to deterministic CFR or VFR frame selection. Native
+composition admits trim and speed after the Chromium control proves source-frame
+selection and independent local and worker partitions produce equal native
+raw-RGBA sequences. It does not require the known-different Chromium and
+`FFmpeg` decode/color paths to hash equally. Repeated playback and final-frame
+holds remain browser-composited until the same independent native proof exists.
+The runtime repeats only the wire-level duration invariant when admitting an
+untrusted plan; it does not derive or alter authored timing.
 
 Gate eight does not add a Player, Studio, preview server, source-mutation API,
 component marketplace, remote authoring command, coordinator, database, queue,
@@ -1735,22 +1755,20 @@ and the bundle explicitly declared `separableOverlay`. Planning now selects
 that native path before launch when all facts prove it; otherwise it selects
 `browserComposite`. The executor never switches paths as a fallback.
 
-The current visual profile admits CFR H.264 assets only. `browserComposite`
-uses the locked Chromium decoder as its authoritative decode/color path and
-does not report readiness until `requestVideoFrameCallback.mediaTime`
-identifies the Rust-selected source frame. `separableOverlay` uses the admitted
-persistent native decoder and compositor under the Gate-seven color and layout
-proof. Unsupported codecs, incomplete native-path color facts, and
-variable-frame-rate input are rejected or kept on the proved browser path
-rather than silently approximated. VFR becomes admissible only after frozen
-metadata and the browser plan carry a complete timestamp map rather than one
-CFR rate.
+The current visual profile admits H.264 with either one proved CFR rate or a
+complete VFR timestamp map. `browserComposite` uses the locked Chromium decoder
+as its authoritative decode/color path and does not report readiness until
+`requestVideoFrameCallback.mediaTime` identifies the Rust-selected source
+frame. `separableOverlay` uses the admitted persistent native decoder and
+compositor only for CFR media under the Gate-seven color, layout, and source-
+treatment proofs. Unsupported codecs and incomplete native-path facts are
+rejected or kept on the proved browser path rather than silently approximated.
 
 This policy is represented by render-owned `AdmittedVideo` proof over core-owned
-metadata. It borrows the normalized facts instead of introducing a second media
-model, and proves both H.264 codec support and one exact source frame rate. The
-whole-film Render Unit retains that rate and lowers it into the browser
-placement exactly once. The decoded-media conformance obtains the proof from the
-production bounded ffprobe boundary for both accepted CFR fixtures and the
-rejected VFR fixture. The whole-film executor consumes admitted video through
-the production adapter and verifies the completed moving-picture artifact.
+metadata. It borrows normalized facts instead of introducing a second media
+model and proves H.264 plus complete source timing. The Render Unit retains that
+timing and lowers it into each browser placement exactly once; native admission
+then independently requires its constant-rate subset. Decoded-media conformance
+obtains CFR and VFR evidence through the production bounded ffprobe boundary,
+and the whole-film executor consumes the same admitted video through the
+production adapter.

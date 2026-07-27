@@ -120,11 +120,15 @@ bounds use the duration grammar above and must satisfy
 
 Video may play its selected source interval at an exact positive rate with
 `speed="integer[.fraction]x"`. The fraction admits at most six digits and the
-default is `1x`. The compiler reduces the decimal to a rational value and
-derives local duration from selected source duration divided by that rate.
-Neither attribute expresses a film-timeline coordinate. They apply to the
-selected visual stream only; authored `music`, `sfx`, and `vo` remain separate
-audio roles and do not inherit a video's source interval or playback rate.
+default is `1x`. `plays="positive integer"` repeats the complete selected
+interval that many times in total and defaults to one play. `hold-last` uses a
+positive duration to retain the selected interval's final frame after all
+plays. The compiler derives local duration as
+`selected duration / speed * plays + hold-last`.
+
+None of these attributes expresses a film-timeline coordinate. They apply to
+the selected visual stream only; authored `music`, `sfx`, and `vo` remain
+separate audio roles and do not inherit a video's source treatment.
 
 The compiler maps exact nanosecond values onto a rational frame grid with
 integer arithmetic. Every conversion names either floor or ceiling rounding at
@@ -208,10 +212,10 @@ namespace.
 Structural binding is followed by attribute and reference resolution. `film`,
 `cues`, and `scene` admit no non-ID attributes. `cue` requires `id` and `time`.
 `shot` admits optional `duration`. `video` admits optional `src`, `delay`,
-`trim`, and `speed`; `vo` admits optional `src` and `delay`; `music` requires
-`src` and admits optional `gain`; `sfx` requires `src` and admits optional
-`delay` and `gain`; `title` and `cta` admit optional `cue` or `delay`. `cue`
-and `delay` cannot appear together on one overlay
+`trim`, `speed`, `plays`, and `hold-last`; `vo` admits optional `src` and
+`delay`; `music` requires `src` and admits optional `gain`; `sfx` requires
+`src` and admits optional `delay` and `gain`; `title` and `cta` admit optional
+`cue` or `delay`. `cue` and `delay` cannot appear together on one overlay
 because they define competing start rules. Missing `src` on `video` or `vo`
 remains valid for static analysis; `music` and `sfx` require it during
 resolution. An authored empty `src` is always invalid. Unknown attributes are

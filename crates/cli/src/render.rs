@@ -274,7 +274,8 @@ async fn prepare_render(
         Some(_) => CacheAdmission::Ephemeral,
         None => CacheAdmission::Persistent,
     });
-    let profile = RenderProfile::new(args.width, args.height)?;
+    let profile =
+        RenderProfile::new(args.width, args.height)?.with_alpha(encode_profile.alpha_mode());
     let source = read_screenplay(&args)?;
 
     let resolved = compilation::resolve(&source);

@@ -14,6 +14,7 @@ import { FakeVideoElement } from "./fake-video-element.js";
 const selection = {
   mediaTimeSeconds: 2 / 30,
   seekTimeSeconds: 2.5 / 30,
+  readinessToleranceSeconds: 0.000_001,
 };
 
 // ── Decoded-video resource ──
@@ -76,6 +77,25 @@ test("waits past unrelated decoded frames and removes every observer", async () 
 
   assert.equal(element.listenerCount, 0);
   assert.equal(element.pendingFrameCallbacks, 0);
+});
+
+test("does not accept an adjacent short frame inside the old fixed tolerance", async () => {
+  const element = new FakeVideoElement();
+  const video = await loadedVideo(element);
+  const shortFrame = {
+    mediaTimeSeconds: 1,
+    seekTimeSeconds: 1.000_000_2,
+    readinessToleranceSeconds: 0.000_000_1,
+  };
+
+  const staging = video.stage(shortFrame);
+  element.emit("seeked");
+  await staging;
+  const confirming = video.confirm(shortFrame);
+  element.present(1.000_000_3);
+  assert.equal(element.pendingFrameCallbacks, 1);
+  element.present(shortFrame.mediaTimeSeconds);
+  await confirming;
 });
 
 test("reports bounded readiness failures and cleans the pending frame wait", async () => {
@@ -231,12 +251,17 @@ test("derives the materialized source from the Rust-owned bundle layout", () => 
     assetId:
       "sha256:0101010101010101010101010101010101010101010101010101010101010101",
     interval: { start: 10, end: 20 },
-    sourceFrameRate: { numerator: 30, denominator: 1 },
+    sourceTiming: {
+      kind: "constant",
+      frameRate: { numerator: 30, denominator: 1 },
+    },
     source: {
       startNanoseconds: "0",
       endNanoseconds: "333333333",
       naturalEndNanoseconds: "333333333",
       playbackRate: { numerator: 1, denominator: 1 },
+      plays: 1,
+      holdLastNanoseconds: "0",
     },
   };
 

@@ -1,0 +1,14 @@
+{
+  "loop-hold": {
+    "passed": 20,
+    "total": 20,
+    "authoredBytes": 2946
+  },
+  "plays-hold-last": {
+    "passed": 20,
+    "total": 20,
+    "authoredBytes": 3000
+  },
+  "admitted": "plays-hold-last",
+  "reason": "Equal generation reliability with unambiguous total-play and final-frame semantics; the 54-byte difference does not justify overloading HTML's boolean loop attribute."
+}

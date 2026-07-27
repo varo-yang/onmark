@@ -7,8 +7,8 @@ use std::fmt::Write as _;
 
 use onmark_core::compiler;
 use onmark_core::model::{
-    AssetMetadata, AssetRef, Duration, FrameRate, FrozenAsset, FrozenAssetId, SourceId, Timebase,
-    VideoDimensions, VideoMetadata, VideoTiming,
+    AssetMetadata, AssetRef, Duration, FrameRate, FrozenAsset, FrozenAssetId, MediaTimebase,
+    SourceId, Timebase, VideoDimensions, VideoFrameMap, VideoMetadata, VideoTiming,
 };
 use onmark_core::protocol::{
     BrowserCommand, BrowserEvent, BrowserPlan, BrowserRequest, BrowserResponse, BundleManifest,
@@ -35,7 +35,7 @@ fn browser_requests_match_the_versioned_wire_contract() {
     ];
 
     assert_or_update(
-        &fixture("protocol", "browser-requests-v2.jsonl"),
+        &fixture("protocol", "browser-requests-v3.jsonl"),
         &render_json_lines(&requests),
     );
 }
@@ -63,18 +63,41 @@ fn browser_responses_match_the_versioned_wire_contract() {
     ];
 
     assert_or_update(
-        &fixture("protocol", "browser-responses-v2.jsonl"),
+        &fixture("protocol", "browser-responses-v3.jsonl"),
         &render_json_lines(&responses),
     );
 }
 
 #[test]
-fn browser_plan_requires_an_admitted_rate_for_every_video() {
+fn browser_plan_requires_admitted_timing_for_every_video() {
     let (timeline, asset_id, _rate) = timeline_fixture();
 
     assert_eq!(
         BrowserPlan::from_timeline(&timeline, &BTreeMap::new()),
-        Err(InvalidBrowserPlan::MissingSourceFrameRate(asset_id)),
+        Err(InvalidBrowserPlan::MissingSourceTiming(asset_id)),
+    );
+}
+
+#[test]
+fn browser_plan_retains_a_complete_variable_source_frame_map() {
+    let (timeline, asset_id, _rate) = timeline_fixture();
+    let timebase =
+        MediaTimebase::new(1, 1_000).expect("one millisecond ticks form a valid timebase");
+    let frames = VideoFrameMap::new(timebase, [0, 1_000, 2_500])
+        .expect("the fixture has two variable source frames");
+    let timing = BTreeMap::from([(asset_id, VideoTiming::Variable(frames))]);
+
+    let plan = BrowserPlan::from_timeline(&timeline, &timing)
+        .expect("the variable source map fits the browser contract");
+    let value = serde_json::to_value(plan).expect("the browser plan must serialize");
+
+    assert_eq!(
+        value["videos"][0]["sourceTiming"],
+        serde_json::json!({
+            "kind": "variable",
+            "timebase": { "numerator": 1, "denominator": 1000 },
+            "boundaries": ["0", "1000", "2500"]
+        }),
     );
 }
 
@@ -117,12 +140,17 @@ fn browser_plan_retains_solved_structure_and_content_ownership() {
             "shotId": 2,
             "assetId": "sha256:0101010101010101010101010101010101010101010101010101010101010101",
             "interval": { "start": 0, "end": 75 },
-            "sourceFrameRate": { "numerator": 30, "denominator": 1 },
+            "sourceTiming": {
+                "kind": "constant",
+                "frameRate": { "numerator": 30, "denominator": 1 }
+            },
             "source": {
                 "startNanoseconds": "0",
                 "endNanoseconds": "2500000000",
                 "naturalEndNanoseconds": "2500000000",
-                "playbackRate": { "numerator": 1, "denominator": 1 }
+                "playbackRate": { "numerator": 1, "denominator": 1 },
+                "plays": 1,
+                "holdLastNanoseconds": "0"
             }
         }]),
     );
@@ -178,9 +206,9 @@ fn frame(index: u64) -> WireFrame {
 
 fn browser_plan_fixture() -> BrowserPlan {
     let (timeline, asset_id, rate) = timeline_fixture();
-    let source_frame_rates = BTreeMap::from([(asset_id, rate)]);
+    let source_timings = BTreeMap::from([(asset_id, VideoTiming::Constant(rate))]);
 
-    BrowserPlan::from_timeline(&timeline, &source_frame_rates)
+    BrowserPlan::from_timeline(&timeline, &source_timings)
         .expect("the fixture timeline fits the browser frame domain")
 }
 

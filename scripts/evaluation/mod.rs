@@ -4,6 +4,7 @@ use std::error::Error;
 use std::path::Path;
 
 mod audio;
+mod continuity;
 mod html;
 mod video;
 
@@ -16,5 +17,6 @@ pub(super) fn grade_html(repository: &Path) -> Result<(), Box<dyn Error>> {
 }
 
 pub(super) fn grade_video(repository: &Path) -> Result<(), Box<dyn Error>> {
-    video::grade(repository)
+    video::grade(repository)?;
+    continuity::grade(repository)
 }

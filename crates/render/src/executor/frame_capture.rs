@@ -11,9 +11,9 @@ use super::{RenderError, invalid_plan, layered_job};
 use crate::encoder::{LayeredCompletion, LayeredOutput};
 use crate::frame_artifact::FrameArtifactWriter;
 use crate::{
-    BrowserCaptureMode, BrowserGraphicsBackend, BrowserLaunchPolicy, BrowserLimits, BrowserSession,
-    BrowserSessionOptions, CaptureEnvironmentId, ExecutableUnit, Ffmpeg, FrameArtifact,
-    FrameArtifactErrorKind, FrameArtifactLimits,
+    AlphaMode, BrowserCaptureMode, BrowserGraphicsBackend, BrowserLaunchPolicy, BrowserLimits,
+    BrowserSession, BrowserSessionOptions, CaptureEnvironmentId, ExecutableUnit, Ffmpeg,
+    FrameArtifact, FrameArtifactErrorKind, FrameArtifactLimits,
 };
 
 struct PendingArtifact<'a> {
@@ -507,7 +507,7 @@ impl FrameCaptureSession {
             .then(|| unit.browser_plan().foreground_only());
         let (plan, surface) = match foreground.as_ref() {
             Some(plan) => (plan, CaptureSurface::Transparent),
-            None => (unit.browser_plan(), CaptureSurface::Opaque),
+            None => (unit.browser_plan(), capture_surface(unit.profile().alpha())),
         };
         render_session(
             &mut self.browser,
@@ -547,5 +547,12 @@ impl FrameCaptureSession {
                 Err(render.with_cleanup_failure("browser shutdown", shutdown))
             }
         }
+    }
+}
+
+const fn capture_surface(alpha: AlphaMode) -> CaptureSurface {
+    match alpha {
+        AlphaMode::Opaque => CaptureSurface::Opaque,
+        AlphaMode::Preserve => CaptureSurface::Transparent,
     }
 }

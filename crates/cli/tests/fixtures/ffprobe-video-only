@@ -1,18 +1,37 @@
 #!/bin/sh
 
-entries='format=duration:stream=index,codec_type,codec_name,pix_fmt,width,height,color_range,color_space,color_transfer,color_primaries,duration,avg_frame_rate,r_frame_rate,nb_frames,sample_rate,channels:stream_disposition=default,attached_pic'
+metadata_entries='format=duration:stream=index,codec_type,codec_name,pix_fmt,width,height,color_range,color_space,color_transfer,color_primaries,duration,sample_rate,channels:stream_disposition=default,attached_pic'
+frame_entries='frame=best_effort_timestamp,pkt_duration:stream=time_base,duration_ts'
 
-if [ "$#" -ne 8 ] || \
-   [ "$1" != "-v" ] || [ "$2" != "error" ] || \
-   [ "$3" != "-show_entries" ] || [ "$4" != "$entries" ] || \
-   [ "$5" != "-of" ] || [ "$6" != "json" ] || [ "$7" != "--" ]; then
-  printf 'unexpected ffprobe arguments\n' >&2
+case "$3" in
+  -show_entries)
+    if [ "$#" -ne 8 ] || [ "$4" != "$metadata_entries" ] || \
+       [ "$5" != "-of" ] || [ "$6" != "json" ] || [ "$7" != "--" ]; then
+      printf 'unexpected metadata arguments\n' >&2
+      exit 2
+    fi
+    input=$8
+    output='{"streams":[{"index":0,"codec_type":"video","codec_name":"h264","pix_fmt":"yuv420p","width":1920,"height":1080,"duration":"2.000000","disposition":{"default":1,"attached_pic":0}}],"format":{"duration":"2.000000"}}'
+    ;;
+  -select_streams)
+    if [ "$#" -ne 11 ] || [ "$4" != "0" ] || [ "$5" != "-show_frames" ] || \
+       [ "$6" != "-show_entries" ] || [ "$7" != "$frame_entries" ] || \
+       [ "$8" != "-of" ] || [ "$9" != "json" ] || [ "${10}" != "--" ]; then
+      printf 'unexpected frame arguments\n' >&2
+      exit 2
+    fi
+    input=${11}
+    output='{"frames":[{"best_effort_timestamp":0,"pkt_duration":1},{"best_effort_timestamp":1,"pkt_duration":1}],"streams":[{"time_base":"1/1","duration_ts":2}]}'
+    ;;
+  *)
+    printf 'unexpected ffprobe arguments\n' >&2
+    exit 2
+    ;;
+esac
+
+if [ "$1" != "-v" ] || [ "$2" != "error" ] || [ ! -f "$input" ]; then
+  printf 'fixture input is invalid: %s\n' "$input" >&2
   exit 2
 fi
 
-if [ ! -f "$8" ]; then
-  printf 'fixture input is not a file: %s\n' "$8" >&2
-  exit 2
-fi
-
-printf '%s' '{"streams":[{"index":0,"codec_type":"video","codec_name":"h264","pix_fmt":"yuv420p","width":1920,"height":1080,"duration":"2.000000","avg_frame_rate":"30/1","r_frame_rate":"30/1","nb_frames":"60","disposition":{"default":1,"attached_pic":0}}],"format":{"duration":"2.000000"}}'
+printf '%s' "$output"

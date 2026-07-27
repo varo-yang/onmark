@@ -991,11 +991,13 @@ chain 保留，供调试使用。探测对每条 stream 请求有界的 stream-l
 facts。attached-picture video stream 不属于可渲染媒体；其余 video stream 与 audio
 stream 分别优先选择声明为 default 的流，default 缺失或并列时按 ffprobe 报告的最低
 stream index 确定。`sample_rate` 与 `channels` 固定 selected audio stream 的 sample
-grid 与归一化 channel layout，`nb_frames` 识别 still。视觉流优先使用自己的 duration；ffprobe 省略该字段时才回退到容器
-duration，显式但格式错误的 stream duration 仍会被拒绝，不能被 fallback
-掩盖。仅当 ffprobe 中可解析的 `avg_frame_rate` 和 `r_frame_rate`
-约分为同一个精确有理帧率时，才把视觉流归为 constant；二者不一致或不可用时保守归为 variable。因此一 MiB
-stdout ceiling 与媒体时长无关。
+grid 与归一化 channel layout。第二次 probe 只读取 selected visual stream
+的完整 best-effort timestamp 序列、精确 media timebase 与终止 timestamp。单帧即
+still；多个相等 timestamp interval 证明精确有理 constant frame rate；不等 interval
+形成完整 `VideoFrameMap`。nominal stream rate 不能代替这份证据。visual duration
+来自归一化后的终止边界，不再来自十进制 stream duration。固定的十六 MiB
+stdout/stderr ceiling 足以承载 browser contract 的 100,000 个边界，同时让两条 process
+pipe 保持有界。
 
 Gate 四同时把 standalone-subtitle syntax boundary 放进 `onmark-media`。parser 在显式
 input bytes、cue count、单 cue text 与固定 retained-error 上限内消费 caller-owned bytes，并返回
@@ -1142,9 +1144,10 @@ observed process peak RSS 分别约为 533–541、545、561–577、605–615 M
 
 direct screenshot encoder 与 layered media encoder 共同消费同一份封闭输出 policy。
 交付 profile 使用 x264 `medium`、CRF 18、`yuv420p` 与 BT.709 limited-range metadata；
-剪辑 profile 使用 `prores_ks` profile 3、`yuv422p10le` 与相同 color declaration。
+剪辑 profile 使用 `prores_ks` profile 4、`yuva444p10le`、16-bit alpha plane 与相同
+color declaration。
 这些事实必须显式声明，不能继承 FFmpeg default；FFmpeg 升级不得暗中选择 codec、
-pixel format 或 container。
+pixel format、alpha policy 或 container。
 
 本地 capture 保留 Chromium 的标准 multi-process
 topology；只有独立审计过的外层 container 或 microVM 承担等价的 process
@@ -1321,9 +1324,12 @@ Schema，CI 重新生成并要求工作树零 diff。存在真实 TypeScript
 consumer 的 schema 同时生成 checked-in types/codecs；目前 browser 与 bundle
 contract 属于这一类，Lambda invocation 在没有真实 TypeScript
 caller 前刻意不造 codec。生成结果提交进仓库，供 npm package、diff
-review 和非 Rust 消费者直接使用；禁止手工修改。产品首次对外发布之前，v1 可以原地收口，避免初始公开契约背负实验字段；一旦发布，任何不兼容 wire 变化都必须使用新 protocol
-version 并带 migration/conformance fixture。Rust 本身直接使用原始领域/wire
-types，不再从 schema 反向生成第二套 Rust 类型。
+review 和非 Rust 消费者直接使用；禁止手工修改。browser 与 worker contract
+是 build-coupled internal artifact：不兼容变化必须递增当前 protocol version，
+替换 checked-in schema 与 example，并重建依赖它的 bundle 和 worker request。
+consumer 只接受当前版本，不保留 legacy decoder；released product version
+就是迁移边界。Rust 本身直接使用原始领域/wire types，不再从 schema 反向生成
+第二套 Rust 类型。
 
 `BrowserPlan` 现在携带 production presentation adapter 已真实消费的 output frame
 rate、完整 solved film interval、evaluation/output interval、film/scene/shot structure、
@@ -1332,17 +1338,17 @@ primary-video placement，以及 title、call-to-action 或导入 caption overla
 只定义发布窗口，两者都不能改写 presentation time。每个投影 node 都记录 dense
 unit-local compiler-owned identity 与可选 authored identity；跨 projection 的语义身份由
 authored identity 承担，content 显式指向其 structural parent。video placement 另记录
-immutable asset identity、admitted CFR source rate、所选 source interval、冻结素材的
-natural end，以及验证 decoded-frame selection 所需的 canonical playback ratio；overlay
+immutable asset identity、完整 CFR 或 VFR source timing、所选 source interval、冻结素材的
+natural end，以及验证 decoded-frame selection 所需的 canonical playback、重复次数与
+final-frame hold；overlay
 placement 记录封闭的语义角色与 decoded text。materialized URL 仍是 render-owned
 fact，DOM 结构与 CSS 则始终是 presentation-owned effect。这是一条 Render
 Unit 的 browser-facing projection，不是 Render Graph 或 partition
 plan 本身。它只能包含浏览器真实消费的事实；output path、cache
-key、FFmpeg 参数、source span 和 materialization policy 都不得进入。VFR
-timestamp map 与更多 component 事实等 production
-adapter 真正消费时再加入，不提前把后续 gate 塞进协议。
+key、FFmpeg 参数、source span 和 materialization policy 都不得进入。更多 component
+事实等 production adapter 真正消费时再加入，不提前把后续 gate 塞进协议。
 
-Protocol V2 最多分别携带 10,000 个 scene container、shot container、video placement
+Protocol V3 最多分别携带 10,000 个 scene container、shot container、video placement
 与 overlay placement；每条 overlay
 inscription 最多包含 65,536 个 Unicode 字符。native projection 与 Rust wire decode
 还会在 CDP serialization 前，把每份 browser plan 的合计 UTF-8 text 限制为一 MiB；该 aggregate
@@ -1599,20 +1605,28 @@ workspace 内执行一至九次有界奇数样本，强制使用 ephemeral frame
 不得替换成缩水的 benchmark-only executor。
 
 第二个切片只通过 typed fact 与锁定证据接纳更广的媒体输入、输出 profile 与 native placement。
-输入归一化可以把 VFR 或额外 codec 冻结成具有精确 identity 的规范字节，但不能让 browser 或
-`FFmpeg` 默认值选择 source frame。透明或其他 container 输出必须端到端保留请求的 pixel
-contract。native crop、scale、picture-in-picture 与 multi-video placement 必须先具有显式
-layout fact，并通过 whole-film、partitioned 与 distributed raw-pixel equivalence，才能绕过
-Chromium。
+VFR 输入保留冻结的源字节，并要求完整的 frame timestamp map；Onmark 不会把它转码成隐式 CFR
+替身，也不会让 browser 或 `FFmpeg` 默认值选择 source frame。额外 codec 必须在同一份冻结字节上
+获得 decoder 与 color contract 的准入证据。透明或其他 container 输出必须端到端保留请求的
+pixel contract。native crop、scale、picture-in-picture 与 multi-video placement 必须先具有
+显式 layout fact，并通过 whole-film、partitioned 与 distributed raw-pixel equivalence，才能
+绕过 Chromium。
 
-首个获准的替代输出是面向剪辑的 MOV：`ProRes` 422 HQ（`yuv422p10le`）
-配 48 kHz 双声道 24-bit PCM。原有交付配置仍是 MP4 中的 x264 H.264
+获准的替代输出是面向剪辑且保留 alpha 的 MOV：`ProRes` 4444
+（编码为 `yuva444p10le`，锁定工具链解码为 `yuva444p12le`）配 48 kHz
+双声道 24-bit PCM。原有交付配置仍是 MP4 中的不透明 x264 H.264
 （`yuv420p`）与 AAC。一个封闭的 `EncodeProfile` 在浏览器直出、原生分层、
 本地组装和分布式帧产物组装之间统一拥有视觉编码器、音频编码器、像素格式、
 容器、暂存后缀与机器拼写。CLI 只从 `.mp4` 或 `.mov` 扩展名选择一次，并拒绝
 其他拼写；不得让 `FFmpeg` 默认值暗中决定结果。桌面发布验收会从已安装
-产品分别渲染并探测两种配置。透明输出须等 alpha 契约贯穿浏览器捕获、原生合成、
-缓存和最终封装并获得证据后再准入。
+产品分别渲染并探测两种配置。
+
+alpha 保留是影响像素的 `RenderProfile` 事实。它在导航前选择透明 Chromium
+根表面，进入 worker request 与 frame artifact identity，并在最终编码时不
+偷偷铺黑底。准入测试比较整片捕获与独立分片 artifact，经生产 encoder
+重新组装，要求 raw RGBA 序列相等、两个 MOV 都探测为 ProRes 4444，并同时
+保留全透明和半透明像素。不透明 MP4 保持独立的浏览器表面，避免 H.264
+隐式压平透明抗锯齿。
 
 media treatment、transition、dynamic author input、caption presentation 与 multiple subtitle
 track 一旦改变作者语义，就属于语言工作。每项新增能力都必须先提交语言准入规则要求的 cases、
@@ -1620,13 +1634,18 @@ prompts、grader、raw model outputs 与 baseline。之后 trim、rate、gain、
 transition interval 由 Rust 独占；TypeScript 只能实现已经求解的视觉 effect。JavaScript
 timeline、CLI flag 或 `FFmpeg` filter string 都不能成为另一套 scheduler。
 
-Gate 八首个获准的视频处理能力是精确的素材内部选段。两个 live-model 方案都完成了全部二十个
-编辑 case，且没有引入 film 坐标；最终接纳的 `trim="起点..终点"` 比两个边界属性使用更少
-authored bytes。resolve 只解析一次 `trim` 与 `speed`，solve 使用整数有理运算推导输出帧，
-Timeline IR 独占 source mapping，Browser Plan 把该事实传给确定性选帧。经过编辑的 placement
-在 native path 证明等价的 source selection 与 pixel 之前继续走 browser composition。
-runtime 只在接纳不可信 plan 时重复校验 wire-level duration invariant，不推导或修改 authored
-timing。
+Gate 八已准入的视频处理能力始终只描述素材局部。第一组 live-model 实验在全部二十个
+编辑 case 中准入 `trim="起点..终点"` 与精确 `speed`，没有引入 film 坐标；range
+拼写也比两个边界属性使用更少 authored bytes。第二组 20/20 实验准入语义无歧义的总播放
+次数 `plays` 与最终帧停留 `hold-last`，并拒绝给 HTML 的布尔 `loop` 拼写再赋整数含义。
+
+resolve 对每项 treatment 只解析一次，solve 使用整数有理运算推导输出帧，Timeline IR
+独占完整 source mapping，Browser Plan 把该事实传给确定性的 CFR 或 VFR 选帧。原生合成
+在 Chromium 对照证明 source-frame selection，且彼此独立的本地与 worker 分区产出相同
+native raw-RGBA sequence 后准入 trim 与 speed；它不要求已知不同的 Chromium 与 `FFmpeg`
+decode/color path 得出相同 hash。重复播放与最终帧停留在取得同样独立的 native 证据前仍走
+browser composition。runtime 只在接纳不可信 plan 时重复校验 wire-level duration
+invariant，不推导或修改 authored timing。
 
 Gate 八不加入 Player、Studio、preview server、source-mutation API、component marketplace、
 remote authoring command、coordinator、database、queue、lease service、cloud workflow、
@@ -1706,21 +1725,19 @@ frozen asset metadata 拥有完整 BT.709 limited color tuple、且 bundle 显�
 `separableOverlay` 后，准入了更窄的生产合约。planner 会在 launch 前用事实选择该
 native path；否则选择 `browserComposite`。executor 绝不在运行中切换成隐藏 fallback。
 
-当前视觉 profile 只接纳 CFR H.264 素材。`browserComposite` 使用锁定 Chromium
-decoder 作为权威 decode/color path，且只有
+当前视觉 profile 接纳具备一个精确 CFR rate 或完整 VFR timestamp map 的 H.264
+素材。`browserComposite` 使用锁定 Chromium decoder 作为权威 decode/color path，且只有
 `requestVideoFrameCallback.mediaTime` 指向 Rust 选中的 source frame 时才返回
-ready。`separableOverlay` 在 Gate 七的 color 与 layout proof 下使用已准入的持久 native
-decoder 与 compositor。不支持的 codec、native path 所需的不完整 color fact 与 VFR
-不会被静默近似：它们会被拒绝，或留在已经证明的 browser path。只有 frozen metadata 与
-Browser Plan 携带完整 timestamp map、而非单一 CFR rate 后，VFR 才能转为正式能力。
+ready。`separableOverlay` 只有在 Gate 七的 color、layout 与 source-treatment proof
+成立且素材为 CFR 时，才使用已准入的持久 native decoder 与 compositor。不支持的 codec
+与不完整 native-path fact 不会被静默近似：它们会被拒绝，或留在已经证明的 browser path。
 
-这条策略由 render-owned `AdmittedVideo` proof 对 core-owned
-metadata 执行 admission 来表达。它借用规范化事实，不再复制一套 render 媒体模型，并证明 H.264
-codec 与唯一精确 source frame rate。whole-film Render
-Unit 保留该 rate，并只向 browser placement lower 一次。decoded-media
-conformance 通过生产用的有界 ffprobe 边界，为两个被接纳的 CFR
-fixture 和一个被拒绝的 VFR fixture 生成 proof。whole-film
-executor 通过 production adapter 消费被接纳的视频，并验证最终动态画面产物。
+这条策略由 render-owned `AdmittedVideo` proof 对 core-owned metadata 执行 admission
+来表达。它借用规范化事实，不复制第二套 render 媒体模型，并证明 H.264 与完整 source
+timing。Render Unit 保留该 timing，并只向每个 browser placement lower 一次；native
+admission 再独立要求其中的 constant-rate 子集。decoded-media conformance 通过生产用
+的有界 ffprobe boundary 同时取得 CFR 与 VFR 证据，whole-film executor 则通过 production
+adapter 消费同一份被接纳的视频。
 
 - 当前 native capture 已选择 headless shell 的 CDP
   BeginFrameControl；只有更强的正确性与性能证据才能重开 WebDriver BiDi、surface

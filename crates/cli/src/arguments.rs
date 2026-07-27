@@ -290,7 +290,7 @@ impl RenderArgs {
         if extension.eq_ignore_ascii_case("mp4") {
             Ok(EncodeProfile::H264Mp4)
         } else if extension.eq_ignore_ascii_case("mov") {
-            Ok(EncodeProfile::ProResMov)
+            Ok(EncodeProfile::ProRes4444Mov)
         } else {
             Err(InvalidOutputExtension(output))
         }
@@ -440,7 +440,7 @@ mod tests {
         };
         assert_eq!(
             args.encode_profile().expect("the MOV profile is valid"),
-            EncodeProfile::ProResMov,
+            EncodeProfile::ProRes4444Mov,
         );
 
         let cli = Cli::try_parse_from(["onmark", "render", "film.html", "--output", "film.webm"])

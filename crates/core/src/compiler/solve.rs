@@ -12,7 +12,7 @@ use crate::diagnostics::{Diagnostic, DiagnosticCode, Diagnostics};
 use crate::model::{
     AssetMetadata, AssetRef, AudioGain, AudioMetadata, CueId, Duration, EventRef, FrameCount,
     FrameIndex, FrameInterval, FrozenAsset, FrozenAssetId, MediaSource, MediaSourceInterval,
-    MediaTrim, PlaybackRate, Rounding, SourceSpan, Timebase, VideoMetadata,
+    MediaTrim, PlayCount, PlaybackRate, Rounding, SourceSpan, Timebase, VideoMetadata,
 };
 use crate::timeline::{
     TimelineAudio, TimelineAudioKind, TimelineContent, TimelineElement, TimelineEvent, TimelineIr,
@@ -24,7 +24,7 @@ use super::diagnostic::author_diagnostic;
 use super::resolved_film::{
     Authored, ResolvedAudio, ResolvedCues, ResolvedElement, ResolvedFilm, ResolvedFilmParts,
     ResolvedMedia, ResolvedOverlay, ResolvedScene, ResolvedShot, ResolvedShotContent,
-    ResolvedStart, ResolvedText, ResolvedVideo, ResolvedVoiceOver,
+    ResolvedStart, ResolvedText, ResolvedVideo, ResolvedVideoTreatment, ResolvedVoiceOver,
 };
 
 /// Optional Timeline IR and the authored diagnostics produced while solving it.
@@ -293,7 +293,7 @@ impl<'a> Solver<'a> {
         &mut self,
         video: ResolvedVideo,
     ) -> Result<Option<PreparedContent>, SolveError> {
-        let (media, trim, playback_rate) = video.into_parts();
+        let (media, treatment) = video.into_parts();
         let (element, source, delay) = media.into_parts();
         let Some(source) = source else {
             self.diagnostics.push(missing_media_source(&element));
@@ -302,24 +302,26 @@ impl<'a> Solver<'a> {
         let Some(asset) = self.prepare_video_asset(&element, source)? else {
             return Ok(None);
         };
-        let (playback_rate, rate_span) =
-            playback_rate.map_or((PlaybackRate::ONE, asset.authored_at), Authored::into_parts);
-        let Some(source) =
-            self.prepare_video_source(trim, playback_rate, asset.duration, asset.authored_at)
-        else {
+        let timing_span = treatment_span(&treatment, asset.authored_at);
+        let playback_rate = authored_value(treatment.playback_rate, PlaybackRate::ONE);
+        let plays = authored_value(treatment.plays, PlayCount::ONE);
+        let hold_last = authored_value(treatment.hold_last, Duration::ZERO);
+        let Some(source) = self.prepare_video_source(
+            treatment.trim,
+            playback_rate,
+            plays,
+            hold_last,
+            asset.duration,
+            asset.authored_at,
+        ) else {
             return Ok(None);
         };
         let Some((start, start_reason)) = self.prepare_delay(delay) else {
             return Ok(None);
         };
-        let duration = source.interval().duration();
-        let Some(duration) = frames_for_playback(
-            self.timebase,
-            duration,
-            playback_rate,
-            rate_span,
-            &mut self.diagnostics,
-        ) else {
+        let Some(duration) =
+            frames_for_media(self.timebase, source, timing_span, &mut self.diagnostics)
+        else {
             return Ok(None);
         };
         let Some(end) = start.checked_add(duration) else {
@@ -371,6 +373,8 @@ impl<'a> Solver<'a> {
         &mut self,
         trim: Option<Authored<MediaTrim>>,
         playback_rate: PlaybackRate,
+        plays: PlayCount,
+        hold_last: Duration,
         natural_duration: Duration,
         asset_span: SourceSpan,
     ) -> Option<MediaSource> {
@@ -397,7 +401,7 @@ impl<'a> Solver<'a> {
         let interval = MediaSourceInterval::new(start, end)
             .expect("the authored source bounds are increasing");
         Some(
-            MediaSource::new(interval, playback_rate, natural_duration)
+            MediaSource::new(interval, playback_rate, plays, hold_last, natural_duration)
                 .expect("the source interval was bounded by its metadata above"),
         )
     }
@@ -943,19 +947,35 @@ fn frame_at(
     Some(frame)
 }
 
-fn frames_for_playback(
+fn frames_for_media(
     timebase: Timebase,
-    duration: Duration,
-    playback_rate: PlaybackRate,
+    source: MediaSource,
     authored_at: SourceSpan,
     diagnostics: &mut Diagnostics,
 ) -> Option<FrameCount> {
-    let Ok(frames) = timebase.frames_for_playback(duration, playback_rate, Rounding::Ceil) else {
+    let Ok(frames) = timebase.frames_for_media(source, Rounding::Ceil) else {
         diagnostics.push(frame_overflow(authored_at));
         return None;
     };
 
     Some(frames)
+}
+
+fn authored_value<T>(authored: Option<Authored<T>>, default: T) -> T {
+    authored.map_or(default, |authored| authored.into_parts().0)
+}
+
+fn treatment_span(treatment: &ResolvedVideoTreatment, default: SourceSpan) -> SourceSpan {
+    if let Some(value) = &treatment.hold_last {
+        return value.span();
+    }
+    if let Some(value) = &treatment.plays {
+        return value.span();
+    }
+    if let Some(value) = &treatment.playback_rate {
+        return value.span();
+    }
+    treatment.trim.as_ref().map_or(default, Authored::span)
 }
 
 fn frames_for(

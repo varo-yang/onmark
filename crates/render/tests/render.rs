@@ -19,11 +19,11 @@ use onmark_core::protocol::{
 use onmark_core::render_graph::{PartitionPlan, RenderGraph};
 use onmark_media::{Ffprobe, SubtitleLimits, parse_webvtt};
 use onmark_render::{
-    BrowserCaptureMode, BrowserErrorKind, BrowserGraphicsBackend, BrowserLaunchPolicy,
+    AlphaMode, BrowserCaptureMode, BrowserErrorKind, BrowserGraphicsBackend, BrowserLaunchPolicy,
     BrowserLimits, BrowserSession, BrowserSessionOptions, CaptureEnvironmentId, EncodeLimits,
-    EncodedPng, ExecutableUnit, Ffmpeg, FrameArtifact, FrameArtifactErrorKind, FrameArtifactLimits,
-    MaterializedAsset, RawRgbaHash, RenderErrorKind, RenderExecutor, RenderProfile, RenderUnit,
-    UnitRootLimits,
+    EncodeProfile, EncodedPng, ExecutableUnit, Ffmpeg, FrameArtifact, FrameArtifactErrorKind,
+    FrameArtifactLimits, MaterializedAsset, RawRgbaHash, RenderErrorKind, RenderExecutor,
+    RenderProfile, RenderUnit, UnitRootLimits,
 };
 use serde::Deserialize;
 use sha2::{Digest as _, Sha256};
@@ -376,10 +376,15 @@ async fn renders_and_repeats_the_production_layered_path() {
 
 #[tokio::test]
 #[ignore = "requires ONMARK_BUNDLER, ONMARK_FFMPEG, ONMARK_FFPROBE, and a supported browser"]
-async fn renders_random_access_media_equally_as_one_or_two_units() {
+async fn renders_repeated_and_held_media_equally_as_one_or_two_units() {
     let directory = tempdir().expect("the test output directory must be available");
-    let bundle = FixtureBundle::build_audio_subtitle(directory.path()).await;
-    let fixture = AudioSubtitleFixture::materialize(directory.path(), &bundle).await;
+    let bundle = FixtureBundle::build_media_continuity(directory.path()).await;
+    let fixture = AudioSubtitleFixture::materialize(
+        directory.path(),
+        &bundle,
+        "conformance/cli/media-continuity.html",
+    )
+    .await;
     let whole_output = directory.path().join("whole.mp4");
     let partitioned_output = directory.path().join("partitioned.mp4");
     let executor = layered_executor(TWO_UNIT_FRAME_COUNT);
@@ -403,7 +408,7 @@ async fn renders_random_access_media_equally_as_one_or_two_units() {
     let partitioned = inspect_audio_subtitle_output(&partitioned_output).await;
     assert_eq!(
         whole.video_hashes, partitioned.video_hashes,
-        "reusing Chromium across units must preserve whole-film pixels",
+        "source repetition and final-frame hold must preserve whole-film browser pixels",
     );
     assert_eq!(
         whole.audio_hashes, partitioned.audio_hashes,
@@ -413,57 +418,126 @@ async fn renders_random_access_media_equally_as_one_or_two_units() {
 
 #[tokio::test]
 #[ignore = "requires ONMARK_BUNDLER, ONMARK_FFMPEG, ONMARK_FFPROBE, and a supported browser"]
-async fn assembles_temporal_frame_artifacts_equivalently_to_the_whole_film() {
+async fn preserves_source_edits_across_local_and_worker_partition_execution() {
     let directory = tempdir().expect("the test output directory must be available");
-    let bundle = FixtureBundle::build_audio_subtitle(directory.path()).await;
-    let fixture = AudioSubtitleFixture::materialize(directory.path(), &bundle).await;
-    let whole_artifact_path = directory.path().join("whole-film.onmark-frames");
+    let bundle = FixtureBundle::build_source_edits(directory.path()).await;
+    let local = AudioSubtitleFixture::materialize(
+        directory.path(),
+        &bundle,
+        "conformance/cli/audio-subtitle.html",
+    )
+    .await;
+    let distributed = AudioSubtitleFixture::materialize(
+        directory.path(),
+        &bundle,
+        "conformance/cli/audio-subtitle.html",
+    )
+    .await;
+    let local_output = directory.path().join("local-partitions.mp4");
     let assembled_output = directory.path().join("assembled-from-artifacts.mp4");
     let executor = layered_executor(TWO_UNIT_FRAME_COUNT);
 
-    let whole = executor
-        .capture_frame_artifact(
-            &fixture.whole_film,
-            capture_environment(),
-            &whole_artifact_path,
-            frame_artifact_limits(),
-        )
-        .await
-        .expect("the whole-film baseline must capture canonical pixels");
-
-    let mut artifacts = Vec::new();
-    for (index, unit) in fixture.partitioned_units.iter().enumerate() {
-        let artifact = directory
-            .path()
-            .join(format!("worker-{index}.onmark-frames"));
-        let captured = executor
-            .capture_frame_artifact(
-                unit,
-                capture_environment(),
-                &artifact,
-                frame_artifact_limits(),
-            )
-            .await
-            .expect("each independent unit must publish a verified frame artifact");
-        artifacts.push(captured);
-    }
+    let local_artifacts = capture_partition_artifacts(
+        &executor,
+        directory.path(),
+        "local",
+        &local.partitioned_units,
+    )
+    .await;
+    let worker_artifacts = capture_partition_artifacts(
+        &executor,
+        directory.path(),
+        "worker",
+        &distributed.partitioned_units,
+    )
+    .await;
 
     let assembled = executor
         .assemble_frame_artifacts(
-            &fixture.partition_plan,
-            &fixture.partitioned_units,
-            &artifacts,
+            &distributed.partition_plan,
+            &distributed.partitioned_units,
+            &worker_artifacts,
             capture_environment(),
             &assembled_output,
         )
         .await
         .expect("the assembler must reuse worker artifacts through one encoder");
-
-    FrameArtifact::verify_raw_rgba_equivalence(std::slice::from_ref(&whole), &artifacts)
+    let rendered = executor
+        .render_partitioned(
+            &local.partition_plan,
+            local.partitioned_units,
+            &local_output,
+        )
         .await
-        .expect("partition artifacts must reproduce the whole-film pixel sequence");
+        .expect("the same source edits must render through local partitions");
+
+    FrameArtifact::verify_raw_rgba_equivalence(&local_artifacts, &worker_artifacts)
+        .await
+        .expect("local and worker source edits must produce the same raw pixels");
     assert_eq!(assembled.frames(), TWO_UNIT_FRAME_COUNT);
-    inspect_audio_subtitle_output(&assembled_output).await;
+    assert_eq!(rendered.frames(), TWO_UNIT_FRAME_COUNT);
+    let assembled = inspect_audio_subtitle_output(&assembled_output).await;
+    let rendered = inspect_audio_subtitle_output(&local_output).await;
+    assert_eq!(assembled.video_hashes, rendered.video_hashes);
+    assert_eq!(assembled.audio_hashes, rendered.audio_hashes);
+}
+
+#[tokio::test]
+#[ignore = "requires ONMARK_BUNDLER, ONMARK_FFMPEG, ONMARK_FFPROBE, and a supported browser"]
+async fn preserves_alpha_across_whole_partitioned_and_worker_output() {
+    let directory = tempdir().expect("the experiment workspace must be available");
+    let source = directory.path().join("transparent.html");
+    fs::write(&source, transparent_source())
+        .expect("the transparent presentation source must be writable");
+    let bundle = FixtureBundle::build_from(
+        directory.path(),
+        "transparent-bundle",
+        &source,
+        "randomAccess",
+        "browserComposite",
+        "perFrame",
+    )
+    .await;
+    let local =
+        StaticPartitionFixture::materialize_with_profile(&source, &bundle, transparent_profile());
+    let distributed =
+        StaticPartitionFixture::materialize_with_profile(&source, &bundle, transparent_profile());
+    let executor = executor_with_profile(TWO_UNIT_FRAME_COUNT, EncodeProfile::ProRes4444Mov);
+    let whole_output = directory.path().join("whole.mov");
+    let assembled_output = directory.path().join("assembled.mov");
+    let whole = executor
+        .render(local.whole_film, &whole_output)
+        .await
+        .expect("the complete transparent film must render");
+    let captured =
+        capture_static_fixture(&executor, directory.path(), "transparent", &distributed).await;
+
+    FrameArtifact::verify_raw_rgba_equivalence(
+        std::slice::from_ref(&captured.whole),
+        &captured.partitions,
+    )
+    .await
+    .expect("transparent worker artifacts must reproduce whole-film pixels");
+    let assembled = executor
+        .assemble_frame_artifacts(
+            &distributed.partition_plan,
+            &distributed.partitioned_units,
+            &captured.partitions,
+            capture_environment(),
+            &assembled_output,
+        )
+        .await
+        .expect("transparent worker artifacts must assemble through the same profile");
+
+    assert_eq!(whole.frames(), TWO_UNIT_FRAME_COUNT);
+    assert_eq!(assembled.frames(), TWO_UNIT_FRAME_COUNT);
+    assert_prores_4444_alpha(&whole_output).await;
+    assert_prores_4444_alpha(&assembled_output).await;
+    assert_eq!(
+        decoded_hashes(&whole_output, "0:v:0").await,
+        decoded_hashes(&assembled_output, "0:v:0").await,
+        "local and worker assembly must decode to the same ProRes 4444 frames",
+    );
 }
 
 #[tokio::test]
@@ -633,6 +707,30 @@ async fn inspect_audio_subtitle_output(output: &Path) -> DecodedOutput {
 
 fn isolation_source(closing: &str) -> String {
     static_partition_source("", "", closing)
+}
+
+fn transparent_source() -> &'static str {
+    r#"<!doctype html>
+<html><head><style>
+html, body, om-film, om-scene, om-shot {
+  display: block; height: 100%; margin: 0; overflow: hidden; width: 100%;
+}
+om-shot { align-items: center; display: flex; justify-content: center; }
+om-title {
+  background: rgba(70, 120, 255, 0.65);
+  border-radius: 48px;
+  color: rgba(255, 255, 255, 0.9);
+  display: block;
+  font: 700 28px sans-serif;
+  padding: 36px 52px;
+}
+</style></head><body>
+<om-film><om-scene>
+  <om-shot duration="1s"><om-title>Alpha one</om-title></om-shot>
+  <om-shot duration="1s"><om-title>Alpha two</om-title></om-shot>
+</om-scene></om-film>
+</body></html>
+"#
 }
 
 fn exact_motion_partition_source() -> &'static str {
@@ -1091,6 +1189,59 @@ async fn assert_decodable_motion(output: &Path) {
     assert!(hashes.len() > 1, "the rendered video must contain motion");
 }
 
+async fn assert_prores_4444_alpha(output: &Path) {
+    let probe = Command::new(required_path("ONMARK_FFPROBE"))
+        .args([
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=codec_name,pix_fmt",
+            "-of",
+            "json",
+            "--",
+        ])
+        .arg(output)
+        .output();
+    let probe = timeout(Duration::from_secs(10), probe)
+        .await
+        .expect("alpha probing must finish before its deadline")
+        .expect("ffprobe must inspect the completed MOV");
+    assert!(
+        probe.status.success(),
+        "{}",
+        String::from_utf8_lossy(&probe.stderr),
+    );
+    let value: serde_json::Value =
+        serde_json::from_slice(&probe.stdout).expect("ffprobe must emit JSON");
+    let stream = &value["streams"][0];
+    assert_eq!(stream["codec_name"], "prores");
+    assert_eq!(stream["pix_fmt"], "yuva444p12le");
+
+    let decoded = Command::new(required_path("ONMARK_FFMPEG"))
+        .args(["-nostdin", "-v", "error", "-i"])
+        .arg(output)
+        .args(["-map", "0:v:0", "-f", "rawvideo", "-pix_fmt", "rgba", "-"])
+        .output();
+    let decoded = timeout(Duration::from_secs(10), decoded)
+        .await
+        .expect("alpha decoding must finish before its deadline")
+        .expect("FFmpeg must decode the completed MOV");
+    assert!(
+        decoded.status.success(),
+        "{}",
+        String::from_utf8_lossy(&decoded.stderr),
+    );
+    let (mut transparent, mut translucent) = (false, false);
+    for alpha in decoded.stdout.iter().skip(3).step_by(4) {
+        transparent |= *alpha == 0;
+        translucent |= *alpha > 0 && *alpha < u8::MAX;
+    }
+    assert!(transparent, "the output must retain transparent pixels");
+    assert!(translucent, "the output must retain translucent pixels");
+}
+
 struct DecodedOutput {
     video_hashes: Vec<String>,
     audio_hashes: Vec<String>,
@@ -1285,6 +1436,10 @@ fn render_profile() -> RenderProfile {
     RenderProfile::new(WIDTH, HEIGHT).expect("the fixture render profile is valid")
 }
 
+fn transparent_profile() -> RenderProfile {
+    render_profile().with_alpha(AlphaMode::Preserve)
+}
+
 fn capture_environment() -> CaptureEnvironmentId {
     CaptureEnvironmentId::from_sha256([7; CaptureEnvironmentId::BYTE_LENGTH])
 }
@@ -1320,6 +1475,15 @@ fn render_executor(
     capture_mode: BrowserCaptureMode,
     max_frames: u64,
 ) -> RenderExecutor {
+    render_executor_with_profile(browser, capture_mode, max_frames, EncodeProfile::H264Mp4)
+}
+
+fn render_executor_with_profile(
+    browser: PathBuf,
+    capture_mode: BrowserCaptureMode,
+    max_frames: u64,
+    profile: EncodeProfile,
+) -> RenderExecutor {
     let limits = EncodeLimits::new(
         Duration::from_secs(30),
         max_frames,
@@ -1327,12 +1491,8 @@ fn render_executor(
         64 * 1024,
     )
     .expect("the fixture encoding limits are bounded");
-    let ffmpeg = Ffmpeg::new(
-        required_path("ONMARK_FFMPEG"),
-        limits,
-        onmark_render::EncodeProfile::H264Mp4,
-    )
-    .expect("the FFmpeg executable path is present");
+    let ffmpeg = Ffmpeg::new(required_path("ONMARK_FFMPEG"), limits, profile)
+        .expect("the FFmpeg executable path is present");
 
     RenderExecutor::new(
         browser,
@@ -1340,6 +1500,21 @@ fn render_executor(
         browser_limits(Duration::from_secs(10)),
         ffmpeg,
     )
+}
+
+fn executor_with_profile(max_frames: u64, profile: EncodeProfile) -> RenderExecutor {
+    if let Some(browser) = env::var_os("ONMARK_HEADLESS_SHELL") {
+        return render_executor_with_profile(
+            PathBuf::from(browser),
+            BrowserCaptureMode::BeginFrame,
+            max_frames,
+            profile,
+        );
+    }
+    let browser = env::var_os("ONMARK_PORTABLE_CHROME")
+        .map(PathBuf::from)
+        .expect("ONMARK_HEADLESS_SHELL or ONMARK_PORTABLE_CHROME must name an executable");
+    render_executor_with_profile(browser, BrowserCaptureMode::Screenshot, max_frames, profile)
 }
 
 fn frame_artifact_limits() -> FrameArtifactLimits {
@@ -1465,7 +1640,7 @@ struct AudioSubtitleFixture {
 }
 
 impl AudioSubtitleFixture {
-    async fn materialize(workspace: &Path, bundle: &FixtureBundle) -> Self {
+    async fn materialize(workspace: &Path, bundle: &FixtureBundle, screenplay: &str) -> Self {
         let video_path = workspace.join("source.mp4");
         let voice_over_path = workspace.join("voice.m4a");
         let music_path = workspace.join("music.wav");
@@ -1491,7 +1666,7 @@ impl AudioSubtitleFixture {
             (asset_ref("music.wav"), music.clone()),
             (asset_ref("effect.wav"), effect.clone()),
         ]);
-        let source = fs::read_to_string(repository().join("conformance/cli/audio-subtitle.html"))
+        let source = fs::read_to_string(repository().join(screenplay))
             .expect("the audio-and-subtitle screenplay fixture is readable");
         let timeline = solve_timeline(&source, &assets);
         let timeline = compiler::import_captions(timeline, [caption_track()])
@@ -1523,6 +1698,10 @@ impl AudioSubtitleFixture {
             materialized_assets.clone(),
         )
         .expect("the complete fixture forms one whole-film unit");
+        assert!(
+            whole_film.visual_execution().layered_media().is_none(),
+            "two simultaneous media placements keep the whole-film control in Chromium",
+        );
         let whole_film = bundle.materialize(whole_film);
         let region_manifests = bundle.region_manifests(partition_plan.units().len());
         let partitioned_units: Vec<_> = RenderUnit::from_partitioned_bundles(
@@ -1537,6 +1716,11 @@ impl AudioSubtitleFixture {
         .enumerate()
         .map(|(index, unit)| bundle.materialize_region(index, unit))
         .collect();
+        if bundle.manifest.visual_capability()
+            == onmark_core::model::PresentationVisualCapability::SeparableOverlay
+        {
+            assert_native_source_edits(&partitioned_units);
+        }
         assert!(partitioned_units.iter().all(|unit| {
             unit.browser_plan()
                 .overlays()
@@ -1552,13 +1736,31 @@ impl AudioSubtitleFixture {
     }
 }
 
+fn assert_native_source_edits(units: &[ExecutableUnit]) {
+    for (index, unit) in units.iter().enumerate() {
+        assert!(
+            unit.visual_execution().layered_media().is_some(),
+            "source-edited partition {index} must admit the native layered path",
+        );
+    }
+}
+
 struct StaticPartitionFixture {
+    partition_plan: PartitionPlan,
     whole_film: ExecutableUnit,
     partitioned_units: Vec<ExecutableUnit>,
 }
 
 impl StaticPartitionFixture {
     fn materialize(source: &Path, bundle: &FixtureBundle) -> Self {
+        Self::materialize_with_profile(source, bundle, render_profile())
+    }
+
+    fn materialize_with_profile(
+        source: &Path,
+        bundle: &FixtureBundle,
+        profile: RenderProfile,
+    ) -> Self {
         let source =
             fs::read_to_string(source).expect("the static presentation source must be readable");
         let timeline = solve_timeline(&source, &BTreeMap::new());
@@ -1572,15 +1774,14 @@ impl StaticPartitionFixture {
             "the static fixture must produce two independent units",
         );
 
-        let whole_film =
-            RenderUnit::whole_film(&timeline, bundle.manifest.clone(), render_profile(), [])
-                .expect("the static fixture forms one whole-film unit");
+        let whole_film = RenderUnit::whole_film(&timeline, bundle.manifest.clone(), profile, [])
+            .expect("the static fixture forms one whole-film unit");
         let region_manifests = bundle.region_manifests(partitions.units().len());
         let partitioned_units = RenderUnit::from_partitioned_bundles(
             &timeline,
             &partitions,
             region_manifests,
-            render_profile(),
+            profile,
             [],
         )
         .expect("the static fixture forms two partition units")
@@ -1590,6 +1791,7 @@ impl StaticPartitionFixture {
         .collect();
 
         Self {
+            partition_plan: partitions,
             whole_film: bundle.materialize(whole_film),
             partitioned_units,
         }
@@ -1627,6 +1829,20 @@ async fn capture_static_partitions(
         partitions.push(artifact);
     }
     partitions
+}
+
+async fn capture_partition_artifacts(
+    executor: &RenderExecutor,
+    workspace: &Path,
+    label: &str,
+    units: &[ExecutableUnit],
+) -> Vec<FrameArtifact> {
+    let mut artifacts = Vec::with_capacity(units.len());
+    for (index, unit) in units.iter().enumerate() {
+        let path = workspace.join(format!("{label}-{index}.onmark-frames"));
+        artifacts.push(capture_and_reuse_static(executor, unit, &path).await);
+    }
+    artifacts
 }
 
 async fn capture_and_reuse_static(
@@ -1692,14 +1908,26 @@ impl FixtureBundle {
         .await
     }
 
-    async fn build_audio_subtitle(workspace: &Path) -> Self {
+    async fn build_media_continuity(workspace: &Path) -> Self {
         Self::build_from(
             workspace,
-            "audio-subtitle-bundle",
-            &repository().join("conformance/cli/audio-subtitle.html"),
+            "media-continuity-bundle",
+            &repository().join("conformance/cli/media-continuity.html"),
             "randomAccess",
             "browserComposite",
             "perFrame",
+        )
+        .await
+    }
+
+    async fn build_source_edits(workspace: &Path) -> Self {
+        Self::build_from(
+            workspace,
+            "source-edit-bundle",
+            &repository().join("conformance/cli/audio-subtitle.html"),
+            "randomAccess",
+            "separableOverlay",
+            "placementBounded",
         )
         .await
     }

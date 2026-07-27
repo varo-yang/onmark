@@ -257,6 +257,8 @@ struct JsonMediaSource {
     end_nanoseconds: String,
     natural_end_nanoseconds: String,
     playback_rate: JsonPlaybackRate,
+    plays: u32,
+    hold_last_nanoseconds: String,
 }
 
 impl From<MediaSource> for JsonMediaSource {
@@ -267,6 +269,8 @@ impl From<MediaSource> for JsonMediaSource {
             end_nanoseconds: interval.end().as_nanos().to_string(),
             natural_end_nanoseconds: source.natural_duration().as_nanos().to_string(),
             playback_rate: source.playback_rate().into(),
+            plays: source.plays().get(),
+            hold_last_nanoseconds: source.hold_last().as_nanos().to_string(),
         }
     }
 }
@@ -470,7 +474,7 @@ mod tests {
     fn projects_exact_video_source_facts() {
         let source = concat!(
             "<om-film><om-scene><om-shot>",
-            r#"<video src="clip.mp4" trim="4s..10s" speed="2x"></video>"#,
+            r#"<video src="clip.mp4" trim="4s..10s" speed="2x" plays="2" hold-last="1s"></video>"#,
             "</om-shot></om-scene></om-film>",
         );
         let (film, diagnostics) = compilation::resolve(source).into_parts();
@@ -498,6 +502,8 @@ mod tests {
         assert_eq!(video["source"]["naturalEndNanoseconds"], "12000000000");
         assert_eq!(video["source"]["playbackRate"]["numerator"], 2);
         assert_eq!(video["source"]["playbackRate"]["denominator"], 1);
+        assert_eq!(video["source"]["plays"], 2);
+        assert_eq!(video["source"]["holdLastNanoseconds"], "1000000000");
     }
 
     fn fixture_video(asset: &str, rate: FrameRate) -> (AssetRef, FrozenAsset) {

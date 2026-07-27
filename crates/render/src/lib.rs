@@ -39,7 +39,7 @@ pub use frame_artifact::{
     FrameArtifact, FrameArtifactError, FrameArtifactErrorKind, FrameArtifactId,
     FrameArtifactLimits, InvalidFrameArtifactId, InvalidFrameArtifactLimits,
 };
-pub use profile::{InvalidRenderProfile, RenderProfile};
+pub use profile::{AlphaMode, InvalidRenderProfile, RenderProfile};
 pub use unit::{
     AudioPlan, InvalidMaterializedAsset, InvalidRenderUnit, MaterializedAsset, RenderAudio,
     RenderUnit, RenderVideo,

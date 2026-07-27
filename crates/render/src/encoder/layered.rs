@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitStatus;
 use std::time::Duration;
 
+use onmark_core::model::MediaSource;
 use onmark_core::protocol::WireFrameRate;
 use tokio::io::AsyncWriteExt as _;
 use tokio::process::{Child, ChildStdin};
@@ -80,6 +81,7 @@ impl LayeredOutput {
 pub(crate) struct LayeredMediaInput {
     pub(crate) path: PathBuf,
     pub(crate) source_frame_rate: WireFrameRate,
+    pub(crate) source: MediaSource,
     pub(crate) frames: u64,
 }
 

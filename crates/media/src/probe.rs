@@ -11,8 +11,8 @@ use std::time::Duration;
 use onmark_core::model::AssetMetadata;
 
 use crate::error::{InvalidFfprobe, ProbeError, Stream};
-use crate::process::{OutputReaders, RunningProbe};
-use crate::response::parse_metadata;
+use crate::process::{OutputReaders, ProcessOutput, RunningProbe};
+use crate::response::{FrameProbeRequest, parse_frame_timing, parse_metadata};
 
 /// Configured boundary for probing local artifacts with ffprobe.
 ///
@@ -48,7 +48,11 @@ impl Ffprobe {
     pub const MAX_TIMEOUT: Duration = Duration::from_mins(10);
 
     /// Maximum bytes retained independently from stdout and stderr.
-    pub const MAX_OUTPUT_BYTES: usize = 1_048_576;
+    ///
+    /// The selected video stream may contribute up to the browser contract's
+    /// complete 100,000-boundary timing map. Sixteen MiB retains that evidence
+    /// without making either process pipe unbounded.
+    pub const MAX_OUTPUT_BYTES: usize = 16 * 1_048_576;
 
     /// Creates an ffprobe boundary with explicit process limits.
     ///
@@ -92,7 +96,20 @@ impl Ffprobe {
     /// Returns [`ProbeError`] when the process cannot be controlled, exceeds
     /// its limits, exits unsuccessfully, or emits unusable metadata.
     pub fn probe(&self, path: &Path) -> Result<AssetMetadata, ProbeError> {
-        let mut process = self.spawn(path)?;
+        let metadata = self.capture(self.spawn_metadata(path)?, path)?;
+        let pending = parse_metadata(path, &metadata.stdout.bytes)?;
+        let timing = pending
+            .frame_probe_request()
+            .map(|request| {
+                let frames = self.capture(self.spawn_frames(path, request)?, path)?;
+                parse_frame_timing(path, &frames.stdout.bytes)
+            })
+            .transpose()?;
+
+        pending.finish(path, timing)
+    }
+
+    fn capture(&self, mut process: RunningProbe, path: &Path) -> Result<ProcessOutput, ProbeError> {
         let readers = OutputReaders::spawn(&mut process, self.output_limit)?;
         let outcome = process.wait(self.timeout);
         let output = readers.finish(path);
@@ -122,10 +139,10 @@ impl Ffprobe {
             ));
         }
 
-        parse_metadata(path, &output.stdout.bytes)
+        Ok(output)
     }
 
-    fn spawn(&self, path: &Path) -> Result<RunningProbe, ProbeError> {
+    fn spawn_metadata(&self, path: &Path) -> Result<RunningProbe, ProbeError> {
         let child = Command::new(&self.executable)
             .args([
                 OsStr::new("-v"),
@@ -133,10 +150,40 @@ impl Ffprobe {
                 OsStr::new("-show_entries"),
                 OsStr::new(
                     "format=duration:stream=index,codec_type,codec_name,pix_fmt,width,height,color_range,\
-                     color_space,color_transfer,color_primaries,duration,avg_frame_rate,\
-                     r_frame_rate,nb_frames,sample_rate,channels:\
+                     color_space,color_transfer,color_primaries,duration,sample_rate,channels:\
                      stream_disposition=default,attached_pic",
                 ),
+                OsStr::new("-of"),
+                OsStr::new("json"),
+                OsStr::new("--"),
+            ])
+            .arg(path)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|source| ProbeError::spawn(path, source))?;
+
+        Ok(RunningProbe::new(child, path.to_owned()))
+    }
+
+    fn spawn_frames(
+        &self,
+        path: &Path,
+        request: FrameProbeRequest,
+    ) -> Result<RunningProbe, ProbeError> {
+        let stream = request.stream_index().to_string();
+        let child = Command::new(&self.executable)
+            .args([
+                OsStr::new("-v"),
+                OsStr::new("error"),
+                OsStr::new("-select_streams"),
+            ])
+            .arg(stream)
+            .args([
+                OsStr::new("-show_frames"),
+                OsStr::new("-show_entries"),
+                OsStr::new("frame=best_effort_timestamp,pkt_duration:stream=time_base,duration_ts"),
                 OsStr::new("-of"),
                 OsStr::new("json"),
                 OsStr::new("--"),

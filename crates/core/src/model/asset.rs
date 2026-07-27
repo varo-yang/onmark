@@ -10,6 +10,7 @@ use super::{AudioChannelLayout, AudioSampleRate, Duration, FrameRate};
 
 /// Byte width of the SHA-256 asset digest.
 const SHA256_BYTES: usize = 32;
+const NANOSECONDS_PER_SECOND: u128 = 1_000_000_000;
 
 /// Immutable identity of the exact asset bytes consumed by compilation.
 ///
@@ -338,6 +339,9 @@ impl VideoMetadata {
 
         let pixel_format = pixel_format.into();
         validate_format_name(&pixel_format, InvalidVideoMetadata::InvalidPixelFormat)?;
+        if matches!(&timing, VideoTiming::Variable(frame_map) if frame_map.duration() != duration) {
+            return Err(InvalidVideoMetadata::TimingDurationMismatch);
+        }
 
         Ok(Self {
             duration,
@@ -383,8 +387,8 @@ impl VideoMetadata {
 
     /// Returns the observed source-frame timing shape.
     #[must_use]
-    pub const fn timing(&self) -> VideoTiming {
-        self.timing
+    pub const fn timing(&self) -> &VideoTiming {
+        &self.timing
     }
 
     /// Returns the complete admitted source-color tuple, when probing reported
@@ -395,14 +399,204 @@ impl VideoMetadata {
     }
 }
 
-/// Timing shape inferred from ffprobe's stream-level frame facts.
+/// Exact duration of one source timestamp tick.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct MediaTimebase {
+    numerator: u32,
+    denominator: u32,
+}
+
+impl MediaTimebase {
+    /// Creates a canonical seconds-per-tick ratio.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InvalidMediaTimebase`] when either ratio part is zero.
+    pub const fn new(numerator: u32, denominator: u32) -> Result<Self, InvalidMediaTimebase> {
+        if numerator == 0 {
+            return Err(InvalidMediaTimebase::ZeroNumerator);
+        }
+        if denominator == 0 {
+            return Err(InvalidMediaTimebase::ZeroDenominator);
+        }
+
+        let divisor = greatest_common_divisor_u32(numerator, denominator);
+        Ok(Self {
+            numerator: numerator / divisor,
+            denominator: denominator / divisor,
+        })
+    }
+
+    /// Returns the canonical seconds-per-tick numerator.
+    #[must_use]
+    pub const fn numerator(self) -> u32 {
+        self.numerator
+    }
+
+    /// Returns the canonical seconds-per-tick denominator.
+    #[must_use]
+    pub const fn denominator(self) -> u32 {
+        self.denominator
+    }
+
+    /// Converts a relative tick count into a ceiling-rounded duration.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MediaTimestampOverflow`] when the exact rational timestamp
+    /// exceeds the nanosecond duration domain.
+    pub fn duration_at(self, ticks: u64) -> Result<Duration, MediaTimestampOverflow> {
+        let scaled = u128::from(ticks)
+            .checked_mul(u128::from(self.numerator))
+            .and_then(|value| value.checked_mul(NANOSECONDS_PER_SECOND))
+            .ok_or(MediaTimestampOverflow)?;
+        let denominator = u128::from(self.denominator);
+        let nanoseconds = scaled
+            .checked_add(denominator - 1)
+            .and_then(|value| value.checked_div(denominator))
+            .ok_or(MediaTimestampOverflow)?;
+        u64::try_from(nanoseconds)
+            .map(Duration::from_nanos)
+            .map_err(|_| MediaTimestampOverflow)
+    }
+}
+
+/// Reason a media timestamp timebase is not a positive rational value.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum InvalidMediaTimebase {
+    /// A timestamp tick cannot have zero duration.
+    ZeroNumerator,
+    /// A rational timebase cannot have a zero denominator.
+    ZeroDenominator,
+}
+
+impl fmt::Display for InvalidMediaTimebase {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::ZeroNumerator => "media timebase numerator must be greater than zero",
+            Self::ZeroDenominator => "media timebase denominator must be greater than zero",
+        })
+    }
+}
+
+impl Error for InvalidMediaTimebase {}
+
+/// A rational media timestamp outside the nanosecond duration domain.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct MediaTimestampOverflow;
+
+impl fmt::Display for MediaTimestampOverflow {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("media timestamp exceeds the duration domain")
+    }
+}
+
+impl Error for MediaTimestampOverflow {}
+
+/// Complete half-open source-frame boundaries for one variable-rate stream.
+///
+/// Boundaries are relative timestamp ticks. The first boundary is zero and the
+/// final boundary is the exclusive end of the last frame, so `n` frames always
+/// have `n + 1` boundaries.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VideoFrameMap {
+    timebase: MediaTimebase,
+    boundaries: Box<[u64]>,
+    duration: Duration,
+}
+
+impl VideoFrameMap {
+    /// Creates a complete, increasing timestamp map for at least two frames.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InvalidVideoFrameMap`] when the map cannot identify a
+    /// variable-rate frame sequence or its exact ceiling duration exceeds the
+    /// media-duration domain.
+    pub fn new(
+        timebase: MediaTimebase,
+        boundaries: impl Into<Box<[u64]>>,
+    ) -> Result<Self, InvalidVideoFrameMap> {
+        let boundaries = boundaries.into();
+        if boundaries.len() < 3 {
+            return Err(InvalidVideoFrameMap::TooFewFrames);
+        }
+        if boundaries[0] != 0 {
+            return Err(InvalidVideoFrameMap::NonzeroStart);
+        }
+        if boundaries.windows(2).any(|pair| pair[0] >= pair[1]) {
+            return Err(InvalidVideoFrameMap::NonIncreasing);
+        }
+        let duration = timebase
+            .duration_at(boundaries[boundaries.len() - 1])
+            .map_err(|_| InvalidVideoFrameMap::DurationOutOfRange)?;
+
+        Ok(Self {
+            timebase,
+            boundaries,
+            duration,
+        })
+    }
+
+    /// Returns the source timestamp timebase.
+    #[must_use]
+    pub const fn timebase(&self) -> MediaTimebase {
+        self.timebase
+    }
+
+    /// Returns all frame boundaries, including the terminal exclusive end.
+    #[must_use]
+    pub fn boundaries(&self) -> &[u64] {
+        &self.boundaries
+    }
+
+    /// Returns the number of source frames described by the map.
+    #[must_use]
+    pub fn frame_count(&self) -> usize {
+        self.boundaries.len() - 1
+    }
+
+    /// Returns the timestamp-map duration rounded upward to nanoseconds.
+    #[must_use]
+    pub const fn duration(&self) -> Duration {
+        self.duration
+    }
+}
+
+/// Reason source-frame timestamps cannot form a complete variable-rate map.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum InvalidVideoFrameMap {
+    /// Fewer than two frames belong in the still-image timing variant.
+    TooFewFrames,
+    /// Source-local frame timestamps must begin at zero.
+    NonzeroStart,
+    /// Every frame boundary must strictly follow the preceding boundary.
+    NonIncreasing,
+    /// The terminal timestamp exceeds the exact duration domain.
+    DurationOutOfRange,
+}
+
+impl fmt::Display for InvalidVideoFrameMap {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::TooFewFrames => "variable video timing requires at least two frames",
+            Self::NonzeroStart => "video frame timestamps must begin at source zero",
+            Self::NonIncreasing => "video frame timestamps must be strictly increasing",
+            Self::DurationOutOfRange => "video frame timestamps exceed the duration domain",
+        })
+    }
+}
+
+impl Error for InvalidVideoFrameMap {}
+
+/// Timing shape observed for one selected visual stream.
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum VideoTiming {
-    /// ffprobe reports matching average and nominal rational frame rates.
+    /// Every source frame has one exact rational rate.
     Constant(FrameRate),
-    /// ffprobe reports disagreeing or unavailable stream frame rates.
-    Variable,
-    /// ffprobe reports exactly one frame and therefore no observable rate.
+    /// Source frames carry a complete exact timestamp map.
+    Variable(VideoFrameMap),
+    /// The stream contains exactly one frame and has no observable rate.
     Still,
 }
 
@@ -413,6 +607,8 @@ pub enum InvalidVideoMetadata {
     InvalidCodec,
     /// The pixel-format name is empty or contains ASCII whitespace.
     InvalidPixelFormat,
+    /// A complete source-frame map disagrees with the selected-stream duration.
+    TimingDurationMismatch,
 }
 
 impl fmt::Display for InvalidVideoMetadata {
@@ -420,6 +616,9 @@ impl fmt::Display for InvalidVideoMetadata {
         let message = match self {
             Self::InvalidCodec => "video codec name is invalid",
             Self::InvalidPixelFormat => "video pixel-format name is invalid",
+            Self::TimingDurationMismatch => {
+                "video frame timestamps disagree with the stream duration"
+            }
         };
         formatter.write_str(message)
     }
@@ -435,6 +634,15 @@ fn validate_format_name(
         return Err(invalid);
     }
     Ok(())
+}
+
+const fn greatest_common_divisor_u32(mut left: u32, mut right: u32) -> u32 {
+    while right != 0 {
+        let remainder = left % right;
+        left = right;
+        right = remainder;
+    }
+    left
 }
 
 /// One frozen artifact and the normalized facts probed from those same bytes.
@@ -472,7 +680,8 @@ impl FrozenAsset {
 mod tests {
     use super::{
         AssetMetadata, AudioMetadata, FrozenAssetId, InvalidFrozenAssetId, InvalidVideoDimensions,
-        InvalidVideoMetadata, VideoDimensions, VideoMetadata, VideoTiming,
+        InvalidVideoFrameMap, InvalidVideoMetadata, MediaTimebase, VideoDimensions, VideoFrameMap,
+        VideoMetadata, VideoTiming,
     };
     use crate::model::{AudioChannelLayout, AudioSampleRate, Duration, FrameRate};
 
@@ -580,6 +789,49 @@ mod tests {
         let dimensions = video_dimensions();
         assert_eq!(dimensions.width(), 1_920);
         assert_eq!(dimensions.height(), 1_080);
+    }
+
+    #[test]
+    fn variable_frame_map_requires_one_exact_increasing_boundary_sequence() {
+        let timebase =
+            MediaTimebase::new(1, 1_000).expect("one millisecond ticks form a valid timebase");
+        let timing = VideoFrameMap::new(timebase, [0, 40, 100, 140])
+            .expect("three variable frames have four increasing boundaries");
+
+        assert_eq!(timing.frame_count(), 3);
+        assert_eq!(timing.boundaries(), &[0, 40, 100, 140]);
+        assert_eq!(timing.duration(), Duration::from_nanos(140_000_000));
+        assert_eq!(
+            VideoFrameMap::new(timebase, [0, 40]),
+            Err(InvalidVideoFrameMap::TooFewFrames),
+        );
+        assert_eq!(
+            VideoFrameMap::new(timebase, [1, 40, 100]),
+            Err(InvalidVideoFrameMap::NonzeroStart),
+        );
+        assert_eq!(
+            VideoFrameMap::new(timebase, [0, 40, 40]),
+            Err(InvalidVideoFrameMap::NonIncreasing),
+        );
+    }
+
+    #[test]
+    fn video_metadata_requires_variable_timing_to_cover_the_stream() {
+        let timebase =
+            MediaTimebase::new(1, 1_000).expect("one millisecond ticks form a valid timebase");
+        let frame_map =
+            VideoFrameMap::new(timebase, [0, 40, 100]).expect("the fixture has two source frames");
+
+        assert_eq!(
+            VideoMetadata::new(
+                Duration::from_nanos(1_000_000_000),
+                video_dimensions(),
+                "h264",
+                "yuv420p",
+                VideoTiming::Variable(frame_map),
+            ),
+            Err(InvalidVideoMetadata::TimingDurationMismatch),
+        );
     }
 
     fn video_dimensions() -> VideoDimensions {

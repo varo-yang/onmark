@@ -12,14 +12,18 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::model::{
     Duration, ElementKind, FrameInterval, FrameRate, FrozenAssetId, MediaSource,
-    MediaSourceInterval, NodeId, PlaybackRate, Rounding, Timebase,
+    MediaSourceInterval, MediaTimebase, NodeId, PlayCount, PlaybackRate, Rounding, Timebase,
+    VideoFrameMap, VideoTiming,
 };
 use crate::timeline::{TimelineIr, TimelineVersion};
 
-use super::frame::{InvalidWireFrame, WireFrame, WireFrameRate, WireInterval, WirePlaybackRate};
+use super::frame::{
+    InvalidWireFrame, WireFrame, WireFrameRate, WireInterval, WireMediaTimebase, WirePlaybackRate,
+};
 use super::projection::ProjectionBuilder;
 
 pub(super) const MAX_BROWSER_VIDEOS: usize = 10_000;
+const MAX_BROWSER_VIDEO_FRAME_BOUNDARIES: usize = 100_000;
 pub(super) const MAX_BROWSER_OVERLAYS: usize = 10_000;
 pub(super) const MAX_BROWSER_SCENES: usize = 10_000;
 pub(super) const MAX_BROWSER_SHOTS: usize = 10_000;
@@ -64,10 +68,10 @@ impl BrowserPlan {
     /// or a frame lies outside JavaScript's exact integer domain.
     pub fn from_timeline(
         timeline: &TimelineIr,
-        source_frame_rates: &BTreeMap<FrozenAssetId, FrameRate>,
+        source_timings: &BTreeMap<FrozenAssetId, VideoTiming>,
     ) -> Result<Self, InvalidBrowserPlan> {
         let interval = timeline.interval();
-        Self::from_timeline_for_unit(timeline, source_frame_rates, interval, interval)
+        Self::from_timeline_for_unit(timeline, source_timings, interval, interval)
     }
 
     /// Projects one evaluated and published unit from solved Timeline IR.
@@ -85,7 +89,7 @@ impl BrowserPlan {
     /// malformed, or a frame lies outside JavaScript's exact integer domain.
     pub fn from_timeline_for_unit(
         timeline: &TimelineIr,
-        source_frame_rates: &BTreeMap<FrozenAssetId, FrameRate>,
+        source_timings: &BTreeMap<FrozenAssetId, VideoTiming>,
         evaluation: FrameInterval,
         output: FrameInterval,
     ) -> Result<Self, InvalidBrowserPlan> {
@@ -98,8 +102,7 @@ impl BrowserPlan {
 
         let evaluation_wire = WireInterval::try_from(evaluation)?;
         let output_wire = WireInterval::try_from(output)?;
-        let projection =
-            ProjectionBuilder::new(evaluation, source_frame_rates).project(timeline)?;
+        let projection = ProjectionBuilder::new(evaluation, source_timings).project(timeline)?;
 
         Self::checked(BrowserPlanWire {
             timeline_version: timeline.version().get(),
@@ -221,6 +224,9 @@ impl BrowserPlan {
         if wire.videos.len() > MAX_BROWSER_VIDEOS {
             return Err(InvalidBrowserPlan::TooManyVideos);
         }
+        if source_frame_boundary_count(&wire.videos)? > MAX_BROWSER_VIDEO_FRAME_BOUNDARIES {
+            return Err(InvalidBrowserPlan::SourceTimingBudget);
+        }
         if wire.overlays.len() > MAX_BROWSER_OVERLAYS {
             return Err(InvalidBrowserPlan::TooManyOverlays);
         }
@@ -254,6 +260,7 @@ impl BrowserPlan {
             return Err(InvalidBrowserPlan::VideoCrossesEvaluation);
         }
         validate_video_durations(&wire.videos, wire.frame_rate)?;
+        validate_source_timing_durations(&wire.videos)?;
         Ok(Self {
             timeline_version: wire.timeline_version,
             frame_rate: wire.frame_rate,
@@ -454,16 +461,32 @@ fn validate_video_durations(
     for video in videos {
         let source = video.source().media_source();
         let expected = timebase
-            .frames_for_playback(
-                source.interval().duration(),
-                source.playback_rate(),
-                Rounding::Ceil,
-            )
+            .frames_for_media(source, Rounding::Ceil)
             .map_err(|_| InvalidBrowserPlan::VideoSourceDurationMismatch)?;
         let interval = video.interval();
         let actual = interval.end().get() - interval.start().get();
         if actual != expected.get() {
             return Err(InvalidBrowserPlan::VideoSourceDurationMismatch);
+        }
+    }
+    Ok(())
+}
+
+fn source_frame_boundary_count(videos: &[BrowserVideo]) -> Result<usize, InvalidBrowserPlan> {
+    videos.iter().try_fold(0_usize, |count, video| {
+        count
+            .checked_add(video.source_timing().boundary_count())
+            .ok_or(InvalidBrowserPlan::SourceTimingBudget)
+    })
+}
+
+fn validate_source_timing_durations(videos: &[BrowserVideo]) -> Result<(), InvalidBrowserPlan> {
+    for video in videos {
+        let Some(duration) = video.source_timing().variable_duration() else {
+            continue;
+        };
+        if duration != video.source().media_source().natural_duration() {
+            return Err(InvalidBrowserPlan::SourceTimingDurationMismatch);
         }
     }
     Ok(())
@@ -635,7 +658,7 @@ pub struct BrowserVideo {
     #[cfg_attr(feature = "schema", schemars(skip))]
     asset_identity: FrozenAssetId,
     interval: WireInterval,
-    source_frame_rate: WireFrameRate,
+    source_timing: BrowserVideoTiming,
     source: BrowserVideoSource,
 }
 
@@ -645,7 +668,7 @@ impl BrowserVideo {
         shot_id: BrowserNodeId,
         asset_identity: FrozenAssetId,
         interval: WireInterval,
-        source_frame_rate: WireFrameRate,
+        source_timing: BrowserVideoTiming,
         source: MediaSource,
     ) -> Self {
         Self {
@@ -654,7 +677,7 @@ impl BrowserVideo {
             asset_id: asset_identity.to_string().into_boxed_str(),
             asset_identity,
             interval,
-            source_frame_rate,
+            source_timing,
             source: BrowserVideoSource::new(source),
         }
     }
@@ -689,10 +712,10 @@ impl BrowserVideo {
         self.interval
     }
 
-    /// Returns the exact selected source-stream frame rate.
+    /// Returns the exact selected source-stream frame timing.
     #[must_use]
-    pub const fn source_frame_rate(&self) -> WireFrameRate {
-        self.source_frame_rate
+    pub const fn source_timing(&self) -> &BrowserVideoTiming {
+        &self.source_timing
     }
 
     /// Returns the exact mapping from output time into source time.
@@ -716,7 +739,7 @@ impl<'de> Deserialize<'de> for BrowserVideo {
             asset_id: wire.asset_id,
             asset_identity,
             interval: wire.interval,
-            source_frame_rate: wire.source_frame_rate,
+            source_timing: wire.source_timing,
             source: wire.source,
         })
     }
@@ -729,8 +752,166 @@ struct BrowserVideoWire {
     shot_id: BrowserNodeId,
     asset_id: Box<str>,
     interval: WireInterval,
-    source_frame_rate: WireFrameRate,
+    source_timing: BrowserVideoTiming,
     source: BrowserVideoSource,
+}
+
+/// Exact source-frame timing projected into the browser runtime.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(
+    deny_unknown_fields,
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "kind"
+)]
+pub enum BrowserVideoTiming {
+    /// Every source frame has one exact rational rate.
+    Constant {
+        /// Exact source frames per second.
+        frame_rate: WireFrameRate,
+    },
+    /// Every source frame carries one half-open timestamp interval.
+    Variable {
+        /// Exact seconds represented by one source timestamp tick.
+        timebase: WireMediaTimebase,
+        /// Canonical decimal ticks from source zero through terminal end.
+        #[cfg_attr(
+            feature = "schema",
+            schemars(length(min = 3, max = MAX_BROWSER_VIDEO_FRAME_BOUNDARIES))
+        )]
+        boundaries: Vec<Box<str>>,
+    },
+}
+
+impl BrowserVideoTiming {
+    pub(super) fn from_model(timing: &VideoTiming) -> Result<Self, InvalidBrowserPlan> {
+        match timing {
+            VideoTiming::Constant(frame_rate) => Ok(Self::Constant {
+                frame_rate: (*frame_rate).into(),
+            }),
+            VideoTiming::Variable(frame_map) => {
+                if frame_map.boundaries().len() > MAX_BROWSER_VIDEO_FRAME_BOUNDARIES {
+                    return Err(InvalidBrowserPlan::SourceTimingBudget);
+                }
+                Ok(Self::Variable {
+                    timebase: frame_map.timebase().into(),
+                    boundaries: frame_map
+                        .boundaries()
+                        .iter()
+                        .map(|boundary| boundary.to_string().into_boxed_str())
+                        .collect(),
+                })
+            }
+            VideoTiming::Still => Err(InvalidBrowserPlan::UnsupportedSourceTiming),
+        }
+    }
+
+    /// Returns the exact constant rate, when source intervals are uniform.
+    #[must_use]
+    pub const fn constant_frame_rate(&self) -> Option<WireFrameRate> {
+        match self {
+            Self::Constant { frame_rate } => Some(*frame_rate),
+            Self::Variable { .. } => None,
+        }
+    }
+
+    /// Returns the exact source timestamp unit for a variable-rate stream.
+    #[must_use]
+    pub const fn variable_timebase(&self) -> Option<WireMediaTimebase> {
+        match self {
+            Self::Constant { .. } => None,
+            Self::Variable { timebase, .. } => Some(*timebase),
+        }
+    }
+
+    /// Returns every canonical source-frame boundary for a variable stream.
+    #[must_use]
+    pub fn variable_boundaries(&self) -> Option<&[Box<str>]> {
+        match self {
+            Self::Constant { .. } => None,
+            Self::Variable { boundaries, .. } => Some(boundaries),
+        }
+    }
+
+    fn boundary_count(&self) -> usize {
+        match self {
+            Self::Constant { .. } => 0,
+            Self::Variable { boundaries, .. } => boundaries.len(),
+        }
+    }
+
+    fn variable_duration(&self) -> Option<Duration> {
+        let Self::Variable {
+            timebase,
+            boundaries,
+        } = self
+        else {
+            return None;
+        };
+        let terminal = parse_wire_ticks(&boundaries[boundaries.len() - 1])
+            .expect("browser video timing validates canonical boundaries");
+        let timebase = MediaTimebase::new(timebase.numerator(), timebase.denominator())
+            .expect("wire media timebases are canonical");
+        Some(
+            timebase
+                .duration_at(terminal)
+                .expect("browser video timing validates its duration domain"),
+        )
+    }
+}
+
+impl<'de> Deserialize<'de> for BrowserVideoTiming {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = BrowserVideoTimingWire::deserialize(deserializer)?;
+        match wire {
+            BrowserVideoTimingWire::Constant { frame_rate } => Ok(Self::Constant { frame_rate }),
+            BrowserVideoTimingWire::Variable {
+                timebase,
+                boundaries,
+            } => {
+                if boundaries.len() > MAX_BROWSER_VIDEO_FRAME_BOUNDARIES {
+                    return Err(D::Error::custom(
+                        "source frame map exceeds the browser timing budget",
+                    ));
+                }
+                let parsed = boundaries
+                    .iter()
+                    .map(|boundary| parse_wire_ticks(boundary))
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(D::Error::custom)?;
+                let timebase_model =
+                    MediaTimebase::new(timebase.numerator(), timebase.denominator())
+                        .expect("wire media timebases are canonical");
+                VideoFrameMap::new(timebase_model, parsed)
+                    .map_err(|source| D::Error::custom(source.to_string()))?;
+                Ok(Self::Variable {
+                    timebase,
+                    boundaries,
+                })
+            }
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(
+    deny_unknown_fields,
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "kind"
+)]
+enum BrowserVideoTimingWire {
+    Constant {
+        frame_rate: WireFrameRate,
+    },
+    Variable {
+        timebase: WireMediaTimebase,
+        boundaries: Vec<Box<str>>,
+    },
 }
 
 /// Exact source-time mapping for one browser video placement.
@@ -754,6 +935,13 @@ pub struct BrowserVideoSource {
     )]
     natural_end_nanoseconds: Box<str>,
     playback_rate: WirePlaybackRate,
+    #[cfg_attr(feature = "schema", schemars(range(min = 1)))]
+    plays: u32,
+    #[cfg_attr(
+        feature = "schema",
+        schemars(length(min = 1, max = 20), regex(pattern = r"^(0|[1-9][0-9]*)$"))
+    )]
+    hold_last_nanoseconds: Box<str>,
     #[serde(skip)]
     #[cfg_attr(feature = "schema", schemars(skip))]
     source: MediaSource,
@@ -771,6 +959,8 @@ impl BrowserVideoSource {
                 .to_string()
                 .into_boxed_str(),
             playback_rate: source.playback_rate().into(),
+            plays: source.plays().get(),
+            hold_last_nanoseconds: source.hold_last().as_nanos().to_string().into_boxed_str(),
             source,
         }
     }
@@ -799,6 +989,18 @@ impl BrowserVideoSource {
         self.playback_rate
     }
 
+    /// Returns the exact number of complete source passes.
+    #[must_use]
+    pub const fn plays(&self) -> u32 {
+        self.plays
+    }
+
+    /// Returns the exact final-frame hold as canonical decimal nanoseconds.
+    #[must_use]
+    pub fn hold_last_nanoseconds(&self) -> &str {
+        &self.hold_last_nanoseconds
+    }
+
     /// Returns the validated domain source mapping.
     #[must_use]
     pub const fn media_source(&self) -> MediaSource {
@@ -816,6 +1018,8 @@ impl<'de> Deserialize<'de> for BrowserVideoSource {
         let end = parse_wire_nanoseconds(&wire.end_nanoseconds).map_err(D::Error::custom)?;
         let natural_end =
             parse_wire_nanoseconds(&wire.natural_end_nanoseconds).map_err(D::Error::custom)?;
+        let hold_last =
+            parse_wire_nanoseconds(&wire.hold_last_nanoseconds).map_err(D::Error::custom)?;
         let interval = MediaSourceInterval::new(start, end)
             .map_err(|source| D::Error::custom(source.to_string()))?;
         let playback_rate = PlaybackRate::new(
@@ -823,7 +1027,9 @@ impl<'de> Deserialize<'de> for BrowserVideoSource {
             wire.playback_rate.denominator(),
         )
         .map_err(|source| D::Error::custom(source.to_string()))?;
-        let source = MediaSource::new(interval, playback_rate, natural_end)
+        let plays =
+            PlayCount::new(wire.plays).map_err(|source| D::Error::custom(source.to_string()))?;
+        let source = MediaSource::new(interval, playback_rate, plays, hold_last, natural_end)
             .map_err(|source| D::Error::custom(source.to_string()))?;
 
         Ok(Self {
@@ -831,6 +1037,8 @@ impl<'de> Deserialize<'de> for BrowserVideoSource {
             end_nanoseconds: wire.end_nanoseconds,
             natural_end_nanoseconds: wire.natural_end_nanoseconds,
             playback_rate: wire.playback_rate,
+            plays: wire.plays,
+            hold_last_nanoseconds: wire.hold_last_nanoseconds,
             source,
         })
     }
@@ -843,6 +1051,8 @@ struct BrowserVideoSourceWire {
     end_nanoseconds: Box<str>,
     natural_end_nanoseconds: Box<str>,
     playback_rate: WirePlaybackRate,
+    plays: u32,
+    hold_last_nanoseconds: Box<str>,
 }
 
 fn parse_wire_nanoseconds(value: &str) -> Result<Duration, &'static str> {
@@ -853,6 +1063,16 @@ fn parse_wire_nanoseconds(value: &str) -> Result<Duration, &'static str> {
         return Err("source nanoseconds are not in canonical decimal form");
     }
     Ok(Duration::from_nanos(nanoseconds))
+}
+
+fn parse_wire_ticks(value: &str) -> Result<u64, &'static str> {
+    let ticks = value
+        .parse::<u64>()
+        .map_err(|_| "source frame timestamp exceeds its exact integer domain")?;
+    if ticks.to_string() != value {
+        return Err("source frame timestamp is not in canonical decimal form");
+    }
+    Ok(ticks)
 }
 
 /// Closed overlay roles understood by the browser presentation.
@@ -1001,6 +1221,8 @@ pub enum InvalidBrowserPlan {
     VideoCrossesEvaluation,
     /// A video interval disagrees with its exact source-time mapping.
     VideoSourceDurationMismatch,
+    /// A variable source map disagrees with the frozen artifact duration.
+    SourceTimingDurationMismatch,
     /// A projected overlay lies outside the solved film.
     OverlayOutsideTimeline,
     /// A projected overlay does not intersect this unit.
@@ -1041,8 +1263,12 @@ pub enum InvalidBrowserPlan {
     CaptionTextTooLong,
     /// Combined browser text would exceed the bounded CDP request budget.
     OverlayTextBudget,
-    /// One video lacks the source rate proved during render admission.
-    MissingSourceFrameRate(FrozenAssetId),
+    /// One video lacks the source timing proved during render admission.
+    MissingSourceTiming(FrozenAssetId),
+    /// The admitted source timing shape cannot be presented as video.
+    UnsupportedSourceTiming,
+    /// Complete source-frame maps exceed the bounded browser request budget.
+    SourceTimingBudget,
     /// A frame lies outside JavaScript's exact integer range.
     InvalidFrame(InvalidWireFrame),
 }
@@ -1068,6 +1294,9 @@ impl fmt::Display for InvalidBrowserPlan {
             }
             Self::VideoSourceDurationMismatch => {
                 formatter.write_str("browser video duration disagrees with its source mapping")
+            }
+            Self::SourceTimingDurationMismatch => {
+                formatter.write_str("browser source timing disagrees with its natural duration")
             }
             Self::OverlayOutsideTimeline => {
                 formatter.write_str("browser overlay lies outside the solved film")
@@ -1128,8 +1357,14 @@ impl fmt::Display for InvalidBrowserPlan {
             Self::OverlayTextBudget => {
                 formatter.write_str("browser overlay text exceeds the request byte budget")
             }
-            Self::MissingSourceFrameRate(id) => {
-                write!(formatter, "source frame rate is missing for video {id}")
+            Self::MissingSourceTiming(id) => {
+                write!(formatter, "source frame timing is missing for video {id}")
+            }
+            Self::UnsupportedSourceTiming => {
+                formatter.write_str("source frame timing cannot be presented as video")
+            }
+            Self::SourceTimingBudget => {
+                formatter.write_str("browser source timing exceeds the request budget")
             }
             Self::InvalidFrame(source) => source.fmt(formatter),
         }
@@ -1149,6 +1384,7 @@ impl Error for InvalidBrowserPlan {
             | Self::EmptyStructure
             | Self::VideoCrossesEvaluation
             | Self::VideoSourceDurationMismatch
+            | Self::SourceTimingDurationMismatch
             | Self::OverlayOutsideTimeline
             | Self::OverlayOutsideEvaluation
             | Self::StructureOutsideTimeline
@@ -1169,7 +1405,9 @@ impl Error for InvalidBrowserPlan {
             | Self::OverlayTextTooLong(_)
             | Self::CaptionTextTooLong
             | Self::OverlayTextBudget
-            | Self::MissingSourceFrameRate(_) => None,
+            | Self::MissingSourceTiming(_)
+            | Self::UnsupportedSourceTiming
+            | Self::SourceTimingBudget => None,
         }
     }
 }
@@ -1186,7 +1424,8 @@ mod tests {
 
     use crate::model::{
         ByteOffset, Duration, ElementKind, FrameIndex, FrameInterval, FrameRate, FrozenAssetId,
-        MediaSource, MediaSourceInterval, PlaybackRate, SourceId, SourceSpan, Timebase,
+        MediaSource, MediaSourceInterval, PlayCount, PlaybackRate, SourceId, SourceSpan, Timebase,
+        VideoTiming,
     };
     use crate::timeline::{
         TimelineCaption, TimelineContent, TimelineElement, TimelineIr, TimelineOverlay,
@@ -1266,12 +1505,19 @@ mod tests {
         let mut nanoseconds = wire.clone();
         nanoseconds["videos"][0]["source"]["startNanoseconds"] =
             serde_json::Value::String(String::from("00"));
-        let mut playback_rate = wire;
+        let mut playback_rate = wire.clone();
         playback_rate["videos"][0]["source"]["playbackRate"] =
             serde_json::json!({ "numerator": 2, "denominator": 2 });
+        let mut plays = wire.clone();
+        plays["videos"][0]["source"]["plays"] = serde_json::json!(0);
+        let mut hold = wire;
+        hold["videos"][0]["source"]["holdLastNanoseconds"] =
+            serde_json::Value::String(String::from("00"));
 
         assert!(serde_json::from_value::<BrowserPlan>(nanoseconds).is_err());
         assert!(serde_json::from_value::<BrowserPlan>(playback_rate).is_err());
+        assert!(serde_json::from_value::<BrowserPlan>(plays).is_err());
+        assert!(serde_json::from_value::<BrowserPlan>(hold).is_err());
     }
 
     #[test]
@@ -1370,11 +1616,11 @@ mod tests {
             ],
             interval(0, 4),
         );
-        let source_rates = BTreeMap::from([(
+        let source_timings = BTreeMap::from([(
             asset_id,
-            FrameRate::new(30, 1).expect("the fixture frame rate is valid"),
+            VideoTiming::Constant(FrameRate::new(30, 1).expect("the fixture frame rate is valid")),
         )]);
-        let plan = BrowserPlan::from_timeline(&timeline, &source_rates)
+        let plan = BrowserPlan::from_timeline(&timeline, &source_timings)
             .expect("the fixture forms a valid browser plan");
 
         let boundaries = plan.placement_boundaries().collect::<BTreeSet<_>>();
@@ -1429,13 +1675,13 @@ mod tests {
     fn rejects_a_plan_outside_the_video_budget() {
         let asset_id = FrozenAssetId::from_sha256([1; 32]);
         let timeline = timeline_with_videos(asset_id, MAX_BROWSER_VIDEOS + 1);
-        let source_rates = BTreeMap::from([(
+        let source_timings = BTreeMap::from([(
             asset_id,
-            FrameRate::new(30, 1).expect("the fixture frame rate is valid"),
+            VideoTiming::Constant(FrameRate::new(30, 1).expect("the fixture frame rate is valid")),
         )]);
 
         assert_eq!(
-            BrowserPlan::from_timeline(&timeline, &source_rates),
+            BrowserPlan::from_timeline(&timeline, &source_timings),
             Err(InvalidBrowserPlan::TooManyVideos),
         );
     }
@@ -1562,14 +1808,14 @@ mod tests {
         let asset_id = FrozenAssetId::from_sha256([1; 32]);
         let timeline =
             timeline_with_content_in(vec![video(asset_id, interval(1, 3))], interval(0, 4));
-        let source_rates = BTreeMap::from([(
+        let source_timings = BTreeMap::from([(
             asset_id,
-            FrameRate::new(30, 1).expect("the fixture frame rate is valid"),
+            VideoTiming::Constant(FrameRate::new(30, 1).expect("the fixture frame rate is valid")),
         )]);
         let unit = interval(0, 2);
 
         assert_eq!(
-            BrowserPlan::from_timeline_for_unit(&timeline, &source_rates, unit, unit),
+            BrowserPlan::from_timeline_for_unit(&timeline, &source_timings, unit, unit),
             Err(InvalidBrowserPlan::VideoCrossesEvaluation),
         );
     }
@@ -1702,6 +1948,8 @@ mod tests {
             MediaSourceInterval::new(Duration::ZERO, duration)
                 .expect("the fixture source interval is non-empty"),
             PlaybackRate::ONE,
+            PlayCount::ONE,
+            Duration::ZERO,
             duration,
         )
         .expect("the fixture selection fits its natural source");
@@ -1717,12 +1965,12 @@ mod tests {
     fn one_frame_video_plan() -> BrowserPlan {
         let asset_id = FrozenAssetId::from_sha256([1; 32]);
         let timeline = timeline_with_content(vec![video(asset_id, interval(0, 1))]);
-        let source_rates = BTreeMap::from([(
+        let source_timings = BTreeMap::from([(
             asset_id,
-            FrameRate::new(30, 1).expect("the fixture frame rate is valid"),
+            VideoTiming::Constant(FrameRate::new(30, 1).expect("the fixture frame rate is valid")),
         )]);
 
-        BrowserPlan::from_timeline(&timeline, &source_rates)
+        BrowserPlan::from_timeline(&timeline, &source_timings)
             .expect("the fixture forms a valid browser plan")
     }
 

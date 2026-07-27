@@ -9,6 +9,72 @@ use super::{Duration, InvalidDuration};
 
 const RATE_DENOMINATORS: [u128; 7] = [1, 10, 100, 1_000, 10_000, 100_000, 1_000_000];
 
+/// Exact number of complete passes through one selected source interval.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct PlayCount(u32);
+
+impl PlayCount {
+    /// One natural pass through the selected source.
+    pub const ONE: Self = Self(1);
+
+    /// Parses a positive decimal integer.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InvalidPlayCount`] when the spelling is not a positive `u32`.
+    pub fn parse(value: &str) -> Result<Self, InvalidPlayCount> {
+        if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
+            return Err(InvalidPlayCount::Malformed);
+        }
+        let count = value
+            .parse::<u32>()
+            .map_err(|_| InvalidPlayCount::OutOfRange)?;
+        Self::new(count)
+    }
+
+    /// Creates a positive play count.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InvalidPlayCount::Zero`] when `count` contains no play.
+    pub const fn new(count: u32) -> Result<Self, InvalidPlayCount> {
+        if count == 0 {
+            return Err(InvalidPlayCount::Zero);
+        }
+        Ok(Self(count))
+    }
+
+    /// Returns the exact number of complete source passes.
+    #[must_use]
+    pub const fn get(self) -> u32 {
+        self.0
+    }
+}
+
+/// Reason authored play-count text is invalid.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum InvalidPlayCount {
+    /// The value is not an unsigned decimal integer.
+    Malformed,
+    /// Zero contains no source pass.
+    Zero,
+    /// The integer exceeds the play-count domain.
+    OutOfRange,
+}
+
+impl fmt::Display for InvalidPlayCount {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let message = match self {
+            Self::Malformed => "plays must be an unsigned decimal integer",
+            Self::Zero => "plays must be greater than zero",
+            Self::OutOfRange => "plays exceeds the supported integer range",
+        };
+        formatter.write_str(message)
+    }
+}
+
+impl Error for InvalidPlayCount {}
+
 /// Authored half-open source interval with an optional natural end.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct MediaTrim {
@@ -272,6 +338,8 @@ impl Error for InvalidMediaSourceInterval {}
 pub struct MediaSource {
     interval: MediaSourceInterval,
     playback_rate: PlaybackRate,
+    plays: PlayCount,
+    hold_last: Duration,
     natural_duration: Duration,
 }
 
@@ -285,6 +353,8 @@ impl MediaSource {
     pub const fn new(
         interval: MediaSourceInterval,
         playback_rate: PlaybackRate,
+        plays: PlayCount,
+        hold_last: Duration,
         natural_duration: Duration,
     ) -> Result<Self, InvalidMediaSource> {
         if interval.end().as_nanos() > natural_duration.as_nanos() {
@@ -296,6 +366,8 @@ impl MediaSource {
         Ok(Self {
             interval,
             playback_rate,
+            plays,
+            hold_last,
             natural_duration,
         })
     }
@@ -312,6 +384,18 @@ impl MediaSource {
         self.playback_rate
     }
 
+    /// Returns the exact number of complete source passes.
+    #[must_use]
+    pub const fn plays(self) -> PlayCount {
+        self.plays
+    }
+
+    /// Returns the exact final-frame hold after all source passes.
+    #[must_use]
+    pub const fn hold_last(self) -> Duration {
+        self.hold_last
+    }
+
     /// Returns the frozen artifact's natural source duration.
     #[must_use]
     pub const fn natural_duration(self) -> Duration {
@@ -325,6 +409,8 @@ impl MediaSource {
             && self.interval.end().as_nanos() == self.natural_duration.as_nanos()
             && self.playback_rate.numerator() == 1
             && self.playback_rate.denominator() == 1
+            && self.plays.get() == 1
+            && self.hold_last.as_nanos() == 0
     }
 }
 
@@ -410,7 +496,9 @@ const fn greatest_common_divisor_u32(mut left: u32, mut right: u32) -> u32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{InvalidMediaTrim, InvalidPlaybackRate, MediaTrim, PlaybackRate};
+    use super::{
+        InvalidMediaTrim, InvalidPlayCount, InvalidPlaybackRate, MediaTrim, PlayCount, PlaybackRate,
+    };
     use crate::model::{Duration, InvalidDuration};
     use proptest::prelude::*;
 
@@ -477,6 +565,18 @@ mod tests {
                 numerator: 5,
                 denominator: 2,
             })
+        );
+    }
+
+    #[test]
+    fn parses_positive_play_counts() {
+        assert_eq!(PlayCount::parse("1"), Ok(PlayCount::ONE));
+        assert_eq!(PlayCount::parse("12"), Ok(PlayCount(12)));
+        assert_eq!(PlayCount::parse("0"), Err(InvalidPlayCount::Zero));
+        assert_eq!(PlayCount::parse("-1"), Err(InvalidPlayCount::Malformed));
+        assert_eq!(
+            PlayCount::parse("4294967296"),
+            Err(InvalidPlayCount::OutOfRange)
         );
     }
 
