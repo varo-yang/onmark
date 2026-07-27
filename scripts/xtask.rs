@@ -30,6 +30,7 @@ fn run() -> Result<(), Box<dyn Error>> {
         Command::Schema(mode) => schema::generate(repository, mode),
         Command::AudioEvaluation => evaluation::grade_audio(repository),
         Command::HtmlEvaluation => evaluation::grade_html(repository),
+        Command::TransitionEvaluation => evaluation::grade_transition(repository),
         Command::VideoEvaluation => evaluation::grade_video(repository),
         Command::ReleaseSidecar(arguments) => {
             release::run_sidecar(repository, arguments.into_iter()).map_err(Into::into)
@@ -47,6 +48,7 @@ enum Command {
     Schema(schema::GenerationMode),
     AudioEvaluation,
     HtmlEvaluation,
+    TransitionEvaluation,
     VideoEvaluation,
     ReleaseSidecar(Vec<String>),
     ReleasePrepare(String),
@@ -66,6 +68,9 @@ impl Command {
             }
             [command, subject] if command == "eval" && subject == "html" => {
                 Ok(Self::HtmlEvaluation)
+            }
+            [command, subject] if command == "eval" && subject == "transition" => {
+                Ok(Self::TransitionEvaluation)
             }
             [command, subject] if command == "eval" && subject == "video" => {
                 Ok(Self::VideoEvaluation)
@@ -96,7 +101,8 @@ impl fmt::Display for InvalidCommand {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(
             "expected `cargo xtask schema [--check]`, `cargo xtask eval audio`, \
-             `cargo xtask eval html`, `cargo xtask eval video`, \
+             `cargo xtask eval html`, `cargo xtask eval transition`, \
+             `cargo xtask eval video`, \
              `cargo xtask release prepare <version>`, \
              `cargo xtask release verify [version]`, or \
              `cargo xtask release sidecar <options>`",
