@@ -62,6 +62,10 @@ importers:
       parse5:
         specifier: 8.0.1
         version: 8.0.1
+    devDependencies:
+      '@onmark/motion-gsap':
+        specifier: workspace:*
+        version: link:../motion-gsap
 
   packages/launcher:
     dependencies:

@@ -25,5 +25,8 @@
     "@onmark/runtime": "workspace:*",
     "esbuild": "0.28.1",
     "parse5": "8.0.1"
+  },
+  "devDependencies": {
+    "@onmark/motion-gsap": "workspace:*"
   }
 }
