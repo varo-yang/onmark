@@ -393,12 +393,17 @@ const PLAN: RuntimePlan = {
       assetId:
         "sha256:0101010101010101010101010101010101010101010101010101010101010101",
       interval: { start: 0, end: 60 },
-      sourceFrameRate: { numerator: 30, denominator: 1 },
+      sourceTiming: {
+        kind: "constant",
+        frameRate: { numerator: 30, denominator: 1 },
+      },
       source: {
         startNanoseconds: "0",
         endNanoseconds: "2000000000",
         naturalEndNanoseconds: "2000000000",
         playbackRate: { numerator: 1, denominator: 1 },
+        plays: 1,
+        holdLastNanoseconds: "0",
       },
     },
   ],

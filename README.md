@@ -88,8 +88,8 @@ onmark doctor
 onmark benchmark film.html --runs 3 --json
 ```
 
-Use the default H.264/AAC MP4 for delivery, or select the edit-friendly
-ProRes/PCM MOV profile by filename:
+Use the default opaque H.264/AAC MP4 for delivery, or select the
+alpha-preserving ProRes 4444/PCM MOV profile by filename:
 
 ```bash
 onmark render film.html --output film.mov

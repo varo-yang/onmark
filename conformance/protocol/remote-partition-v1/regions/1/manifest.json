@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "bundleId": "sha256:4b77ceda453eed1af4763e1087595e43372aaae5dfbfcc73a8987d4343c482d4",
+  "bundleId": "sha256:30bdedacf5b606dd949e2163fca1e05013355248c83c4e54936bacd79c21454a",
   "entryPoint": "index.html",
   "documentScope": "renderRegion",
   "temporalCapability": "randomAccess",
@@ -13,9 +13,9 @@
       "sha256": "sha256:e1e102c81c6d270a778c32970d6b01f29bccd8235af706786430747c5265a066"
     },
     {
-      "bytes": 98388,
+      "bytes": 109802,
       "path": "presentation.js",
-      "sha256": "sha256:1491f5d5dcd406036862290443417a2ffc78c57ed9e360216d135409a0f4eb56"
+      "sha256": "sha256:3ada10c712548bc99fb2b2c0da26fdd906c53b9508ff6b8a6e6ec6955fa11061"
     },
     {
       "bytes": 181,

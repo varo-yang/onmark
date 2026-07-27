@@ -15,7 +15,8 @@ use sha2::{Digest as _, Sha256};
 
 use super::{FrameArtifactError, FrameArtifactErrorKind, FrameArtifactLimits};
 use crate::{
-    CaptureEnvironmentId, ExecutableUnit, RawRgbaHash, RenderProfile, VisualExecutionPlan,
+    AlphaMode, CaptureEnvironmentId, ExecutableUnit, RawRgbaHash, RenderProfile,
+    VisualExecutionPlan,
 };
 
 pub(super) const HEADER_BYTES: usize = 156;
@@ -24,7 +25,7 @@ pub(super) const RAW_RGBA_HASH_BYTES: u64 = RawRgbaHash::BYTE_LENGTH as u64;
 pub(super) const MIN_FRAME_RECORD_BYTES: u64 = FRAME_LENGTH_BYTES + 1 + RAW_RGBA_HASH_BYTES;
 
 const MAGIC: [u8; 8] = *b"ONMARKF1";
-const VERSION: u16 = 1;
+const VERSION: u16 = 2;
 const ID_DOMAIN: &[u8] = b"onmark-frame-artifact-id\0";
 
 /// Deterministic identity of one frame-artifact capture contract.
@@ -219,6 +220,7 @@ struct UnitIdentity<'a> {
     bundle_id: &'a str,
     width: u32,
     height: u32,
+    alpha: AlphaMode,
     visual_execution: &'a VisualExecutionPlan,
     browser_plan: &'a BrowserPlan,
 }
@@ -234,6 +236,7 @@ fn visual_plan_digest(
         bundle_id,
         width: profile.width(),
         height: profile.height(),
+        alpha: profile.alpha(),
         visual_execution,
         browser_plan: plan,
     };
@@ -270,7 +273,7 @@ impl Header {
         let mut header = HeaderEncoder::new();
         header.bytes(MAGIC);
         header.u16(VERSION);
-        header.bytes([0, 0]);
+        header.bytes([alpha_code(self.descriptor.profile.alpha()), 0]);
         header.u64(self.descriptor.output.start().get());
         header.u64(self.descriptor.output.end().get());
         header.u32(self.descriptor.frame_rate.numerator());
@@ -302,12 +305,7 @@ impl Header {
                 "frame artifact version is unsupported",
             ));
         }
-        if header.bytes::<2>() != [0, 0] {
-            return Err(FrameArtifactError::invalid(
-                path,
-                "frame artifact reserved header bytes are nonzero",
-            ));
-        }
+        let alpha = decode_alpha(path, header.bytes::<2>())?;
 
         let output =
             FrameInterval::new(FrameIndex::new(header.u64()), FrameIndex::new(header.u64()))
@@ -325,9 +323,11 @@ impl Header {
                 "frame artifact frame rate is not canonical",
             ));
         }
-        let profile = RenderProfile::new(header.u32(), header.u32()).map_err(|_| {
-            FrameArtifactError::invalid(path, "frame artifact render profile is invalid")
-        })?;
+        let profile = RenderProfile::new(header.u32(), header.u32())
+            .map(|profile| profile.with_alpha(alpha))
+            .map_err(|_| {
+                FrameArtifactError::invalid(path, "frame artifact render profile is invalid")
+            })?;
         let capture_environment = CaptureEnvironmentId::from_sha256(header.bytes());
         let visual_plan_digest = header.bytes();
         let frames = header.u64();
@@ -390,6 +390,30 @@ impl Header {
             ));
         }
         Ok(())
+    }
+}
+
+const fn alpha_code(alpha: AlphaMode) -> u8 {
+    match alpha {
+        AlphaMode::Opaque => 0,
+        AlphaMode::Preserve => 1,
+    }
+}
+
+fn decode_alpha(path: &Path, bytes: [u8; 2]) -> Result<AlphaMode, FrameArtifactError> {
+    if bytes[1] != 0 {
+        return Err(FrameArtifactError::invalid(
+            path,
+            "frame artifact reserved header byte is nonzero",
+        ));
+    }
+    match bytes[0] {
+        0 => Ok(AlphaMode::Opaque),
+        1 => Ok(AlphaMode::Preserve),
+        _ => Err(FrameArtifactError::invalid(
+            path,
+            "frame artifact alpha mode is invalid",
+        )),
     }
 }
 

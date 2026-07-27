@@ -17,7 +17,8 @@ mod visual;
 
 pub use asset::{
     AssetMetadata, AudioMetadata, FrozenAsset, FrozenAssetId, InvalidFrozenAssetId,
-    InvalidVideoDimensions, InvalidVideoMetadata, VideoColorProfile, VideoDimensions,
+    InvalidMediaTimebase, InvalidVideoDimensions, InvalidVideoFrameMap, InvalidVideoMetadata,
+    MediaTimebase, MediaTimestampOverflow, VideoColorProfile, VideoDimensions, VideoFrameMap,
     VideoMetadata, VideoTiming,
 };
 pub use audio::{
@@ -32,8 +33,8 @@ pub use duration::{Duration, InvalidDuration};
 pub use element::{ElementKind, GeneralAudioKind};
 pub use id::{InvalidNodeId, NodeId};
 pub use media::{
-    InvalidMediaSource, InvalidMediaSourceInterval, InvalidMediaTrim, InvalidPlaybackRate,
-    MediaSource, MediaSourceInterval, MediaTrim, PlaybackRate,
+    InvalidMediaSource, InvalidMediaSourceInterval, InvalidMediaTrim, InvalidPlayCount,
+    InvalidPlaybackRate, MediaSource, MediaSourceInterval, MediaTrim, PlayCount, PlaybackRate,
 };
 pub use reference::{AssetRef, CueId, EventRef, InvalidAssetRef};
 pub use source::{ByteOffset, InvalidSourceSpan, SourceId, SourceSpan};

@@ -637,7 +637,13 @@ fn layered_media_input(
         .ok_or_else(|| invalid_plan(output, "layered render unit has a reversed output"))?;
     Ok(LayeredMediaInput {
         path,
-        source_frame_rate: video.source_frame_rate(),
+        source_frame_rate: video.source_timing().constant_frame_rate().ok_or_else(|| {
+            invalid_plan(
+                output,
+                "layered render unit contains variable source timing",
+            )
+        })?,
+        source: video.source().media_source(),
         frames,
     })
 }

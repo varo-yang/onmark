@@ -50,13 +50,32 @@ export type BrowserNodeId = number;
  */
 export type BrowserOverlayKind = "title" | "callToAction" | "caption";
 /**
+ * Exact source-frame timing projected into the browser runtime.
+ */
+export type BrowserVideoTiming =
+  | {
+      frameRate: WireFrameRate1;
+      kind: "constant";
+    }
+  | {
+      /**
+       * Canonical decimal ticks from source zero through terminal end.
+       *
+       * @minItems 3
+       * @maxItems 100000
+       */
+      boundaries: [string, string, string, ...string[]];
+      kind: "variable";
+      timebase: WireMediaTimebase;
+    };
+/**
  * Correlation identity shared by one request and its response events.
  */
 export type RequestId = number;
 /**
  * Version of the native-to-browser message contract.
  */
-export type ProtocolVersion = 2;
+export type ProtocolVersion = 3;
 
 /**
  * One versioned command sent from the native executor to the browser.
@@ -148,21 +167,37 @@ export interface BrowserVideo {
   node: BrowserNode;
   shotId: BrowserNodeId;
   source: BrowserVideoSource;
-  sourceFrameRate: WireFrameRate;
+  sourceTiming: BrowserVideoTiming;
 }
 /**
  * Exact source-time mapping for one browser video placement.
  */
 export interface BrowserVideoSource {
   endNanoseconds: string;
+  holdLastNanoseconds: string;
   naturalEndNanoseconds: string;
   playbackRate: WirePlaybackRate;
+  plays: number;
   startNanoseconds: string;
 }
 /**
  * Exact canonical playback ratio represented with browser-safe integers.
  */
 export interface WirePlaybackRate {
+  denominator: number;
+  numerator: number;
+}
+/**
+ * Exact rational frame rate represented with browser-safe integers.
+ */
+export interface WireFrameRate1 {
+  denominator: number;
+  numerator: number;
+}
+/**
+ * Exact seconds represented by one source timestamp tick.
+ */
+export interface WireMediaTimebase {
   denominator: number;
   numerator: number;
 }

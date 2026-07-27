@@ -2,7 +2,7 @@
 film id=demo
   scene id=launch
     shot id=hero duration=-
-      video id=- src=hero.mp4 delay=- trim=- speed=1/1
+      video id=- src=hero.mp4 delay=- trim=- speed=1/1 plays=1 hold-last=0s
       om-title id=- start=shot-start
         text "\n        Write " @0:273..288
         text "native." @0:309..316

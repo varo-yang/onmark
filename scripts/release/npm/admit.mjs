@@ -491,9 +491,11 @@ async function verifyEditingStreams(ffprobe, input, directory) {
   if (
     !isObject(video) ||
     video.codec_name !== "prores" ||
-    video.pix_fmt !== "yuv422p10le"
+    video.pix_fmt !== "yuva444p12le"
   ) {
-    throw new Error("release editing output is not ProRes 422 HQ");
+    throw new Error(
+      "release editing output is not alpha-preserving ProRes 4444",
+    );
   }
   if (
     !isObject(audio) ||

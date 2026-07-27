@@ -9,7 +9,7 @@ use std::fmt;
 
 use onmark_core::model::{
     FrozenAssetId, PresentationFrameBehavior, PresentationVisualCapability, VideoColorProfile,
-    VideoDimensions,
+    VideoDimensions, VideoTiming,
 };
 use onmark_core::protocol::BrowserPlan;
 use serde::ser::SerializeStruct as _;
@@ -178,6 +178,12 @@ fn select_layered_media_plan<'a>(
         return None;
     }
     if video.color_profile() != Some(VideoColorProfile::Bt709Limited) {
+        return None;
+    }
+    if !matches!(video.source_timing(), VideoTiming::Constant(_)) {
+        return None;
+    }
+    if !native_source_treatment_is_supported(placement) {
         return None;
     }
 
@@ -367,13 +373,21 @@ fn validate_layered_placement(
     if placement.interval() != plan.output() {
         return Err(UnsupportedVisualComposition::IncompleteCoverage);
     }
-    if !placement.source().media_source().is_identity() {
-        return Err(UnsupportedVisualComposition::EditedSource);
+    if placement.source_timing().constant_frame_rate().is_none() {
+        return Err(UnsupportedVisualComposition::VariableSourceTiming);
+    }
+    if !native_source_treatment_is_supported(placement) {
+        return Err(UnsupportedVisualComposition::UnsupportedSourceTreatment);
     }
     if dimensions.width() != profile.width() || dimensions.height() != profile.height() {
         return Err(UnsupportedVisualComposition::DimensionMismatch);
     }
     Ok(())
+}
+
+fn native_source_treatment_is_supported(placement: &onmark_core::protocol::BrowserVideo) -> bool {
+    let source = placement.source().media_source();
+    source.plays().get() == 1 && source.hold_last().as_nanos() == 0
 }
 
 /// Reason a declared visual capability cannot enter the production pixel path.
@@ -389,8 +403,10 @@ pub enum UnsupportedVisualComposition {
     PrimaryVideoMismatch,
     /// The primary video does not occupy the complete published interval.
     IncompleteCoverage,
-    /// Native selection has not proved this edited source mapping.
-    EditedSource,
+    /// Native selection has not proved variable source-frame timestamps.
+    VariableSourceTiming,
+    /// Native selection has not proved repeated playback or a final-frame hold.
+    UnsupportedSourceTreatment,
     /// Source pixels cannot be placed without inventing CSS layout semantics.
     DimensionMismatch,
     /// Native decoding requires one complete supported source-color tuple.
@@ -415,7 +431,12 @@ impl fmt::Display for UnsupportedVisualComposition {
             Self::IncompleteCoverage => {
                 "separable overlay requires primary video to cover the complete output"
             }
-            Self::EditedSource => "separable overlay requires an unedited primary-video source",
+            Self::VariableSourceTiming => {
+                "separable overlay requires constant primary-video source timing"
+            }
+            Self::UnsupportedSourceTreatment => {
+                "separable overlay does not admit this source treatment"
+            }
             Self::DimensionMismatch => {
                 "separable overlay requires source and output dimensions to match"
             }

@@ -218,13 +218,15 @@ impl ResolvedFilmRenderer {
             .map_or_else(|| "-".to_owned(), |trim| trim.value().to_string());
         writeln!(
             self.output,
-            "      video id={} src={} delay={} trim={} speed={}/{}",
+            "      video id={} src={} delay={} trim={} speed={}/{} plays={} hold-last={}",
             id(video.element()),
             asset(video.src()),
             duration(video.delay()),
             trim,
             video.playback_rate().numerator(),
             video.playback_rate().denominator(),
+            video.plays().get(),
+            video.hold_last(),
         )
     }
 

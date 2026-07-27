@@ -76,10 +76,13 @@ impl StrategyFixture {
         let indices = (0..BENCHMARK_FRAME_COUNT).collect::<Vec<_>>();
         let media = directory.path().join("rate-conversion.mp4");
         crate::generate_video(&media, source_rate, crate::FixtureTiming::Constant).await;
-        let admitted = crate::admitted_source_video(&media, crate::FixtureTiming::Constant)
+        let admitted = crate::admitted_source_video(&media)
             .await
             .expect("the rate fixture must satisfy layered-media admission");
-        assert_eq!(admitted.frame_rate, source_rate);
+        assert_eq!(
+            admitted.timing,
+            onmark_core::model::VideoTiming::Constant(source_rate),
+        );
 
         Self {
             directory,

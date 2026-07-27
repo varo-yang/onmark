@@ -6,7 +6,7 @@
 use std::error::Error;
 use std::fmt;
 
-use onmark_core::model::{AssetMetadata, FrameRate, VideoMetadata, VideoTiming};
+use onmark_core::model::{AssetMetadata, VideoMetadata, VideoTiming};
 
 /// A visual stream proven admissible by the browser media profile.
 ///
@@ -16,7 +16,6 @@ use onmark_core::model::{AssetMetadata, FrameRate, VideoMetadata, VideoTiming};
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct AdmittedVideo<'a> {
     metadata: &'a VideoMetadata,
-    frame_rate: FrameRate,
 }
 
 impl<'a> AdmittedVideo<'a> {
@@ -25,7 +24,7 @@ impl<'a> AdmittedVideo<'a> {
     /// # Errors
     ///
     /// Returns [`UnsupportedVideo`] when the artifact has no visual stream,
-    /// uses a codec outside the locked profile, or has variable frame timing.
+    /// uses a codec outside the locked profile, or represents a still image.
     pub fn admit(metadata: &'a AssetMetadata) -> Result<Self, UnsupportedVideo> {
         let video = metadata
             .video_metadata()
@@ -33,16 +32,12 @@ impl<'a> AdmittedVideo<'a> {
         if video.codec() != "h264" {
             return Err(UnsupportedVideo::Codec(video.codec().into()));
         }
-        let frame_rate = match video.timing() {
-            VideoTiming::Constant(frame_rate) => frame_rate,
-            VideoTiming::Variable => return Err(UnsupportedVideo::VariableFrameRate),
+        match video.timing() {
+            VideoTiming::Constant(_) | VideoTiming::Variable(_) => {}
             VideoTiming::Still => return Err(UnsupportedVideo::StillFrame),
-        };
+        }
 
-        Ok(Self {
-            metadata: video,
-            frame_rate,
-        })
+        Ok(Self { metadata: video })
     }
 
     /// Returns the normalized facts admitted by this proof.
@@ -51,10 +46,10 @@ impl<'a> AdmittedVideo<'a> {
         self.metadata
     }
 
-    /// Returns the exact source frame rate admitted from normalized stream facts.
+    /// Returns the complete source-frame timing admitted from normalized facts.
     #[must_use]
-    pub const fn frame_rate(self) -> FrameRate {
-        self.frame_rate
+    pub const fn timing(self) -> &'a VideoTiming {
+        self.metadata.timing()
     }
 }
 
@@ -66,8 +61,6 @@ pub enum UnsupportedVideo {
     MissingVideoStream,
     /// The selected codec is outside the locked browser profile.
     Codec(Box<str>),
-    /// Source-frame presentation intervals are not constant.
-    VariableFrameRate,
     /// A single-frame stream has no source frame rate.
     StillFrame,
 }
@@ -77,9 +70,6 @@ impl fmt::Display for UnsupportedVideo {
         match self {
             Self::MissingVideoStream => formatter.write_str("asset has no video stream"),
             Self::Codec(codec) => write!(formatter, "video codec {codec:?} is not supported"),
-            Self::VariableFrameRate => {
-                formatter.write_str("variable-frame-rate video is not supported")
-            }
             Self::StillFrame => formatter.write_str("single-frame video is not supported"),
         }
     }
@@ -90,20 +80,20 @@ impl Error for UnsupportedVideo {}
 #[cfg(test)]
 mod tests {
     use onmark_core::model::{
-        AssetMetadata, AudioChannelLayout, AudioSampleRate, Duration, FrameRate, VideoDimensions,
-        VideoMetadata, VideoTiming,
+        AssetMetadata, AudioChannelLayout, AudioSampleRate, Duration, FrameRate, MediaTimebase,
+        VideoDimensions, VideoFrameMap, VideoMetadata, VideoTiming,
     };
 
     use super::{AdmittedVideo, UnsupportedVideo};
 
     #[test]
-    fn admits_only_cfr_h264_visual_streams() {
+    fn admits_timed_h264_visual_streams() {
         let rate = FrameRate::new(30_000, 1_001).expect("NTSC timing is valid");
         let supported = video("h264", VideoTiming::Constant(rate));
         let admitted =
             AdmittedVideo::admit(&supported).expect("CFR H.264 is an admitted video profile");
 
-        assert_eq!(admitted.frame_rate(), rate);
+        assert_eq!(admitted.timing(), &VideoTiming::Constant(rate));
         assert_eq!(admitted.metadata().pixel_format(), "yuv420p");
         assert_eq!(
             AdmittedVideo::admit(&AssetMetadata::audio(
@@ -118,8 +108,10 @@ mod tests {
             Err(UnsupportedVideo::Codec("vp9".into())),
         );
         assert_eq!(
-            AdmittedVideo::admit(&video("h264", VideoTiming::Variable)),
-            Err(UnsupportedVideo::VariableFrameRate),
+            AdmittedVideo::admit(&video("h264", variable_timing()))
+                .expect("complete VFR timing is admitted")
+                .timing(),
+            &variable_timing(),
         );
         assert_eq!(
             AdmittedVideo::admit(&video("h264", VideoTiming::Still)),
@@ -128,7 +120,10 @@ mod tests {
     }
 
     fn video(codec: &str, timing: VideoTiming) -> AssetMetadata {
-        let duration = Duration::from_nanos(1);
+        let duration = match &timing {
+            VideoTiming::Variable(frame_map) => frame_map.duration(),
+            VideoTiming::Constant(_) | VideoTiming::Still => Duration::from_nanos(1),
+        };
         let metadata = VideoMetadata::new(
             duration,
             VideoDimensions::new(1_920, 1_080).expect("fixture dimensions are positive"),
@@ -138,5 +133,13 @@ mod tests {
         )
         .expect("the fixture metadata is normalized");
         AssetMetadata::video(duration, metadata)
+    }
+
+    fn variable_timing() -> VideoTiming {
+        let timebase =
+            MediaTimebase::new(1, 1_000).expect("one millisecond ticks form a valid timebase");
+        let frames = VideoFrameMap::new(timebase, [0, 40, 100])
+            .expect("the fixture has two variable frame intervals");
+        VideoTiming::Variable(frames)
     }
 }

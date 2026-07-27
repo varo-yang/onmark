@@ -9,6 +9,7 @@ import {
   RuntimeAdapterError,
   runtimeFrameAt,
   type BrowserPlan,
+  type BrowserVideo,
   type FrameEffect,
   type PresentationBindings,
 } from "../src/index.js";
@@ -680,18 +681,23 @@ function video(
   nodeId: number,
   startFrame: number,
   endFrame: number,
-) {
+): BrowserVideo {
   return {
     node: { nodeId, authoredId: null },
     shotId: 2,
     assetId: `sha256:${digestByte.toString().padStart(2, "0").repeat(32)}`,
     interval: { start: startFrame, end: endFrame },
-    sourceFrameRate: { numerator: 30, denominator: 1 },
+    sourceTiming: {
+      kind: "constant",
+      frameRate: { numerator: 30, denominator: 1 },
+    },
     source: {
       startNanoseconds: "0",
       endNanoseconds: "333333333",
       naturalEndNanoseconds: "333333333",
       playbackRate: { numerator: 1, denominator: 1 },
+      plays: 1,
+      holdLastNanoseconds: "0",
     },
   };
 }

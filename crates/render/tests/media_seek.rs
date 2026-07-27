@@ -35,7 +35,7 @@ use onmark_core::protocol::{
 use onmark_media::Ffprobe;
 use onmark_render::{
     AdmittedVideo, BrowserCaptureMode, BrowserLaunchPolicy, BrowserLimits, BrowserSession,
-    BrowserSessionOptions, EncodedPng, RenderProfile, UnsupportedVideo,
+    BrowserSessionOptions, EncodedPng, RenderProfile,
 };
 use serde::Deserialize;
 use tempfile::{Builder as TempDirBuilder, TempDir};
@@ -68,18 +68,35 @@ async fn validates_admission_and_cfr_decode_paths() {
     run_case(
         "cfr-30",
         FrameRate::new(30, 1).expect("the CFR fixture rate is valid"),
+        FrameRate::new(30, 1).expect("the output rate is valid"),
         FixtureTiming::Constant,
     )
     .await;
     run_case(
         "cfr-ntsc",
         FrameRate::new(30_000, 1_001).expect("the NTSC fixture rate is valid"),
+        FrameRate::new(30_000, 1_001).expect("the output rate is valid"),
+        FixtureTiming::Constant,
+    )
+    .await;
+    run_case(
+        "cfr-24-to-30",
+        FrameRate::new(24, 1).expect("the source rate is valid"),
+        FrameRate::new(30, 1).expect("the output rate is valid"),
+        FixtureTiming::Constant,
+    )
+    .await;
+    run_case(
+        "cfr-30-to-24",
+        FrameRate::new(30, 1).expect("the source rate is valid"),
+        FrameRate::new(24, 1).expect("the output rate is valid"),
         FixtureTiming::Constant,
     )
     .await;
     run_case(
         "vfr-30",
         FrameRate::new(30, 1).expect("the VFR output rate is valid"),
+        FrameRate::new(30, 1).expect("the output rate is valid"),
         FixtureTiming::AlternatingVfr,
     )
     .await;
@@ -113,10 +130,10 @@ impl StrategyFixture {
         let indices = (0..BENCHMARK_FRAME_COUNT).collect::<Vec<_>>();
         let media = directory.path().join("benchmark.mp4");
         generate_video(&media, frame_rate, FixtureTiming::Constant).await;
-        let admitted = admitted_source_video(&media, FixtureTiming::Constant)
+        let admitted = admitted_source_video(&media)
             .await
             .expect("the layered fixture must satisfy media admission");
-        assert_eq!(admitted.frame_rate, frame_rate);
+        assert_eq!(admitted.timing, VideoTiming::Constant(frame_rate));
 
         let expected = expected_cfr_frames(frame_rate, &indices);
         let plan = browser_plan(frame_rate);
@@ -323,19 +340,33 @@ fn report_strategies(measurements: &StrategyMeasurements, evidence: &StrategyEvi
     );
 }
 
-async fn run_case(name: &str, frame_rate: FrameRate, timing: FixtureTiming) {
+async fn run_case(
+    name: &str,
+    source_frame_rate: FrameRate,
+    output_frame_rate: FrameRate,
+    timing: FixtureTiming,
+) {
     let directory = experiment_directory(name);
     let media = directory.path().join(format!("{name}.mp4"));
-    generate_video(&media, frame_rate, timing).await;
-    let Some(source_video) = admitted_source_video(&media, timing).await else {
+    generate_video(&media, source_frame_rate, timing).await;
+    let Some(source_video) = admitted_source_video(&media).await else {
         return;
     };
-    assert_eq!(source_video.frame_rate, frame_rate);
+    if timing == FixtureTiming::Constant {
+        assert_eq!(
+            source_video.timing,
+            VideoTiming::Constant(source_frame_rate),
+        );
+    }
 
     let source_frames = probe_source_frames(&media).await;
-    let expected = expected_frames(frame_rate, &source_frames, &SEEK_SEQUENCE);
+    let expected = expected_frames(output_frame_rate, &source_frames, &SEEK_SEQUENCE);
     let fixture = decoded_video_fixture(&media, &expected);
-    let plan = browser_plan(frame_rate);
+    let plan = browser_plan_with_timing(
+        output_frame_rate,
+        source_video.timing,
+        source_video.duration,
+    );
 
     let first_browser = capture_seek_sequence(&fixture, &plan).await;
     let second_browser = capture_seek_sequence(&fixture, &plan).await;
@@ -428,13 +459,21 @@ async fn launch_browser() -> BrowserSession {
         BrowserSessionOptions {
             launch_policy: browser_launch_policy(),
             graphics_backend: onmark_render::BrowserGraphicsBackend::SwiftShader,
-            capture_mode: BrowserCaptureMode::BeginFrame,
+            capture_mode: browser_capture_mode(),
             render_profile: render_profile(),
             limits: browser_limits(),
         },
     )
     .await
     .expect("headless shell must launch")
+}
+
+fn browser_capture_mode() -> BrowserCaptureMode {
+    if cfg!(target_os = "macos") {
+        BrowserCaptureMode::Screenshot
+    } else {
+        BrowserCaptureMode::BeginFrame
+    }
 }
 
 async fn launch_transparent_browser() -> BrowserSession {
@@ -571,7 +610,7 @@ async fn confirm(
     Ok(())
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 enum FixtureTiming {
     Constant,
     AlternatingVfr,
@@ -632,14 +671,12 @@ async fn generate_video(output: &Path, frame_rate: FrameRate, timing: FixtureTim
 }
 
 struct AdmittedFixtureVideo {
-    frame_rate: FrameRate,
+    timing: VideoTiming,
+    duration: MediaDuration,
     color_profile: VideoColorProfile,
 }
 
-async fn admitted_source_video(
-    media: &Path,
-    timing: FixtureTiming,
-) -> Option<AdmittedFixtureVideo> {
+async fn admitted_source_video(media: &Path) -> Option<AdmittedFixtureVideo> {
     let probe = Ffprobe::new(
         required_path("ONMARK_FFPROBE"),
         PROCESS_DEADLINE,
@@ -652,27 +689,17 @@ async fn admitted_source_video(
         .expect("the probe task must complete")
         .expect("ffprobe must normalize the experiment media");
 
-    match timing {
-        FixtureTiming::Constant => {
-            let admitted =
-                AdmittedVideo::admit(&metadata).expect("the CFR H.264 fixture must be admitted");
-            let color_profile = admitted
-                .metadata()
-                .color_profile()
-                .expect("the layered experiment requires complete source-color facts");
-            Some(AdmittedFixtureVideo {
-                frame_rate: admitted.frame_rate(),
-                color_profile,
-            })
-        }
-        FixtureTiming::AlternatingVfr => {
-            assert_eq!(
-                AdmittedVideo::admit(&metadata),
-                Err(UnsupportedVideo::VariableFrameRate),
-            );
-            None
-        }
-    }
+    let admitted =
+        AdmittedVideo::admit(&metadata).expect("the timed H.264 fixture must be admitted");
+    let color_profile = admitted
+        .metadata()
+        .color_profile()
+        .expect("the layered experiment requires complete source-color facts");
+    Some(AdmittedFixtureVideo {
+        timing: admitted.timing().clone(),
+        duration: admitted.metadata().duration(),
+        color_profile,
+    })
 }
 
 async fn probe_source_frames(media: &Path) -> Vec<f64> {
@@ -1070,21 +1097,36 @@ fn assert_transparent_presentation(frames: &[Vec<u8>]) {
 }
 
 fn browser_plan(frame_rate: FrameRate) -> BrowserPlan {
-    browser_plan_with_source_rate(frame_rate, frame_rate)
+    browser_plan_with_timing(
+        frame_rate,
+        VideoTiming::Constant(frame_rate),
+        MediaDuration::from_nanos(2_500_000_000),
+    )
 }
 
 fn browser_plan_with_source_rate(
     output_frame_rate: FrameRate,
     source_frame_rate: FrameRate,
 ) -> BrowserPlan {
-    let duration = MediaDuration::from_nanos(2_500_000_000);
+    browser_plan_with_timing(
+        output_frame_rate,
+        VideoTiming::Constant(source_frame_rate),
+        MediaDuration::from_nanos(2_500_000_000),
+    )
+}
+
+fn browser_plan_with_timing(
+    output_frame_rate: FrameRate,
+    source_timing: VideoTiming,
+    duration: MediaDuration,
+) -> BrowserPlan {
     let (width, height) = experiment_dimensions();
     let video = VideoMetadata::new(
         duration,
         VideoDimensions::new(width, height).expect("fixture dimensions are positive"),
         "h264",
         "yuv420p",
-        VideoTiming::Constant(source_frame_rate),
+        source_timing.clone(),
     )
     .expect("the fixture video metadata is normalized");
     let asset = AssetRef::parse("experiment.mp4").expect("the fixture asset is valid");
@@ -1114,10 +1156,10 @@ fn browser_plan_with_source_rate(
     .expect("the fixture metadata is complete");
     assert!(solved.diagnostics().is_empty());
 
-    let source_frame_rates = BTreeMap::from([(fixture_asset_id(), source_frame_rate)]);
+    let source_timings = BTreeMap::from([(fixture_asset_id(), source_timing)]);
     BrowserPlan::from_timeline(
         solved.timeline().expect("the fixture solves"),
-        &source_frame_rates,
+        &source_timings,
     )
     .expect("the fixture timeline fits the browser frame domain")
 }

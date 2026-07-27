@@ -20,7 +20,7 @@ pub enum InvalidFfprobe {
     TimeoutTooLong,
     /// A zero-byte limit cannot carry valid probe output.
     ZeroOutputLimit,
-    /// The requested capture exceeds the crate's fixed one-MiB ceiling.
+    /// The requested capture exceeds the crate's fixed sixteen-MiB ceiling.
     OutputLimitTooLarge,
 }
 
@@ -31,7 +31,7 @@ impl fmt::Display for InvalidFfprobe {
             Self::ZeroTimeout => "ffprobe timeout cannot be zero",
             Self::TimeoutTooLong => "ffprobe timeout cannot exceed ten minutes",
             Self::ZeroOutputLimit => "ffprobe output limit cannot be zero",
-            Self::OutputLimitTooLarge => "ffprobe output limit cannot exceed one MiB",
+            Self::OutputLimitTooLarge => "ffprobe output limit cannot exceed sixteen MiB",
         };
         formatter.write_str(message)
     }
@@ -185,18 +185,6 @@ impl ProbeError {
         Self::InvalidAudio(ProbeFailure::with_source(
             path,
             format!("ffprobe audio stream duration {duration:?} is invalid"),
-            ProbeErrorSource::Duration(source),
-        ))
-    }
-
-    pub(crate) fn invalid_video_duration(
-        path: &Path,
-        duration: &str,
-        source: InvalidDuration,
-    ) -> Self {
-        Self::InvalidVideo(ProbeFailure::with_source(
-            path,
-            format!("ffprobe video stream duration {duration:?} is invalid"),
             ProbeErrorSource::Duration(source),
         ))
     }

@@ -7,7 +7,7 @@ use std::error::Error;
 use std::fmt;
 
 use super::duration::NANOS_PER_SECOND;
-use super::{Duration, PlaybackRate};
+use super::{Duration, MediaSource};
 
 /// Zero-based position of one frame on a timeline.
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -193,28 +193,40 @@ impl Timebase {
         self.frame_number(duration, rounding).map(FrameCount::new)
     }
 
-    /// Converts source duration into output frames at an exact playback rate.
+    /// Converts one solved source treatment into its output frame count.
     ///
     /// # Errors
     ///
     /// Returns [`FrameConversionOverflow`] when the resulting count does not
     /// fit in the timeline's `u64` frame domain.
-    pub fn frames_for_playback(
+    pub fn frames_for_media(
         self,
-        source_duration: Duration,
-        playback_rate: PlaybackRate,
+        source: MediaSource,
         rounding: Rounding,
     ) -> Result<FrameCount, FrameConversionOverflow> {
-        let numerator = u128::from(source_duration.as_nanos())
-            * u128::from(self.frame_rate.numerator())
-            * u128::from(playback_rate.denominator());
+        let rate = source.playback_rate();
+        let playback_nanos = u128::from(source.interval().duration().as_nanos())
+            .checked_mul(u128::from(rate.denominator()))
+            .and_then(|value| value.checked_mul(u128::from(source.plays().get())));
+        let held_nanos =
+            u128::from(source.hold_last().as_nanos()).checked_mul(u128::from(rate.numerator()));
+        let numerator = playback_nanos
+            .zip(held_nanos)
+            .and_then(|(playback, hold)| playback.checked_add(hold))
+            .and_then(|value| value.checked_mul(u128::from(self.frame_rate.numerator())));
+        let Some(numerator) = numerator else {
+            return Err(FrameConversionOverflow {
+                duration: source.natural_duration(),
+                frame_rate: self.frame_rate,
+            });
+        };
         let denominator = u128::from(NANOS_PER_SECOND)
             * u128::from(self.frame_rate.denominator())
-            * u128::from(playback_rate.numerator());
+            * u128::from(rate.numerator());
 
         u64::try_from(rounded_quotient(numerator, denominator, rounding))
             .map_err(|_| FrameConversionOverflow {
-                duration: source_duration,
+                duration: source.natural_duration(),
                 frame_rate: self.frame_rate,
             })
             .map(FrameCount::new)
@@ -396,7 +408,7 @@ mod tests {
         FrameCount, FrameIndex, FrameInterval, FrameRate, InvalidFrameInterval, InvalidFrameRate,
         Rounding, Timebase, greatest_common_divisor,
     };
-    use crate::model::{Duration, PlaybackRate};
+    use crate::model::{Duration, MediaSource, MediaSourceInterval, PlayCount, PlaybackRate};
 
     proptest! {
         #[test]
@@ -525,24 +537,59 @@ mod tests {
     #[test]
     fn converts_playback_duration_without_floating_point() {
         let timebase = Timebase::new(FrameRate::new(30, 1).expect("30 fps is valid"));
-        let source = Duration::from_nanos(6_000_000_000);
+        let duration = Duration::from_nanos(6_000_000_000);
 
         assert_eq!(
-            timebase.frames_for_playback(
-                source,
-                PlaybackRate::parse("2x").expect("2x is valid"),
+            timebase.frames_for_media(
+                media_source(
+                    duration,
+                    PlaybackRate::parse("2x").expect("2x is valid"),
+                    PlayCount::ONE,
+                    Duration::ZERO,
+                ),
                 Rounding::Ceil,
             ),
             Ok(FrameCount::new(90)),
         );
         assert_eq!(
-            timebase.frames_for_playback(
-                source,
-                PlaybackRate::parse("0.5x").expect("0.5x is valid"),
+            timebase.frames_for_media(
+                media_source(
+                    duration,
+                    PlaybackRate::parse("0.5x").expect("0.5x is valid"),
+                    PlayCount::new(2).expect("two plays are valid"),
+                    Duration::from_nanos(1_000_000_000),
+                ),
                 Rounding::Ceil,
             ),
-            Ok(FrameCount::new(360)),
+            Ok(FrameCount::new(750)),
         );
+    }
+
+    fn media_source(
+        duration: Duration,
+        rate: PlaybackRate,
+        plays: PlayCount,
+        hold_last: Duration,
+    ) -> MediaSource {
+        let interval = MediaSourceInterval::new(Duration::ZERO, duration)
+            .expect("the fixture source duration is positive");
+        MediaSource::new(interval, rate, plays, hold_last, duration)
+            .expect("the fixture source interval is naturally bounded")
+    }
+
+    #[test]
+    fn reports_media_treatment_arithmetic_overflow() {
+        let duration = Duration::from_nanos(u64::MAX);
+        let source = media_source(
+            duration,
+            PlaybackRate::new(1, u32::MAX).expect("the fixture rate is positive"),
+            PlayCount::new(u32::MAX).expect("the fixture play count is positive"),
+            duration,
+        );
+        let timebase =
+            Timebase::new(FrameRate::new(u32::MAX, 1).expect("the maximum numerator is positive"));
+
+        assert!(timebase.frames_for_media(source, Rounding::Ceil).is_err());
     }
 
     #[test]

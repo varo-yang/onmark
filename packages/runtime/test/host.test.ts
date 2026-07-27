@@ -32,7 +32,7 @@ test("installs one immutable host that decodes before dispatch", async () => {
   );
   assert.deepEqual(
     await host.dispatch({
-      version: 2,
+      version: 3,
       requestId: 1,
       command: {
         type: "load",
@@ -50,10 +50,10 @@ test("installs one immutable host that decodes before dispatch", async () => {
         },
       },
     }),
-    { version: 2, requestId: 1, event: { type: "loaded" } },
+    { version: 3, requestId: 1, event: { type: "loaded" } },
   );
   await assert.rejects(
-    host.dispatch({ version: 3, requestId: 2, command: { type: "dispose" } }),
+    host.dispatch({ version: 2, requestId: 2, command: { type: "dispose" } }),
     ProtocolDecodeError,
   );
 });

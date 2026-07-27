@@ -1,0 +1,75 @@
+{
+  "cases": [
+    {
+      "id": "loop-twice",
+      "videos": [
+        { "src": "media/logo.mp4", "plays": 2 }
+      ]
+    },
+    {
+      "id": "loop-four",
+      "videos": [
+        { "src": "media/pattern.mp4", "plays": 4 }
+      ]
+    },
+    {
+      "id": "hold-end",
+      "videos": [
+        { "src": "media/product.mp4", "holdLast": "750ms" }
+      ]
+    },
+    {
+      "id": "trim-loop",
+      "videos": [
+        { "src": "media/demo.mp4", "trim": "2s..5s", "plays": 3 }
+      ]
+    },
+    {
+      "id": "speed-loop",
+      "videos": [
+        { "src": "media/pulse.mp4", "speed": "2x", "plays": 5 }
+      ]
+    },
+    {
+      "id": "trim-speed-hold",
+      "videos": [
+        {
+          "src": "media/detail.mp4",
+          "trim": "250ms..2.25s",
+          "speed": "0.5x",
+          "holdLast": "1s"
+        }
+      ]
+    },
+    {
+      "id": "loop-and-hold",
+      "videos": [
+        { "src": "media/spinner.mp4", "plays": 3, "holdLast": "500ms" }
+      ]
+    },
+    {
+      "id": "two-treatments",
+      "videos": [
+        { "src": "media/opening.mp4", "plays": 2 },
+        { "src": "media/closing.mp4", "holdLast": "2s" }
+      ]
+    },
+    {
+      "id": "untreated",
+      "videos": [
+        { "src": "media/plain.mp4" }
+      ]
+    },
+    {
+      "id": "change-loop-count",
+      "videos": [
+        {
+          "src": "media/take.mp4",
+          "trim": "1s..4s",
+          "speed": "2x",
+          "plays": 6
+        }
+      ]
+    }
+  ]
+}

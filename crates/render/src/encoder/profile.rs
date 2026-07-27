@@ -5,13 +5,15 @@
 
 use tokio::process::Command;
 
+use crate::AlphaMode;
+
 /// One admitted final video-delivery profile.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum EncodeProfile {
     /// Compact H.264 video with AAC audio in an MP4 container.
     H264Mp4,
-    /// Edit-friendly `ProRes` 422 HQ video with PCM audio in a MOV container.
-    ProResMov,
+    /// Edit-friendly `ProRes` 4444 video with alpha and PCM audio in MOV.
+    ProRes4444Mov,
 }
 
 impl EncodeProfile {
@@ -20,7 +22,7 @@ impl EncodeProfile {
     pub const fn extension(self) -> &'static str {
         match self {
             Self::H264Mp4 => "mp4",
-            Self::ProResMov => "mov",
+            Self::ProRes4444Mov => "mov",
         }
     }
 
@@ -29,7 +31,16 @@ impl EncodeProfile {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::H264Mp4 => "h264Mp4",
-            Self::ProResMov => "proResMov",
+            Self::ProRes4444Mov => "proRes4444Mov",
+        }
+    }
+
+    /// Returns the alpha contract required while capturing frames.
+    #[must_use]
+    pub const fn alpha_mode(self) -> AlphaMode {
+        match self {
+            Self::H264Mp4 => AlphaMode::Opaque,
+            Self::ProRes4444Mov => AlphaMode::Preserve,
         }
     }
 
@@ -44,11 +55,11 @@ impl EncodeProfile {
                     .arg(threads)
                     .args(["-pix_fmt", "yuv420p"]);
             }
-            Self::ProResMov => {
+            Self::ProRes4444Mov => {
                 command
-                    .args(["-an", "-c:v", "prores_ks", "-profile:v", "3", "-threads"])
+                    .args(["-an", "-c:v", "prores_ks", "-profile:v", "4", "-threads"])
                     .arg(threads)
-                    .args(["-pix_fmt", "yuv422p10le"]);
+                    .args(["-pix_fmt", "yuva444p10le", "-alpha_bits", "16"]);
             }
         }
         self.configure_container(command);
@@ -59,7 +70,7 @@ impl EncodeProfile {
             Self::H264Mp4 => {
                 command.args(["-c:a", "aac"]);
             }
-            Self::ProResMov => {
+            Self::ProRes4444Mov => {
                 command.args(["-c:a", "pcm_s24le"]);
             }
         }
@@ -82,7 +93,7 @@ impl EncodeProfile {
         ]);
         command.arg(match self {
             Self::H264Mp4 => "mp4",
-            Self::ProResMov => "mov",
+            Self::ProRes4444Mov => "mov",
         });
         command.arg("-n");
     }
@@ -106,13 +117,16 @@ mod tests {
     }
 
     #[test]
-    fn prores_profile_owns_the_editing_delivery_policy() {
-        let arguments = video_arguments(EncodeProfile::ProResMov);
+    fn prores_4444_profile_owns_the_alpha_delivery_policy() {
+        let profile = EncodeProfile::ProRes4444Mov;
+        let arguments = video_arguments(profile);
 
         assert!(has_pair(&arguments, "-c:v", "prores_ks"));
-        assert!(has_pair(&arguments, "-profile:v", "3"));
-        assert!(has_pair(&arguments, "-pix_fmt", "yuv422p10le"));
+        assert!(has_pair(&arguments, "-profile:v", "4"));
+        assert!(has_pair(&arguments, "-pix_fmt", "yuva444p10le"));
+        assert!(has_pair(&arguments, "-alpha_bits", "16"));
         assert!(has_pair(&arguments, "-f", "mov"));
+        assert_eq!(profile.alpha_mode(), crate::AlphaMode::Preserve);
     }
 
     fn video_arguments(profile: EncodeProfile) -> Vec<OsString> {

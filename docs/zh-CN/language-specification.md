@@ -139,9 +139,12 @@ video 可以用 `trim="起点..终点"` 选择素材内部的半开区间。两�
 `起点 < 终点 <= 素材时长`。
 
 video 可以用 `speed="整数[.小数]x"` 按精确的正倍率播放所选素材区间。小数最多六位，
-默认值为 `1x`。编译器把十进制约分为有理数，并以“所选素材时长除以倍率”推导局部时长。
-这两个属性都不表达 film 时间线坐标，并且只作用于选中的视觉流；作者显式声明的
-`music`、`sfx` 与 `vo` 仍是独立音频角色，不继承 video 的素材区间或播放倍率。
+默认值为 `1x`。`plays="正整数"` 表示所选区间总共完整播放多少次，默认一次。
+`hold-last` 使用正 duration，表示所有播放结束后继续保留所选区间的最后一帧。编译器按
+`所选时长 / speed * plays + hold-last` 推导局部时长。
+
+这些属性都不表达 film 时间线坐标，并且只作用于选中的视觉流；作者显式声明的
+`music`、`sfx` 与 `vo` 仍是独立音频角色，不继承 video 的素材处理。
 
 编译器使用整数运算把精确纳秒映射到有理数帧网格。每次换算都必须在调用点明确选择向下或向上取整；隐式 cast 或环境默认值不得决定帧边界。当前 authored 起点、delay、cue
 time 和 duration 都选择不早于精确值的第一个帧边界（`Ceil`），因此正的亚帧值不会被静默压成零帧。`Floor`
@@ -242,7 +245,8 @@ error，不能静默裁掉尾部。
 
 结构 bind 之后执行属性与引用 resolve。`film`、`cues`、`scene`
 不接受 ID 以外的属性；`cue` 必须有 `id` 与 `time`；`shot` 可有
-`duration`；`video` 可有 `src`、`delay`、`trim` 与 `speed`，`vo` 可有 `src`
+`duration`；`video` 可有 `src`、`delay`、`trim`、`speed`、`plays` 与
+`hold-last`，`vo` 可有 `src`
 与 `delay`；`title`、`cta` 可有 `cue` 或
 `delay`；`music` 必须有 `src`，可有 `gain`；`sfx` 必须有 `src`，可有 `delay`
 与 `gain`。同一个 overlay 不能同时写 `cue` 与

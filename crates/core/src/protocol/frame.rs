@@ -6,7 +6,7 @@ use std::fmt;
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize};
 
-use crate::model::{FrameIndex, FrameInterval, FrameRate, PlaybackRate};
+use crate::model::{FrameIndex, FrameInterval, FrameRate, MediaTimebase, PlaybackRate};
 
 /// Largest integer represented exactly by every JavaScript implementation.
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
@@ -67,6 +67,66 @@ impl<'de> Deserialize<'de> for WireFrameRate {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct WireFrameRateWire {
+    numerator: u32,
+    denominator: u32,
+}
+
+/// Exact media timestamp unit represented with browser-safe integers.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct WireMediaTimebase {
+    #[cfg_attr(feature = "schema", schemars(range(min = 1, max = u32::MAX)))]
+    numerator: u32,
+    #[cfg_attr(feature = "schema", schemars(range(min = 1, max = u32::MAX)))]
+    denominator: u32,
+}
+
+impl WireMediaTimebase {
+    /// Returns the canonical timestamp-unit numerator.
+    #[must_use]
+    pub const fn numerator(self) -> u32 {
+        self.numerator
+    }
+
+    /// Returns the canonical timestamp-unit denominator.
+    #[must_use]
+    pub const fn denominator(self) -> u32 {
+        self.denominator
+    }
+}
+
+impl From<MediaTimebase> for WireMediaTimebase {
+    fn from(timebase: MediaTimebase) -> Self {
+        Self {
+            numerator: timebase.numerator(),
+            denominator: timebase.denominator(),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for WireMediaTimebase {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = WireMediaTimebaseWire::deserialize(deserializer)?;
+        let timebase = MediaTimebase::new(wire.numerator, wire.denominator)
+            .map_err(|source| D::Error::custom(source.to_string()))?;
+        if timebase.numerator() != wire.numerator || timebase.denominator() != wire.denominator {
+            return Err(D::Error::custom("media timebase is not in canonical form"));
+        }
+
+        Ok(Self {
+            numerator: wire.numerator,
+            denominator: wire.denominator,
+        })
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WireMediaTimebaseWire {
     numerator: u32,
     denominator: u32,
 }

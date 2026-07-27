@@ -121,7 +121,10 @@ fn write_video(output: &mut impl Write, video: &TimelineVideo) -> io::Result<()>
     let source = video.source();
     writeln!(
         output,
-        "    {} {} asset {} source {}..{} of {} at {}/{}x",
+        concat!(
+            "    {} {} asset {} source {}..{} of {} at {}/{}x, ",
+            "plays {}, hold-last {}",
+        ),
         Element(video.element()),
         Timing(video.timing()),
         video.asset_id(),
@@ -130,6 +133,8 @@ fn write_video(output: &mut impl Write, video: &TimelineVideo) -> io::Result<()>
         source.natural_duration(),
         source.playback_rate().numerator(),
         source.playback_rate().denominator(),
+        source.plays().get(),
+        source.hold_last(),
     )
 }
 

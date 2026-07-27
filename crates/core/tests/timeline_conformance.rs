@@ -376,7 +376,10 @@ impl TimelineRenderer {
                 let source = video.source();
                 writeln!(
                     self.output,
-                    "      video {} {} asset={} source={}..{} natural-end={} speed={}/{}",
+                    concat!(
+                        "      video {} {} asset={} source={}..{} natural-end={} ",
+                        "speed={}/{} plays={} hold-last={}",
+                    ),
                     element(video.element()),
                     timing(video.timing()),
                     video.asset_id(),
@@ -385,6 +388,8 @@ impl TimelineRenderer {
                     source.natural_duration(),
                     source.playback_rate().numerator(),
                     source.playback_rate().denominator(),
+                    source.plays().get(),
+                    source.hold_last(),
                 )
             }
             TimelineContent::VoiceOver(voice_over) => writeln!(

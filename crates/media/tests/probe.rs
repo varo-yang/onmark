@@ -54,7 +54,7 @@ fn normalizes_exact_duration_from_ffprobe() {
     assert_eq!(video.duration(), MediaDuration::from_nanos(2_000_000_000));
     assert_eq!(
         video.timing(),
-        VideoTiming::Constant(FrameRate::new(30, 1).expect("30 fps is valid")),
+        &VideoTiming::Constant(FrameRate::new(30, 1).expect("30 fps is valid")),
     );
     assert!(!metadata.has_audio_stream());
 }
@@ -151,7 +151,7 @@ fn selects_default_media_streams_and_ignores_attached_pictures() {
     assert_eq!(video.duration(), MediaDuration::from_nanos(2_000_000_000));
     assert_eq!(
         video.timing(),
-        VideoTiming::Constant(FrameRate::new(30, 1).expect("30 fps is valid")),
+        &VideoTiming::Constant(FrameRate::new(30, 1).expect("30 fps is valid")),
     );
 
     let audio = metadata
@@ -217,19 +217,20 @@ fn distinguishes_variable_and_still_video_timing() {
         .probe(Path::new("still.mp4"))
         .expect("the fixture contains one video frame");
 
-    assert_eq!(
-        variable
-            .video_metadata()
-            .expect("the fixture has video")
-            .timing(),
-        VideoTiming::Variable,
-    );
+    let VideoTiming::Variable(frames) = variable
+        .video_metadata()
+        .expect("the fixture has video")
+        .timing()
+    else {
+        panic!("the fixture must retain its variable frame map");
+    };
+    assert_eq!(frames.boundaries(), &[0, 40, 100, 140]);
     assert_eq!(
         still
             .video_metadata()
             .expect("the fixture has video")
             .timing(),
-        VideoTiming::Still,
+        &VideoTiming::Still,
     );
 }
 
@@ -304,7 +305,7 @@ fn rejects_probe_limits_outside_the_safety_ceiling() {
             Duration::from_secs(1),
             Ffprobe::MAX_OUTPUT_BYTES + 1,
         )
-        .expect_err("the fixed capture ceiling is one MiB"),
+        .expect_err("the fixed capture ceiling is sixteen MiB"),
         InvalidFfprobe::OutputLimitTooLarge,
     );
 

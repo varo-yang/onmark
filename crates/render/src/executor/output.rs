@@ -124,7 +124,7 @@ mod tests {
         let directory = tempdir().expect("the fixture directory is available");
         let output = directory.path().join("video.mov");
 
-        let staging = StagedOutput::new(&output, crate::EncodeProfile::ProResMov)
+        let staging = StagedOutput::new(&output, crate::EncodeProfile::ProRes4444Mov)
             .expect("editing output can be staged");
 
         assert_eq!(

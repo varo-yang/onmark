@@ -5,6 +5,7 @@ use std::io;
 use std::path::Path;
 use std::process::Stdio;
 
+use onmark_core::model::MediaSource;
 use onmark_core::protocol::WireFrameRate;
 use sha2::{Digest as _, Sha256};
 use tokio::io::AsyncReadExt as _;
@@ -182,7 +183,7 @@ fn append_media_filter(
     media: &super::layered::LayeredMediaInput,
     output_rate: WireFrameRate,
 ) {
-    let selection = source_selection_filter(media.source_frame_rate, output_rate);
+    let selection = source_selection_filter(media.source_frame_rate, output_rate, media.source);
     write!(
         filter,
         concat!(
@@ -211,20 +212,31 @@ fn append_concat_filter(filter: &mut String, inputs: usize) -> &'static str {
     "[base]"
 }
 
-fn source_selection_filter(source: WireFrameRate, output: WireFrameRate) -> String {
+fn source_selection_filter(
+    source_rate: WireFrameRate,
+    output_rate: WireFrameRate,
+    source: MediaSource,
+) -> String {
+    let start = source.interval().start().as_nanos();
+    let speed = source.playback_rate();
     // The explicit midpoint formula is the Rust-owned frame-selection policy;
     // FFmpeg only realizes its projected PTS by dropping or repeating frames.
     format!(
         concat!(
-            "setpts='ceil(N*{output_numerator}*{source_denominator}/",
-            "({output_denominator}*{source_numerator})-0.5)*",
+            "setpts='ceil(((N*{source_denominator}*1000000000-",
+            "{start}*{source_numerator})*{output_numerator}*{speed_denominator})/",
+            "({source_numerator}*1000000000*{output_denominator}*",
+            "{speed_numerator})-0.5)*",
             "{output_denominator}/({output_numerator}*TB)',",
-            "fps=fps={output_numerator}/{output_denominator}:round=near",
+            "fps=fps={output_numerator}/{output_denominator}:round=near:start_time=0",
         ),
-        source_numerator = source.numerator(),
-        source_denominator = source.denominator(),
-        output_numerator = output.numerator(),
-        output_denominator = output.denominator(),
+        source_numerator = source_rate.numerator(),
+        source_denominator = source_rate.denominator(),
+        start = start,
+        output_numerator = output_rate.numerator(),
+        output_denominator = output_rate.denominator(),
+        speed_numerator = speed.numerator(),
+        speed_denominator = speed.denominator(),
     )
 }
 
@@ -293,7 +305,9 @@ fn job_error(job: &LayeredJob, kind: EncodeErrorKind, message: &'static str) -> 
 mod tests {
     use std::path::PathBuf;
 
-    use onmark_core::model::FrameRate;
+    use onmark_core::model::{
+        Duration, FrameRate, MediaSource, MediaSourceInterval, PlayCount, PlaybackRate,
+    };
 
     use super::{composition_filter, source_selection_filter};
     use crate::RenderProfile;
@@ -305,8 +319,27 @@ mod tests {
         let output = FrameRate::new(30, 1).expect("the output rate is valid");
 
         assert_eq!(
-            source_selection_filter(source.into(), output.into()),
-            "setpts='ceil(N*30*1/(1*24)-0.5)*1/(30*TB)',fps=fps=30/1:round=near",
+            source_selection_filter(source.into(), output.into(), identity_source()),
+            concat!(
+                "setpts='ceil(((N*1*1000000000-0*24)*30*1)/",
+                "(24*1000000000*1*1)-0.5)*1/(30*TB)',",
+                "fps=fps=30/1:round=near:start_time=0",
+            ),
+        );
+    }
+
+    #[test]
+    fn projects_trim_and_speed_into_the_same_midpoint_formula() {
+        let rate = FrameRate::new(30, 1).expect("the fixture rate is valid");
+        let source = media_source(250_000_000, 750_000_000, 2, 1);
+
+        assert_eq!(
+            source_selection_filter(rate.into(), rate.into(), source),
+            concat!(
+                "setpts='ceil(((N*1*1000000000-250000000*30)*30*1)/",
+                "(30*1000000000*1*2)-0.5)*1/(30*TB)',",
+                "fps=fps=30/1:round=near:start_time=0",
+            ),
         );
     }
 
@@ -353,7 +386,33 @@ mod tests {
         LayeredMediaInput {
             path: PathBuf::from(path),
             source_frame_rate: rate.into(),
+            source: identity_source(),
             frames,
         }
+    }
+
+    fn identity_source() -> MediaSource {
+        media_source(0, 1_000_000_000, 1, 1)
+    }
+
+    fn media_source(
+        start: u64,
+        end: u64,
+        speed_numerator: u32,
+        speed_denominator: u32,
+    ) -> MediaSource {
+        let interval =
+            MediaSourceInterval::new(Duration::from_nanos(start), Duration::from_nanos(end))
+                .expect("the fixture source interval is valid");
+        let speed = PlaybackRate::new(speed_numerator, speed_denominator)
+            .expect("the fixture playback rate is valid");
+        MediaSource::new(
+            interval,
+            speed,
+            PlayCount::ONE,
+            Duration::ZERO,
+            Duration::from_nanos(1_000_000_000),
+        )
+        .expect("the fixture source selection is valid")
     }
 }

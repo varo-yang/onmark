@@ -45,12 +45,17 @@ const plan: BrowserPlan = {
       assetId:
         "sha256:0101010101010101010101010101010101010101010101010101010101010101",
       interval: { start: 12, end: 18 },
-      sourceFrameRate: { numerator: 24, denominator: 1 },
+      sourceTiming: {
+        kind: "constant",
+        frameRate: { numerator: 24, denominator: 1 },
+      },
       source: {
         startNanoseconds: "0",
         endNanoseconds: "200000000",
         naturalEndNanoseconds: "200000000",
         playbackRate: { numerator: 1, denominator: 1 },
+        plays: 1,
+        holdLastNanoseconds: "0",
       },
     },
   ],
@@ -72,7 +77,7 @@ test("executes the browser protocol in order", async () => {
   const session = new RuntimeSession(adapter);
 
   assert.deepEqual(await session.dispatch(request(1, { type: "load", plan })), {
-    version: 2,
+    version: 3,
     requestId: 1,
     event: { type: "loaded" },
   });
@@ -81,7 +86,7 @@ test("executes the browser protocol in order", async () => {
       request(2, { type: "prepare", evaluationStart: 10 }),
     ),
     {
-      version: 2,
+      version: 3,
       requestId: 2,
       event: { type: "prepared", evaluationStart: 10 },
     },
@@ -89,7 +94,7 @@ test("executes the browser protocol in order", async () => {
   assert.deepEqual(
     await session.dispatch(request(3, { type: "seek", frame: 15 })),
     {
-      version: 2,
+      version: 3,
       requestId: 3,
       event: { type: "frameStaged", frame: 15 },
     },
@@ -97,13 +102,13 @@ test("executes the browser protocol in order", async () => {
   assert.deepEqual(
     await session.dispatch(request(4, { type: "confirm", frame: 15 })),
     {
-      version: 2,
+      version: 3,
       requestId: 4,
       event: { type: "frameReady", frame: 15 },
     },
   );
   assert.deepEqual(await session.dispatch(request(5, { type: "dispose" })), {
-    version: 2,
+    version: 3,
     requestId: 5,
     event: { type: "disposed" },
   });
@@ -452,16 +457,22 @@ test("rejects invalid browser video facts before adapter loading", async () => {
     denominator: 2,
   };
   const noncanonicalSourceRate = structuredClone(plan);
-  firstVideo(noncanonicalSourceRate).sourceFrameRate = {
-    numerator: 48,
-    denominator: 2,
+  firstVideo(noncanonicalSourceRate).sourceTiming = {
+    kind: "constant",
+    frameRate: { numerator: 48, denominator: 2 },
   };
+  const emptyPlayback = structuredClone(plan);
+  firstVideo(emptyPlayback).source.plays = 0;
+  const noncanonicalHold = structuredClone(plan);
+  firstVideo(noncanonicalHold).source.holdLastNanoseconds = "00";
   const overflowingSource = structuredClone(plan);
   firstVideo(overflowingSource).source = {
     startNanoseconds: "18446744073509551616",
     endNanoseconds: "18446744073709551616",
     naturalEndNanoseconds: "18446744073709551616",
     playbackRate: { numerator: 1, denominator: 1 },
+    plays: 1,
+    holdLastNanoseconds: "0",
   };
 
   for (const invalidPlan of [
@@ -471,6 +482,8 @@ test("rejects invalid browser video facts before adapter loading", async () => {
     mismatchedDuration,
     noncanonicalRate,
     noncanonicalSourceRate,
+    emptyPlayback,
+    noncanonicalHold,
     overflowingSource,
   ]) {
     const adapter = new RecordingAdapter();
@@ -540,7 +553,7 @@ function request(
   requestId: number,
   command: BrowserRequest["command"],
 ): BrowserRequest {
-  return { version: 2, requestId, command };
+  return { version: 3, requestId, command };
 }
 
 function firstVideo<Video>(plan: { readonly videos: readonly Video[] }): Video {
