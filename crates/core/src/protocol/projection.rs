@@ -231,6 +231,7 @@ fn browser_video(
         asset_id,
         WireInterval::try_from(video.timing().interval())?,
         rate.into(),
+        video.source(),
     ))
 }
 

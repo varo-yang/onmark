@@ -713,11 +713,11 @@ semantics.
 
 The authored native surface stays narrow: `onmark check <film.html>` validates
 through Render Unit planning without Chromium, `onmark inspect <film.html>`
-explains the solved and planned facts, and `onmark render <film.html>` executes
-them. `onmark doctor` validates the admitted local toolchain, while `onmark
-info` reports the installed product and host identity. Machine-readable command
-reports carry an explicit version and preserve stable diagnostic codes and byte
-spans.
+explains the solved and planned facts, including exact video source selection
+and rate, and `onmark render <film.html>` executes them. `onmark doctor`
+validates the admitted local toolchain, while `onmark info` reports the
+installed product and host identity. Machine-readable command reports carry an
+explicit version and preserve stable diagnostic codes and byte spans.
 The authored HTML contains both screenplay custom elements and presentation
 DOM/CSS. At most one inline module marked `type="module" data-om-motion`
 exports the declarative `motion` value; the generated infrastructure entry owns
@@ -1195,9 +1195,10 @@ only the publication window; neither rewrites presentation time. Every
 projected node has a dense
 compiler-owned unit-local identity and an optional authored identity; content
 names its structural parent. Authored IDs retain semantic identity across unit
-projections. Video placements additionally identify
-immutable bytes and the admitted CFR source rate needed to verify decoded frame
-selection, while overlays carry their closed semantic role and decoded text.
+projections. Video placements additionally identify immutable bytes, the
+admitted CFR source rate, the selected source interval, its frozen natural end,
+and the canonical playback ratio needed to verify decoded frame selection.
+Overlays carry their closed semantic role and decoded text.
 Materialized URLs remain render-owned facts, while DOM structure and CSS remain
 presentation-owned effects. This is the browser-facing projection of one Render
 Unit, not the Render Graph or partition plan itself. It may contain only facts
@@ -1206,7 +1207,7 @@ spans, and materialization policy remain outside it. VFR timestamp maps and
 further component facts are added only when the production adapter consumes
 them.
 
-Protocol V1 carries at most 10,000 scene containers, shot containers, video
+Protocol V2 carries at most 10,000 scene containers, shot containers, video
 placements, and overlays of each kind; one overlay inscription carries at most
 65,536 Unicode characters.
 Native projection and Rust wire decoding additionally cap their combined UTF-8
@@ -1620,6 +1621,17 @@ outputs, and baseline required by the language admission rule. Rust then owns
 the resulting trim, rate, gain, fade, dependency, or transition interval;
 TypeScript may only realize the already-solved visual effect. No JavaScript
 timeline, CLI flag, or `FFmpeg` filter string may become an alternate scheduler.
+
+Gate eight's first admitted video treatment is exact source-local selection.
+Two live-model arms both completed all twenty editing cases without introducing
+film coordinates; the admitted `trim="start..end"` arm used fewer authored
+bytes than separate edge attributes. Resolve parses `trim` and `speed` once,
+solve derives output frames with integer rational arithmetic, Timeline IR owns
+the source mapping, and Browser Plan transports that fact to deterministic
+frame selection. An edited placement remains browser-composited until a native
+path proves equivalent source selection and pixels. The runtime repeats only
+the wire-level duration invariant when admitting an untrusted plan; it does not
+derive or alter authored timing.
 
 Gate eight does not add a Player, Studio, preview server, source-mutation API,
 component marketplace, remote authoring command, coordinator, database, queue,

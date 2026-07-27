@@ -1,0 +1,14 @@
+{
+  "trim-edges": {
+    "passed": 20,
+    "total": 20,
+    "authoredBytes": 3482
+  },
+  "trim-range": {
+    "passed": 20,
+    "total": 20,
+    "authoredBytes": 3288
+  },
+  "admitted": "trim-range",
+  "reason": "Equal generation reliability with one source-interval value, fewer authored bytes, and no film-level coordinates."
+}

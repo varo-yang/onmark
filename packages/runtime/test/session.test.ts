@@ -19,7 +19,7 @@ import {
 } from "../src/index.js";
 
 const plan: BrowserPlan = {
-  timelineVersion: 1,
+  timelineVersion: 2,
   frameRate: { numerator: 30, denominator: 1 },
   timeline: { start: 0, end: 30 },
   evaluation: { start: 10, end: 20 },
@@ -46,6 +46,12 @@ const plan: BrowserPlan = {
         "sha256:0101010101010101010101010101010101010101010101010101010101010101",
       interval: { start: 12, end: 18 },
       sourceFrameRate: { numerator: 24, denominator: 1 },
+      source: {
+        startNanoseconds: "0",
+        endNanoseconds: "200000000",
+        naturalEndNanoseconds: "200000000",
+        playbackRate: { numerator: 1, denominator: 1 },
+      },
     },
   ],
   overlays: [
@@ -66,7 +72,7 @@ test("executes the browser protocol in order", async () => {
   const session = new RuntimeSession(adapter);
 
   assert.deepEqual(await session.dispatch(request(1, { type: "load", plan })), {
-    version: 1,
+    version: 2,
     requestId: 1,
     event: { type: "loaded" },
   });
@@ -75,7 +81,7 @@ test("executes the browser protocol in order", async () => {
       request(2, { type: "prepare", evaluationStart: 10 }),
     ),
     {
-      version: 1,
+      version: 2,
       requestId: 2,
       event: { type: "prepared", evaluationStart: 10 },
     },
@@ -83,7 +89,7 @@ test("executes the browser protocol in order", async () => {
   assert.deepEqual(
     await session.dispatch(request(3, { type: "seek", frame: 15 })),
     {
-      version: 1,
+      version: 2,
       requestId: 3,
       event: { type: "frameStaged", frame: 15 },
     },
@@ -91,13 +97,13 @@ test("executes the browser protocol in order", async () => {
   assert.deepEqual(
     await session.dispatch(request(4, { type: "confirm", frame: 15 })),
     {
-      version: 1,
+      version: 2,
       requestId: 4,
       event: { type: "frameReady", frame: 15 },
     },
   );
   assert.deepEqual(await session.dispatch(request(5, { type: "dispose" })), {
-    version: 1,
+    version: 2,
     requestId: 5,
     event: { type: "disposed" },
   });
@@ -361,6 +367,8 @@ test("retains complete structural timing across an evaluation window", async () 
 });
 
 test("rejects interval relationships outside the browser plan contract", async () => {
+  const noncanonicalFrameRate = structuredClone(plan);
+  noncanonicalFrameRate.frameRate = { numerator: 60, denominator: 2 };
   const escapedEvaluation = structuredClone(plan);
   escapedEvaluation.timeline = { start: 11, end: 20 };
   const reversedEvaluation = structuredClone(plan);
@@ -377,6 +385,7 @@ test("rejects interval relationships outside the browser plan contract", async (
   escapedVideo.shots[0]!.interval = { start: 13, end: 17 };
 
   for (const invalidPlan of [
+    noncanonicalFrameRate,
     escapedEvaluation,
     reversedEvaluation,
     reversedOutput,
@@ -433,8 +442,37 @@ test("rejects invalid browser video facts before adapter loading", async () => {
   firstVideo(emptyVideo).interval = { start: 12, end: 12 };
   const escapedVideo = structuredClone(plan);
   firstVideo(escapedVideo).interval = { start: 9, end: 18 };
+  const escapedSource = structuredClone(plan);
+  firstVideo(escapedSource).source.endNanoseconds = "200000001";
+  const mismatchedDuration = structuredClone(plan);
+  firstVideo(mismatchedDuration).source.endNanoseconds = "100000000";
+  const noncanonicalRate = structuredClone(plan);
+  firstVideo(noncanonicalRate).source.playbackRate = {
+    numerator: 2,
+    denominator: 2,
+  };
+  const noncanonicalSourceRate = structuredClone(plan);
+  firstVideo(noncanonicalSourceRate).sourceFrameRate = {
+    numerator: 48,
+    denominator: 2,
+  };
+  const overflowingSource = structuredClone(plan);
+  firstVideo(overflowingSource).source = {
+    startNanoseconds: "18446744073509551616",
+    endNanoseconds: "18446744073709551616",
+    naturalEndNanoseconds: "18446744073709551616",
+    playbackRate: { numerator: 1, denominator: 1 },
+  };
 
-  for (const invalidPlan of [emptyVideo, escapedVideo]) {
+  for (const invalidPlan of [
+    emptyVideo,
+    escapedVideo,
+    escapedSource,
+    mismatchedDuration,
+    noncanonicalRate,
+    noncanonicalSourceRate,
+    overflowingSource,
+  ]) {
     const adapter = new RecordingAdapter();
     const session = new RuntimeSession(adapter);
     const rejected = await session.dispatch(
@@ -502,7 +540,7 @@ function request(
   requestId: number,
   command: BrowserRequest["command"],
 ): BrowserRequest {
-  return { version: 1, requestId, command };
+  return { version: 2, requestId, command };
 }
 
 function firstVideo<Video>(plan: { readonly videos: readonly Video[] }): Video {

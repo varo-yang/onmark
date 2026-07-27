@@ -367,6 +367,9 @@ fn validate_layered_placement(
     if placement.interval() != plan.output() {
         return Err(UnsupportedVisualComposition::IncompleteCoverage);
     }
+    if !placement.source().media_source().is_identity() {
+        return Err(UnsupportedVisualComposition::EditedSource);
+    }
     if dimensions.width() != profile.width() || dimensions.height() != profile.height() {
         return Err(UnsupportedVisualComposition::DimensionMismatch);
     }
@@ -386,6 +389,8 @@ pub enum UnsupportedVisualComposition {
     PrimaryVideoMismatch,
     /// The primary video does not occupy the complete published interval.
     IncompleteCoverage,
+    /// Native selection has not proved this edited source mapping.
+    EditedSource,
     /// Source pixels cannot be placed without inventing CSS layout semantics.
     DimensionMismatch,
     /// Native decoding requires one complete supported source-color tuple.
@@ -410,6 +415,7 @@ impl fmt::Display for UnsupportedVisualComposition {
             Self::IncompleteCoverage => {
                 "separable overlay requires primary video to cover the complete output"
             }
+            Self::EditedSource => "separable overlay requires an unedited primary-video source",
             Self::DimensionMismatch => {
                 "separable overlay requires source and output dimensions to match"
             }

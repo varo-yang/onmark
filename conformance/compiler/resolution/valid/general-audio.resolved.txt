@@ -3,7 +3,7 @@ film id=mix
   om-music id=bed src=bed.wav delay=- gain=1/4
   scene id=-
     shot id=opening duration=-
-      video id=- src=opening.mp4 delay=-
+      video id=- src=opening.mp4 delay=- trim=- speed=1/1
       om-sfx id=hit src=hit.wav delay=0.25s gain=1/2
 index
   bed -> om-music @0:35..38

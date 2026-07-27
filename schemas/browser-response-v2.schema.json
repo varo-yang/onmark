@@ -173,7 +173,7 @@
       ]
     },
     "ProtocolVersion": {
-      "const": 1,
+      "const": 2,
       "description": "Version of the native-to-browser message contract.",
       "format": "uint16",
       "maximum": 65535,
@@ -195,7 +195,7 @@
       "type": "integer"
     }
   },
-  "$id": "https://onmark.dev/schemas/browser-response-v1.schema.json",
+  "$id": "https://onmark.dev/schemas/browser-response-v2.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "One versioned event returned by the browser runtime.",

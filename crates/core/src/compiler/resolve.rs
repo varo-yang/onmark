@@ -8,7 +8,8 @@ use std::collections::BTreeMap;
 use crate::diagnostics::{Diagnostic, DiagnosticCode, Diagnostics};
 use crate::model::{
     AssetRef, AudioGain, CueId, Duration, ElementKind, EventRef, GeneralAudioKind, InvalidAssetRef,
-    InvalidAudioGain, InvalidDuration, InvalidNodeId, NodeId, SourceSpan,
+    InvalidAudioGain, InvalidDuration, InvalidMediaTrim, InvalidNodeId, InvalidPlaybackRate,
+    MediaTrim, NodeId, PlaybackRate, SourceSpan,
 };
 use crate::syntax::{Attribute, TextNode};
 
@@ -223,8 +224,19 @@ impl Resolver {
     }
 
     fn resolve_video(&mut self, video: LinkedVideo) -> ResolvedVideo {
-        let media = self.resolve_media_attributes(video.into_element());
-        ResolvedVideo::new(media.element, media.src, media.delay)
+        let input = ElementInput::new(video.into_element());
+        let (element, mut attributes) = input.into_resolved_parts();
+        let src = self.take_asset(&mut attributes, "src");
+        let delay = self.take_duration(&mut attributes, "delay");
+        let trim = attributes
+            .take("trim")
+            .and_then(|attribute| self.resolve_trim(&attribute));
+        let speed = attributes
+            .take("speed")
+            .and_then(|attribute| self.resolve_playback_rate(&attribute));
+        attributes.reject_unknown(element.kind(), &mut self.diagnostics);
+
+        ResolvedVideo::new(element, src, delay, trim, speed)
     }
 
     fn resolve_voice_over(&mut self, voice_over: LinkedVoiceOver) -> ResolvedVoiceOver {
@@ -378,6 +390,27 @@ impl Resolver {
     ) -> Option<Authored<Duration>> {
         let attribute = attributes.take(name)?;
         self.resolve_duration_with(&attribute, Duration::parse_positive)
+    }
+
+    fn resolve_trim(&mut self, attribute: &Attribute) -> Option<Authored<MediaTrim>> {
+        match MediaTrim::parse(attribute.value()) {
+            Ok(trim) => Some(Authored::new(trim, attribute.value_span())),
+            Err(reason) => {
+                self.diagnostics.push(invalid_trim(attribute, reason));
+                None
+            }
+        }
+    }
+
+    fn resolve_playback_rate(&mut self, attribute: &Attribute) -> Option<Authored<PlaybackRate>> {
+        match PlaybackRate::parse(attribute.value()) {
+            Ok(rate) => Some(Authored::new(rate, attribute.value_span())),
+            Err(reason) => {
+                self.diagnostics
+                    .push(invalid_playback_rate(attribute, reason));
+                None
+            }
+        }
     }
 
     fn resolve_asset(&mut self, attribute: &Attribute) -> Option<Authored<AssetRef>> {
@@ -540,6 +573,24 @@ fn invalid_audio_gain(attribute: &Attribute, reason: InvalidAudioGain) -> Diagno
         attribute.value_span(),
         format!("audio gain \"{}\" is invalid: {reason}", attribute.value()),
         "use an exact linear gain from 0% through 100%",
+    )
+}
+
+fn invalid_trim(attribute: &Attribute, reason: InvalidMediaTrim) -> Diagnostic {
+    author_diagnostic(
+        DiagnosticCode::InvalidAttributeValue,
+        attribute.value_span(),
+        format!("video trim \"{}\" is invalid: {reason}", attribute.value()),
+        "use a source interval such as 3s..8s, 3s.., or ..8s",
+    )
+}
+
+fn invalid_playback_rate(attribute: &Attribute, reason: InvalidPlaybackRate) -> Diagnostic {
+    author_diagnostic(
+        DiagnosticCode::InvalidAttributeValue,
+        attribute.value_span(),
+        format!("video speed \"{}\" is invalid: {reason}", attribute.value()),
+        "use an exact positive rate such as 1x, 0.5x, or 2x",
     )
 }
 

@@ -33,6 +33,13 @@ fn media_duration_and_longest_content_match_canonical_timeline() {
 }
 
 #[test]
+fn source_local_video_edits_determine_shot_duration() {
+    let assets = frozen_assets([("clip.mp4", "12s"), ("detail.mp4", "3s")]);
+
+    assert_valid_fixture("video-editing", assets);
+}
+
+#[test]
 fn authored_general_audio_matches_canonical_timeline() {
     let assets = frozen_assets([
         ("bed.wav", "5s"),
@@ -75,6 +82,23 @@ fn a_sound_effect_cannot_escape_its_shot() {
     );
     let assets = frozen_assets([("hit.wav", "500ms")]);
     let report = solve_fixture(&source_path, &assets).expect("the sound effect was probed");
+
+    assert!(report.timeline().is_none());
+    assert_or_update(&expected_path, &render_diagnostics(report.diagnostics()));
+}
+
+#[test]
+fn a_video_source_interval_must_fit_its_frozen_asset() {
+    let source_path = fixture(
+        "compiler/timeline",
+        "invalid/video-source-outside-asset.html",
+    );
+    let expected_path = fixture(
+        "compiler/timeline",
+        "invalid/video-source-outside-asset.diagnostics.txt",
+    );
+    let assets = frozen_assets([("clip.mp4", "2s")]);
+    let report = solve_fixture(&source_path, &assets).expect("the video was probed");
 
     assert!(report.timeline().is_none());
     assert_or_update(&expected_path, &render_diagnostics(report.diagnostics()));
@@ -348,13 +372,21 @@ impl TimelineRenderer {
 
     fn render_content(&mut self, content: &TimelineContent) -> std::fmt::Result {
         match content {
-            TimelineContent::Video(video) => writeln!(
-                self.output,
-                "      video {} {} asset={}",
-                element(video.element()),
-                timing(video.timing()),
-                video.asset_id(),
-            ),
+            TimelineContent::Video(video) => {
+                let source = video.source();
+                writeln!(
+                    self.output,
+                    "      video {} {} asset={} source={}..{} natural-end={} speed={}/{}",
+                    element(video.element()),
+                    timing(video.timing()),
+                    video.asset_id(),
+                    source.interval().start(),
+                    source.interval().end(),
+                    source.natural_duration(),
+                    source.playback_rate().numerator(),
+                    source.playback_rate().denominator(),
+                )
+            }
             TimelineContent::VoiceOver(voice_over) => writeln!(
                 self.output,
                 "      vo {} {} asset={} text={:?}",
@@ -423,6 +455,7 @@ fn reason(reason: &TimingReason) -> String {
         },
         TimingReason::ExplicitDuration(_) => "explicit-duration".to_owned(),
         TimingReason::AssetDuration => "asset-duration".to_owned(),
+        TimingReason::SourcePlayback => "source-playback".to_owned(),
         TimingReason::LongestContent(_) => "longest-content".to_owned(),
         TimingReason::Children => "children".to_owned(),
         TimingReason::ShotEnd => "shot-end".to_owned(),

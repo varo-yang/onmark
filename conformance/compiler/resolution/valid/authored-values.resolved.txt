@@ -4,12 +4,12 @@ film id=-
     cue id=anchor id@0:38..44 time=0s time@0:52..54
   scene id=-
     shot id=- duration=3.25s
-      video id=- src=clip.mp4 delay=0.5s
+      video id=- src=clip.mp4 delay=0.5s trim=0.25s..2.25s speed=1/2
       vo id=- src=voice.mp3 delay=1.5s
-        text "Narration" @0:216..225
+        text "Narration" @0:249..258
       om-title id=- start=delay:0.25s
-        text "Later" @0:264..269
+        text "Later" @0:297..302
       om-cta id=- start=cue:anchor
-        text "Aligned" @0:308..315
+        text "Aligned" @0:341..348
 index
   anchor -> om-cue @0:38..44

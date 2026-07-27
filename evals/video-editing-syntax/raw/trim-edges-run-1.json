@@ -1,0 +1,44 @@
+{
+  "results": [
+    {
+      "caseId": "trim-head",
+      "screenplay": "<om-film>\n  <om-scene>\n    <om-shot>\n      <video src=\"media/interview.mp4\" trim-in=\"12s\"></video>\n    </om-shot>\n  </om-scene>\n</om-film>"
+    },
+    {
+      "caseId": "trim-tail",
+      "screenplay": "<om-film>\n  <om-scene>\n    <om-shot>\n      <video src=\"media/reveal.mp4\" trim-out=\"7.5s\"></video>\n    </om-shot>\n  </om-scene>\n</om-film>"
+    },
+    {
+      "caseId": "extract-subclip",
+      "screenplay": "<om-film>\n  <om-scene>\n    <om-shot>\n      <video src=\"media/demo.mp4\" trim-in=\"4s\" trim-out=\"10s\"></video>\n    </om-shot>\n  </om-scene>\n</om-film>"
+    },
+    {
+      "caseId": "double-speed",
+      "screenplay": "<om-film>\n  <om-scene>\n    <om-shot>\n      <video src=\"media/walkthrough.mp4\" speed=\"2x\"></video>\n    </om-shot>\n  </om-scene>\n</om-film>"
+    },
+    {
+      "caseId": "slow-subclip",
+      "screenplay": "<om-film>\n  <om-scene>\n    <om-shot>\n      <video src=\"media/detail.mp4\" trim-in=\"250ms\" trim-out=\"2.25s\" speed=\"0.5x\"></video>\n    </om-shot>\n  </om-scene>\n</om-film>"
+    },
+    {
+      "caseId": "two-local-edits",
+      "screenplay": "<om-film>\n  <om-scene>\n    <om-shot>\n      <video src=\"media/opening.mp4\" trim-in=\"1s\" trim-out=\"4s\"></video>\n    </om-shot>\n    <om-shot>\n      <video src=\"media/product.mp4\" trim-in=\"8s\" trim-out=\"12s\" speed=\"2x\"></video>\n    </om-shot>\n  </om-scene>\n</om-film>"
+    },
+    {
+      "caseId": "change-only-in-point",
+      "screenplay": "<om-film>\n  <om-scene>\n    <om-shot>\n      <video src=\"media/take.mp4\" trim-in=\"3.5s\" trim-out=\"9s\"></video>\n    </om-shot>\n  </om-scene>\n</om-film>"
+    },
+    {
+      "caseId": "change-only-out-point",
+      "screenplay": "<om-film>\n  <om-scene>\n    <om-shot>\n      <video src=\"media/cutaway.mp4\" trim-in=\"2s\" trim-out=\"6.75s\"></video>\n    </om-shot>\n  </om-scene>\n</om-film>"
+    },
+    {
+      "caseId": "untreated-video",
+      "screenplay": "<om-film>\n  <om-scene>\n    <om-shot>\n      <video src=\"media/plain.mp4\"></video>\n    </om-shot>\n  </om-scene>\n</om-film>"
+    },
+    {
+      "caseId": "three-sequential-clips",
+      "screenplay": "<om-film>\n  <om-scene>\n    <om-shot>\n      <video src=\"media/a.mp4\" trim-out=\"2s\"></video>\n    </om-shot>\n    <om-shot>\n      <video src=\"media/b.mp4\" trim-in=\"5s\" trim-out=\"8s\" speed=\"0.5x\"></video>\n    </om-shot>\n    <om-shot>\n      <video src=\"media/c.mp4\" trim-in=\"1s\" speed=\"3x\"></video>\n    </om-shot>\n  </om-scene>\n</om-film>"
+    }
+  ]
+}

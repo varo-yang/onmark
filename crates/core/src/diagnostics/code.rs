@@ -39,6 +39,8 @@ pub enum DiagnosticCode {
     FrameConversionOverflow,
     /// A film has no shot with a positive solved duration.
     EmptyFilm,
+    /// A selected video source interval lies outside its frozen artifact.
+    SourceIntervalOutsideAsset,
     /// Renderable media omits its frozen artifact reference.
     MissingMediaSource,
     /// A media element references an artifact without its required track.
@@ -98,6 +100,7 @@ impl DiagnosticCode {
             Self::TimingOutsideShot => "ONM-TIME-004",
             Self::FrameConversionOverflow => "ONM-TIME-005",
             Self::EmptyFilm => "ONM-TIME-006",
+            Self::SourceIntervalOutsideAsset => "ONM-TIME-007",
             Self::MissingMediaSource => "ONM-ASSET-001",
             Self::IncompatibleMediaSource => "ONM-ASSET-002",
             Self::UnknownCueReference => "ONM-REF-001",
@@ -138,6 +141,7 @@ impl DiagnosticCode {
             | Self::TimingOutsideShot
             | Self::FrameConversionOverflow
             | Self::EmptyFilm
+            | Self::SourceIntervalOutsideAsset
             | Self::MissingMediaSource
             | Self::IncompatibleMediaSource
             | Self::UnknownCueReference
@@ -208,6 +212,7 @@ mod tests {
             (DiagnosticCode::TimingOutsideShot, "ONM-TIME-004"),
             (DiagnosticCode::FrameConversionOverflow, "ONM-TIME-005"),
             (DiagnosticCode::EmptyFilm, "ONM-TIME-006"),
+            (DiagnosticCode::SourceIntervalOutsideAsset, "ONM-TIME-007"),
             (DiagnosticCode::MissingMediaSource, "ONM-ASSET-001"),
             (DiagnosticCode::IncompatibleMediaSource, "ONM-ASSET-002"),
             (DiagnosticCode::UnknownCueReference, "ONM-REF-001"),

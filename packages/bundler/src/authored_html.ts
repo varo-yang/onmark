@@ -502,7 +502,12 @@ function isCompilerOnlyAttribute(
     case "om-shot":
       return attributeName === "duration";
     case "video":
-      return attributeName === "delay" || attributeName === "src";
+      return (
+        attributeName === "delay" ||
+        attributeName === "speed" ||
+        attributeName === "src" ||
+        attributeName === "trim"
+      );
     default:
       return false;
   }

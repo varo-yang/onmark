@@ -6,8 +6,8 @@
 use std::error::Error;
 use std::fmt;
 
-use super::Duration;
 use super::duration::NANOS_PER_SECOND;
+use super::{Duration, PlaybackRate};
 
 /// Zero-based position of one frame on a timeline.
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -193,6 +193,33 @@ impl Timebase {
         self.frame_number(duration, rounding).map(FrameCount::new)
     }
 
+    /// Converts source duration into output frames at an exact playback rate.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FrameConversionOverflow`] when the resulting count does not
+    /// fit in the timeline's `u64` frame domain.
+    pub fn frames_for_playback(
+        self,
+        source_duration: Duration,
+        playback_rate: PlaybackRate,
+        rounding: Rounding,
+    ) -> Result<FrameCount, FrameConversionOverflow> {
+        let numerator = u128::from(source_duration.as_nanos())
+            * u128::from(self.frame_rate.numerator())
+            * u128::from(playback_rate.denominator());
+        let denominator = u128::from(NANOS_PER_SECOND)
+            * u128::from(self.frame_rate.denominator())
+            * u128::from(playback_rate.numerator());
+
+        u64::try_from(rounded_quotient(numerator, denominator, rounding))
+            .map_err(|_| FrameConversionOverflow {
+                duration: source_duration,
+                frame_rate: self.frame_rate,
+            })
+            .map(FrameCount::new)
+    }
+
     fn frame_number(
         self,
         duration: Duration,
@@ -200,17 +227,21 @@ impl Timebase {
     ) -> Result<u64, FrameConversionOverflow> {
         let numerator = u128::from(duration.as_nanos()) * u128::from(self.frame_rate.numerator());
         let denominator = u128::from(NANOS_PER_SECOND) * u128::from(self.frame_rate.denominator());
-        let quotient = numerator / denominator;
-        let remainder = numerator % denominator;
-        let frames = match rounding {
-            Rounding::Floor => quotient,
-            Rounding::Ceil => quotient + u128::from(remainder != 0),
-        };
+        let frames = rounded_quotient(numerator, denominator, rounding);
 
         u64::try_from(frames).map_err(|_| FrameConversionOverflow {
             duration,
             frame_rate: self.frame_rate,
         })
+    }
+}
+
+fn rounded_quotient(numerator: u128, denominator: u128, rounding: Rounding) -> u128 {
+    let quotient = numerator / denominator;
+    let remainder = numerator % denominator;
+    match rounding {
+        Rounding::Floor => quotient,
+        Rounding::Ceil => quotient + u128::from(remainder != 0),
     }
 }
 
@@ -365,7 +396,7 @@ mod tests {
         FrameCount, FrameIndex, FrameInterval, FrameRate, InvalidFrameInterval, InvalidFrameRate,
         Rounding, Timebase, greatest_common_divisor,
     };
-    use crate::model::Duration;
+    use crate::model::{Duration, PlaybackRate};
 
     proptest! {
         #[test]
@@ -488,6 +519,29 @@ mod tests {
         assert_eq!(
             timebase.frames_for(second, Rounding::Ceil),
             Ok(FrameCount::new(30)),
+        );
+    }
+
+    #[test]
+    fn converts_playback_duration_without_floating_point() {
+        let timebase = Timebase::new(FrameRate::new(30, 1).expect("30 fps is valid"));
+        let source = Duration::from_nanos(6_000_000_000);
+
+        assert_eq!(
+            timebase.frames_for_playback(
+                source,
+                PlaybackRate::parse("2x").expect("2x is valid"),
+                Rounding::Ceil,
+            ),
+            Ok(FrameCount::new(90)),
+        );
+        assert_eq!(
+            timebase.frames_for_playback(
+                source,
+                PlaybackRate::parse("0.5x").expect("0.5x is valid"),
+                Rounding::Ceil,
+            ),
+            Ok(FrameCount::new(360)),
         );
     }
 

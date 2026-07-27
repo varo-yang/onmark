@@ -69,7 +69,7 @@ fn inspect_reuses_structured_diagnostics_without_tool_preflight() {
     assert!(output.stderr.is_empty());
     let report: serde_json::Value =
         serde_json::from_slice(&output.stdout).expect("the inspection is JSON");
-    assert_eq!(report["version"], 1);
+    assert_eq!(report["version"], 2);
     assert_eq!(report["command"], "inspect");
     assert_eq!(report["valid"], false);
     assert!(report.get("inspection").is_none());

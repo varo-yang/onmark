@@ -6,7 +6,7 @@ use std::fmt;
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize};
 
-use crate::model::{FrameIndex, FrameInterval, FrameRate};
+use crate::model::{FrameIndex, FrameInterval, FrameRate, PlaybackRate};
 
 /// Largest integer represented exactly by every JavaScript implementation.
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
@@ -67,6 +67,66 @@ impl<'de> Deserialize<'de> for WireFrameRate {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct WireFrameRateWire {
+    numerator: u32,
+    denominator: u32,
+}
+
+/// Exact canonical playback ratio represented with browser-safe integers.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct WirePlaybackRate {
+    #[cfg_attr(feature = "schema", schemars(range(min = 1, max = u32::MAX)))]
+    numerator: u32,
+    #[cfg_attr(feature = "schema", schemars(range(min = 1, max = u32::MAX)))]
+    denominator: u32,
+}
+
+impl WirePlaybackRate {
+    /// Returns the canonical numerator.
+    #[must_use]
+    pub const fn numerator(self) -> u32 {
+        self.numerator
+    }
+
+    /// Returns the canonical denominator.
+    #[must_use]
+    pub const fn denominator(self) -> u32 {
+        self.denominator
+    }
+}
+
+impl From<PlaybackRate> for WirePlaybackRate {
+    fn from(rate: PlaybackRate) -> Self {
+        Self {
+            numerator: rate.numerator(),
+            denominator: rate.denominator(),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for WirePlaybackRate {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = WirePlaybackRateWire::deserialize(deserializer)?;
+        let rate = PlaybackRate::new(wire.numerator, wire.denominator)
+            .map_err(|source| D::Error::custom(source.to_string()))?;
+        if rate.numerator() != wire.numerator || rate.denominator() != wire.denominator {
+            return Err(D::Error::custom("playback rate is not in canonical form"));
+        }
+
+        Ok(Self {
+            numerator: wire.numerator,
+            denominator: wire.denominator,
+        })
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WirePlaybackRateWire {
     numerator: u32,
     denominator: u32,
 }

@@ -6,8 +6,8 @@
 use std::collections::BTreeMap;
 
 use crate::model::{
-    AssetRef, AudioGain, CueId, Duration, ElementKind, EventRef, GeneralAudioKind, NodeId,
-    SourceSpan,
+    AssetRef, AudioGain, CueId, Duration, ElementKind, EventRef, GeneralAudioKind, MediaTrim,
+    NodeId, PlaybackRate, SourceSpan,
 };
 
 /// One typed value together with the authored bytes that produced it.
@@ -413,10 +413,12 @@ pub enum ResolvedShotContent {
     Overlay(ResolvedOverlay),
 }
 
-/// Video content with optional artifact and local delay.
+/// Video content with typed source-local editing intent.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ResolvedVideo {
     media: ResolvedMedia,
+    trim: Option<Authored<MediaTrim>>,
+    playback_rate: Option<Authored<PlaybackRate>>,
 }
 
 impl ResolvedVideo {
@@ -424,9 +426,13 @@ impl ResolvedVideo {
         element: ResolvedElement,
         src: Option<Authored<AssetRef>>,
         delay: Option<Authored<Duration>>,
+        trim: Option<Authored<MediaTrim>>,
+        playback_rate: Option<Authored<PlaybackRate>>,
     ) -> Self {
         Self {
             media: ResolvedMedia::new(element, src, delay),
+            trim,
+            playback_rate,
         }
     }
 
@@ -448,8 +454,28 @@ impl ResolvedVideo {
         self.media.delay()
     }
 
-    pub(super) fn into_media(self) -> ResolvedMedia {
-        self.media
+    /// Returns the optional source-local interval selection.
+    #[must_use]
+    pub const fn trim(&self) -> Option<&Authored<MediaTrim>> {
+        self.trim.as_ref()
+    }
+
+    /// Returns the exact source-to-output playback ratio.
+    #[must_use]
+    pub fn playback_rate(&self) -> PlaybackRate {
+        self.playback_rate
+            .as_ref()
+            .map_or(PlaybackRate::ONE, |rate| *rate.value())
+    }
+
+    pub(super) fn into_parts(
+        self,
+    ) -> (
+        ResolvedMedia,
+        Option<Authored<MediaTrim>>,
+        Option<Authored<PlaybackRate>>,
+    ) {
+        (self.media, self.trim, self.playback_rate)
     }
 }
 

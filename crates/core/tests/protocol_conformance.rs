@@ -35,7 +35,7 @@ fn browser_requests_match_the_versioned_wire_contract() {
     ];
 
     assert_or_update(
-        &fixture("protocol", "browser-requests-v1.jsonl"),
+        &fixture("protocol", "browser-requests-v2.jsonl"),
         &render_json_lines(&requests),
     );
 }
@@ -63,7 +63,7 @@ fn browser_responses_match_the_versioned_wire_contract() {
     ];
 
     assert_or_update(
-        &fixture("protocol", "browser-responses-v1.jsonl"),
+        &fixture("protocol", "browser-responses-v2.jsonl"),
         &render_json_lines(&responses),
     );
 }
@@ -117,7 +117,13 @@ fn browser_plan_retains_solved_structure_and_content_ownership() {
             "shotId": 2,
             "assetId": "sha256:0101010101010101010101010101010101010101010101010101010101010101",
             "interval": { "start": 0, "end": 75 },
-            "sourceFrameRate": { "numerator": 30, "denominator": 1 }
+            "sourceFrameRate": { "numerator": 30, "denominator": 1 },
+            "source": {
+                "startNanoseconds": "0",
+                "endNanoseconds": "2500000000",
+                "naturalEndNanoseconds": "2500000000",
+                "playbackRate": { "numerator": 1, "denominator": 1 }
+            }
         }]),
     );
     assert_eq!(

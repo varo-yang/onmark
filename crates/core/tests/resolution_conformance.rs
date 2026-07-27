@@ -213,12 +213,18 @@ impl ResolvedFilmRenderer {
     }
 
     fn render_video(&mut self, video: &ResolvedVideo) -> std::fmt::Result {
+        let trim = video
+            .trim()
+            .map_or_else(|| "-".to_owned(), |trim| trim.value().to_string());
         writeln!(
             self.output,
-            "      video id={} src={} delay={}",
+            "      video id={} src={} delay={} trim={} speed={}/{}",
             id(video.element()),
             asset(video.src()),
             duration(video.delay()),
+            trim,
+            video.playback_rate().numerator(),
+            video.playback_rate().denominator(),
         )
     }
 
