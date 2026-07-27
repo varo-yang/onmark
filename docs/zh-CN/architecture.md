@@ -829,8 +829,14 @@ S3 contract 不会变成桌面 installer 语义。
 
 ### 产品命令与语言证据
 
-当前 authored native 命令刻意保持很窄：`onmark render <film.html>`。authored HTML 同时包含
-screenplay custom element 与 presentation DOM/CSS；至多一个带
+当前 authored native surface 刻意保持很窄：`onmark check <film.html>` 不启动
+Chromium，验证到 Render Unit planning；`onmark inspect <film.html>` 解释已经求解和规划的
+fact，包括精确的 video source selection 与 rate；`onmark render <film.html>` 执行这些
+fact。`onmark doctor` 验证已准入的本地工具链，`onmark info` 报告已安装产品与 host
+identity。machine-readable command report 带显式版本，并保留稳定 diagnostic code 与 byte
+span。
+
+authored HTML 同时包含 screenplay custom element 与 presentation DOM/CSS；至多一个带
 `type="module" data-om-motion` 的 inline module 导出 declarative `motion` value，
 固定 infrastructure entry 负责安装 runtime。不存在平行 stylesheet、motion 文件或 custom
 entry path。CLI 只读取一次有界 HTML：Rust compiler 消费这份 owned byte，bundler 消费
@@ -1325,9 +1331,10 @@ primary-video placement，以及 title、call-to-action 或导入 caption overla
 相交的 structure 和 overlay 保留完整 solved interval；evaluation 只定义执行窗口，output
 只定义发布窗口，两者都不能改写 presentation time。每个投影 node 都记录 dense
 unit-local compiler-owned identity 与可选 authored identity；跨 projection 的语义身份由
-authored identity 承担，content 显式指向其 structural parent。video placement 另记录 immutable asset identity 与验证 decoded-frame
-selection 所需的 admitted CFR source rate；overlay placement 记录封闭的语义角色与 decoded
-text。materialized URL 仍是 render-owned
+authored identity 承担，content 显式指向其 structural parent。video placement 另记录
+immutable asset identity、admitted CFR source rate、所选 source interval、冻结素材的
+natural end，以及验证 decoded-frame selection 所需的 canonical playback ratio；overlay
+placement 记录封闭的语义角色与 decoded text。materialized URL 仍是 render-owned
 fact，DOM 结构与 CSS 则始终是 presentation-owned effect。这是一条 Render
 Unit 的 browser-facing projection，不是 Render Graph 或 partition
 plan 本身。它只能包含浏览器真实消费的事实；output path、cache
@@ -1335,7 +1342,7 @@ key、FFmpeg 参数、source span 和 materialization policy 都不得进入。V
 timestamp map 与更多 component 事实等 production
 adapter 真正消费时再加入，不提前把后续 gate 塞进协议。
 
-Protocol V1 最多分别携带 10,000 个 scene container、shot container、video placement
+Protocol V2 最多分别携带 10,000 个 scene container、shot container、video placement
 与 overlay placement；每条 overlay
 inscription 最多包含 65,536 个 Unicode 字符。native projection 与 Rust wire decode
 还会在 CDP serialization 前，把每份 browser plan 的合计 UTF-8 text 限制为一 MiB；该 aggregate
@@ -1612,6 +1619,14 @@ track 一旦改变作者语义，就属于语言工作。每项新增能力都�
 prompts、grader、raw model outputs 与 baseline。之后 trim、rate、gain、fade、dependency 或
 transition interval 由 Rust 独占；TypeScript 只能实现已经求解的视觉 effect。JavaScript
 timeline、CLI flag 或 `FFmpeg` filter string 都不能成为另一套 scheduler。
+
+Gate 八首个获准的视频处理能力是精确的素材内部选段。两个 live-model 方案都完成了全部二十个
+编辑 case，且没有引入 film 坐标；最终接纳的 `trim="起点..终点"` 比两个边界属性使用更少
+authored bytes。resolve 只解析一次 `trim` 与 `speed`，solve 使用整数有理运算推导输出帧，
+Timeline IR 独占 source mapping，Browser Plan 把该事实传给确定性选帧。经过编辑的 placement
+在 native path 证明等价的 source selection 与 pixel 之前继续走 browser composition。
+runtime 只在接纳不可信 plan 时重复校验 wire-level duration invariant，不推导或修改 authored
+timing。
 
 Gate 八不加入 Player、Studio、preview server、source-mutation API、component marketplace、
 remote authoring command、coordinator、database、queue、lease service、cloud workflow、

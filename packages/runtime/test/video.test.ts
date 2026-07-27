@@ -232,6 +232,12 @@ test("derives the materialized source from the Rust-owned bundle layout", () => 
       "sha256:0101010101010101010101010101010101010101010101010101010101010101",
     interval: { start: 10, end: 20 },
     sourceFrameRate: { numerator: 30, denominator: 1 },
+    source: {
+      startNanoseconds: "0",
+      endNanoseconds: "333333333",
+      naturalEndNanoseconds: "333333333",
+      playbackRate: { numerator: 1, denominator: 1 },
+    },
   };
 
   assert.equal(

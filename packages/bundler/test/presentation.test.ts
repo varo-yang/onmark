@@ -81,7 +81,7 @@ test("excludes compiler-only facts from presentation identity", async () => {
         '  <om-scene><om-shot duration="2s">',
         '    <om-sfx src="first.wav" delay="250ms"></om-sfx>',
         '    <om-vo src="first-voice.mp3">Narration <img src="ignored.png"></om-vo>',
-        '    <video id="hero" class="media" src="first.mp4" delay="100ms"></video>',
+        '    <video id="hero" class="media" src="first.mp4" delay="100ms" trim="1s..2s" speed="2x"></video>',
         '    <om-title id="headline" data-delay="authored" cue="reveal">',
         '      Keep <img src="texture.png" alt="texture"> me',
         "    </om-title>",
@@ -103,7 +103,7 @@ test("excludes compiler-only facts from presentation identity", async () => {
         '  <om-scene><om-shot duration="3s">',
         '    <om-sfx src="second.wav" delay="750ms"></om-sfx>',
         '    <om-vo src="second-voice.mp3">Narration <img src="ignored.png"></om-vo>',
-        '    <video id="hero" class="media" src="second.mp4" delay="200ms"></video>',
+        '    <video id="hero" class="media" src="second.mp4" delay="200ms" trim="3s..5s" speed="0.5x"></video>',
         '    <om-title id="headline" data-delay="authored" delay="1s">',
         '      Keep <img src="texture.png" alt="texture"> me',
         "    </om-title>",
@@ -124,7 +124,7 @@ test("excludes compiler-only facts from presentation identity", async () => {
     assert.doesNotMatch(html, /om-cues|om-cue|om-music|om-sfx|om-vo/u);
     assert.doesNotMatch(
       html,
-      /first\.mp3|first\.mp4|\s(?:cue|delay|duration|gain)="[^"]*"/u,
+      /first\.mp3|first\.mp4|\s(?:cue|delay|duration|gain|speed|trim)="[^"]*"/u,
     );
     assert.match(html, /<video id="hero" class="media"\s*><\/video>/u);
     assert.match(html, /<om-title id="headline" data-delay="authored"\s*>/u);

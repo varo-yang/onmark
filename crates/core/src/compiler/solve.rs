@@ -11,8 +11,8 @@ use std::fmt;
 use crate::diagnostics::{Diagnostic, DiagnosticCode, Diagnostics};
 use crate::model::{
     AssetMetadata, AssetRef, AudioGain, AudioMetadata, CueId, Duration, EventRef, FrameCount,
-    FrameIndex, FrameInterval, FrozenAsset, FrozenAssetId, Rounding, SourceSpan, Timebase,
-    VideoMetadata,
+    FrameIndex, FrameInterval, FrozenAsset, FrozenAssetId, MediaSource, MediaSourceInterval,
+    MediaTrim, PlaybackRate, Rounding, SourceSpan, Timebase, VideoMetadata,
 };
 use crate::timeline::{
     TimelineAudio, TimelineAudioKind, TimelineContent, TimelineElement, TimelineEvent, TimelineIr,
@@ -293,8 +293,113 @@ impl<'a> Solver<'a> {
         &mut self,
         video: ResolvedVideo,
     ) -> Result<Option<PreparedContent>, SolveError> {
-        let media = self.prepare_media(video.into_media(), MediaTrack::Video)?;
-        Ok(media.map(PreparedContent::Video))
+        let (media, trim, playback_rate) = video.into_parts();
+        let (element, source, delay) = media.into_parts();
+        let Some(source) = source else {
+            self.diagnostics.push(missing_media_source(&element));
+            return Ok(None);
+        };
+        let Some(asset) = self.prepare_video_asset(&element, source)? else {
+            return Ok(None);
+        };
+        let (playback_rate, rate_span) =
+            playback_rate.map_or((PlaybackRate::ONE, asset.authored_at), Authored::into_parts);
+        let Some(source) =
+            self.prepare_video_source(trim, playback_rate, asset.duration, asset.authored_at)
+        else {
+            return Ok(None);
+        };
+        let Some((start, start_reason)) = self.prepare_delay(delay) else {
+            return Ok(None);
+        };
+        let duration = source.interval().duration();
+        let Some(duration) = frames_for_playback(
+            self.timebase,
+            duration,
+            playback_rate,
+            rate_span,
+            &mut self.diagnostics,
+        ) else {
+            return Ok(None);
+        };
+        let Some(end) = start.checked_add(duration) else {
+            self.diagnostics.push(frame_overflow(asset.authored_at));
+            return Ok(None);
+        };
+        let media = PreparedMedia {
+            element,
+            asset_id: asset.id,
+            start,
+            end,
+            start_reason,
+        };
+
+        Ok(Some(PreparedContent::Video(PreparedVideo {
+            media,
+            source,
+        })))
+    }
+
+    fn prepare_video_asset(
+        &mut self,
+        element: &ResolvedElement,
+        source: Authored<AssetRef>,
+    ) -> Result<Option<PreparedVideoAsset>, SolveError> {
+        let (asset_ref, authored_at) = source.into_parts();
+        let frozen = self
+            .assets
+            .get(&asset_ref)
+            .ok_or_else(|| SolveError::MissingFrozenAsset(asset_ref.clone()))?;
+        let Some(metadata) = frozen.metadata().video_metadata() else {
+            self.diagnostics.push(incompatible_media_source(
+                authored_at,
+                &asset_ref,
+                element,
+                MediaTrack::Video,
+            ));
+            return Ok(None);
+        };
+
+        Ok(Some(PreparedVideoAsset {
+            id: frozen.id(),
+            duration: metadata.duration(),
+            authored_at,
+        }))
+    }
+
+    fn prepare_video_source(
+        &mut self,
+        trim: Option<Authored<MediaTrim>>,
+        playback_rate: PlaybackRate,
+        natural_duration: Duration,
+        asset_span: SourceSpan,
+    ) -> Option<MediaSource> {
+        let (trim, authored_at) = match trim {
+            Some(trim) => {
+                let (trim, span) = trim.into_parts();
+                (Some(trim), span)
+            }
+            None => (None, asset_span),
+        };
+        let start = trim.map_or(Duration::ZERO, MediaTrim::start);
+        let end = trim.and_then(MediaTrim::end).unwrap_or(natural_duration);
+
+        if start >= end || end > natural_duration {
+            self.diagnostics.push(source_interval_outside_asset(
+                authored_at,
+                start,
+                end,
+                natural_duration,
+            ));
+            return None;
+        }
+
+        let interval = MediaSourceInterval::new(start, end)
+            .expect("the authored source bounds are increasing");
+        Some(
+            MediaSource::new(interval, playback_rate, natural_duration)
+                .expect("the source interval was bounded by its metadata above"),
+        )
     }
 
     fn prepare_voice_over(
@@ -669,7 +774,7 @@ struct PreparedShot {
 }
 
 enum PreparedContent {
-    Video(PreparedMedia),
+    Video(PreparedVideo),
     VoiceOver {
         media: PreparedMedia,
         text: Vec<ResolvedText>,
@@ -680,7 +785,8 @@ enum PreparedContent {
 impl PreparedContent {
     fn primary_end(&self) -> Option<PrimaryEnd> {
         let media = match self {
-            Self::Video(media) | Self::VoiceOver { media, .. } => media,
+            Self::Video(video) => &video.media,
+            Self::VoiceOver { media, .. } => media,
             Self::Overlay(_) => return None,
         };
 
@@ -689,6 +795,19 @@ impl PreparedContent {
             source: media.element.span(),
         })
     }
+}
+
+/// Video output duration and its immutable source-time mapping.
+struct PreparedVideo {
+    media: PreparedMedia,
+    source: MediaSource,
+}
+
+/// Frozen visual facts needed to solve one video without retaining a borrow.
+struct PreparedVideoAsset {
+    id: FrozenAssetId,
+    duration: Duration,
+    authored_at: SourceSpan,
 }
 
 const fn is_primary_content(content: &ResolvedShotContent) -> bool {
@@ -721,7 +840,7 @@ struct PlacedMedia {
     asset_id: FrozenAssetId,
 }
 
-fn place_media(media: PreparedMedia, shot: FrameInterval) -> PlacedMedia {
+fn place_media(media: PreparedMedia, shot: FrameInterval, end_reason: TimingReason) -> PlacedMedia {
     let start = shot
         .start()
         .checked_advance(media.start)
@@ -730,11 +849,7 @@ fn place_media(media: PreparedMedia, shot: FrameInterval) -> PlacedMedia {
         .start()
         .checked_advance(media.end)
         .expect("a placed shot bounds every prepared media end");
-    let timing = TimelineTiming::new(
-        interval(start, end),
-        media.start_reason,
-        TimingReason::AssetDuration,
-    );
+    let timing = TimelineTiming::new(interval(start, end), media.start_reason, end_reason);
 
     PlacedMedia {
         element: timeline_element(media.element),
@@ -789,9 +904,9 @@ fn place_sound_effect(
     ))
 }
 
-fn lower_video(media: PreparedMedia, shot: FrameInterval) -> TimelineContent {
-    let media = place_media(media, shot);
-    let video = TimelineVideo::new(media.element, media.timing, media.asset_id);
+fn lower_video(video: PreparedVideo, shot: FrameInterval) -> TimelineContent {
+    let media = place_media(video.media, shot, TimingReason::SourcePlayback);
+    let video = TimelineVideo::new(media.element, media.timing, media.asset_id, video.source);
 
     TimelineContent::Video(video)
 }
@@ -801,7 +916,7 @@ fn lower_voice_over(
     text: Vec<ResolvedText>,
     shot: FrameInterval,
 ) -> TimelineContent {
-    let media = place_media(media, shot);
+    let media = place_media(media, shot, TimingReason::AssetDuration);
     let text = timeline_text(text);
     let voice_over = TimelineVoiceOver::new(media.element, media.timing, media.asset_id, text);
 
@@ -826,6 +941,21 @@ fn frame_at(
     };
 
     Some(frame)
+}
+
+fn frames_for_playback(
+    timebase: Timebase,
+    duration: Duration,
+    playback_rate: PlaybackRate,
+    authored_at: SourceSpan,
+    diagnostics: &mut Diagnostics,
+) -> Option<FrameCount> {
+    let Ok(frames) = timebase.frames_for_playback(duration, playback_rate, Rounding::Ceil) else {
+        diagnostics.push(frame_overflow(authored_at));
+        return None;
+    };
+
+    Some(frames)
 }
 
 fn frames_for(
@@ -904,6 +1034,22 @@ fn incompatible_media_source(
             element.kind()
         ),
         format!("choose {asset_kind} asset for <{}>", element.kind()),
+    )
+}
+
+fn source_interval_outside_asset(
+    primary: SourceSpan,
+    start: Duration,
+    end: Duration,
+    source_duration: Duration,
+) -> Diagnostic {
+    author_diagnostic(
+        DiagnosticCode::SourceIntervalOutsideAsset,
+        primary,
+        format!(
+            "video selects source interval {start}..{end}, but the source ends at {source_duration}"
+        ),
+        "choose a non-empty trim interval within the frozen video duration",
     )
 }
 

@@ -218,7 +218,7 @@
           "$ref": "#/$defs/WireInterval"
         },
         "timelineVersion": {
-          "const": 1,
+          "const": 2,
           "format": "uint16",
           "maximum": 65535,
           "minimum": 0,
@@ -301,6 +301,9 @@
         "shotId": {
           "$ref": "#/$defs/BrowserNodeId"
         },
+        "source": {
+          "$ref": "#/$defs/BrowserVideoSource"
+        },
         "sourceFrameRate": {
           "$ref": "#/$defs/WireFrameRate"
         }
@@ -310,12 +313,47 @@
         "shotId",
         "assetId",
         "interval",
-        "sourceFrameRate"
+        "sourceFrameRate",
+        "source"
+      ],
+      "type": "object"
+    },
+    "BrowserVideoSource": {
+      "additionalProperties": false,
+      "description": "Exact source-time mapping for one browser video placement.",
+      "properties": {
+        "endNanoseconds": {
+          "maxLength": 20,
+          "minLength": 1,
+          "pattern": "^(0|[1-9][0-9]*)$",
+          "type": "string"
+        },
+        "naturalEndNanoseconds": {
+          "maxLength": 20,
+          "minLength": 1,
+          "pattern": "^(0|[1-9][0-9]*)$",
+          "type": "string"
+        },
+        "playbackRate": {
+          "$ref": "#/$defs/WirePlaybackRate"
+        },
+        "startNanoseconds": {
+          "maxLength": 20,
+          "minLength": 1,
+          "pattern": "^(0|[1-9][0-9]*)$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "startNanoseconds",
+        "endNanoseconds",
+        "naturalEndNanoseconds",
+        "playbackRate"
       ],
       "type": "object"
     },
     "ProtocolVersion": {
-      "const": 1,
+      "const": 2,
       "description": "Version of the native-to-browser message contract.",
       "format": "uint16",
       "maximum": 65535,
@@ -375,9 +413,32 @@
         "end"
       ],
       "type": "object"
+    },
+    "WirePlaybackRate": {
+      "additionalProperties": false,
+      "description": "Exact canonical playback ratio represented with browser-safe integers.",
+      "properties": {
+        "denominator": {
+          "format": "uint32",
+          "maximum": 4294967295,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "numerator": {
+          "format": "uint32",
+          "maximum": 4294967295,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "numerator",
+        "denominator"
+      ],
+      "type": "object"
     }
   },
-  "$id": "https://onmark.dev/schemas/browser-request-v1.schema.json",
+  "$id": "https://onmark.dev/schemas/browser-request-v2.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "One versioned command sent from the native executor to the browser.",

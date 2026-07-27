@@ -1,0 +1,116 @@
+{
+  "cases": [
+    {
+      "id": "trim-head",
+      "videos": [
+        {
+          "src": "media/interview.mp4",
+          "trimIn": "12s"
+        }
+      ]
+    },
+    {
+      "id": "trim-tail",
+      "videos": [
+        {
+          "src": "media/reveal.mp4",
+          "trimOut": "7.5s"
+        }
+      ]
+    },
+    {
+      "id": "extract-subclip",
+      "videos": [
+        {
+          "src": "media/demo.mp4",
+          "trimIn": "4s",
+          "trimOut": "10s"
+        }
+      ]
+    },
+    {
+      "id": "double-speed",
+      "videos": [
+        {
+          "src": "media/walkthrough.mp4",
+          "speed": "2x"
+        }
+      ]
+    },
+    {
+      "id": "slow-subclip",
+      "videos": [
+        {
+          "src": "media/detail.mp4",
+          "trimIn": "250ms",
+          "trimOut": "2.25s",
+          "speed": "0.5x"
+        }
+      ]
+    },
+    {
+      "id": "two-local-edits",
+      "videos": [
+        {
+          "src": "media/opening.mp4",
+          "trimIn": "1s",
+          "trimOut": "4s"
+        },
+        {
+          "src": "media/product.mp4",
+          "trimIn": "8s",
+          "trimOut": "12s",
+          "speed": "2x"
+        }
+      ]
+    },
+    {
+      "id": "change-only-in-point",
+      "videos": [
+        {
+          "src": "media/take.mp4",
+          "trimIn": "3.5s",
+          "trimOut": "9s"
+        }
+      ]
+    },
+    {
+      "id": "change-only-out-point",
+      "videos": [
+        {
+          "src": "media/cutaway.mp4",
+          "trimIn": "2s",
+          "trimOut": "6.75s"
+        }
+      ]
+    },
+    {
+      "id": "untreated-video",
+      "videos": [
+        {
+          "src": "media/plain.mp4"
+        }
+      ]
+    },
+    {
+      "id": "three-sequential-clips",
+      "videos": [
+        {
+          "src": "media/a.mp4",
+          "trimOut": "2s"
+        },
+        {
+          "src": "media/b.mp4",
+          "trimIn": "5s",
+          "trimOut": "8s",
+          "speed": "0.5x"
+        },
+        {
+          "src": "media/c.mp4",
+          "trimIn": "1s",
+          "speed": "3x"
+        }
+      ]
+    }
+  ]
+}

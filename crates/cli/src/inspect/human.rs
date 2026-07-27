@@ -6,7 +6,7 @@ use std::io::{self, Write};
 use onmark_core::model::FrameInterval;
 use onmark_core::timeline::{
     TimelineContent, TimelineElement, TimelineIr, TimelineScene, TimelineShot, TimelineText,
-    TimelineTiming,
+    TimelineTiming, TimelineVideo,
 };
 
 use crate::check::{RegionInspection, Validation};
@@ -98,13 +98,7 @@ fn write_shot(output: &mut impl Write, index: usize, shot: &TimelineShot) -> io:
 
 fn write_content(output: &mut impl Write, content: &TimelineContent) -> io::Result<()> {
     match content {
-        TimelineContent::Video(video) => writeln!(
-            output,
-            "    {} {} asset {}",
-            Element(video.element()),
-            Timing(video.timing()),
-            video.asset_id(),
-        ),
+        TimelineContent::Video(video) => write_video(output, video),
         TimelineContent::VoiceOver(voice_over) => writeln!(
             output,
             "    {} {} asset {} text {:?}",
@@ -121,6 +115,22 @@ fn write_content(output: &mut impl Write, content: &TimelineContent) -> io::Resu
             text(overlay.text()),
         ),
     }
+}
+
+fn write_video(output: &mut impl Write, video: &TimelineVideo) -> io::Result<()> {
+    let source = video.source();
+    writeln!(
+        output,
+        "    {} {} asset {} source {}..{} of {} at {}/{}x",
+        Element(video.element()),
+        Timing(video.timing()),
+        video.asset_id(),
+        source.interval().start(),
+        source.interval().end(),
+        source.natural_duration(),
+        source.playback_rate().numerator(),
+        source.playback_rate().denominator(),
+    )
 }
 
 fn write_region(

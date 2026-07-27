@@ -588,7 +588,7 @@ class PresentationRecorder {
 
 function presentationPlan(): BrowserPlan {
   return {
-    timelineVersion: 1,
+    timelineVersion: 2,
     frameRate: { numerator: 30, denominator: 1 },
     timeline: { start: 0, end: 40 },
     evaluation: { start: 10, end: 30 },
@@ -687,6 +687,12 @@ function video(
     assetId: `sha256:${digestByte.toString().padStart(2, "0").repeat(32)}`,
     interval: { start: startFrame, end: endFrame },
     sourceFrameRate: { numerator: 30, denominator: 1 },
+    source: {
+      startNanoseconds: "0",
+      endNanoseconds: "333333333",
+      naturalEndNanoseconds: "333333333",
+      playbackRate: { numerator: 1, denominator: 1 },
+    },
   };
 }
 

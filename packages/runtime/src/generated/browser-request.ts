@@ -56,7 +56,7 @@ export type RequestId = number;
 /**
  * Version of the native-to-browser message contract.
  */
-export type ProtocolVersion = 1;
+export type ProtocolVersion = 2;
 
 /**
  * One versioned command sent from the native executor to the browser.
@@ -87,7 +87,7 @@ export interface BrowserPlan {
    */
   shots: BrowserShot[];
   timeline: WireInterval;
-  timelineVersion: 1;
+  timelineVersion: 2;
   /**
    * @maxItems 10000
    */
@@ -147,5 +147,22 @@ export interface BrowserVideo {
   interval: WireInterval;
   node: BrowserNode;
   shotId: BrowserNodeId;
+  source: BrowserVideoSource;
   sourceFrameRate: WireFrameRate;
+}
+/**
+ * Exact source-time mapping for one browser video placement.
+ */
+export interface BrowserVideoSource {
+  endNanoseconds: string;
+  naturalEndNanoseconds: string;
+  playbackRate: WirePlaybackRate;
+  startNanoseconds: string;
+}
+/**
+ * Exact canonical playback ratio represented with browser-safe integers.
+ */
+export interface WirePlaybackRate {
+  denominator: number;
+  numerator: number;
 }

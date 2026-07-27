@@ -796,7 +796,7 @@ mod tests {
         let decoded: WorkerCaptureRequest =
             serde_json::from_str(&encoded).expect("the portable worker request parses once");
 
-        assert_eq!(wire["version"], 1);
+        assert_eq!(wire["version"], 2);
         assert_eq!(wire["captureEnvironment"], environment.to_string());
         assert_eq!(encoded, repeated);
         assert_eq!(decoded, request);
@@ -863,6 +863,38 @@ mod tests {
         let after = video_partition_artifact_ids(
             after,
             [("opening.mp4", opening), ("replacement.mp4", replacement)],
+        );
+
+        assert_eq!(before[0], after[0]);
+        assert_ne!(before[1], after[1]);
+    }
+
+    #[test]
+    fn scopes_source_edits_to_their_distributed_partition() {
+        let before = concat!(
+            "<om-film><om-scene>",
+            r#"<om-shot><video src="opening.mp4"></video></om-shot>"#,
+            r#"<om-shot><video src="closing.mp4" trim="..500ms"></video></om-shot>"#,
+            "</om-scene></om-film>",
+        );
+        let after = concat!(
+            "<om-film><om-scene>",
+            r#"<om-shot><video src="opening.mp4"></video></om-shot>"#,
+            r#"<om-shot><video src="closing.mp4" trim="500ms.."></video></om-shot>"#,
+            "</om-scene></om-film>",
+        );
+        let opening = video_asset_with_identity(1);
+        let closing = video_asset_with_identity(2);
+        let before = video_partition_artifact_ids(
+            before,
+            [
+                ("opening.mp4", opening.clone()),
+                ("closing.mp4", closing.clone()),
+            ],
+        );
+        let after = video_partition_artifact_ids(
+            after,
+            [("opening.mp4", opening), ("closing.mp4", closing)],
         );
 
         assert_eq!(before[0], after[0]);
@@ -1081,6 +1113,35 @@ mod tests {
         )
         .expect("browser video remains a supported conservative path");
 
+        assert_eq!(
+            unit.visual_execution().capture_cadence(),
+            BrowserCaptureCadence::EveryFrame,
+        );
+    }
+
+    #[test]
+    fn keeps_source_edited_video_on_browser_composition() {
+        let frozen = layered_video_asset(video_dimensions(), true);
+        let timeline = solve(
+            concat!(
+                "<om-film><om-scene><om-shot>",
+                r#"<video src="opening.mp4" trim="250ms..750ms" speed="2x"></video>"#,
+                "</om-shot></om-scene></om-film>",
+            ),
+            "opening.mp4",
+            frozen.clone(),
+        );
+        let materialized = MaterializedAsset::new(frozen, "/tmp/opening.mp4")
+            .expect("the fixture path is present");
+        let unit = RenderUnit::whole_film(
+            &timeline,
+            placement_bounded_manifest(PresentationVisualCapability::SeparableOverlay),
+            render_profile(),
+            [materialized],
+        )
+        .expect("edited source media retains the conservative browser path");
+
+        assert!(unit.visual_execution().layered_media().is_none());
         assert_eq!(
             unit.visual_execution().capture_cadence(),
             BrowserCaptureCadence::EveryFrame,

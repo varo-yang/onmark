@@ -14,7 +14,7 @@ pub use bundle::{
     BundleFile, BundleIdentity, BundleManifest, BundleVersion, InvalidBundleFile,
     InvalidBundleManifest,
 };
-pub use frame::{InvalidWireFrame, WireFrame, WireFrameRate, WireInterval};
+pub use frame::{InvalidWireFrame, WireFrame, WireFrameRate, WireInterval, WirePlaybackRate};
 
 pub use message::{
     BrowserCommand, BrowserEvent, BrowserRequest, BrowserResponse, InvalidProtocolFailure,
@@ -22,5 +22,5 @@ pub use message::{
 };
 pub use plan::{
     BrowserNode, BrowserNodeId, BrowserOverlay, BrowserOverlayKind, BrowserPlan, BrowserScene,
-    BrowserShot, BrowserVideo, InvalidBrowserPlan,
+    BrowserShot, BrowserVideo, BrowserVideoSource, InvalidBrowserPlan,
 };

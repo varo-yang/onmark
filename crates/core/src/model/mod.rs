@@ -8,6 +8,7 @@ mod caption;
 mod duration;
 mod element;
 mod id;
+mod media;
 mod reference;
 mod source;
 mod temporal;
@@ -30,6 +31,10 @@ pub use caption::{
 pub use duration::{Duration, InvalidDuration};
 pub use element::{ElementKind, GeneralAudioKind};
 pub use id::{InvalidNodeId, NodeId};
+pub use media::{
+    InvalidMediaSource, InvalidMediaSourceInterval, InvalidMediaTrim, InvalidPlaybackRate,
+    MediaSource, MediaSourceInterval, MediaTrim, PlaybackRate,
+};
 pub use reference::{AssetRef, CueId, EventRef, InvalidAssetRef};
 pub use source::{ByteOffset, InvalidSourceSpan, SourceId, SourceSpan};
 pub use temporal::{InvalidPresentationTemporalCapability, PresentationTemporalCapability};

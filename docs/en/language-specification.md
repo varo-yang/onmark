@@ -112,6 +112,20 @@ nanosecond representation. A shot's `duration` must be greater than zero; cue
 times and delays may name zero. Frame units and floating-point approximations
 are not part of the language.
 
+Video may select a source-local half-open interval with
+`trim="start..end"`. Either bound may be omitted, but not both: an omitted
+start means source zero and an omitted end means the probed source end. Both
+bounds use the duration grammar above and must satisfy
+`start < end <= source duration`.
+
+Video may play its selected source interval at an exact positive rate with
+`speed="integer[.fraction]x"`. The fraction admits at most six digits and the
+default is `1x`. The compiler reduces the decimal to a rational value and
+derives local duration from selected source duration divided by that rate.
+Neither attribute expresses a film-timeline coordinate. They apply to the
+selected visual stream only; authored `music`, `sfx`, and `vo` remain separate
+audio roles and do not inherit a video's source interval or playback rate.
+
 The compiler maps exact nanosecond values onto a rational frame grid with
 integer arithmetic. Every conversion names either floor or ceiling rounding at
 its call site; no implicit cast or ambient default may choose a frame boundary.
@@ -193,10 +207,11 @@ namespace.
 
 Structural binding is followed by attribute and reference resolution. `film`,
 `cues`, and `scene` admit no non-ID attributes. `cue` requires `id` and `time`.
-`shot` admits optional `duration`. `video` and `vo` admit optional `src` and
-`delay`; `music` requires `src` and admits optional `gain`; `sfx` requires
-`src` and admits optional `delay` and `gain`; `title` and `cta` admit optional
-`cue` or `delay`. `cue` and `delay` cannot appear together on one overlay
+`shot` admits optional `duration`. `video` admits optional `src`, `delay`,
+`trim`, and `speed`; `vo` admits optional `src` and `delay`; `music` requires
+`src` and admits optional `gain`; `sfx` requires `src` and admits optional
+`delay` and `gain`; `title` and `cta` admit optional `cue` or `delay`. `cue`
+and `delay` cannot appear together on one overlay
 because they define competing start rules. Missing `src` on `video` or `vo`
 remains valid for static analysis; `music` and `sfx` require it during
 resolution. An authored empty `src` is always invalid. Unknown attributes are
@@ -239,6 +254,7 @@ Initial binding, resolution, and timing diagnostics are:
 | `ONM-TIME-004`   | resolved shot content starts or ends outside its owning shot          |
 | `ONM-TIME-005`   | an exact time does not fit in the selected frame domain               |
 | `ONM-TIME-006`   | a film has no shot with a positive solved duration                    |
+| `ONM-TIME-007`   | a selected video source interval lies outside its frozen artifact     |
 | `ONM-ASSET-001`  | renderable media has no frozen artifact reference                     |
 | `ONM-ASSET-002`  | a media element references an artifact without its required track     |
 | `ONM-REF-001`    | a well-formed overlay cue reference does not name a resolved cue      |

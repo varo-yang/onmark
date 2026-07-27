@@ -14,6 +14,7 @@ import {
   MAX_PENDING_RESOURCES,
 } from "./generated/runtime-contract.js";
 import { runtimeFrameAt, type RuntimeFrame } from "./clock.js";
+import { exactRatioIsCanonical, videoSourceMappingIsValid } from "./media.js";
 
 // ── Browser adapter boundary ──
 
@@ -293,7 +294,7 @@ type OperationFailureCode = Exclude<
 >;
 
 function response(requestId: number, event: BrowserEvent): BrowserResponse {
-  return decodeBrowserResponse({ version: 1, requestId, event });
+  return decodeBrowserResponse({ version: 2, requestId, event });
 }
 
 function invalidRequest(requestId: number, message: string): BrowserResponse {
@@ -347,6 +348,9 @@ function readinessFailure(
 }
 
 function planViolation(plan: BrowserPlan): string | undefined {
+  if (!exactRatioIsCanonical(plan.frameRate)) {
+    return "plan frame rate is not canonical";
+  }
   if (plan.timeline.start >= plan.timeline.end) {
     return "plan timeline interval is empty or reversed";
   }
@@ -426,6 +430,9 @@ function planViolation(plan: BrowserPlan): string | undefined {
     }
     if (!insideInterval(video.interval, shotInterval)) {
       return "plan video interval falls outside its shot";
+    }
+    if (!videoSourceMappingIsValid(video, plan.frameRate)) {
+      return "plan video source mapping disagrees with its interval";
     }
   }
 
@@ -606,6 +613,10 @@ function snapshotVideo(
     assetId: video.assetId,
     interval: Object.freeze({ ...video.interval }),
     sourceFrameRate: Object.freeze({ ...video.sourceFrameRate }),
+    source: Object.freeze({
+      ...video.source,
+      playbackRate: Object.freeze({ ...video.source.playbackRate }),
+    }),
   });
 }
 

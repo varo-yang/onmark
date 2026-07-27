@@ -134,6 +134,15 @@ timing error。
 `整数[.小数](s|ms)`，不允许空白或正负号。秒最多九位小数，毫秒最多六位小数，因此每个合法值都能精确表示为无符号整数纳秒。shot 的
 `duration` 必须大于零；cue time 与 delay 可以为零。语言不接受帧单位或浮点近似。
 
+video 可以用 `trim="起点..终点"` 选择素材内部的半开区间。两个边界可省略其一，但不能同时省略：
+省略起点表示素材零点，省略终点表示探测到的素材末端。边界沿用上述 duration 文法，并且必须满足
+`起点 < 终点 <= 素材时长`。
+
+video 可以用 `speed="整数[.小数]x"` 按精确的正倍率播放所选素材区间。小数最多六位，
+默认值为 `1x`。编译器把十进制约分为有理数，并以“所选素材时长除以倍率”推导局部时长。
+这两个属性都不表达 film 时间线坐标，并且只作用于选中的视觉流；作者显式声明的
+`music`、`sfx` 与 `vo` 仍是独立音频角色，不继承 video 的素材区间或播放倍率。
+
 编译器使用整数运算把精确纳秒映射到有理数帧网格。每次换算都必须在调用点明确选择向下或向上取整；隐式 cast 或环境默认值不得决定帧边界。当前 authored 起点、delay、cue
 time 和 duration 都选择不早于精确值的第一个帧边界（`Ceil`），因此正的亚帧值不会被静默压成零帧。`Floor`
 只保留给明确要求归属到更早边界的规则。
@@ -233,7 +242,8 @@ error，不能静默裁掉尾部。
 
 结构 bind 之后执行属性与引用 resolve。`film`、`cues`、`scene`
 不接受 ID 以外的属性；`cue` 必须有 `id` 与 `time`；`shot` 可有
-`duration`；`video`、`vo` 可有 `src` 与 `delay`；`title`、`cta` 可有 `cue` 或
+`duration`；`video` 可有 `src`、`delay`、`trim` 与 `speed`，`vo` 可有 `src`
+与 `delay`；`title`、`cta` 可有 `cue` 或
 `delay`；`music` 必须有 `src`，可有 `gain`；`sfx` 必须有 `src`，可有 `delay`
 与 `gain`。同一个 overlay 不能同时写 `cue` 与
 `delay`，因为两者定义互相竞争的起点规则。`video` 或 `vo` 缺少 `src`
@@ -302,6 +312,7 @@ ONM-TIME-004 标题“立即购买”从第 13 秒开始，但所属 shot 在第
 | `ONM-TIME-004`   | 已解析 shot 内容的起点或末端落在所属 shot 外  |
 | `ONM-TIME-005`   | 精确时间无法装入所选帧域                      |
 | `ONM-TIME-006`   | film 没有求解出任何持续时间为正的 shot        |
+| `ONM-TIME-007`   | video 所选素材区间落在冻结素材范围之外        |
 | `ONM-ASSET-001`  | 可渲染媒体没有冻结素材引用                    |
 | `ONM-ASSET-002`  | 媒体元素引用的素材没有所需轨道                |
 | `ONM-REF-001`    | 格式良好的 overlay cue 引用没有指向已解析 cue |

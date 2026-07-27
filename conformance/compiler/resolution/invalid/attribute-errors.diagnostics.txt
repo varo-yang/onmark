@@ -15,16 +15,20 @@ ONM-ATTR-003 error @0:324..324 attribute "src" is invalid: asset reference canno
   help: provide a screenplay-relative path for "src"
 ONM-TIME-001 error @0:333..344 duration "1.0000001ms" is invalid: duration exceeds the supported fractional precision
   help: use an exact duration such as 3s, 500ms, or 1.5s
-ONM-ATTR-001 error @0:346..353 attribute "mystery" is not allowed on <video>
+ONM-ATTR-003 error @0:352..358 video trim "3s..2s" is invalid: trim end must be after its start
+  help: use a source interval such as 3s..8s, 3s.., or ..8s
+ONM-ATTR-003 error @0:367..369 video speed "0x" is invalid: speed must be greater than zero
+  help: use an exact positive rate such as 1x, 0.5x, or 2x
+ONM-ATTR-001 error @0:371..378 attribute "mystery" is not allowed on <video>
   help: remove the "mystery" attribute
-ONM-REF-001 error @0:388..395 cue "missing" is not declared as a resolved event
+ONM-REF-001 error @0:413..420 cue "missing" is not declared as a resolved event
   help: declare this cue with a valid id and time, or use another cue
-ONM-ATTR-004 error @0:397..402 attributes "cue" and "delay" define conflicting start rules
+ONM-ATTR-004 error @0:422..427 attributes "cue" and "delay" define conflicting start rules
   help: keep either "cue" or "delay", not both
-  related @0:383..386 "cue" is first authored here
-ONM-ATTR-001 error @0:408..415 attribute "strange" is not allowed on <om-title>
+  related @0:408..411 "cue" is first authored here
+ONM-ATTR-001 error @0:433..440 attribute "strange" is not allowed on <om-title>
   help: remove the "strange" attribute
-ONM-ATTR-003 error @0:496..503 attribute "cue" is invalid: node ID cannot contain ASCII whitespace
+ONM-ATTR-003 error @0:521..528 attribute "cue" is invalid: node ID cannot contain ASCII whitespace
   help: use a non-empty cue ID without ASCII whitespace
-ONM-TIME-001 error @0:572..574 duration "0s" is invalid: duration must be greater than zero
+ONM-TIME-001 error @0:597..599 duration "0s" is invalid: duration must be greater than zero
   help: use an exact duration such as 3s, 500ms, or 1.5s

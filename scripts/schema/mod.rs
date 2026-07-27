@@ -14,12 +14,12 @@ use serde_json::Value;
 pub(super) fn generate(repository: &Path, mode: GenerationMode) -> Result<(), Box<dyn Error>> {
     let artifacts = [
         SchemaArtifact::new::<BrowserRequest>(
-            "https://onmark.dev/schemas/browser-request-v1.schema.json",
-            "browser-request-v1.schema.json",
+            "https://onmark.dev/schemas/browser-request-v2.schema.json",
+            "browser-request-v2.schema.json",
         )?,
         SchemaArtifact::new::<BrowserResponse>(
-            "https://onmark.dev/schemas/browser-response-v1.schema.json",
-            "browser-response-v1.schema.json",
+            "https://onmark.dev/schemas/browser-response-v2.schema.json",
+            "browser-response-v2.schema.json",
         )?,
         SchemaArtifact::new::<BundleManifest>(
             "https://onmark.dev/schemas/bundle-manifest-v1.schema.json",

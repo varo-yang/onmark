@@ -20,14 +20,14 @@ const MAX_PENDING_RESOURCE_CHARACTERS: usize = 1_024;
 
 /// Version of the native-to-browser message contract.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[cfg_attr(feature = "schema", schemars(extend("const" = 1)))]
+#[cfg_attr(feature = "schema", schemars(extend("const" = 2)))]
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(transparent)]
 pub struct ProtocolVersion(u16);
 
 impl ProtocolVersion {
     /// Only browser protocol version accepted by this build.
-    pub const CURRENT: Self = Self(1);
+    pub const CURRENT: Self = Self(2);
 
     /// Returns the stable integer representation.
     #[must_use]
@@ -421,7 +421,7 @@ mod tests {
     #[test]
     fn rejects_an_unsupported_deserialized_protocol_version() {
         let encoded = serde_json::json!({
-            "version": 2,
+            "version": 3,
             "requestId": 1,
             "event": { "type": "loaded" },
         });
@@ -431,7 +431,7 @@ mod tests {
     #[test]
     fn rejects_an_unsafe_response_frame() {
         let encoded = serde_json::json!({
-            "version": 1,
+            "version": 2,
             "requestId": 1,
             "event": {
                 "type": "frameReady",
@@ -444,7 +444,7 @@ mod tests {
     #[test]
     fn rejects_the_removed_runtime_state_hash() {
         let encoded = serde_json::json!({
-            "version": 1,
+            "version": 2,
             "requestId": 1,
             "event": {
                 "type": "frameReady",
@@ -458,7 +458,7 @@ mod tests {
     #[test]
     fn rejects_a_blank_deserialized_failure_message() {
         let encoded = serde_json::json!({
-            "version": 1,
+            "version": 2,
             "requestId": 1,
             "event": {
                 "type": "failed",

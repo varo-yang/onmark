@@ -367,7 +367,7 @@ test("releases prior extensions when later motion binding fails", async () => {
 // ── Fixture ──
 
 const PLAN: RuntimePlan = {
-  timelineVersion: 1,
+  timelineVersion: 2,
   frameRate: { numerator: 30, denominator: 1 },
   timeline: { start: 0, end: 90 },
   evaluation: { start: 0, end: 60 },
@@ -394,6 +394,12 @@ const PLAN: RuntimePlan = {
         "sha256:0101010101010101010101010101010101010101010101010101010101010101",
       interval: { start: 0, end: 60 },
       sourceFrameRate: { numerator: 30, denominator: 1 },
+      source: {
+        startNanoseconds: "0",
+        endNanoseconds: "2000000000",
+        naturalEndNanoseconds: "2000000000",
+        playbackRate: { numerator: 1, denominator: 1 },
+      },
     },
   ],
   overlays: [

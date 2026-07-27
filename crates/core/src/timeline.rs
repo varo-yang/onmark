@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 
 use crate::model::{
     AudioGain, CueId, ElementKind, EventRef, FrameIndex, FrameInterval, FrozenAssetId,
-    GeneralAudioKind, NodeId, SourceSpan, Timebase,
+    GeneralAudioKind, MediaSource, NodeId, SourceSpan, Timebase,
 };
 
 /// Version of the Timeline IR contract.
@@ -16,7 +16,7 @@ pub struct TimelineVersion(u16);
 
 impl TimelineVersion {
     /// Only Timeline IR version accepted by this build.
-    pub const CURRENT: Self = Self(1);
+    pub const CURRENT: Self = Self(2);
 
     /// Returns the stable integer representation.
     #[must_use]
@@ -378,6 +378,7 @@ pub struct TimelineVideo {
     element: TimelineElement,
     timing: TimelineTiming,
     asset_id: FrozenAssetId,
+    source: MediaSource,
 }
 
 impl TimelineVideo {
@@ -385,11 +386,13 @@ impl TimelineVideo {
         element: TimelineElement,
         timing: TimelineTiming,
         asset_id: FrozenAssetId,
+        source: MediaSource,
     ) -> Self {
         Self {
             element,
             timing,
             asset_id,
+            source,
         }
     }
 
@@ -409,6 +412,12 @@ impl TimelineVideo {
     #[must_use]
     pub const fn asset_id(&self) -> FrozenAssetId {
         self.asset_id
+    }
+
+    /// Returns the exact source interval and playback ratio.
+    #[must_use]
+    pub const fn source(&self) -> MediaSource {
+        self.source
     }
 }
 
@@ -693,6 +702,8 @@ pub enum TimingReason {
     ExplicitDuration(SourceSpan),
     /// Duration measured from a frozen media artifact.
     AssetDuration,
+    /// End of a selected video source interval after exact-rate playback.
+    SourcePlayback,
     /// The primary content whose end determines its owning shot.
     LongestContent(SourceSpan),
     /// Bounds derived from sequential children.
@@ -715,6 +726,7 @@ impl TimingReason {
             Self::Event { .. } => "event",
             Self::ExplicitDuration(_) => "explicitDuration",
             Self::AssetDuration => "assetDuration",
+            Self::SourcePlayback => "sourcePlayback",
             Self::LongestContent(_) => "longestContent",
             Self::Children => "children",
             Self::ShotEnd => "shotEnd",
@@ -734,6 +746,7 @@ impl TimingReason {
             | Self::Sequential
             | Self::ShotStart
             | Self::AssetDuration
+            | Self::SourcePlayback
             | Self::Children
             | Self::ShotEnd
             | Self::FilmEnd => None,
@@ -751,6 +764,7 @@ impl TimingReason {
             | Self::AuthoredDelay(_)
             | Self::ExplicitDuration(_)
             | Self::AssetDuration
+            | Self::SourcePlayback
             | Self::LongestContent(_)
             | Self::Children
             | Self::ShotEnd

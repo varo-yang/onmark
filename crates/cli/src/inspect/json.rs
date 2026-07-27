@@ -2,7 +2,7 @@
 
 use std::io::{self, Write};
 
-use onmark_core::model::{EventRef, FrameInterval, NodeId, SourceSpan};
+use onmark_core::model::{EventRef, FrameInterval, MediaSource, NodeId, PlaybackRate, SourceSpan};
 use onmark_core::timeline::{
     TimelineAudio, TimelineCaption, TimelineContent, TimelineElement, TimelineEvent, TimelineIr,
     TimelineScene, TimelineShot, TimelineText, TimelineTiming, TimingReason,
@@ -12,7 +12,7 @@ use serde::Serialize;
 use crate::check::{Inspection, RegionInspection, Validation};
 use crate::diagnostic::JsonDiagnostic;
 
-const REPORT_VERSION: u16 = 1;
+const REPORT_VERSION: u16 = 2;
 
 pub(super) fn write(validation: &Validation) -> io::Result<()> {
     let report = &validation.report;
@@ -217,6 +217,8 @@ struct JsonContent<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     asset_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    source: Option<JsonMediaSource>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     text: Option<String>,
 }
 
@@ -227,20 +229,59 @@ impl<'a> From<&'a TimelineContent> for JsonContent<'a> {
                 element: video.element().into(),
                 timing: video.timing().into(),
                 asset_id: Some(video.asset_id().to_string()),
+                source: Some(video.source().into()),
                 text: None,
             },
             TimelineContent::VoiceOver(voice_over) => Self {
                 element: voice_over.element().into(),
                 timing: voice_over.timing().into(),
                 asset_id: Some(voice_over.asset_id().to_string()),
+                source: None,
                 text: Some(text(voice_over.text())),
             },
             TimelineContent::Overlay(overlay) => Self {
                 element: overlay.element().into(),
                 timing: overlay.timing().into(),
                 asset_id: None,
+                source: None,
                 text: Some(text(overlay.text())),
             },
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct JsonMediaSource {
+    start_nanoseconds: String,
+    end_nanoseconds: String,
+    natural_end_nanoseconds: String,
+    playback_rate: JsonPlaybackRate,
+}
+
+impl From<MediaSource> for JsonMediaSource {
+    fn from(source: MediaSource) -> Self {
+        let interval = source.interval();
+        Self {
+            start_nanoseconds: interval.start().as_nanos().to_string(),
+            end_nanoseconds: interval.end().as_nanos().to_string(),
+            natural_end_nanoseconds: source.natural_duration().as_nanos().to_string(),
+            playback_rate: source.playback_rate().into(),
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct JsonPlaybackRate {
+    numerator: u32,
+    denominator: u32,
+}
+
+impl From<PlaybackRate> for JsonPlaybackRate {
+    fn from(rate: PlaybackRate) -> Self {
+        Self {
+            numerator: rate.numerator(),
+            denominator: rate.denominator(),
         }
     }
 }
@@ -374,7 +415,10 @@ impl<'a> From<&'a RegionInspection> for JsonRegion<'a> {
 mod tests {
     use std::collections::BTreeMap;
 
-    use onmark_core::model::{FrameRate, Timebase};
+    use onmark_core::model::{
+        AssetMetadata, AssetRef, Duration, FrameRate, FrozenAsset, FrozenAssetId, Timebase,
+        VideoDimensions, VideoMetadata, VideoTiming,
+    };
 
     use super::JsonTimeline;
     use crate::compilation;
@@ -420,5 +464,59 @@ mod tests {
             document["scenes"][0]["shots"][0]["content"][0]["text"],
             "Exact.",
         );
+    }
+
+    #[test]
+    fn projects_exact_video_source_facts() {
+        let source = concat!(
+            "<om-film><om-scene><om-shot>",
+            r#"<video src="clip.mp4" trim="4s..10s" speed="2x"></video>"#,
+            "</om-shot></om-scene></om-film>",
+        );
+        let (film, diagnostics) = compilation::resolve(source).into_parts();
+        assert!(diagnostics.is_empty());
+        let rate = FrameRate::new(30, 1).expect("the fixture rate is valid");
+        let assets = BTreeMap::from([fixture_video("clip.mp4", rate)]);
+        let (timeline, diagnostics) = compilation::solve(
+            film.expect("the fixture resolves"),
+            &assets,
+            Timebase::new(rate),
+            diagnostics,
+        )
+        .expect("the fixture solves")
+        .into_parts();
+        assert!(diagnostics.is_empty());
+
+        let document = serde_json::to_value(JsonTimeline::from(
+            &timeline.expect("the fixture produces Timeline IR"),
+        ))
+        .expect("the inspection projection serializes");
+        let video = &document["scenes"][0]["shots"][0]["content"][0];
+
+        assert_eq!(video["source"]["startNanoseconds"], "4000000000");
+        assert_eq!(video["source"]["endNanoseconds"], "10000000000");
+        assert_eq!(video["source"]["naturalEndNanoseconds"], "12000000000");
+        assert_eq!(video["source"]["playbackRate"]["numerator"], 2);
+        assert_eq!(video["source"]["playbackRate"]["denominator"], 1);
+    }
+
+    fn fixture_video(asset: &str, rate: FrameRate) -> (AssetRef, FrozenAsset) {
+        let duration = Duration::parse("12s").expect("the fixture duration is valid");
+        let dimensions =
+            VideoDimensions::new(1_920, 1_080).expect("fixture dimensions are positive");
+        let video = VideoMetadata::new(
+            duration,
+            dimensions,
+            "h264",
+            "yuv420p",
+            VideoTiming::Constant(rate),
+        )
+        .expect("the fixture video metadata is normalized");
+        let metadata = AssetMetadata::video(duration, video);
+
+        (
+            AssetRef::parse(asset).expect("the fixture asset reference is valid"),
+            FrozenAsset::new(FrozenAssetId::from_sha256([1; 32]), metadata),
+        )
     }
 }
