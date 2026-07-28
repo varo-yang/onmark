@@ -4,11 +4,18 @@
 //! human-readable line and column locations.
 
 use std::io::{self, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use onmark_core::diagnostics::{Diagnostic, RelatedDiagnostic, Severity};
 use onmark_core::model::{ByteOffset, SourceSpan};
 use serde::Serialize;
+
+/// One authored source and the structured diagnostics anchored into it.
+pub(super) struct AuthoredReport {
+    pub(super) path: PathBuf,
+    pub(super) source: String,
+    pub(super) diagnostics: Vec<Diagnostic>,
+}
 
 pub(super) fn write_all(
     writer: &mut impl Write,

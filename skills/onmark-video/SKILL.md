@@ -1,6 +1,6 @@
 ---
 name: onmark-video
-description: Create, edit, validate, inspect, benchmark, or render deterministic Onmark videos from one HTML screenplay. Use for Onmark film.html files, screenplay timing, semantic video/audio/caption elements, CSS/Canvas/WebGL presentation, seekable frame motion, CLI diagnostics, incremental rendering, or delivery and ProRes exports.
+description: Create, edit, validate, inspect, snapshot, benchmark, or render deterministic Onmark videos from one HTML screenplay. Use for Onmark film.html files, screenplay timing, semantic video/audio/caption elements, CSS/Canvas/WebGL presentation, seekable frame motion, CLI diagnostics, exact visual feedback, incremental rendering, or delivery and ProRes exports.
 ---
 
 # Onmark video
@@ -70,10 +70,13 @@ Run the cheapest authoritative command that answers the current question:
 1. `onmark check film.html --json` after every structural or timing edit.
 2. `onmark inspect film.html --json` when reasoning about frames, partitions,
    execution paths, or bundle identity.
-3. `onmark render film.html --output draft.mp4` after validation succeeds.
-4. Re-run the same command after edits; Onmark reuses only verified unchanged
+3. `onmark snapshot film.html --frame 42 --json` to inspect an exact production
+   frame before paying for a complete encode. Choose the frame from `inspect`;
+   do not convert guessed seconds in prompt text.
+4. `onmark render film.html --output draft.mp4` after selected frames are sound.
+5. Re-run the same command after edits; Onmark reuses only verified unchanged
    regions.
-5. `onmark benchmark film.html --runs 3 --json` only for measured performance
+6. `onmark benchmark film.html --runs 3 --json` only for measured performance
    work.
 
 Treat exit code 1 as authored diagnostics to fix at their reported spans. Treat
@@ -82,8 +85,9 @@ rewriting the screenplay blindly. Never hide a failure by changing tools,
 capture modes, frame rates, or output profiles.
 
 Use `onmark doctor --json` to diagnose the local toolchain and `onmark info
---json` to record product identity. Do not invoke Chromium directly or construct
-a private FFmpeg pipeline.
+--json` to record product identity. Treat a snapshot as pixel evidence, not a
+replacement for watching the completed motion. Do not invoke Chromium directly
+or construct a private FFmpeg pipeline.
 
 ## Deliver
 

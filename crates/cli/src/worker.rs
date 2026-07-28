@@ -3,7 +3,6 @@
 //! The command accepts the same serialized worker request as deployment and
 //! deliberately bypasses source parsing, asset probing, and graph planning.
 
-use std::fs;
 use std::io::{self, Write as _};
 use std::path::Path;
 use std::process::ExitCode;
@@ -19,6 +18,7 @@ use crate::environment;
 use crate::execution;
 use crate::failure::CliError;
 use crate::input;
+use crate::output;
 
 pub(super) struct WorkerOutcome {
     artifact: FrameArtifact,
@@ -62,7 +62,7 @@ pub(super) async fn run(args: WorkerArgs, json: bool) -> Result<WorkerOutcome, C
 
 async fn capture(args: WorkerCaptureArgs, json: bool) -> Result<WorkerOutcome, CliError> {
     let browser = environment::worker_browser(&args.browser)?;
-    create_output_directory(&args.output)?;
+    output::create_parent(&args.output)?;
     let request = read_request(&args.input)?;
     let capture_environment = request.capture_environment();
     let input = args.input.clone();
@@ -108,12 +108,4 @@ fn read_request(input: &Path) -> Result<WorkerCaptureRequest, CliError> {
     let source = input::read_utf8(&path, WorkerCaptureRequest::MAX_JSON_BYTES)
         .map_err(|source| CliError::read_worker_request(&path, source))?;
     serde_json::from_str(&source).map_err(|source| CliError::parse_worker_request(&path, source))
-}
-
-fn create_output_directory(output: &Path) -> Result<(), CliError> {
-    let parent = output
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-        .unwrap_or_else(|| Path::new("."));
-    fs::create_dir_all(parent).map_err(|source| CliError::create_output_directory(parent, source))
 }

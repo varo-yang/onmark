@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use onmark_core::compiler;
 use onmark_core::model::{
-    AssetRef, FrameRate, FrozenAsset, FrozenAssetId, PresentationTemporalCapability,
+    AssetRef, FrameIndex, FrameRate, FrozenAsset, FrozenAssetId, PresentationTemporalCapability,
     PresentationVisualCapability, SourceId, Timebase,
 };
 use onmark_core::protocol::{
@@ -181,6 +181,167 @@ async fn captures_stable_raw_rgba_frames_across_independent_browser_sessions() {
         first, second,
         "locked browser sessions must capture equal RGBA"
     );
+}
+
+#[tokio::test]
+#[ignore = "requires ONMARK_BUNDLER, ONMARK_FFMPEG, and a supported browser"]
+async fn exact_snapshot_matches_the_same_frame_in_a_complete_artifact() {
+    let directory = tempdir().expect("the experiment workspace must be available");
+    let bundle = FixtureBundle::build_temporal(directory.path()).await;
+    let timeline = synthetic_timeline();
+    let complete = RenderUnit::whole_film(&timeline, bundle.manifest.clone(), render_profile(), [])
+        .expect("the fixture forms one production unit");
+    let frame = FrameIndex::new(17);
+    let snapshot = complete
+        .clone()
+        .into_frame(frame)
+        .expect("frame 17 lies inside the production unit");
+    let complete = bundle.materialize(complete);
+    let snapshot = bundle.materialize(snapshot);
+    let executor = layered_executor(FRAME_COUNT);
+
+    assert_exact_snapshot(
+        &executor,
+        &complete,
+        &snapshot,
+        directory.path(),
+        "browser",
+        frame,
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ignore = "requires ONMARK_BUNDLER, ONMARK_FFMPEG, ONMARK_FFPROBE, and a supported browser"]
+async fn exact_snapshot_preserves_the_admitted_layered_media_path() {
+    let directory = tempdir().expect("the experiment workspace must be available");
+    let bundle = FixtureBundle::build_layered(directory.path()).await;
+    let source = directory.path().join("source.mp4");
+    generate_source_video(&source, "2.5").await;
+    let frozen = freeze_asset(&source).await;
+    let timeline = video_timeline_fixture(frozen.clone());
+    let materialized =
+        MaterializedAsset::new(frozen, source).expect("the fixture source path is present");
+    let complete = RenderUnit::whole_film(
+        &timeline,
+        bundle.manifest.clone(),
+        render_profile(),
+        [materialized],
+    )
+    .expect("the fixture forms one admitted layered unit");
+    assert!(complete.visual_execution().layered_media().is_some());
+    let frame = FrameIndex::new(17);
+    let snapshot = complete
+        .clone()
+        .into_frame(frame)
+        .expect("frame 17 lies inside the layered unit");
+    assert!(snapshot.visual_execution().layered_media().is_some());
+    let complete = bundle.materialize(complete);
+    let snapshot = bundle.materialize(snapshot);
+    let executor = layered_executor(FRAME_COUNT);
+
+    assert_exact_snapshot(
+        &executor,
+        &complete,
+        &snapshot,
+        directory.path(),
+        "layered",
+        frame,
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ignore = "requires ONMARK_BUNDLER, ONMARK_FFMPEG, ONMARK_FFPROBE, and a supported browser"]
+async fn exact_snapshot_preserves_the_admitted_backdrop_media_path() {
+    let directory = tempdir().expect("the experiment workspace must be available");
+    let source = repository().join("conformance/browser/backdrop-sequence.html");
+    let bundle = FixtureBundle::build_from(
+        directory.path(),
+        "snapshot-backdrop-bundle",
+        &source,
+        "randomAccess",
+        "separableBackdrop",
+        "perFrame",
+        TWO_SHOT_PROJECTION,
+    )
+    .await;
+    let video_path = directory.path().join("source.mp4");
+    generate_source_video(&video_path, "1").await;
+    let video = freeze_asset(&video_path).await;
+    let assets = BTreeMap::from([(asset_ref("source.mp4"), video.clone())]);
+    let screenplay = fs::read_to_string(source).expect("the backdrop screenplay is readable");
+    let timeline = solve_timeline(&screenplay, &assets);
+    let materialized =
+        MaterializedAsset::new(video, video_path).expect("the backdrop source path is present");
+    let complete = RenderUnit::whole_film(
+        &timeline,
+        bundle.manifest.clone(),
+        render_profile(),
+        [materialized],
+    )
+    .expect("the fixture forms one admitted backdrop unit");
+    assert!(complete.visual_execution().backdrop_media().is_some());
+    let frame = FrameIndex::new(17);
+    let snapshot = complete
+        .clone()
+        .into_frame(frame)
+        .expect("frame 17 lies inside the backdrop unit");
+    assert!(snapshot.visual_execution().backdrop_media().is_some());
+    let complete = bundle.materialize(complete);
+    let snapshot = bundle.materialize(snapshot);
+    let executor = layered_executor(TWO_UNIT_FRAME_COUNT);
+
+    assert_exact_snapshot(
+        &executor,
+        &complete,
+        &snapshot,
+        directory.path(),
+        "backdrop",
+        frame,
+    )
+    .await;
+}
+
+async fn assert_exact_snapshot(
+    executor: &RenderExecutor,
+    complete: &ExecutableUnit,
+    snapshot: &ExecutableUnit,
+    directory: &Path,
+    name: &str,
+    frame: FrameIndex,
+) {
+    let complete_path = directory.join(format!("complete-{name}.onmark-frames"));
+    let snapshot_path = directory.join(format!("snapshot-{name}.onmark-frames"));
+    let complete_artifact = executor
+        .capture_frame_artifact(
+            complete,
+            capture_environment(),
+            &complete_path,
+            frame_artifact_limits(),
+        )
+        .await
+        .expect("the complete production artifact captures");
+    let snapshot_artifact = executor
+        .capture_frame_artifact(
+            snapshot,
+            capture_environment(),
+            &snapshot_path,
+            frame_artifact_limits(),
+        )
+        .await
+        .expect("the exact snapshot artifact captures");
+    let position = frame.get() - complete.browser_plan().output().start().get();
+    let expected = complete_artifact
+        .frame(position)
+        .await
+        .expect("the complete artifact retains the selected frame");
+    let actual = snapshot_artifact
+        .single_frame()
+        .await
+        .expect("the snapshot artifact retains exactly one frame");
+
+    assert_eq!(actual.raw_rgba_hash(), expected.raw_rgba_hash());
 }
 
 #[tokio::test]

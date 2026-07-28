@@ -20,8 +20,10 @@ mod failure;
 mod info;
 mod input;
 mod inspect;
+mod output;
 mod progress;
 mod render;
+mod snapshot;
 mod subtitle;
 mod worker;
 
@@ -51,6 +53,9 @@ async fn main() -> ExitCode {
         Command::Render(args) => render::run(args, json)
             .await
             .map(render::RenderOutcome::write),
+        Command::Snapshot(args) => snapshot::run(args, json)
+            .await
+            .map(snapshot::SnapshotOutcome::write),
         Command::Worker(args) => worker::run(args, json)
             .await
             .map(worker::WorkerOutcome::write),

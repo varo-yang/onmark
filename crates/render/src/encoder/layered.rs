@@ -84,6 +84,8 @@ pub(crate) struct LayeredMediaInput {
     pub(crate) path: PathBuf,
     pub(crate) source_frame_rate: WireFrameRate,
     pub(crate) source: MediaSource,
+    /// Selected output frames skipped before this unit begins publishing.
+    pub(crate) source_skip: u64,
     pub(crate) frames: u64,
 }
 

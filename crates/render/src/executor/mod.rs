@@ -857,13 +857,15 @@ fn layered_media_input(
             "layered render unit does not contain one primary video",
         ));
     };
-    let frames = unit
-        .browser_plan()
-        .output()
-        .end()
-        .get()
-        .checked_sub(unit.browser_plan().output().start().get())
-        .ok_or_else(|| invalid_plan(output, "layered render unit has a reversed output"))?;
+    let published = unit.browser_plan().output();
+    if !video.interval().contains_interval(published) {
+        return Err(invalid_plan(
+            output,
+            "layered media does not cover the published interval",
+        ));
+    }
+    let source_skip = published.start().get() - video.interval().start().get();
+    let frames = published.end().get() - published.start().get();
     Ok(LayeredMediaInput {
         path,
         source_frame_rate: video.source_timing().constant_frame_rate().ok_or_else(|| {
@@ -873,6 +875,7 @@ fn layered_media_input(
             )
         })?,
         source: video.source().media_source(),
+        source_skip,
         frames,
     })
 }

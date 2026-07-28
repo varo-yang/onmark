@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use onmark_render::BrowserCaptureMode;
 
-use crate::arguments::{DoctorArgs, RenderArgs, ValidationArgs};
+use crate::arguments::{DoctorArgs, RenderArgs, SnapshotArgs, ValidationArgs};
 use crate::browser_install::{self, BrowserInstallError};
 use crate::bundler::BundlerProcess;
 
@@ -37,16 +37,36 @@ pub(super) struct Executables {
 
 impl Executables {
     pub(super) async fn discover(args: &RenderArgs) -> Result<Self, EnvironmentError> {
-        let browser = browser(args.browser.as_deref()).await?;
-        let bundler = bundler(&args.bundler)?;
-        let ffmpeg = locate("FFmpeg", &args.ffmpeg)?;
-        let ffprobe = locate("ffprobe", &args.ffprobe)?;
+        Self::discover_with(
+            args.browser.as_deref(),
+            &args.bundler,
+            &args.ffmpeg,
+            &args.ffprobe,
+        )
+        .await
+    }
 
+    pub(super) async fn discover_snapshot(args: &SnapshotArgs) -> Result<Self, EnvironmentError> {
+        Self::discover_with(
+            args.browser.as_deref(),
+            &args.validation.bundler,
+            &args.ffmpeg,
+            &args.validation.ffprobe,
+        )
+        .await
+    }
+
+    async fn discover_with(
+        browser_override: Option<&Path>,
+        bundler_override: &Path,
+        ffmpeg_override: &Path,
+        ffprobe_override: &Path,
+    ) -> Result<Self, EnvironmentError> {
         Ok(Self {
-            browser,
-            bundler,
-            ffmpeg,
-            ffprobe,
+            browser: browser(browser_override).await?,
+            bundler: bundler(bundler_override)?,
+            ffmpeg: locate("FFmpeg", ffmpeg_override)?,
+            ffprobe: locate("ffprobe", ffprobe_override)?,
         })
     }
 }

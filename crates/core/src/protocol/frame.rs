@@ -213,7 +213,9 @@ impl WireInterval {
         self.end
     }
 
-    pub(super) const fn contains_interval(self, other: Self) -> bool {
+    /// Returns whether `other` is bounded by this wire interval.
+    #[must_use]
+    pub const fn contains_interval(self, other: Self) -> bool {
         self.start.get() <= other.start.get() && other.end.get() <= self.end.get()
     }
 

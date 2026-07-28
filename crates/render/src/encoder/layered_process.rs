@@ -66,7 +66,10 @@ fn validate_inputs(job: &LayeredJob) -> Result<(), EncodeError> {
             let planned = media
                 .iter()
                 .try_fold(0_u64, |total, media| total.checked_add(media.frames));
-            planned == Some(job.frames) && media.iter().all(|media| media.frames != 0)
+            planned == Some(job.frames)
+                && media.iter().all(|media| {
+                    media.frames != 0 && media.source_skip.checked_add(media.frames).is_some()
+                })
         }
         LayeredInputs::BrowserBase(media) => media.iter().all(|media| {
             media.frames != 0
@@ -299,17 +302,22 @@ fn append_media_filter(
     output_rate: WireFrameRate,
 ) {
     let selection = source_selection_filter(media.source_frame_rate, output_rate, media.source);
+    let end = media
+        .source_skip
+        .checked_add(media.frames)
+        .expect("validated layered source frames fit their accounting domain");
     write!(
         filter,
         concat!(
-            "[{index}:v]{selection},trim=start_frame=0:end_frame={frames},",
+            "[{index}:v]{selection},trim=start_frame={skip}:end_frame={end},",
             "setpts=PTS-STARTPTS,",
             "scale=in_range=limited:in_color_matrix=bt709:",
             "out_range=full:out_color_matrix=bt709,format=rgba[base{index}];",
         ),
         index = index,
         selection = selection,
-        frames = media.frames,
+        skip = media.source_skip,
+        end = end,
     )
     .expect("writing an FFmpeg filter into a String cannot fail");
 }
@@ -504,6 +512,25 @@ mod tests {
     }
 
     #[test]
+    fn trims_layered_media_to_the_published_source_window() {
+        let rate = FrameRate::new(30, 1).expect("the fixture rate is valid");
+        let mut media = media("film.mp4", 1, rate);
+        media.source_skip = 17;
+        let job = LayeredJob {
+            inputs: LayeredInputs::VideoBase(vec![media]),
+            output_frame_rate: rate.into(),
+            frames: 1,
+            profile: RenderProfile::new(320, 180).expect("the fixture profile is valid"),
+            destination: LayeredOutput::Frames,
+            diagnostic_path: PathBuf::from("artifact.onmark-frames"),
+        };
+
+        let filter = composition_filter(&job);
+
+        assert!(filter.contains("trim=start_frame=17:end_frame=18"));
+    }
+
+    #[test]
     fn places_native_media_above_the_browser_backdrop() {
         let rate = FrameRate::new(30, 1).expect("the fixture rate is valid");
         let job = LayeredJob {
@@ -539,6 +566,7 @@ mod tests {
             path: PathBuf::from(path),
             source_frame_rate: rate.into(),
             source: identity_source(),
+            source_skip: 0,
             frames,
         }
     }

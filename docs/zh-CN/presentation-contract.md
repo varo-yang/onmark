@@ -23,6 +23,12 @@ interval；HTML、CSS、Canvas、WebGL、GSAP、Three.js 等 browser library 可
 onmark render film.html
 ```
 
+创作过程中可以在不编码完整影片的前提下捕获一张精确 production frame：
+
+```bash
+onmark snapshot film.html --frame 42
+```
+
 CSS 直接写在普通 HTML 中：
 
 ```html
