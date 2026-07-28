@@ -376,8 +376,8 @@ mod tests {
     use std::collections::BTreeMap;
 
     use crate::model::{
-        AudioGain, ByteOffset, ElementKind, FrameIndex, FrameInterval, FrameRate, FrozenAssetId,
-        PresentationTemporalCapability, SourceId, SourceSpan, Timebase,
+        AudioEnvelope, AudioGain, ByteOffset, ElementKind, FrameIndex, FrameInterval, FrameRate,
+        FrozenAssetId, PresentationTemporalCapability, SourceId, SourceSpan, Timebase,
     };
     use crate::timeline::{
         TimelineAudio, TimelineAudioKind, TimelineElement, TimelineIr, TimelineScene, TimelineShot,
@@ -464,6 +464,7 @@ mod tests {
             timing(audio_interval),
             asset,
             AudioGain::new(1, 2).expect("one half is a valid gain"),
+            AudioEnvelope::NONE,
             TimelineAudioKind::Music,
         );
         let rate = FrameRate::new(30, 1).expect("30 fps is valid");

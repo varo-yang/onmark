@@ -386,6 +386,7 @@ pub struct ResolvedAudio {
     src: Authored<AssetRef>,
     delay: Option<Authored<Duration>>,
     gain: AudioGain,
+    envelope: ResolvedAudioEnvelope,
 }
 
 impl ResolvedAudio {
@@ -395,6 +396,7 @@ impl ResolvedAudio {
         src: Authored<AssetRef>,
         delay: Option<Authored<Duration>>,
         gain: AudioGain,
+        envelope: ResolvedAudioEnvelope,
     ) -> Self {
         Self {
             kind,
@@ -402,6 +404,7 @@ impl ResolvedAudio {
             src,
             delay,
             gain,
+            envelope,
         }
     }
 
@@ -429,16 +432,62 @@ impl ResolvedAudio {
         self.gain
     }
 
-    pub(super) fn into_parts(
-        self,
-    ) -> (
-        GeneralAudioKind,
-        ResolvedElement,
-        Authored<AssetRef>,
-        Option<Authored<Duration>>,
-        AudioGain,
-    ) {
-        (self.kind, self.element, self.src, self.delay, self.gain)
+    /// Returns authored fade lengths relative to the solved placement.
+    #[must_use]
+    pub const fn envelope(&self) -> &ResolvedAudioEnvelope {
+        &self.envelope
+    }
+
+    pub(super) fn into_parts(self) -> ResolvedAudioParts {
+        ResolvedAudioParts {
+            kind: self.kind,
+            element: self.element,
+            src: self.src,
+            delay: self.delay,
+            gain: self.gain,
+            envelope: self.envelope,
+        }
+    }
+}
+
+pub(super) struct ResolvedAudioParts {
+    pub(super) kind: GeneralAudioKind,
+    pub(super) element: ResolvedElement,
+    pub(super) src: Authored<AssetRef>,
+    pub(super) delay: Option<Authored<Duration>>,
+    pub(super) gain: AudioGain,
+    pub(super) envelope: ResolvedAudioEnvelope,
+}
+
+/// Authored amplitude ramps awaiting exact frame conversion.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ResolvedAudioEnvelope {
+    fade_in: Option<Authored<Duration>>,
+    fade_out: Option<Authored<Duration>>,
+}
+
+impl ResolvedAudioEnvelope {
+    pub(super) const fn new(
+        fade_in: Option<Authored<Duration>>,
+        fade_out: Option<Authored<Duration>>,
+    ) -> Self {
+        Self { fade_in, fade_out }
+    }
+
+    /// Returns the optional fade measured from the placement start.
+    #[must_use]
+    pub const fn fade_in(&self) -> Option<&Authored<Duration>> {
+        self.fade_in.as_ref()
+    }
+
+    /// Returns the optional fade measured back from the placement end.
+    #[must_use]
+    pub const fn fade_out(&self) -> Option<&Authored<Duration>> {
+        self.fade_out.as_ref()
+    }
+
+    pub(super) fn into_parts(self) -> (Option<Authored<Duration>>, Option<Authored<Duration>>) {
+        (self.fade_in, self.fade_out)
     }
 }
 
@@ -552,6 +601,7 @@ pub(super) struct ResolvedVideoTreatment {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ResolvedVoiceOver {
     media: ResolvedMedia,
+    envelope: ResolvedAudioEnvelope,
     text: Vec<ResolvedText>,
 }
 
@@ -560,10 +610,12 @@ impl ResolvedVoiceOver {
         element: ResolvedElement,
         src: Option<Authored<AssetRef>>,
         delay: Option<Authored<Duration>>,
+        envelope: ResolvedAudioEnvelope,
         text: Vec<ResolvedText>,
     ) -> Self {
         Self {
             media: ResolvedMedia::new(element, src, delay),
+            envelope,
             text,
         }
     }
@@ -586,14 +638,20 @@ impl ResolvedVoiceOver {
         self.media.delay()
     }
 
+    /// Returns authored fade lengths relative to the solved voice-over.
+    #[must_use]
+    pub const fn envelope(&self) -> &ResolvedAudioEnvelope {
+        &self.envelope
+    }
+
     /// Returns decoded authored inscription in source order.
     #[must_use]
     pub fn text(&self) -> &[ResolvedText] {
         &self.text
     }
 
-    pub(super) fn into_parts(self) -> (ResolvedMedia, Vec<ResolvedText>) {
-        (self.media, self.text)
+    pub(super) fn into_parts(self) -> (ResolvedMedia, ResolvedAudioEnvelope, Vec<ResolvedText>) {
+        (self.media, self.envelope, self.text)
     }
 }
 

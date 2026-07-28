@@ -453,9 +453,7 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::time::Duration;
 
-    use onmark_core::model::{
-        AudioChannelLayout, AudioGain, AudioSampleCount, FrameCount, FrameIndex, FrameRate,
-    };
+    use onmark_core::model::FrameRate;
     use onmark_core::protocol::WireFrameRate;
     use tempfile::{TempDir, tempdir};
     use tokio::time::{sleep, timeout};
@@ -560,15 +558,7 @@ mod tests {
             path: fixture.directory.path().join("visual.mp4"),
             frames: 1,
         };
-        let input = AudioInput::new(
-            0,
-            fixture.directory.path().join("voice.m4a"),
-            FrameIndex::ZERO,
-            FrameCount::new(30),
-            AudioSampleCount::new(48_000),
-            AudioChannelLayout::Stereo,
-            AudioGain::UNITY,
-        );
+        let input = AudioInput::fixture(fixture.directory.path().join("voice.m4a"));
         let rate = FrameRate::new(30, 1).expect("the fixture frame rate is valid");
 
         let error = fixture

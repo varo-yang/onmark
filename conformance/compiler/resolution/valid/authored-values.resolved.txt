@@ -5,7 +5,7 @@ film id=-
   scene id=-
     shot id=- duration=3.25s
       video id=- src=clip.mp4 delay=0.5s trim=0.25s..2.25s speed=1/2 plays=3 hold-last=1s
-      vo id=- src=voice.mp3 delay=1.5s
+      vo id=- src=voice.mp3 delay=1.5s fade-in=- fade-out=-
         text "Narration" @0:274..283
       om-title id=- start=delay:0.25s
         text "Later" @0:322..327

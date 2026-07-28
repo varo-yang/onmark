@@ -3,7 +3,7 @@
 use std::fmt;
 use std::io::{self, Write};
 
-use onmark_core::model::FrameInterval;
+use onmark_core::model::{AudioEnvelope, FrameInterval};
 use onmark_core::timeline::{
     TimelineContent, TimelineElement, TimelineIr, TimelineScene, TimelineShot, TimelineText,
     TimelineTiming, TimelineVideo,
@@ -51,12 +51,16 @@ fn write_timeline(output: &mut impl Write, timeline: &TimelineIr) -> io::Result<
         write_scene(output, index, scene)?;
     }
     for audio in timeline.general_audio() {
+        let gain = audio.gain();
         writeln!(
             output,
-            "Audio {} {} asset {}",
+            "Audio {} {} asset {} gain {}/{} {}",
             audio.kind().as_str(),
             Timing(audio.timing()),
             audio.asset_id(),
+            gain.numerator(),
+            gain.denominator(),
+            Envelope(audio.envelope()),
         )?;
     }
     for (index, caption) in timeline.captions().iter().enumerate() {
@@ -101,10 +105,11 @@ fn write_content(output: &mut impl Write, content: &TimelineContent) -> io::Resu
         TimelineContent::Video(video) => write_video(output, video),
         TimelineContent::VoiceOver(voice_over) => writeln!(
             output,
-            "    {} {} asset {} text {:?}",
+            "    {} {} asset {} {} text {:?}",
             Element(voice_over.element()),
             Timing(voice_over.timing()),
             voice_over.asset_id(),
+            Envelope(voice_over.audio().envelope()),
             text(voice_over.text()),
         ),
         TimelineContent::Overlay(overlay) => writeln!(
@@ -192,6 +197,19 @@ impl fmt::Display for Timing<'_> {
             Interval(self.0.interval()),
             self.0.start_reason().as_str(),
             self.0.end_reason().as_str(),
+        )
+    }
+}
+
+struct Envelope(AudioEnvelope);
+
+impl fmt::Display for Envelope {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "fade-in {} fade-out {}",
+            self.0.fade_in().get(),
+            self.0.fade_out().get(),
         )
     }
 }

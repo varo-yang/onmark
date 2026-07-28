@@ -10,9 +10,10 @@ use std::fmt;
 
 use crate::diagnostics::{Diagnostic, DiagnosticCode, Diagnostics};
 use crate::model::{
-    AssetMetadata, AssetRef, AudioGain, AudioMetadata, CueId, Duration, EventRef, FrameCount,
-    FrameIndex, FrameInterval, FrozenAsset, FrozenAssetId, MediaSource, MediaSourceInterval,
-    MediaTrim, PlayCount, PlaybackRate, Rounding, SourceSpan, Timebase, VideoMetadata,
+    AssetMetadata, AssetRef, AudioEnvelope, AudioGain, AudioMetadata, CueId, Duration, EventRef,
+    FrameCount, FrameIndex, FrameInterval, FrozenAsset, FrozenAssetId, MediaSource,
+    MediaSourceInterval, MediaTrim, PlayCount, PlaybackRate, Rounding, SourceSpan, Timebase,
+    VideoMetadata,
 };
 use crate::timeline::{
     TimelineAudio, TimelineAudioKind, TimelineContent, TimelineElement, TimelineEvent, TimelineIr,
@@ -22,10 +23,10 @@ use crate::timeline::{
 
 use super::diagnostic::author_diagnostic;
 use super::resolved_film::{
-    Authored, ResolvedAudio, ResolvedCues, ResolvedElement, ResolvedFilm, ResolvedFilmParts,
-    ResolvedMedia, ResolvedOverlay, ResolvedScene, ResolvedShot, ResolvedShotContent,
-    ResolvedShotParts, ResolvedStart, ResolvedText, ResolvedTransition, ResolvedVideo,
-    ResolvedVideoTreatment, ResolvedVoiceOver,
+    Authored, ResolvedAudio, ResolvedAudioEnvelope, ResolvedAudioParts, ResolvedCues,
+    ResolvedElement, ResolvedFilm, ResolvedFilmParts, ResolvedMedia, ResolvedOverlay,
+    ResolvedScene, ResolvedShot, ResolvedShotContent, ResolvedShotParts, ResolvedStart,
+    ResolvedText, ResolvedTransition, ResolvedVideo, ResolvedVideoTreatment, ResolvedVoiceOver,
 };
 
 /// Optional Timeline IR and the authored diagnostics produced while solving it.
@@ -178,7 +179,7 @@ impl<'a> Solver<'a> {
         let mut timeline_shots = Vec::with_capacity(shots.len());
 
         for shot in shots {
-            let previous = timeline_shots.last().map(PreviousShot::from_timeline);
+            let previous = timeline_shots.last();
             if let Some(shot) = self.solve_shot(shot, previous)? {
                 timeline_shots.push(shot);
             }
@@ -197,7 +198,7 @@ impl<'a> Solver<'a> {
     fn solve_shot(
         &mut self,
         shot: ResolvedShot,
-        previous: Option<PreviousShot>,
+        previous: Option<&TimelineShot>,
     ) -> Result<Option<TimelineShot>, SolveError> {
         let ResolvedShotParts {
             element,
@@ -212,7 +213,8 @@ impl<'a> Solver<'a> {
         let explicit = self.explicit_duration(duration);
         let duration = self.shot_duration(explicit, prepared.primary, source);
         let transition = self.prepare_transition(transition);
-        let Some(placement) = self.place_shot(duration, transition, previous, source) else {
+        let placement_facts = previous.map(PreviousShot::from_timeline);
+        let Some(placement) = self.place_shot(duration, transition, placement_facts, source) else {
             return Ok(None);
         };
         let content = self.lower_contents(prepared.content, placement.timing.interval());
@@ -224,6 +226,7 @@ impl<'a> Solver<'a> {
             placement.incoming_transition,
             content,
         );
+        self.report_transition_voice_over_overlap(previous, &shot);
 
         Ok(Some(shot))
     }
@@ -366,6 +369,28 @@ impl<'a> Solver<'a> {
         }
     }
 
+    fn report_transition_voice_over_overlap(
+        &mut self,
+        previous: Option<&TimelineShot>,
+        shot: &TimelineShot,
+    ) {
+        let Some(transition) = shot.incoming_transition() else {
+            return;
+        };
+        let Some(previous) = previous else {
+            return;
+        };
+        let Some((outgoing, incoming)) = overlapping_voice_overs(previous, shot) else {
+            return;
+        };
+
+        self.diagnostics.push(voice_over_transition_overlap(
+            transition.authored_at(),
+            outgoing.element().span(),
+            incoming.element().span(),
+        ));
+    }
+
     fn prepare_content(
         &mut self,
         content: ResolvedShotContent,
@@ -498,12 +523,19 @@ impl<'a> Solver<'a> {
         &mut self,
         voice_over: ResolvedVoiceOver,
     ) -> Result<Option<PreparedContent>, SolveError> {
-        let (media, text) = voice_over.into_parts();
+        let (media, envelope, text) = voice_over.into_parts();
         let Some(media) = self.prepare_media(media, MediaTrack::Audio)? else {
             return Ok(None);
         };
+        let Some(envelope) = self.prepare_audio_envelope(envelope) else {
+            return Ok(None);
+        };
 
-        Ok(Some(PreparedContent::VoiceOver { media, text }))
+        Ok(Some(PreparedContent::VoiceOver {
+            media,
+            envelope,
+            text,
+        }))
     }
 
     fn prepare_audio_tracks(
@@ -520,13 +552,52 @@ impl<'a> Solver<'a> {
     }
 
     fn prepare_audio(&mut self, audio: ResolvedAudio) -> Result<Option<PreparedAudio>, SolveError> {
-        let (kind, element, source, delay, gain) = audio.into_parts();
-        let media = self.prepare_resolved_media(element, source, delay, MediaTrack::Audio)?;
-        Ok(media.map(|media| PreparedAudio {
+        let ResolvedAudioParts {
+            kind,
+            element,
+            src,
+            delay,
+            gain,
+            envelope,
+        } = audio.into_parts();
+        let Some(media) = self.prepare_resolved_media(element, src, delay, MediaTrack::Audio)?
+        else {
+            return Ok(None);
+        };
+        let Some(envelope) = self.prepare_audio_envelope(envelope) else {
+            return Ok(None);
+        };
+
+        Ok(Some(PreparedAudio {
             media,
             gain,
+            envelope,
             kind: kind.into(),
         }))
+    }
+
+    fn prepare_audio_envelope(
+        &mut self,
+        envelope: ResolvedAudioEnvelope,
+    ) -> Option<PreparedAudioEnvelope> {
+        let (fade_in, fade_out) = envelope.into_parts();
+        Some(PreparedAudioEnvelope {
+            fade_in: self.prepare_fade(fade_in)?,
+            fade_out: self.prepare_fade(fade_out)?,
+        })
+    }
+
+    fn prepare_fade(&mut self, fade: Option<Authored<Duration>>) -> Option<PreparedFade> {
+        let Some(fade) = fade else {
+            return Some(PreparedFade::default());
+        };
+        let (duration, authored_at) = fade.into_parts();
+        let frames = frames_for(self.timebase, duration, authored_at, &mut self.diagnostics)?;
+
+        Some(PreparedFade {
+            frames,
+            authored_at: Some(authored_at),
+        })
     }
 
     fn prepare_media(
@@ -590,7 +661,9 @@ impl<'a> Solver<'a> {
         let prepared = self.prepare_audio_tracks(music)?;
         let mut timeline = Vec::with_capacity(prepared.len());
         for audio in prepared {
-            timeline.push(place_music(audio, film));
+            if let Some(audio) = place_music(audio, film, &mut self.diagnostics) {
+                timeline.push(audio);
+            }
         }
         Ok(timeline)
     }
@@ -623,9 +696,33 @@ impl<'a> Solver<'a> {
     ) -> Option<TimelineContent> {
         match content {
             PreparedContent::Video(video) => Some(lower_video(video, shot)),
-            PreparedContent::VoiceOver { media, text } => Some(lower_voice_over(media, text, shot)),
+            PreparedContent::VoiceOver {
+                media,
+                envelope,
+                text,
+            } => self.lower_voice_over(media, envelope, text, shot),
             PreparedContent::Overlay(overlay) => self.lower_overlay(overlay, shot),
         }
+    }
+
+    fn lower_voice_over(
+        &mut self,
+        media: PreparedMedia,
+        envelope: PreparedAudioEnvelope,
+        text: Vec<ResolvedText>,
+        shot: FrameInterval,
+    ) -> Option<TimelineContent> {
+        let media = place_media(media, shot, TimingReason::AssetDuration);
+        let envelope = envelope.fit(
+            media.timing.interval().len(),
+            media.element.span(),
+            &mut self.diagnostics,
+        )?;
+        let text = timeline_text(text);
+        let voice_over =
+            TimelineVoiceOver::new(media.element, media.timing, media.asset_id, envelope, text);
+
+        Some(TimelineContent::VoiceOver(voice_over))
     }
 
     fn lower_overlay(
@@ -924,6 +1021,7 @@ enum PreparedContent {
     Video(PreparedVideo),
     VoiceOver {
         media: PreparedMedia,
+        envelope: PreparedAudioEnvelope,
         text: Vec<ResolvedText>,
     },
     Overlay(ResolvedOverlay),
@@ -964,6 +1062,33 @@ const fn is_primary_content(content: &ResolvedShotContent) -> bool {
     )
 }
 
+fn overlapping_voice_overs<'a>(
+    outgoing_shot: &'a TimelineShot,
+    incoming_shot: &'a TimelineShot,
+) -> Option<(&'a TimelineVoiceOver, &'a TimelineVoiceOver)> {
+    for outgoing in voice_overs(outgoing_shot) {
+        let Some(incoming) = voice_overs(incoming_shot).find(|incoming| {
+            outgoing
+                .timing()
+                .interval()
+                .intersects(incoming.timing().interval())
+        }) else {
+            continue;
+        };
+
+        return Some((outgoing, incoming));
+    }
+
+    None
+}
+
+fn voice_overs(shot: &TimelineShot) -> impl Iterator<Item = &TimelineVoiceOver> {
+    shot.content().iter().filter_map(|content| match content {
+        TimelineContent::VoiceOver(voice_over) => Some(voice_over),
+        TimelineContent::Video(_) | TimelineContent::Overlay(_) => None,
+    })
+}
+
 /// Media with shot-relative bounds, before its owning shot is placed.
 struct PreparedMedia {
     element: ResolvedElement,
@@ -977,7 +1102,37 @@ struct PreparedMedia {
 struct PreparedAudio {
     media: PreparedMedia,
     gain: AudioGain,
+    envelope: PreparedAudioEnvelope,
     kind: TimelineAudioKind,
+}
+
+#[derive(Clone, Copy, Default)]
+struct PreparedAudioEnvelope {
+    fade_in: PreparedFade,
+    fade_out: PreparedFade,
+}
+
+impl PreparedAudioEnvelope {
+    fn fit(
+        self,
+        placement: FrameCount,
+        element: SourceSpan,
+        diagnostics: &mut Diagnostics,
+    ) -> Option<AudioEnvelope> {
+        let envelope = AudioEnvelope::new(self.fade_in.frames, self.fade_out.frames, placement);
+        if let Ok(envelope) = envelope {
+            return Some(envelope);
+        }
+
+        diagnostics.push(audio_envelope_outside_placement(self, placement, element));
+        None
+    }
+}
+
+#[derive(Clone, Copy, Default)]
+struct PreparedFade {
+    frames: FrameCount,
+    authored_at: Option<SourceSpan>,
 }
 
 /// Media placed at absolute Timeline IR bounds.
@@ -1005,8 +1160,17 @@ fn place_media(media: PreparedMedia, shot: FrameInterval, end_reason: TimingReas
     }
 }
 
-fn place_music(audio: PreparedAudio, film: FrameInterval) -> TimelineAudio {
-    let PreparedAudio { media, gain, kind } = audio;
+fn place_music(
+    audio: PreparedAudio,
+    film: FrameInterval,
+    diagnostics: &mut Diagnostics,
+) -> Option<TimelineAudio> {
+    let PreparedAudio {
+        media,
+        gain,
+        envelope,
+        kind,
+    } = audio;
     let authored_at = media.element.span();
     let natural_end = FrameIndex::new(media.end.get());
     let (end, end_reason) = if natural_end > film.end() {
@@ -1019,8 +1183,16 @@ fn place_music(audio: PreparedAudio, film: FrameInterval) -> TimelineAudio {
         TimingReason::FilmStart,
         end_reason,
     );
+    let envelope = envelope.fit(timing.interval().len(), authored_at, diagnostics)?;
 
-    TimelineAudio::new(authored_at, timing, media.asset_id, gain, kind)
+    Some(TimelineAudio::new(
+        authored_at,
+        timing,
+        media.asset_id,
+        gain,
+        envelope,
+        kind,
+    ))
 }
 
 fn place_sound_effect(
@@ -1028,7 +1200,12 @@ fn place_sound_effect(
     shot: FrameInterval,
     diagnostics: &mut Diagnostics,
 ) -> Option<TimelineAudio> {
-    let PreparedAudio { media, gain, kind } = audio;
+    let PreparedAudio {
+        media,
+        gain,
+        envelope,
+        kind,
+    } = audio;
     let authored_at = media.element.span();
     let start = advance(shot.start(), media.start, authored_at, diagnostics)?;
     let end = advance(shot.start(), media.end, authored_at, diagnostics)?;
@@ -1041,12 +1218,14 @@ fn place_sound_effect(
         media.start_reason,
         TimingReason::AssetDuration,
     );
+    let envelope = envelope.fit(timing.interval().len(), authored_at, diagnostics)?;
 
     Some(TimelineAudio::new(
         authored_at,
         timing,
         media.asset_id,
         gain,
+        envelope,
         kind,
     ))
 }
@@ -1056,18 +1235,6 @@ fn lower_video(video: PreparedVideo, shot: FrameInterval) -> TimelineContent {
     let video = TimelineVideo::new(media.element, media.timing, media.asset_id, video.source);
 
     TimelineContent::Video(video)
-}
-
-fn lower_voice_over(
-    media: PreparedMedia,
-    text: Vec<ResolvedText>,
-    shot: FrameInterval,
-) -> TimelineContent {
-    let media = place_media(media, shot, TimingReason::AssetDuration);
-    let text = timeline_text(text);
-    let voice_over = TimelineVoiceOver::new(media.element, media.timing, media.asset_id, text);
-
-    TimelineContent::VoiceOver(voice_over)
 }
 
 struct OverlayStart {
@@ -1237,6 +1404,68 @@ fn overlapping_transitions(primary: SourceSpan, previous: SourceSpan) -> Diagnos
         "the preceding transition starts this shared-shot overlap",
     )
     .expect("the static transition relation is non-blank")
+}
+
+fn voice_over_transition_overlap(
+    primary: SourceSpan,
+    outgoing: SourceSpan,
+    incoming: SourceSpan,
+) -> Diagnostic {
+    let diagnostic = author_diagnostic(
+        DiagnosticCode::TransitionVoiceOverOverlap,
+        primary,
+        "transition makes adjacent voice-over tracks overlap",
+        "shorten the transition or delay the incoming voice-over",
+    )
+    .with_related(
+        outgoing,
+        "the outgoing voice-over remains active in the overlap",
+    )
+    .expect("the static outgoing voice-over relation is non-blank");
+
+    diagnostic
+        .with_related(
+            incoming,
+            "the incoming voice-over starts inside the overlap",
+        )
+        .expect("the static incoming voice-over relation is non-blank")
+}
+
+fn audio_envelope_outside_placement(
+    envelope: PreparedAudioEnvelope,
+    placement: FrameCount,
+    element: SourceSpan,
+) -> Diagnostic {
+    let primary = envelope
+        .fade_out
+        .authored_at
+        .or(envelope.fade_in.authored_at)
+        .unwrap_or(element);
+    let message = match envelope
+        .fade_in
+        .frames
+        .checked_add(envelope.fade_out.frames)
+    {
+        Some(frames) => format!(
+            "audio fades occupy {} frames, but the solved placement has {} frames",
+            frames.get(),
+            placement.get(),
+        ),
+        None => String::from("audio fades exceed the frame accounting domain"),
+    };
+    let diagnostic = author_diagnostic(
+        DiagnosticCode::AudioEnvelopeOutsidePlacement,
+        primary,
+        message,
+        "shorten fade-in or fade-out so both fit without overlapping",
+    );
+
+    match (envelope.fade_in.authored_at, envelope.fade_out.authored_at) {
+        (Some(fade_in), Some(_)) => diagnostic
+            .with_related(fade_in, "fade-in also contributes to this envelope")
+            .expect("the static fade-in relation is non-blank"),
+        _ => diagnostic,
+    }
 }
 
 fn missing_duration_source(primary: SourceSpan) -> Diagnostic {

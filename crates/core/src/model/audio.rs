@@ -133,6 +133,69 @@ impl fmt::Display for InvalidAudioGain {
 
 impl Error for InvalidAudioGain {}
 
+/// Exact frame lengths of one placement-relative amplitude envelope.
+///
+/// The fade-in begins at the placement start. The fade-out ends at the
+/// placement's exclusive end. The base gain remains the envelope ceiling.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+pub struct AudioEnvelope {
+    fade_in: FrameCount,
+    fade_out: FrameCount,
+}
+
+impl AudioEnvelope {
+    /// An unmodified amplitude envelope.
+    pub const NONE: Self = Self {
+        fade_in: FrameCount::ZERO,
+        fade_out: FrameCount::ZERO,
+    };
+
+    /// Creates an envelope bounded by its solved audio placement.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InvalidAudioEnvelope`] when the two fades overlap or exceed
+    /// the placement.
+    pub fn new(
+        fade_in: FrameCount,
+        fade_out: FrameCount,
+        placement: FrameCount,
+    ) -> Result<Self, InvalidAudioEnvelope> {
+        let Some(envelope) = fade_in.checked_add(fade_out) else {
+            return Err(InvalidAudioEnvelope);
+        };
+        if envelope.get() > placement.get() {
+            return Err(InvalidAudioEnvelope);
+        }
+
+        Ok(Self { fade_in, fade_out })
+    }
+
+    /// Returns the fade length measured from the placement start.
+    #[must_use]
+    pub const fn fade_in(self) -> FrameCount {
+        self.fade_in
+    }
+
+    /// Returns the fade length measured back from the placement end.
+    #[must_use]
+    pub const fn fade_out(self) -> FrameCount {
+        self.fade_out
+    }
+}
+
+/// An audio envelope cannot fit its solved placement.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct InvalidAudioEnvelope;
+
+impl fmt::Display for InvalidAudioEnvelope {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("audio fades overlap or exceed their placement")
+    }
+}
+
+impl Error for InvalidAudioEnvelope {}
+
 /// Positive number of decoded audio samples per second.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct AudioSampleRate(u32);
@@ -275,7 +338,7 @@ mod tests {
     use proptest::prelude::*;
 
     use super::{
-        AudioGain, AudioSampleRate, InvalidAudioGain, InvalidAudioSampleRate,
+        AudioEnvelope, AudioGain, AudioSampleRate, InvalidAudioGain, InvalidAudioSampleRate,
         greatest_common_divisor,
     };
     use crate::model::{FrameCount, FrameRate, Rounding};
@@ -318,6 +381,23 @@ mod tests {
 
             prop_assert!(floor <= ceil);
             prop_assert!(ceil.get() - floor.get() <= 1);
+        }
+
+        #[test]
+        fn admits_exactly_the_envelopes_that_fit(
+            fade_in in any::<u32>(),
+            fade_out in any::<u32>(),
+            placement in any::<u32>(),
+        ) {
+            let fade_in = FrameCount::new(u64::from(fade_in));
+            let fade_out = FrameCount::new(u64::from(fade_out));
+            let placement = FrameCount::new(u64::from(placement));
+            let fits = fade_in.get() + fade_out.get() <= placement.get();
+
+            prop_assert_eq!(
+                AudioEnvelope::new(fade_in, fade_out, placement).is_ok(),
+                fits,
+            );
         }
     }
 
@@ -378,6 +458,17 @@ mod tests {
             1_602,
         );
         assert_eq!(AudioSampleRate::new(0), Err(InvalidAudioSampleRate));
+    }
+
+    #[test]
+    fn rejects_an_envelope_whose_total_overflows() {
+        let result = AudioEnvelope::new(
+            FrameCount::new(u64::MAX),
+            FrameCount::new(1),
+            FrameCount::new(u64::MAX),
+        );
+
+        assert!(result.is_err());
     }
 
     #[test]

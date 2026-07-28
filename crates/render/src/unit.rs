@@ -11,9 +11,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use onmark_core::model::{
-    AudioChannelLayout, AudioGain, AudioSampleConversionOverflow, AudioSampleCount, FrameCount,
-    FrameIndex, FrameInterval, FrameRate, FrozenAsset, FrozenAssetId, PresentationDocumentScope,
-    PresentationVisualCapability, Rounding, VideoColorProfile, VideoDimensions, VideoTiming,
+    AudioChannelLayout, AudioEnvelope, AudioGain, AudioSampleConversionOverflow, AudioSampleCount,
+    FrameCount, FrameIndex, FrameInterval, FrameRate, FrozenAsset, FrozenAssetId,
+    PresentationDocumentScope, PresentationVisualCapability, Rounding, VideoColorProfile,
+    VideoDimensions, VideoTiming,
 };
 use onmark_core::protocol::{BrowserPlan, BundleManifest, InvalidBrowserPlan};
 use onmark_core::render_graph::{PartitionPlan, RenderPartition};
@@ -167,6 +168,7 @@ pub struct RenderAudio {
     asset: MaterializedAsset,
     interval: FrameInterval,
     gain: AudioGain,
+    envelope: AudioEnvelope,
     samples: AudioSampleCount,
     channel_layout: AudioChannelLayout,
 }
@@ -192,6 +194,12 @@ impl RenderAudio {
     #[must_use]
     pub const fn gain(&self) -> AudioGain {
         self.gain
+    }
+
+    /// Returns exact placement-relative fade lengths.
+    #[must_use]
+    pub const fn envelope(&self) -> AudioEnvelope {
+        self.envelope
     }
 
     /// Returns how many decoded source samples belong to this placement.
@@ -788,6 +796,7 @@ fn render_audio(
         asset,
         interval,
         gain: audio.gain(),
+        envelope: audio.envelope(),
         samples,
         channel_layout,
     })
@@ -820,7 +829,7 @@ mod tests {
         MaterializedAsset, RenderAudio, RenderProfile, RenderUnit, VisualExecutionPlan,
         WorkerCaptureRequest,
     };
-    use crate::{AlphaMode, BrowserCaptureCadence};
+    use crate::{AlphaMode, BrowserCaptureCadence, WorkerCaptureVersion};
 
     #[test]
     fn composes_only_required_admitted_video_assets() {
@@ -882,7 +891,7 @@ mod tests {
         let decoded: WorkerCaptureRequest =
             serde_json::from_str(&encoded).expect("the portable worker request parses once");
 
-        assert_eq!(wire["version"], 4);
+        assert_eq!(wire["version"], WorkerCaptureVersion::CURRENT.get());
         assert_eq!(wire["profile"]["alpha"], "opaque");
         assert_eq!(wire["captureEnvironment"], environment.to_string());
         assert_eq!(encoded, repeated);
@@ -1581,7 +1590,10 @@ mod tests {
         let timeline = solve(
             concat!(
                 "<om-film><om-scene><om-shot>",
-                r#"<om-vo src="voice.mp3" delay="500ms">Read me</om-vo>"#,
+                concat!(
+                    r#"<om-vo src="voice.mp3" delay="500ms" "#,
+                    r#"fade-in="250ms" fade-out="500ms">Read me</om-vo>"#,
+                ),
                 "</om-shot></om-scene></om-film>",
             ),
             "voice.mp3",
@@ -1607,6 +1619,8 @@ mod tests {
         assert_eq!(audio.interval().end().get(), 45);
         assert_eq!(audio.samples().get(), 48_000);
         assert_eq!(audio.gain(), AudioGain::UNITY);
+        assert_eq!(audio.envelope().fade_in().get(), 8);
+        assert_eq!(audio.envelope().fade_out().get(), 15);
         assert_eq!(unit.materialized_assets().len(), 1);
     }
 

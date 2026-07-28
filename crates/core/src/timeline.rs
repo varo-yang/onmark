@@ -6,8 +6,8 @@
 use std::collections::BTreeMap;
 
 use crate::model::{
-    AudioGain, CueId, ElementKind, EventRef, FrameIndex, FrameInterval, FrozenAssetId,
-    GeneralAudioKind, MediaSource, NodeId, SourceSpan, Timebase,
+    AudioEnvelope, AudioGain, CueId, ElementKind, EventRef, FrameIndex, FrameInterval,
+    FrozenAssetId, GeneralAudioKind, MediaSource, NodeId, SourceSpan, Timebase,
 };
 
 /// Version of the Timeline IR contract.
@@ -16,7 +16,7 @@ pub struct TimelineVersion(u16);
 
 impl TimelineVersion {
     /// Only Timeline IR version accepted by this build.
-    pub const CURRENT: Self = Self(3);
+    pub const CURRENT: Self = Self(4);
 
     /// Returns the stable integer representation.
     #[must_use]
@@ -513,6 +513,7 @@ impl TimelineVoiceOver {
         element: TimelineElement,
         timing: TimelineTiming,
         asset_id: FrozenAssetId,
+        envelope: AudioEnvelope,
         text: Vec<TimelineText>,
     ) -> Self {
         let authored_at = element.span();
@@ -523,6 +524,7 @@ impl TimelineVoiceOver {
                 timing,
                 asset_id,
                 AudioGain::UNITY,
+                envelope,
                 TimelineAudioKind::VoiceOver,
             ),
             text,
@@ -599,6 +601,7 @@ pub struct TimelineAudio {
     timing: TimelineTiming,
     asset_id: FrozenAssetId,
     gain: AudioGain,
+    envelope: AudioEnvelope,
     kind: TimelineAudioKind,
 }
 
@@ -608,6 +611,7 @@ impl TimelineAudio {
         timing: TimelineTiming,
         asset_id: FrozenAssetId,
         gain: AudioGain,
+        envelope: AudioEnvelope,
         kind: TimelineAudioKind,
     ) -> Self {
         Self {
@@ -615,6 +619,7 @@ impl TimelineAudio {
             timing,
             asset_id,
             gain,
+            envelope,
             kind,
         }
     }
@@ -641,6 +646,12 @@ impl TimelineAudio {
     #[must_use]
     pub const fn gain(&self) -> AudioGain {
         self.gain
+    }
+
+    /// Returns exact placement-relative fade lengths.
+    #[must_use]
+    pub const fn envelope(&self) -> AudioEnvelope {
+        self.envelope
     }
 
     /// Returns the retained narrative or general-audio role.

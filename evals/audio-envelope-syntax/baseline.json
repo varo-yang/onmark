@@ -1,0 +1,14 @@
+{
+  "fade-attributes": {
+    "passed": 20,
+    "total": 20,
+    "authoredBytes": 4914
+  },
+  "envelope-element": {
+    "passed": 20,
+    "total": 20,
+    "authoredBytes": 5868
+  },
+  "admitted": "fade-attributes",
+  "reason": "Equal generation reliability with 954 fewer authored bytes, no treatment child inside voice-over inscription, and no new envelope cardinality rule."
+}

@@ -127,6 +127,12 @@ that grid with ceiling semantics, so `FFmpeg` receives an integer `adelay`
 sample count rather than evaluating a decimal or floating timing expression.
 The canonical rational linear gain is applied through `volume`, and `amix`
 normalization is disabled so overlapping tracks do not silently rescale it.
+Timeline IR also retains each admitted fade as an exact frame count. The
+encoder projects the fade-in end and fade-out start onto the same 48 kHz grid
+and emits sample-indexed `afade` filters with explicit linear curves, silence,
+and unity levels. The placement end owns fade-out rounding, so adjacent ramps
+that meet on the frame grid cannot overlap because of two independent sample
+roundings.
 The final AAC path trims or pads the mix to the visual frame count projected
 onto the same grid and lets the visual stream close the container through
 `-shortest`. A partition-owning track therefore cannot lengthen an independently
@@ -852,9 +858,10 @@ AWS. Product crates and packages never depend on it. The Lambda dependency
 exists solely to publish that deployment boundary's schemas, not to smuggle AWS
 into core. The adjacent Node generator may use the pinned schema-to-TypeScript
 and validation toolchain. `cargo xtask schema` writes every versioned schema,
-then invokes that generator. `cargo xtask eval audio` and `cargo xtask eval
-html` independently regrade the frozen audio-language and native-HTML authoring
-experiments. `cargo xtask release prepare/verify` owns product-version changes
+then invokes that generator. `cargo xtask eval audio`, `audio-envelope`,
+`html`, `transition`, and `video` independently regrade the frozen language
+experiments without live model calls.
+`cargo xtask release prepare/verify` owns product-version changes
 and consistency; `cargo xtask release sidecar` assembles only the native
 platform payload. Adjacent release scripts assemble and admit the public npm
 package and media. Only the protected release workflow invokes the registry

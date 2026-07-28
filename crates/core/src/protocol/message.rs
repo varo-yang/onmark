@@ -20,14 +20,17 @@ const MAX_PENDING_RESOURCE_CHARACTERS: usize = 1_024;
 
 /// Version of the native-to-browser message contract.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[cfg_attr(feature = "schema", schemars(extend("const" = 5)))]
+#[cfg_attr(
+    feature = "schema",
+    schemars(extend("const" = ProtocolVersion::CURRENT.get()))
+)]
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(transparent)]
 pub struct ProtocolVersion(u16);
 
 impl ProtocolVersion {
     /// Only browser protocol version accepted by this build.
-    pub const CURRENT: Self = Self(5);
+    pub const CURRENT: Self = Self(6);
 
     /// Returns the stable integer representation.
     #[must_use]
@@ -456,7 +459,7 @@ mod tests {
     #[test]
     fn rejects_an_unsupported_deserialized_protocol_version() {
         let encoded = serde_json::json!({
-            "version": 2,
+            "version": 5,
             "requestId": 1,
             "event": { "type": "loaded" },
         });
@@ -466,7 +469,7 @@ mod tests {
     #[test]
     fn parses_exact_prepared_media_layout_evidence() {
         let encoded = serde_json::json!({
-            "version": 5,
+            "version": 6,
             "requestId": 2,
             "event": {
                 "type": "prepared",

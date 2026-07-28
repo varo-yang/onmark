@@ -1,0 +1,4 @@
+# onmark diagnostic test rendering; not a wire format
+ONM-AUDIO-002 error @0:64..69 audio fades occupy 38 frames, but the solved placement has 30 frames
+  help: shorten fade-in or fade-out so both fit without overlapping
+  related @0:47..52 fade-in also contributes to this envelope

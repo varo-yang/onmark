@@ -22,8 +22,8 @@ pub use asset::{
     VideoMetadata, VideoTiming,
 };
 pub use audio::{
-    AudioChannelLayout, AudioGain, AudioSampleConversionOverflow, AudioSampleCount,
-    AudioSampleRate, InvalidAudioGain, InvalidAudioSampleRate,
+    AudioChannelLayout, AudioEnvelope, AudioGain, AudioSampleConversionOverflow, AudioSampleCount,
+    AudioSampleRate, InvalidAudioEnvelope, InvalidAudioGain, InvalidAudioSampleRate,
 };
 pub use caption::{
     CaptionCue, CaptionInterval, CaptionTrack, InvalidCaptionCue, InvalidCaptionInterval,

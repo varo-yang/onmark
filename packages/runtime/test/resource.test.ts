@@ -15,7 +15,7 @@ import {
 } from "../src/index.js";
 
 const PLAN: BrowserPlan = {
-  timelineVersion: 3,
+  timelineVersion: 4,
   frameRate: { numerator: 30, denominator: 1 },
   timeline: { start: 0, end: 1 },
   evaluation: { start: 0, end: 1 },

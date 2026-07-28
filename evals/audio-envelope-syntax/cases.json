@@ -1,0 +1,214 @@
+{
+  "cases": [
+    {
+      "id": "music-both-edges",
+      "music": [
+        {
+          "src": "audio/bed.wav",
+          "gain": "25%",
+          "fadeIn": "800ms",
+          "fadeOut": "1s"
+        }
+      ],
+      "scenes": [
+        [
+          {
+            "video": "media/opening.mp4"
+          }
+        ]
+      ]
+    },
+    {
+      "id": "effect-out-only",
+      "music": [],
+      "scenes": [
+        [
+          {
+            "video": "media/card.mp4",
+            "effects": [
+              {
+                "src": "audio/hit.wav",
+                "delay": "250ms",
+                "gain": "70%",
+                "fadeOut": "120ms"
+              }
+            ]
+          }
+        ]
+      ]
+    },
+    {
+      "id": "voice-in-only",
+      "music": [],
+      "scenes": [
+        [
+          {
+            "video": "media/story.mp4",
+            "voiceOvers": [
+              {
+                "src": "audio/story.wav",
+                "fadeIn": "300ms",
+                "text": "A precise story begins."
+              }
+            ]
+          }
+        ]
+      ]
+    },
+    {
+      "id": "all-audio-roles",
+      "music": [
+        {
+          "src": "audio/theme.wav",
+          "gain": "20%",
+          "fadeIn": "1s",
+          "fadeOut": "1s"
+        }
+      ],
+      "scenes": [
+        [
+          {
+            "video": "media/demo.mp4",
+            "voiceOvers": [
+              {
+                "src": "audio/demo-voice.wav",
+                "fadeIn": "150ms",
+                "fadeOut": "250ms",
+                "text": "Watch the system respond."
+              }
+            ],
+            "effects": [
+              {
+                "src": "audio/click.wav",
+                "delay": "600ms",
+                "gain": "50%",
+                "fadeIn": "50ms",
+                "fadeOut": "100ms"
+              }
+            ]
+          }
+        ]
+      ]
+    },
+    {
+      "id": "no-fade-control",
+      "music": [
+        {
+          "src": "audio/plain-bed.wav",
+          "gain": "30%"
+        }
+      ],
+      "scenes": [
+        [
+          {
+            "video": "media/plain.mp4"
+          }
+        ]
+      ]
+    },
+    {
+      "id": "remove-fade-in",
+      "music": [
+        {
+          "src": "audio/closing.wav",
+          "fadeOut": "750ms"
+        }
+      ],
+      "scenes": [
+        [
+          {
+            "video": "media/closing.mp4"
+          }
+        ]
+      ]
+    },
+    {
+      "id": "retime-fade-out",
+      "music": [],
+      "scenes": [
+        [
+          {
+            "video": "media/answer.mp4",
+            "voiceOvers": [
+              {
+                "src": "audio/answer.wav",
+                "delay": "100ms",
+                "fadeIn": "200ms",
+                "fadeOut": "400ms",
+                "text": "The answer stays exact."
+              }
+            ]
+          }
+        ]
+      ]
+    },
+    {
+      "id": "independent-effects",
+      "music": [],
+      "scenes": [
+        [
+          {
+            "video": "media/controls.mp4",
+            "effects": [
+              {
+                "src": "audio/click.wav",
+                "delay": "100ms",
+                "fadeIn": "20ms"
+              },
+              {
+                "src": "audio/chime.wav",
+                "delay": "700ms",
+                "fadeOut": "200ms"
+              }
+            ]
+          }
+        ]
+      ]
+    },
+    {
+      "id": "adjacent-voice-edges",
+      "music": [],
+      "scenes": [
+        [
+          {
+            "video": "media/first.mp4",
+            "voiceOvers": [
+              {
+                "src": "audio/first.wav",
+                "fadeOut": "180ms",
+                "text": "First thought."
+              }
+            ]
+          },
+          {
+            "video": "media/second.mp4",
+            "voiceOvers": [
+              {
+                "src": "audio/second.wav",
+                "fadeIn": "220ms",
+                "text": "Second thought."
+              }
+            ]
+          }
+        ]
+      ]
+    },
+    {
+      "id": "symmetric-music",
+      "music": [
+        {
+          "src": "audio/identity.wav",
+          "fadeIn": "500ms",
+          "fadeOut": "500ms"
+        }
+      ],
+      "scenes": [
+        [
+          {
+            "video": "media/identity.mp4"
+          }
+        ]
+      ]
+    }
+  ]
+}

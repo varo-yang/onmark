@@ -1,9 +1,16 @@
 <om-film id="mix">
-  <om-music id="bed" src="bed.wav" gain="25%"></om-music>
+  <om-music id="bed" src="bed.wav" gain="25%" fade-in="500ms" fade-out="1s"></om-music>
   <om-scene>
     <om-shot id="opening">
       <video src="opening.mp4"></video>
-      <om-sfx id="hit" src="hit.wav" delay="250ms" gain="50%"></om-sfx>
+      <om-sfx
+        id="hit"
+        src="hit.wav"
+        delay="250ms"
+        gain="50%"
+        fade-in="100ms"
+        fade-out="100ms"
+      ></om-sfx>
     </om-shot>
   </om-scene>
 </om-film>

@@ -91,8 +91,10 @@ jobs:
       - name: Regrade frozen language evaluations
         run: |
           cargo xtask eval audio
+          cargo xtask eval audio-envelope
           cargo xtask eval html
           cargo xtask eval transition
+          cargo xtask eval video
 
       - name: Check TypeScript
         run: pnpm typecheck
