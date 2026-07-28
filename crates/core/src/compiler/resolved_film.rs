@@ -277,6 +277,7 @@ impl ResolvedScene {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ResolvedShot {
     element: ResolvedElement,
+    incoming_transition: Option<ResolvedTransition>,
     duration: Option<Authored<Duration>>,
     content: Vec<ResolvedShotContent>,
     sound_effects: Vec<ResolvedAudio>,
@@ -285,12 +286,14 @@ pub struct ResolvedShot {
 impl ResolvedShot {
     pub(super) const fn new(
         element: ResolvedElement,
+        incoming_transition: Option<ResolvedTransition>,
         duration: Option<Authored<Duration>>,
         content: Vec<ResolvedShotContent>,
         sound_effects: Vec<ResolvedAudio>,
     ) -> Self {
         Self {
             element,
+            incoming_transition,
             duration,
             content,
             sound_effects,
@@ -301,6 +304,12 @@ impl ResolvedShot {
     #[must_use]
     pub const fn element(&self) -> &ResolvedElement {
         &self.element
+    }
+
+    /// Returns the typed transition from the preceding shot.
+    #[must_use]
+    pub const fn incoming_transition(&self) -> Option<&ResolvedTransition> {
+        self.incoming_transition.as_ref()
     }
 
     /// Returns the optional authored shot duration.
@@ -321,20 +330,51 @@ impl ResolvedShot {
         &self.sound_effects
     }
 
-    pub(super) fn into_parts(
-        self,
-    ) -> (
-        ResolvedElement,
-        Option<Authored<Duration>>,
-        Vec<ResolvedShotContent>,
-        Vec<ResolvedAudio>,
-    ) {
-        (
-            self.element,
-            self.duration,
-            self.content,
-            self.sound_effects,
-        )
+    pub(super) fn into_parts(self) -> ResolvedShotParts {
+        ResolvedShotParts {
+            element: self.element,
+            transition: self.incoming_transition,
+            duration: self.duration,
+            content: self.content,
+            sound_effects: self.sound_effects,
+        }
+    }
+}
+
+pub(super) struct ResolvedShotParts {
+    pub(super) element: ResolvedElement,
+    pub(super) transition: Option<ResolvedTransition>,
+    pub(super) duration: Option<Authored<Duration>>,
+    pub(super) content: Vec<ResolvedShotContent>,
+    pub(super) sound_effects: Vec<ResolvedAudio>,
+}
+
+/// One typed overlap relationship between adjacent shots.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ResolvedTransition {
+    element: ResolvedElement,
+    duration: Authored<Duration>,
+}
+
+impl ResolvedTransition {
+    pub(super) const fn new(element: ResolvedElement, duration: Authored<Duration>) -> Self {
+        Self { element, duration }
+    }
+
+    /// Returns the resolved transition element.
+    #[must_use]
+    pub const fn element(&self) -> &ResolvedElement {
+        &self.element
+    }
+
+    /// Returns the positive authored overlap duration.
+    #[must_use]
+    pub const fn duration(&self) -> &Authored<Duration> {
+        &self.duration
+    }
+
+    pub(super) fn into_parts(self) -> (ResolvedElement, Authored<Duration>) {
+        (self.element, self.duration)
     }
 }
 

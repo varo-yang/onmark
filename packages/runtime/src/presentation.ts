@@ -36,6 +36,8 @@ export type RuntimeOverlay = RuntimePlan["overlays"][number];
 export type RuntimeScene = RuntimePlan["scenes"][number];
 /** Immutable shot container projected from Timeline IR. */
 export type RuntimeShot = RuntimePlan["shots"][number];
+/** Immutable transition relationship projected from Timeline IR. */
+export type RuntimeTransition = RuntimePlan["transitions"][number];
 /** Immutable film identity projected from Timeline IR. */
 export type RuntimeNode = RuntimePlan["film"];
 
@@ -61,6 +63,14 @@ export interface OverlayPresentation {
   dispose(): void;
 }
 
+/** Presentation-owned binding between two adjacent shot elements. */
+export interface TransitionPresentation {
+  readonly element: HTMLElement;
+  readonly incomingElement: HTMLElement;
+  readonly outgoingElement: HTMLElement;
+  dispose(): void;
+}
+
 /** One paused browser effect driven exclusively by the authored frame. */
 export interface FrameEffect {
   /** Applies the exact frame before the runtime reports it as staged. */
@@ -81,6 +91,7 @@ export interface PresentationBindings {
   bindFilm(plan: RuntimePlan): ContainerPresentation;
   bindScene(scene: RuntimeScene): ContainerPresentation;
   bindShot(shot: RuntimeShot): ContainerPresentation;
+  bindTransition(transition: RuntimeTransition): TransitionPresentation;
   bindVideo(placement: RuntimeVideo): VideoPresentation;
   bindOverlay(placement: RuntimeOverlay): OverlayPresentation;
   bindExtensions(plan: RuntimePlan): Promise<PresentationExtensions>;
@@ -120,6 +131,7 @@ interface LoadedPresentation {
   readonly frameRate: RuntimePlan["frameRate"];
   readonly resources: readonly PresentationResource[];
   readonly structure: BoundStructure;
+  readonly transitions: readonly TransitionPresentation[];
   readonly videos: readonly BoundVideo[];
   readonly overlays: readonly BoundOverlay[];
 }
@@ -182,8 +194,10 @@ export class PresentationRuntimeAdapter implements RuntimeAdapter {
     let boundStructure: BoundStructure;
     const videos: BoundVideo[] = [];
     const overlays: BoundOverlay[] = [];
+    const transitions: TransitionPresentation[] = [];
     try {
       boundStructure = this.#bindStructure(plan, structure);
+      this.#bindTransitions(plan, transitions);
       this.#bindVideos(plan, videos);
       this.#bindOverlays(plan, overlays);
       const extensions = await this.#bindings.bindExtensions(plan);
@@ -201,6 +215,7 @@ export class PresentationRuntimeAdapter implements RuntimeAdapter {
         effects,
         resources,
         structure,
+        transitions,
         videos,
         overlays,
       );
@@ -216,6 +231,7 @@ export class PresentationRuntimeAdapter implements RuntimeAdapter {
       frameRate: plan.frameRate,
       resources,
       structure: boundStructure,
+      transitions,
       videos,
       overlays,
     };
@@ -293,6 +309,7 @@ export class PresentationRuntimeAdapter implements RuntimeAdapter {
       loaded?.effects ?? [],
       loaded?.resources ?? [],
       loaded?.structure,
+      loaded?.transitions ?? [],
       loaded?.videos ?? [],
       loaded?.overlays ?? [],
     );
@@ -341,6 +358,15 @@ export class PresentationRuntimeAdapter implements RuntimeAdapter {
       const video = { placement, presentation, resource };
       videos.push(video);
       presentation.setVisible(false);
+    }
+  }
+
+  #bindTransitions(
+    plan: RuntimePlan,
+    transitions: TransitionPresentation[],
+  ): void {
+    for (const placement of plan.transitions) {
+      transitions.push(this.#bindings.bindTransition(placement));
     }
   }
 
@@ -544,6 +570,7 @@ async function releasePresentation(
   effects: readonly FrameEffect[],
   resources: readonly PresentationResource[],
   structure: PendingStructure | BoundStructure | undefined,
+  transitions: readonly TransitionPresentation[],
   videos: readonly BoundVideo[],
   overlays: readonly BoundOverlay[],
 ): Promise<unknown | undefined> {
@@ -558,9 +585,19 @@ async function releasePresentation(
     const releaseFailure = releaseOverlay(overlay);
     failure ??= releaseFailure;
   }
+  for (const transition of transitions.toReversed()) {
+    const releaseFailure = releaseTransition(transition);
+    failure ??= releaseFailure;
+  }
   const structureFailure = releaseStructure(structure);
   failure ??= structureFailure;
   return failure;
+}
+
+function releaseTransition(
+  transition: TransitionPresentation,
+): unknown | undefined {
+  return releaseAll([() => transition.dispose()]);
 }
 
 function releaseStructure(

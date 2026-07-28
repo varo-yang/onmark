@@ -10,7 +10,9 @@ import type {
   RuntimePlan,
   RuntimeScene,
   RuntimeShot,
+  RuntimeTransition,
   RuntimeVideo,
+  TransitionPresentation,
   VideoPresentation,
 } from "@onmark/runtime/types";
 
@@ -20,8 +22,8 @@ import {
   ownExtensions,
   type PresentationExtension,
   type PresentationExtensionContext,
+  type PresentationElementTargetKind,
   type PresentationTarget,
-  type PresentationTargetKind,
 } from "./motion.js";
 import { authoredImageResources } from "./resource.js";
 
@@ -32,6 +34,7 @@ const ELEMENTS = Object.freeze({
   scene: "om-scene",
   shot: "om-shot",
   title: "om-title",
+  transition: "om-transition",
   video: "video",
 });
 
@@ -41,6 +44,7 @@ const VISIBILITY_RULE = [
   "[data-om-node][hidden],",
   "om-film > om-scene:not([data-om-node]),",
   "om-scene > om-shot:not([data-om-node]),",
+  "om-scene > om-transition,",
   "om-shot > :is(video, om-title, om-cta):not([data-om-node]) {",
   "  display: none !important;",
   "}",
@@ -72,6 +76,7 @@ export function createDomPresentationBindings(
     bindFilm: document.bindFilm.bind(document),
     bindScene: document.bindScene.bind(document),
     bindShot: document.bindShot.bind(document),
+    bindTransition: document.bindTransition.bind(document),
     bindVideo: document.bindVideo.bind(document),
     bindOverlay: document.bindOverlay.bind(document),
     async bindExtensions(plan) {
@@ -164,6 +169,45 @@ class AuthoredDocument {
     };
   }
 
+  bindTransition(placement: RuntimeTransition): TransitionPresentation {
+    const nodes = this.#nodeIndex();
+    const element = requiredNode(
+      nodes,
+      placement.node,
+      "transition",
+      ELEMENTS.transition,
+    );
+    const outgoingElement = requiredNodeId(
+      nodes,
+      placement.outgoingShotId,
+      "outgoing shot",
+      ELEMENTS.shot,
+    );
+    const incomingElement = requiredNodeId(
+      nodes,
+      placement.incomingShotId,
+      "incoming shot",
+      ELEMENTS.shot,
+    );
+    const bound = bindElement(element, placement.node);
+    this.#targets.push(
+      Object.freeze({
+        element,
+        incomingElement,
+        interval: placement.interval,
+        kind: "transition",
+        node: placement.node,
+        outgoingElement,
+      }),
+    );
+    return Object.freeze({
+      dispose: bound.dispose,
+      element,
+      incomingElement,
+      outgoingElement,
+    });
+  }
+
   bindOverlay(placement: RuntimeOverlay): OverlayPresentation {
     if (placement.kind === "caption") {
       return this.#bindCaption(placement);
@@ -214,7 +258,7 @@ class AuthoredDocument {
   }
 
   #record(
-    kind: PresentationTargetKind,
+    kind: PresentationElementTargetKind,
     element: HTMLElement,
     node: RuntimeNode,
     interval: RuntimePlan["evaluation"],
@@ -256,7 +300,16 @@ function collectAuthoredNodes(
   const browserVideoShots = new Set(plan.videos.map(({ shotId }) => shotId));
   for (const scene of semanticChildren(film, ELEMENTS.scene)) {
     indexed.push(scene);
-    for (const shot of semanticChildren(scene, ELEMENTS.shot)) {
+    const structure = semanticChildren(
+      scene,
+      `${ELEMENTS.shot}, ${ELEMENTS.transition}`,
+    );
+    for (const element of structure) {
+      if (element.matches(ELEMENTS.transition)) {
+        indexed.push(element);
+        continue;
+      }
+      const shot = element;
       indexed.push(shot);
       // Browser Plans assign dense semantic preorder IDs. The shot just
       // admitted is therefore the parent ID carried by projected videos.
@@ -268,6 +321,15 @@ function collectAuthoredNodes(
     }
   }
   return Object.freeze({ film, elements: Object.freeze(indexed) });
+}
+
+function requiredNodeId(
+  nodes: AuthoredNodeIndex,
+  nodeId: number,
+  role: string,
+  selector: string,
+): HTMLElement {
+  return requiredNode(nodes, { nodeId }, role, selector);
 }
 
 function requiredNode(

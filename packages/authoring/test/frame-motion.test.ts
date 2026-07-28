@@ -51,6 +51,67 @@ test("does not evaluate local motion outside its solved interval", async () => {
   assert.deepEqual(frames, [0]);
 });
 
+test("samples a transition from zero through its final overlap frame", async () => {
+  const outgoingElement = {} as HTMLElement;
+  const incomingElement = {} as HTMLElement;
+  const progress: number[] = [];
+  const motion = frameMotion({
+    transition(context) {
+      assert.equal(context.outgoingElement, outgoingElement);
+      assert.equal(context.incomingElement, incomingElement);
+      progress.push(context.progress);
+    },
+  });
+  const extension = await motion.bind({
+    frameRate: CONTEXT.frameRate,
+    targets: [
+      {
+        element: {} as HTMLElement,
+        incomingElement,
+        interval: { start: 45, end: 60 },
+        kind: "transition",
+        node: { nodeId: 3, authoredId: "reveal" },
+        outgoingElement,
+      },
+    ],
+  });
+  const [effect] = extension.effects;
+  assert.ok(effect);
+
+  await effect.apply({ index: 45, timeSeconds: 1.5 });
+  await effect.apply({ index: 59, timeSeconds: 59 / 30 });
+
+  assert.deepEqual(progress, [0, 1]);
+});
+
+test("treats a one-frame transition as its terminal sample", async () => {
+  let progress: number | undefined;
+  const motion = frameMotion({
+    transition(context) {
+      progress = context.progress;
+    },
+  });
+  const extension = await motion.bind({
+    frameRate: CONTEXT.frameRate,
+    targets: [
+      {
+        element: {} as HTMLElement,
+        incomingElement: {} as HTMLElement,
+        interval: { start: 45, end: 46 },
+        kind: "transition",
+        node: { nodeId: 3, authoredId: "reveal" },
+        outgoingElement: {} as HTMLElement,
+      },
+    ],
+  });
+  const [effect] = extension.effects;
+  assert.ok(effect);
+
+  await effect.apply({ index: 45, timeSeconds: 1.5 });
+
+  assert.equal(progress, 1);
+});
+
 test("composes semantic and selector motion in declaration order", async () => {
   const calls: string[] = [];
   const element = {

@@ -5,6 +5,8 @@ export {
   type FrameMotionContext,
   type FrameMotionDefinition,
   type FrameMotionHandler,
+  type TransitionFrameMotionContext,
+  type TransitionFrameMotionHandler,
 } from "./frame-motion.js";
 export {
   easing,
@@ -18,8 +20,11 @@ export {
   combineMotion,
   type PresentationExtension,
   type PresentationExtensionContext,
+  type PresentationElementTarget,
+  type PresentationElementTargetKind,
   type PresentationTarget,
   type PresentationTargetKind,
+  type PresentationTransitionTarget,
 } from "./motion.js";
 export {
   createDomPresentationBindings,

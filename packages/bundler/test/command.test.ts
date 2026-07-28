@@ -98,6 +98,38 @@ test("reports typed configuration failures on stderr", async () => {
   assert.match(result.stderr, /^configuration: /u);
 });
 
+test("rejects an empty random-access projection", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "onmark-bundle-command-"));
+  try {
+    const document = join(workspace, "film.html");
+    const projection = join(workspace, "projection.json");
+    await writeFile(document, "<om-film></om-film>\n", "utf8");
+    await writeFile(projection, '{"version":1,"regions":[]}', "utf8");
+
+    const result = await invoke([
+      "--html",
+      document,
+      "--projection",
+      projection,
+      "--output",
+      join(workspace, "bundle"),
+      "--max-output-bytes",
+      "1000000",
+      "--frame-behavior",
+      "perFrame",
+      "--temporal-capability",
+      "randomAccess",
+      "--visual-capability",
+      "browserComposite",
+    ]);
+
+    assert.equal(result.code, 2);
+    assert.match(result.stderr, /^configuration: bundle projection/u);
+  } finally {
+    await rm(workspace, { force: true, recursive: true });
+  }
+});
+
 interface CommandResult {
   readonly code: number | null;
   readonly stderr: string;

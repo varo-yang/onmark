@@ -70,6 +70,56 @@ test("presents videos and overlays on their Rust-owned intervals", async () => {
   assert.equal(recorder.allDisposed(), true);
 });
 
+test("presents both adjacent shots throughout a transition overlap", async () => {
+  const recorder = new PresentationRecorder();
+  const adapter = new PresentationRuntimeAdapter(recorder.bindings, 100);
+  const baseline = presentationPlan();
+  const plan: BrowserPlan = {
+    ...baseline,
+    timeline: { start: 0, end: 105 },
+    evaluation: { start: 0, end: 105 },
+    output: { start: 0, end: 105 },
+    scenes: [{ ...baseline.scenes[0]!, interval: { start: 0, end: 105 } }],
+    shots: [
+      { ...baseline.shots[0]!, interval: { start: 0, end: 60 } },
+      {
+        interval: { start: 45, end: 105 },
+        node: { authoredId: "after", nodeId: 4 },
+        sceneId: 1,
+      },
+    ],
+    transitions: [
+      {
+        incomingShotId: 4,
+        interval: { start: 45, end: 60 },
+        node: { authoredId: "reveal", nodeId: 3 },
+        outgoingShotId: 2,
+      },
+    ],
+    videos: [],
+    overlays: [],
+  };
+
+  await adapter.load(plan);
+  await adapter.prepare(runtimeFrameAt(0, plan.frameRate));
+  const before = runtimeFrameAt(30, plan.frameRate);
+  await adapter.seek(before);
+  await adapter.confirm(before);
+  assert.deepEqual(recorder.shotVisibility(), [true, false]);
+
+  const overlap = runtimeFrameAt(45, plan.frameRate);
+  await adapter.seek(overlap);
+  await adapter.confirm(overlap);
+  assert.deepEqual(recorder.shotVisibility(), [true, true]);
+
+  const after = runtimeFrameAt(60, plan.frameRate);
+  await adapter.seek(after);
+  await adapter.confirm(after);
+  assert.deepEqual(recorder.shotVisibility(), [false, true]);
+  await adapter.dispose();
+  assert.equal(recorder.allDisposed(), true);
+});
+
 test("loads independent videos concurrently", async () => {
   const elements: FakeVideoElement[] = [];
   const adapter = new PresentationRuntimeAdapter(videoBindings(elements), 100);
@@ -437,12 +487,18 @@ interface RecordedFrameEffect {
 
 interface RecordedContainer {
   disposed: boolean;
+  visible: boolean;
+}
+
+interface RecordedTransition {
+  disposed: boolean;
 }
 
 class PresentationRecorder {
   readonly containers: RecordedContainer[] = [];
   readonly effects: RecordedFrameEffect[] = [];
   readonly overlays: RecordedOverlay[] = [];
+  readonly transitions: RecordedTransition[] = [];
   readonly videos: RecordedVideo[] = [];
   #rejectEffectCleanup = false;
   #rejectedContainerCleanupIndex: number | undefined;
@@ -453,6 +509,18 @@ class PresentationRecorder {
     bindFilm: () => this.#bindContainer(),
     bindScene: () => this.#bindContainer(),
     bindShot: () => this.#bindContainer(),
+    bindTransition: () => {
+      const recorded: RecordedTransition = { disposed: false };
+      this.transitions.push(recorded);
+      return {
+        dispose(): void {
+          recorded.disposed = true;
+        },
+        element: {} as HTMLElement,
+        incomingElement: {} as HTMLElement,
+        outgoingElement: {} as HTMLElement,
+      };
+    },
     bindVideo: (placement) => {
       const index = this.videos.length;
       const element = new FakeVideoElement(true);
@@ -558,12 +626,17 @@ class PresentationRecorder {
     };
   }
 
+  shotVisibility(): boolean[] {
+    return this.containers.slice(2).map(({ visible }) => visible);
+  }
+
   allDisposed(): boolean {
     return (
       this.videos.every(
         ({ disposed, element }) => disposed && !element.hasSource,
       ) &&
       this.overlays.every(({ disposed }) => disposed) &&
+      this.transitions.every(({ disposed }) => disposed) &&
       this.effects.every(({ disposed }) => disposed) &&
       this.containers.every(({ disposed }) => disposed)
     );
@@ -571,7 +644,7 @@ class PresentationRecorder {
 
   #bindContainer() {
     const index = this.containers.length;
-    const recorded: RecordedContainer = { disposed: false };
+    const recorded: RecordedContainer = { disposed: false, visible: false };
     this.containers.push(recorded);
     return {
       element: {} as HTMLElement,
@@ -579,6 +652,7 @@ class PresentationRecorder {
         if (!visible && index === this.#rejectedContainerCleanupIndex) {
           throw new Error("container cleanup failed");
         }
+        recorded.visible = visible;
       },
       dispose(): void {
         recorded.disposed = true;
@@ -589,7 +663,7 @@ class PresentationRecorder {
 
 function presentationPlan(): BrowserPlan {
   return {
-    timelineVersion: 2,
+    timelineVersion: 3,
     frameRate: { numerator: 30, denominator: 1 },
     timeline: { start: 0, end: 40 },
     evaluation: { start: 10, end: 30 },
@@ -608,6 +682,7 @@ function presentationPlan(): BrowserPlan {
         interval: { start: 10, end: 30 },
       },
     ],
+    transitions: [],
     videos: [video(1, 3, 10, 20), video(2, 8, 20, 30)],
     overlays: [
       {
@@ -638,6 +713,9 @@ function emptyBindings(effects: readonly FrameEffect[]): PresentationBindings {
     },
     bindShot() {
       return emptyContainer();
+    },
+    bindTransition(): never {
+      throw new Error("the empty fixture contains no transition");
     },
     bindVideo(): never {
       throw new Error("the empty fixture contains no video");

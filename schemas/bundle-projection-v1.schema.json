@@ -1,0 +1,55 @@
+{
+  "$defs": {
+    "BundleProjectionRegion": {
+      "additionalProperties": false,
+      "description": "Dense screenplay-order shots retained by one render region.",
+      "properties": {
+        "shotIndices": {
+          "items": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "maxItems": 10000,
+          "minItems": 1,
+          "type": "array"
+        }
+      },
+      "required": [
+        "shotIndices"
+      ],
+      "type": "object"
+    },
+    "BundleProjectionVersion": {
+      "const": 1,
+      "description": "Current immutable projection-plan version.",
+      "format": "uint16",
+      "maximum": 65535,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "$id": "https://onmark.dev/schemas/bundle-projection-v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Exact shot dependencies for every render region in output order.",
+  "properties": {
+    "regions": {
+      "items": {
+        "$ref": "#/$defs/BundleProjectionRegion"
+      },
+      "maxItems": 10000,
+      "minItems": 1,
+      "type": "array"
+    },
+    "version": {
+      "$ref": "#/$defs/BundleProjectionVersion"
+    }
+  },
+  "required": [
+    "version",
+    "regions"
+  ],
+  "title": "BundleProjection",
+  "type": "object"
+}

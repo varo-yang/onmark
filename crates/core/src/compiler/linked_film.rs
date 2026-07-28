@@ -268,6 +268,7 @@ impl LinkedScene {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LinkedShot {
     element: LinkedElement,
+    incoming_transition: Option<LinkedTransition>,
     content: Vec<LinkedShotContent>,
     sound_effects: Vec<LinkedAudio>,
 }
@@ -275,11 +276,13 @@ pub struct LinkedShot {
 impl LinkedShot {
     pub(super) const fn new(
         element: LinkedElement,
+        incoming_transition: Option<LinkedTransition>,
         content: Vec<LinkedShotContent>,
         sound_effects: Vec<LinkedAudio>,
     ) -> Self {
         Self {
             element,
+            incoming_transition,
             content,
             sound_effects,
         }
@@ -289,6 +292,12 @@ impl LinkedShot {
     #[must_use]
     pub const fn element(&self) -> &LinkedElement {
         &self.element
+    }
+
+    /// Returns the authored boundary that overlaps this shot with its predecessor.
+    #[must_use]
+    pub const fn incoming_transition(&self) -> Option<&LinkedTransition> {
+        self.incoming_transition.as_ref()
     }
 
     /// Returns recognized shot content in authored order.
@@ -303,8 +312,42 @@ impl LinkedShot {
         &self.sound_effects
     }
 
-    pub(super) fn into_parts(self) -> (LinkedElement, Vec<LinkedShotContent>, Vec<LinkedAudio>) {
-        (self.element, self.content, self.sound_effects)
+    pub(super) fn into_parts(
+        self,
+    ) -> (
+        LinkedElement,
+        Option<LinkedTransition>,
+        Vec<LinkedShotContent>,
+        Vec<LinkedAudio>,
+    ) {
+        (
+            self.element,
+            self.incoming_transition,
+            self.content,
+            self.sound_effects,
+        )
+    }
+}
+
+/// One authored relationship between this shot and its predecessor.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LinkedTransition {
+    element: LinkedElement,
+}
+
+impl LinkedTransition {
+    pub(super) const fn new(element: LinkedElement) -> Self {
+        Self { element }
+    }
+
+    /// Returns the structurally bound transition element.
+    #[must_use]
+    pub const fn element(&self) -> &LinkedElement {
+        &self.element
+    }
+
+    pub(super) fn into_element(self) -> LinkedElement {
+        self.element
     }
 }
 

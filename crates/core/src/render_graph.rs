@@ -9,7 +9,9 @@ use std::error::Error;
 use std::fmt;
 
 use crate::model::{FrameIndex, FrameInterval, FrozenAssetId, PresentationTemporalCapability};
-use crate::timeline::{TimelineContent, TimelineIr, TimelineShot};
+use crate::timeline::{
+    TimelineContent, TimelineIr, TimelineScene, TimelineShot, TimelineShotIndex,
+};
 
 /// Render-dependency regions derived from one solved film.
 ///
@@ -37,9 +39,7 @@ impl RenderGraph {
             PresentationTemporalCapability::Sequential => {
                 vec![RenderRegion::from_timeline(timeline)]
             }
-            PresentationTemporalCapability::RandomAccess => {
-                timeline.shots().map(RenderRegion::from_shot).collect()
-            }
+            PresentationTemporalCapability::RandomAccess => random_access_regions(timeline),
         };
         assign_audio_assets(timeline, &mut regions)?;
 
@@ -63,9 +63,8 @@ impl RenderGraph {
 
     /// Produces one local unit candidate for each independently renderable region.
     ///
-    /// The initial render graph contains only regions whose evaluation and
-    /// output intervals are equal. Future graph edges may merge regions or
-    /// widen evaluation before this operation produces a partition plan.
+    /// Transition regions already carry widened evaluation intervals, so
+    /// partitioning only freezes the graph facts into executable candidates.
     #[must_use]
     pub fn into_partition(self) -> PartitionPlan {
         let units = self
@@ -86,24 +85,49 @@ impl RenderGraph {
 pub struct RenderRegion {
     evaluation: FrameInterval,
     output: FrameInterval,
+    shots: BTreeSet<TimelineShotIndex>,
     media_assets: BTreeSet<FrozenAssetId>,
 }
 
 impl RenderRegion {
     fn from_timeline(timeline: &TimelineIr) -> Self {
         let mut region = Self::empty(timeline.interval());
-        for shot in timeline.shots() {
+        for (index, shot) in timeline.indexed_shots() {
+            region.shots.insert(index);
             region.media_assets.extend(Self::shot_assets(shot));
         }
         region
     }
 
-    fn from_shot(shot: &TimelineShot) -> Self {
-        let interval = shot.timing().interval();
+    fn from_shot(index: TimelineShotIndex, shot: &TimelineShot, output: FrameInterval) -> Self {
         Self {
-            evaluation: interval,
-            output: interval,
+            evaluation: shot.timing().interval(),
+            output,
+            shots: BTreeSet::from([index]),
             media_assets: Self::shot_assets(shot),
+        }
+    }
+
+    fn from_transition(
+        outgoing_index: TimelineShotIndex,
+        outgoing: &TimelineShot,
+        incoming_index: TimelineShotIndex,
+        incoming: &TimelineShot,
+        output: FrameInterval,
+    ) -> Self {
+        let evaluation = FrameInterval::new(
+            outgoing.timing().interval().start(),
+            incoming.timing().interval().end(),
+        )
+        .expect("adjacent solved shots form an ordered transition evaluation");
+        let mut media_assets = Self::shot_assets(outgoing);
+        media_assets.extend(Self::shot_assets(incoming));
+
+        Self {
+            evaluation,
+            output,
+            shots: BTreeSet::from([outgoing_index, incoming_index]),
+            media_assets,
         }
     }
 
@@ -121,6 +145,7 @@ impl RenderRegion {
         Self {
             evaluation: interval,
             output: interval,
+            shots: BTreeSet::new(),
             media_assets: BTreeSet::new(),
         }
     }
@@ -141,11 +166,83 @@ impl RenderRegion {
         self.output
     }
 
+    /// Returns shot dependencies in dense screenplay order.
+    #[must_use]
+    pub fn shots(&self) -> impl ExactSizeIterator<Item = &TimelineShotIndex> {
+        self.shots.iter()
+    }
+
     /// Returns direct frozen-media dependencies in deterministic identity order.
     #[must_use]
     pub fn media_assets(&self) -> impl ExactSizeIterator<Item = &FrozenAssetId> {
         self.media_assets.iter()
     }
+}
+
+fn random_access_regions(timeline: &TimelineIr) -> Vec<RenderRegion> {
+    let mut regions = Vec::new();
+    let mut first_shot = 0_usize;
+    for scene in timeline.scenes() {
+        regions.extend(scene_regions(scene, first_shot));
+        first_shot = first_shot
+            .checked_add(scene.shots().len())
+            .expect("owned scene collections fit the process index domain");
+    }
+    regions
+}
+
+fn scene_regions(scene: &TimelineScene, first_shot: usize) -> Vec<RenderRegion> {
+    let shots = scene.shots();
+    let mut regions = Vec::with_capacity(shots.len().saturating_mul(2));
+
+    for (index, shot) in shots.iter().enumerate() {
+        let current_index = shot_index(first_shot, index);
+        let output = exclusive_output(shots, index);
+        if !output.is_empty() {
+            regions.push(RenderRegion::from_shot(current_index, shot, output));
+        }
+
+        let Some(incoming) = shots.get(index + 1) else {
+            continue;
+        };
+        let Some(transition) = incoming.incoming_transition() else {
+            continue;
+        };
+        regions.push(RenderRegion::from_transition(
+            current_index,
+            shot,
+            shot_index(first_shot, index + 1),
+            incoming,
+            transition.timing().interval(),
+        ));
+    }
+
+    regions
+}
+
+fn shot_index(first: usize, offset: usize) -> TimelineShotIndex {
+    TimelineShotIndex::new(
+        first
+            .checked_add(offset)
+            .expect("owned scene collections fit the process index domain"),
+    )
+}
+
+fn exclusive_output(shots: &[TimelineShot], index: usize) -> FrameInterval {
+    let shot = &shots[index];
+    let start = shot.incoming_transition().map_or_else(
+        || shot.timing().interval().start(),
+        |transition| transition.timing().interval().end(),
+    );
+    let end = shots
+        .get(index + 1)
+        .and_then(TimelineShot::incoming_transition)
+        .map_or_else(
+            || shot.timing().interval().end(),
+            |transition| transition.timing().interval().start(),
+        );
+
+    FrameInterval::new(start, end).expect("solved transition windows do not overlap")
 }
 
 fn assign_audio_assets(
@@ -229,6 +326,7 @@ impl PartitionPlan {
 pub struct RenderPartition {
     evaluation: FrameInterval,
     output: FrameInterval,
+    shots: BTreeSet<TimelineShotIndex>,
     media_assets: BTreeSet<FrozenAssetId>,
 }
 
@@ -237,6 +335,7 @@ impl RenderPartition {
         Self {
             evaluation: region.evaluation,
             output: region.output,
+            shots: region.shots,
             media_assets: region.media_assets,
         }
     }
@@ -251,6 +350,12 @@ impl RenderPartition {
     #[must_use]
     pub const fn output(&self) -> FrameInterval {
         self.output
+    }
+
+    /// Returns the exact shots whose presentation affects this unit.
+    #[must_use]
+    pub fn shots(&self) -> impl ExactSizeIterator<Item = &TimelineShotIndex> {
+        self.shots.iter()
     }
 
     /// Returns direct frozen-media dependencies in deterministic identity order.
@@ -378,6 +483,7 @@ mod tests {
         TimelineShot::new(
             TimelineElement::new(ElementKind::Shot, None, span),
             timing(interval),
+            None,
             Vec::new(),
         )
     }

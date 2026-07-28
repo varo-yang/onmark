@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  BROWSER_PROTOCOL_VERSION,
   ProtocolDecodeError,
   RUNTIME_HOST_NAME,
   installRuntimeHost,
@@ -32,12 +33,12 @@ test("installs one immutable host that decodes before dispatch", async () => {
   );
   assert.deepEqual(
     await host.dispatch({
-      version: 3,
+      version: BROWSER_PROTOCOL_VERSION,
       requestId: 1,
       command: {
         type: "load",
         plan: {
-          timelineVersion: 2,
+          timelineVersion: 3,
           frameRate: { numerator: 30, denominator: 1 },
           timeline: { start: 0, end: 1 },
           evaluation: { start: 0, end: 1 },
@@ -45,12 +46,17 @@ test("installs one immutable host that decodes before dispatch", async () => {
           film: { nodeId: 0, authoredId: null },
           scenes: [],
           shots: [],
+          transitions: [],
           videos: [],
           overlays: [],
         },
       },
     }),
-    { version: 3, requestId: 1, event: { type: "loaded" } },
+    {
+      version: BROWSER_PROTOCOL_VERSION,
+      requestId: 1,
+      event: { type: "loaded" },
+    },
   );
   await assert.rejects(
     host.dispatch({ version: 2, requestId: 2, command: { type: "dispose" } }),

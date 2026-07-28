@@ -19,7 +19,7 @@ import {
 } from "../src/index.js";
 
 const plan: BrowserPlan = {
-  timelineVersion: 2,
+  timelineVersion: 3,
   frameRate: { numerator: 30, denominator: 1 },
   timeline: { start: 0, end: 30 },
   evaluation: { start: 10, end: 20 },
@@ -38,6 +38,7 @@ const plan: BrowserPlan = {
       interval: { start: 10, end: 20 },
     },
   ],
+  transitions: [],
   videos: [
     {
       node: { nodeId: 3, authoredId: "video" },
@@ -77,7 +78,7 @@ test("executes the browser protocol in order", async () => {
   const session = new RuntimeSession(adapter);
 
   assert.deepEqual(await session.dispatch(request(1, { type: "load", plan })), {
-    version: 3,
+    version: 4,
     requestId: 1,
     event: { type: "loaded" },
   });
@@ -86,7 +87,7 @@ test("executes the browser protocol in order", async () => {
       request(2, { type: "prepare", evaluationStart: 10 }),
     ),
     {
-      version: 3,
+      version: 4,
       requestId: 2,
       event: { type: "prepared", evaluationStart: 10 },
     },
@@ -94,7 +95,7 @@ test("executes the browser protocol in order", async () => {
   assert.deepEqual(
     await session.dispatch(request(3, { type: "seek", frame: 15 })),
     {
-      version: 3,
+      version: 4,
       requestId: 3,
       event: { type: "frameStaged", frame: 15 },
     },
@@ -102,13 +103,13 @@ test("executes the browser protocol in order", async () => {
   assert.deepEqual(
     await session.dispatch(request(4, { type: "confirm", frame: 15 })),
     {
-      version: 3,
+      version: 4,
       requestId: 4,
       event: { type: "frameReady", frame: 15 },
     },
   );
   assert.deepEqual(await session.dispatch(request(5, { type: "dispose" })), {
-    version: 3,
+    version: 4,
     requestId: 5,
     event: { type: "disposed" },
   });
@@ -388,6 +389,50 @@ test("rejects interval relationships outside the browser plan contract", async (
   escapedShot.scenes[0]!.interval = { start: 12, end: 18 };
   const escapedVideo = structuredClone(plan);
   escapedVideo.shots[0]!.interval = { start: 13, end: 17 };
+  const crossSceneTransition = structuredClone(plan);
+  crossSceneTransition.scenes = [
+    {
+      node: { nodeId: 1, authoredId: "first-scene" },
+      interval: { start: 10, end: 15 },
+    },
+    {
+      node: { nodeId: 3, authoredId: "second-scene" },
+      interval: { start: 14, end: 20 },
+    },
+  ];
+  crossSceneTransition.shots = [
+    {
+      node: { nodeId: 2, authoredId: "first-shot" },
+      sceneId: 1,
+      interval: { start: 10, end: 15 },
+    },
+    {
+      node: { nodeId: 4, authoredId: "second-shot" },
+      sceneId: 3,
+      interval: { start: 14, end: 20 },
+    },
+  ];
+  crossSceneTransition.transitions = [
+    {
+      node: { nodeId: 5, authoredId: "cross-scene" },
+      outgoingShotId: 2,
+      incomingShotId: 4,
+      interval: { start: 14, end: 15 },
+    },
+  ];
+  crossSceneTransition.videos = [];
+  crossSceneTransition.overlays = [];
+  const partialTransition = structuredClone(crossSceneTransition);
+  partialTransition.scenes = [
+    {
+      node: { nodeId: 1, authoredId: "scene" },
+      interval: { start: 10, end: 20 },
+    },
+  ];
+  partialTransition.shots[1]!.sceneId = 1;
+  partialTransition.shots[0]!.interval = { start: 10, end: 17 };
+  partialTransition.shots[1]!.interval = { start: 14, end: 20 };
+  partialTransition.transitions[0]!.interval = { start: 15, end: 17 };
 
   for (const invalidPlan of [
     noncanonicalFrameRate,
@@ -398,6 +443,8 @@ test("rejects interval relationships outside the browser plan contract", async (
     escapedOutput,
     escapedShot,
     escapedVideo,
+    crossSceneTransition,
+    partialTransition,
   ]) {
     const adapter = new RecordingAdapter();
     const session = new RuntimeSession(adapter);
@@ -553,7 +600,7 @@ function request(
   requestId: number,
   command: BrowserRequest["command"],
 ): BrowserRequest {
-  return { version: 3, requestId, command };
+  return { version: 4, requestId, command };
 }
 
 function firstVideo<Video>(plan: { readonly videos: readonly Video[] }): Video {

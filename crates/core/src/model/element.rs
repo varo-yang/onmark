@@ -15,6 +15,8 @@ pub enum ElementKind {
     Scene,
     /// Sequential unit with one local time origin.
     Shot,
+    /// Authored relationship between two adjacent shots.
+    Transition,
     /// Primary video content.
     Video,
     /// Authored voice-over inscription and media reference.
@@ -59,6 +61,7 @@ impl ElementKind {
             "om-cue" => Some(Self::Cue),
             "om-scene" => Some(Self::Scene),
             "om-shot" => Some(Self::Shot),
+            "om-transition" => Some(Self::Transition),
             "video" => Some(Self::Video),
             "om-vo" => Some(Self::VoiceOver),
             "om-music" => Some(Self::Music),
@@ -78,6 +81,7 @@ impl ElementKind {
             Self::Cue => "om-cue",
             Self::Scene => "om-scene",
             Self::Shot => "om-shot",
+            Self::Transition => "om-transition",
             Self::Video => "video",
             Self::VoiceOver => "om-vo",
             Self::Music => "om-music",
@@ -101,8 +105,18 @@ mod tests {
     #[test]
     fn recognizes_the_closed_screenplay_vocabulary() {
         let names = [
-            "om-film", "om-cues", "om-cue", "om-scene", "om-shot", "video", "om-vo", "om-music",
-            "om-sfx", "om-title", "om-cta",
+            "om-film",
+            "om-cues",
+            "om-cue",
+            "om-scene",
+            "om-shot",
+            "om-transition",
+            "video",
+            "om-vo",
+            "om-music",
+            "om-sfx",
+            "om-title",
+            "om-cta",
         ];
 
         for name in names {

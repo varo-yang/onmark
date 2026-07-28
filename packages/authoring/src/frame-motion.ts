@@ -5,8 +5,9 @@ import type { FrameEffect, RuntimeFrame } from "@onmark/runtime/types";
 import type {
   PresentationExtension,
   PresentationExtensionContext,
+  PresentationElementTargetKind,
   PresentationTarget,
-  PresentationTargetKind,
+  PresentationTransitionTarget,
 } from "./motion.js";
 
 /** One immutable sample inside a semantic element's solved interval. */
@@ -21,23 +22,41 @@ export interface FrameMotionContext {
 /** Applies browser-owned visual state for one exact local frame. */
 export type FrameMotionHandler = (context: FrameMotionContext) => void;
 
+/** Exact-frame transition sample with both related shot elements. */
+export interface TransitionFrameMotionContext extends FrameMotionContext {
+  readonly incomingElement: HTMLElement;
+  readonly outgoingElement: HTMLElement;
+}
+
+/** Applies browser-owned transition state for one exact overlap frame. */
+export type TransitionFrameMotionHandler = (
+  context: TransitionFrameMotionContext,
+) => void;
+
 /** Semantic handlers and optional selector handlers for exact-frame motion. */
 export type FrameMotionDefinition = Readonly<
-  Partial<Record<PresentationTargetKind, FrameMotionHandler>> & {
+  Partial<Record<PresentationElementTargetKind, FrameMotionHandler>> & {
     readonly selectors?: Readonly<Record<string, FrameMotionHandler>>;
+    readonly transition?: TransitionFrameMotionHandler;
   }
 >;
 
 interface FrameMotionRules {
   readonly kinds: Readonly<
-    Record<PresentationTargetKind, FrameMotionHandler | undefined>
+    Record<PresentationElementTargetKind, FrameMotionHandler | undefined>
   >;
   readonly selectors: readonly FrameMotionSelector[];
+  readonly transition: TransitionFrameMotionHandler | undefined;
 }
 
 interface FrameMotionSelector {
   readonly apply: FrameMotionHandler;
   readonly selector: string;
+}
+
+interface MatchingFrameMotion {
+  readonly elements: readonly FrameMotionHandler[];
+  readonly transition: TransitionFrameMotionHandler | undefined;
 }
 
 /** Creates local browser effects driven directly by exact runtime frames. */
@@ -62,7 +81,7 @@ function bindEffects(
   const effects: FrameEffect[] = [];
   for (const target of context.targets) {
     const handlers = matchingHandlers(rules, target);
-    if (handlers.length > 0) {
+    if (handlers.elements.length > 0 || handlers.transition !== undefined) {
       effects.push(bindEffect(target, handlers, context.frameRate));
     }
   }
@@ -71,7 +90,7 @@ function bindEffects(
 
 function bindEffect(
   target: PresentationTarget,
-  handlers: readonly FrameMotionHandler[],
+  handlers: MatchingFrameMotion,
   frameRate: PresentationExtensionContext["frameRate"],
 ): FrameEffect {
   const durationFrames = target.interval.end - target.interval.start;
@@ -81,14 +100,17 @@ function bindEffect(
       if (localFrame < 0 || localFrame >= durationFrames) {
         return;
       }
-      const sample = Object.freeze({
+      const sample: FrameMotionContext = Object.freeze({
         durationFrames,
         element: target.element,
         frameRate,
         localFrame,
-        progress: localFrame / durationFrames,
+        progress: targetProgress(target, localFrame, durationFrames),
       });
-      for (const handler of handlers) {
+      if (target.kind === "transition" && handlers.transition !== undefined) {
+        handlers.transition(transitionSample(sample, target));
+      }
+      for (const handler of handlers.elements) {
         handler(sample);
       }
     },
@@ -111,7 +133,11 @@ function ownRules(definition: FrameMotionDefinition): FrameMotionRules {
   const selectors = Object.freeze(
     Object.entries(definition.selectors ?? {}).map(ownSelector),
   );
-  return Object.freeze({ kinds, selectors });
+  return Object.freeze({
+    kinds,
+    selectors,
+    transition: definition.transition,
+  });
 }
 
 function ownSelector([selector, apply]: [
@@ -127,9 +153,10 @@ function ownSelector([selector, apply]: [
 function matchingHandlers(
   rules: FrameMotionRules,
   target: PresentationTarget,
-): readonly FrameMotionHandler[] {
+): MatchingFrameMotion {
   const handlers: FrameMotionHandler[] = [];
-  const kind = rules.kinds[target.kind];
+  const kind =
+    target.kind === "transition" ? undefined : rules.kinds[target.kind];
   if (kind !== undefined) {
     handlers.push(kind);
   }
@@ -138,5 +165,30 @@ function matchingHandlers(
       handlers.push(rule.apply);
     }
   }
-  return handlers;
+  return Object.freeze({
+    elements: Object.freeze(handlers),
+    transition: target.kind === "transition" ? rules.transition : undefined,
+  });
+}
+
+function targetProgress(
+  target: PresentationTarget,
+  localFrame: number,
+  durationFrames: number,
+): number {
+  if (target.kind !== "transition") {
+    return localFrame / durationFrames;
+  }
+  return durationFrames === 1 ? 1 : localFrame / (durationFrames - 1);
+}
+
+function transitionSample(
+  sample: FrameMotionContext,
+  target: PresentationTransitionTarget,
+): TransitionFrameMotionContext {
+  return Object.freeze({
+    ...sample,
+    incomingElement: target.incomingElement,
+    outgoingElement: target.outgoingElement,
+  });
 }

@@ -1,9 +1,9 @@
 # Onmark Language Specification
 
-> Status: current screenplay language through Gate seven and distributed
-> incremental rendering. Gate four was the last completed gate to add authored
-> spelling; later work changed presentation and execution only. Deferred
-> language capabilities are listed explicitly.
+> Status: current screenplay language through the active Gate eight and
+> distributed incremental rendering. Gate eight admits only spelling backed by
+> checked-in generation evidence. Deferred language capabilities are listed
+> explicitly.
 
 ## Purpose
 
@@ -27,17 +27,18 @@ contract: Timeline IR.
 
 ## Core model
 
-The current vocabulary is `film`, `cues`, `cue`, `scene`, `shot`, `video`,
-`vo`, `music`, `sfx`, `title`, and `cta`. A film may contain at most one direct
-`cues` child; that container owns only `cue` declarations and does not
-participate in scene sequencing. A film may also own `music` that does not
-participate in scene sequencing. Scenes own sequential shots. A renderable film
-must contain at least one shot with a positive solved duration. A shot owns its
-`video`, `vo`, `sfx`, `title`, and `cta` content. Titles and CTAs are overlays
-and do not participate in sibling sequencing. `video` is the only current
-visual media element. General audio uses the semantic `music` and `sfx`
-elements; a generic `audio` element is not part of the vocabulary. Image and
-other media elements remain deferred.
+The current vocabulary is `film`, `cues`, `cue`, `scene`, `shot`,
+`transition`, `video`, `vo`, `music`, `sfx`, `title`, and `cta`. A film may
+contain at most one direct `cues` child; that container owns only `cue`
+declarations and does not participate in scene sequencing. A film may also own
+`music` that does not participate in scene sequencing. Scenes own sequential
+shots and explicit transition boundaries. A renderable film must contain at
+least one shot with a positive solved duration. A shot owns its `video`, `vo`,
+`sfx`, `title`, and `cta` content. Titles and CTAs are overlays and do not
+participate in sibling sequencing. `video` is the only current visual media
+element. General audio uses the semantic `music` and `sfx` elements; a generic
+`audio` element is not part of the vocabulary. Image and other media elements
+remain deferred.
 Structural binding retains `src` and other unparsed authored attributes for the
 attribute/reference resolution phase rather than discarding them.
 
@@ -55,6 +56,9 @@ Illustrative syntax:
       <video src="product.mp4"></video>
       <om-sfx src="reveal.wav" delay="250ms"></om-sfx>
       <om-title cue="offer">30% OFF</om-title>
+    </om-shot>
+    <om-transition id="reveal" duration="500ms"></om-transition>
+    <om-shot id="closing" duration="3s">
       <om-cta cue="cta">Buy now</om-cta>
     </om-shot>
   </om-scene>
@@ -108,9 +112,9 @@ through the rejected suffix.
 Authored time values use the exact grammar `integer[.fraction](s|ms)` with no
 whitespace or sign. Seconds admit at most nine fractional digits and
 milliseconds at most six, so every accepted value has an exact unsigned
-nanosecond representation. A shot's `duration` must be greater than zero; cue
-times and delays may name zero. Frame units and floating-point approximations
-are not part of the language.
+nanosecond representation. Shot and transition durations must be greater than
+zero; cue times and delays may name zero. Frame units and floating-point
+approximations are not part of the language.
 
 Video may select a source-local half-open interval with
 `trim="start..end"`. Either bound may be omitted, but not both: an omitted
@@ -159,6 +163,27 @@ the current language.
 
 All resolutions preserve provenance in `TimingReason`, allowing the compiler to
 explain not only where an element landed but why.
+
+## Transition boundaries
+
+`<om-transition duration="500ms"></om-transition>` may appear only between two
+adjacent shots in one scene. It is a relation between those shots, not a
+renderable child, a third shot, or a free timeline coordinate. The compiler
+overlaps the incoming shot with the outgoing shot's tail for the exact authored
+duration. Consequently, the scene and film are shorter by that overlap.
+
+The duration must fit inside both adjacent shots. Two transitions around one
+middle shot must not consume overlapping portions of that shot. Violations are
+authored timing errors; the compiler never clips or silently shortens a
+transition. Cross-scene transitions and transitions whose window is inferred
+from presentation code are not part of the language.
+
+The empty element's `id`, `class`, and ordinary presentation attributes remain
+available to CSS and motion code. `duration` is compiler-owned and is removed
+from the browser projection. The language does not prescribe an effect enum or
+a built-in visual template. A transition motion handler receives the solved
+overlap and both adjacent shot elements, then realizes that fact with
+exact-frame browser effects.
 
 ## Voice-over
 
@@ -210,16 +235,17 @@ namespace.
 ## Attributes and resolution
 
 Structural binding is followed by attribute and reference resolution. `film`,
-`cues`, and `scene` admit no non-ID attributes. `cue` requires `id` and `time`.
-`shot` admits optional `duration`. `video` admits optional `src`, `delay`,
-`trim`, `speed`, `plays`, and `hold-last`; `vo` admits optional `src` and
-`delay`; `music` requires `src` and admits optional `gain`; `sfx` requires
-`src` and admits optional `delay` and `gain`; `title` and `cta` admit optional
-`cue` or `delay`. `cue` and `delay` cannot appear together on one overlay
-because they define competing start rules. Missing `src` on `video` or `vo`
-remains valid for static analysis; `music` and `sfx` require it during
-resolution. An authored empty `src` is always invalid. Unknown attributes are
-errors.
+`cues`, and `scene` admit no non-ID compiler attributes. `cue` requires `id`
+and `time`. `shot` admits optional `duration`; `transition` requires
+`duration`. `video` admits optional `src`, `delay`, `trim`, `speed`, `plays`,
+and `hold-last`; `vo` admits optional `src` and `delay`; `music` requires `src`
+and admits optional `gain`; `sfx` requires `src` and admits optional `delay`
+and `gain`; `title` and `cta` admit optional `cue` or `delay`. `cue` and
+`delay` cannot appear together on one overlay because they define competing
+start rules. Missing `src` on `video` or `vo` remains valid for static
+analysis; `music` and `sfx` require it during resolution. An authored empty
+`src` is always invalid. Unknown compiler attributes are errors; the closed
+set of global HTML presentation attributes remains presentation-owned.
 
 ## Diagnostics
 
@@ -252,6 +278,7 @@ Initial binding, resolution, and timing diagnostics are:
 | `ONM-STRUCT-004` | a known element appears outside its legal parent                      |
 | `ONM-STRUCT-005` | a film contains more than one `cues` container                        |
 | `ONM-STRUCT-006` | authored text appears in a structural or empty element                |
+| `ONM-STRUCT-007` | a transition does not appear between two adjacent shots               |
 | `ONM-TIME-001`   | an authored duration is invalid or outside the exact range            |
 | `ONM-TIME-002`   | a shot has no media-derived or explicit duration source               |
 | `ONM-TIME-003`   | explicit and media-derived shot durations compete                     |
@@ -259,6 +286,7 @@ Initial binding, resolution, and timing diagnostics are:
 | `ONM-TIME-005`   | an exact time does not fit in the selected frame domain               |
 | `ONM-TIME-006`   | a film has no shot with a positive solved duration                    |
 | `ONM-TIME-007`   | a selected video source interval lies outside its frozen artifact     |
+| `ONM-TIME-008`   | a transition cannot fit inside both adjacent shot intervals           |
 | `ONM-ASSET-001`  | renderable media has no frozen artifact reference                     |
 | `ONM-ASSET-002`  | a media element references an artifact without its required track     |
 | `ONM-REF-001`    | a well-formed overlay cue reference does not name a resolved cue      |
@@ -317,11 +345,12 @@ not a general screenplay props channel or a second presentation timeline.
 
 Compiler attributes are not presentation props. The browser projection removes
 cue declarations, native audio elements, and the `src`, `duration`, `delay`,
-`cue`, and `gain` spellings after compilation. Presentation code consumes their
-solved Browser Plan facts where applicable; it must not select CSS or motion
-behavior from the authored compiler spelling. IDs, classes, ordinary HTML
-attributes, nested markup, inline styles, and authored overlay text remain
-presentation inputs.
+`cue`, `gain`, `trim`, `speed`, `plays`, and `hold-last` spellings after
+compilation. A transition marker remains as an empty presentation target only
+in a projection that contains both adjacent shots. Presentation code consumes
+solved Browser Plan facts where applicable; it must not derive timing from
+authored compiler spelling. IDs, classes, ordinary HTML attributes, nested
+markup, inline styles, and authored overlay text remain presentation inputs.
 
 An ordinary `<img src>` is presentation markup, not a screenplay image element
 or duration source. Its local AVIF, GIF, JPEG, PNG, SVG, or WebP bytes are
@@ -354,10 +383,10 @@ Free `begin/end/until` expressions, shots ending at cues, screenplay-selected
 presentations or props, generated cues from media analysis or typed semantic
 boundaries, negative offsets, general flex constraints, runtime branches, speed
 ramps, reverse playback, audio-reactive behavior, cross-scene persistence,
-content-aware transitions, and online media generation remain unsupported
-until their semantics and generation reliability are tested. A future typed
-semantic boundary must still produce a named event; it does not reintroduce free
-timing attributes.
+inferred or cross-scene transition windows, and online media generation remain
+unsupported until their semantics and generation reliability are tested. A
+future typed semantic boundary must still produce a named event; it does not
+reintroduce free timing attributes.
 
 ## Admission rule
 

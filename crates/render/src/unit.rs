@@ -4,7 +4,7 @@
 //! is the portable projection; an `ExecutableUnit` additionally owns the private
 //! verified root required by local or worker execution.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -17,7 +17,7 @@ use onmark_core::model::{
 };
 use onmark_core::protocol::{BrowserPlan, BundleManifest, InvalidBrowserPlan};
 use onmark_core::render_graph::{PartitionPlan, RenderPartition};
-use onmark_core::timeline::{TimelineAudio, TimelineIr};
+use onmark_core::timeline::{TimelineAudio, TimelineIr, TimelineShotIndex};
 
 use crate::VisualExecutionPlan;
 use crate::{
@@ -230,6 +230,7 @@ impl RenderUnit {
             timeline,
             interval,
             interval,
+            None,
             bundle_manifest,
             profile,
             assets,
@@ -252,10 +253,12 @@ impl RenderUnit {
         profile: RenderProfile,
         assets: impl IntoIterator<Item = MaterializedAsset>,
     ) -> Result<Self, InvalidRenderUnit> {
+        let shots = partition.shots().copied().collect();
         Self::compose(
             timeline,
             partition.evaluation(),
             partition.output(),
+            Some(&shots),
             bundle_manifest,
             profile,
             assets,
@@ -285,10 +288,12 @@ impl RenderUnit {
         let mut units = Vec::with_capacity(partitions.units().len());
 
         for partition in partitions.units() {
+            let shots = partition.shots().copied().collect();
             units.push(Self::compose_from_catalog(
                 timeline,
                 partition.evaluation(),
                 partition.output(),
+                Some(&shots),
                 Arc::clone(&bundle_manifest),
                 profile,
                 &available,
@@ -321,10 +326,12 @@ impl RenderUnit {
         let mut units = Vec::with_capacity(partitions.units().len());
 
         for (partition, manifest) in partitions.units().iter().zip(bundle_manifests) {
+            let shots = partition.shots().copied().collect();
             units.push(Self::compose_from_catalog(
                 timeline,
                 partition.evaluation(),
                 partition.output(),
+                Some(&shots),
                 Arc::new(manifest),
                 profile,
                 &available,
@@ -338,6 +345,7 @@ impl RenderUnit {
         timeline: &TimelineIr,
         evaluation: FrameInterval,
         output: FrameInterval,
+        shots: Option<&BTreeSet<TimelineShotIndex>>,
         bundle_manifest: BundleManifest,
         profile: RenderProfile,
         assets: impl IntoIterator<Item = MaterializedAsset>,
@@ -347,6 +355,7 @@ impl RenderUnit {
             timeline,
             evaluation,
             output,
+            shots,
             Arc::new(bundle_manifest),
             profile,
             &available,
@@ -357,18 +366,29 @@ impl RenderUnit {
         timeline: &TimelineIr,
         evaluation: FrameInterval,
         output: FrameInterval,
+        shots: Option<&BTreeSet<TimelineShotIndex>>,
         bundle_manifest: Arc<BundleManifest>,
         profile: RenderProfile,
         available: &BTreeMap<FrozenAssetId, MaterializedAsset>,
     ) -> Result<Self, InvalidRenderUnit> {
-        let videos = render_videos(timeline, evaluation, available)?;
+        let videos = render_videos(timeline, evaluation, shots, available)?;
         let source_timings = videos
             .iter()
             .map(|(id, video)| (*id, video.source_timing().clone()))
             .collect();
-        let browser_plan =
-            BrowserPlan::from_timeline_for_unit(timeline, &source_timings, evaluation, output)
-                .map_err(InvalidRenderUnit::BrowserPlan)?;
+        let browser_plan = match shots {
+            Some(shots) => BrowserPlan::from_timeline_for_region(
+                timeline,
+                &source_timings,
+                evaluation,
+                output,
+                shots,
+            ),
+            None => {
+                BrowserPlan::from_timeline_for_unit(timeline, &source_timings, evaluation, output)
+            }
+        }
+        .map_err(InvalidRenderUnit::BrowserPlan)?;
         let audio = audio_plan(timeline, output, available)?;
         let visual_execution = VisualExecutionPlan::select(
             bundle_manifest.visual_capability(),
@@ -610,40 +630,55 @@ fn materialized_catalog(
 fn render_videos(
     timeline: &TimelineIr,
     evaluation: FrameInterval,
+    selected_shots: Option<&BTreeSet<TimelineShotIndex>>,
     available: &BTreeMap<FrozenAssetId, MaterializedAsset>,
 ) -> Result<BTreeMap<FrozenAssetId, RenderVideo>, InvalidRenderUnit> {
     let mut videos = BTreeMap::new();
 
-    for timeline_video in timeline.videos() {
-        if !timeline_video.timing().interval().intersects(evaluation) {
-            continue;
-        }
-
-        let id = timeline_video.asset_id();
-        if videos.contains_key(&id) {
-            continue;
-        }
-        let asset = available
-            .get(&id)
-            .cloned()
-            .ok_or(InvalidRenderUnit::MissingAsset(id))?;
-        let admitted = AdmittedVideo::admit(asset.frozen().metadata())
-            .map_err(|source| InvalidRenderUnit::UnsupportedVideo { id, source })?;
-        let source_timing = admitted.timing().clone();
-        let dimensions = admitted.metadata().dimensions();
-        let color_profile = admitted.metadata().color_profile();
-        videos.insert(
-            id,
-            RenderVideo {
-                asset,
-                source_timing,
-                dimensions,
-                color_profile,
-            },
+    for (index, shot) in timeline.indexed_shots() {
+        let selected = selected_shots.map_or_else(
+            || shot.timing().interval().intersects(evaluation),
+            |shots| shots.contains(&index),
         );
+        if !selected {
+            continue;
+        }
+        for content in shot.content() {
+            let Some(video) = content.as_video() else {
+                continue;
+            };
+            insert_render_video(video, available, &mut videos)?;
+        }
     }
 
     Ok(videos)
+}
+
+fn insert_render_video(
+    video: &onmark_core::timeline::TimelineVideo,
+    available: &BTreeMap<FrozenAssetId, MaterializedAsset>,
+    videos: &mut BTreeMap<FrozenAssetId, RenderVideo>,
+) -> Result<(), InvalidRenderUnit> {
+    let id = video.asset_id();
+    if videos.contains_key(&id) {
+        return Ok(());
+    }
+    let asset = available
+        .get(&id)
+        .cloned()
+        .ok_or(InvalidRenderUnit::MissingAsset(id))?;
+    let admitted = AdmittedVideo::admit(asset.frozen().metadata())
+        .map_err(|source| InvalidRenderUnit::UnsupportedVideo { id, source })?;
+    videos.insert(
+        id,
+        RenderVideo {
+            source_timing: admitted.timing().clone(),
+            dimensions: admitted.metadata().dimensions(),
+            color_profile: admitted.metadata().color_profile(),
+            asset,
+        },
+    );
+    Ok(())
 }
 
 fn audio_plan(

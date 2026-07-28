@@ -3,6 +3,9 @@
 export type {
   PresentationExtension,
   PresentationExtensionContext,
+  PresentationElementTarget,
+  PresentationElementTargetKind,
   PresentationTarget,
   PresentationTargetKind,
+  PresentationTransitionTarget,
 } from "./motion.js";

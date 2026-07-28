@@ -6,6 +6,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
+  BROWSER_PROTOCOL_VERSION,
   MAX_BROWSER_OVERLAYS,
   MAX_BROWSER_OVERLAY_TEXT_CHARACTERS,
   MAX_BROWSER_VIDEOS,
@@ -27,22 +28,34 @@ const PROTOCOL_FIXTURES = new URL(
 // ── Decoding boundaries ──
 
 test("decodes every checked-in browser protocol example", async () => {
-  for (const request of await fixture("browser-requests-v3.jsonl")) {
+  for (const request of await fixture("browser-requests-v4.jsonl")) {
     assert.deepEqual(decodeBrowserRequest(request), request);
   }
-  for (const response of await fixture("browser-responses-v3.jsonl")) {
+  for (const response of await fixture("browser-responses-v4.jsonl")) {
     assert.deepEqual(decodeBrowserResponse(response), response);
   }
 });
 
 test("rejects values outside the versioned browser contract", () => {
   const invalidRequests = [
-    { version: 2, requestId: 1, command: { type: "dispose" } },
-    { version: 3, requestId: 1, command: { type: "seek", frame: 2 ** 53 } },
-    { version: 3, requestId: 2 ** 32, command: { type: "dispose" } },
-    { version: 3, requestId: 1, command: { type: "dispose", surprise: true } },
+    { version: 3, requestId: 1, command: { type: "dispose" } },
     {
-      version: 3,
+      version: BROWSER_PROTOCOL_VERSION,
+      requestId: 1,
+      command: { type: "seek", frame: 2 ** 53 },
+    },
+    {
+      version: BROWSER_PROTOCOL_VERSION,
+      requestId: 2 ** 32,
+      command: { type: "dispose" },
+    },
+    {
+      version: BROWSER_PROTOCOL_VERSION,
+      requestId: 1,
+      command: { type: "dispose", surprise: true },
+    },
+    {
+      version: BROWSER_PROTOCOL_VERSION,
       requestId: 1,
       command: {
         type: "load",
@@ -73,7 +86,7 @@ test("rejects values outside the versioned browser contract", () => {
 
   const invalidResponses = [
     {
-      version: 3,
+      version: BROWSER_PROTOCOL_VERSION,
       requestId: 1,
       event: {
         type: "failed",
@@ -83,7 +96,7 @@ test("rejects values outside the versioned browser contract", () => {
       },
     },
     {
-      version: 3,
+      version: BROWSER_PROTOCOL_VERSION,
       requestId: 1,
       event: { type: "frameReady", frame: 0, stateHash: "0".repeat(64) },
     },
@@ -115,12 +128,12 @@ test("rejects protocol payloads outside generated resource budgets", () => {
     },
   };
   const request = {
-    version: 3,
+    version: BROWSER_PROTOCOL_VERSION,
     requestId: 1,
     command: {
       type: "load",
       plan: {
-        timelineVersion: 2,
+        timelineVersion: 3,
         frameRate: { numerator: 30, denominator: 1 },
         timeline: { start: 0, end: 1 },
         evaluation: { start: 0, end: 1 },
@@ -139,6 +152,7 @@ test("rejects protocol payloads outside generated resource budgets", () => {
             interval: { start: 0, end: 1 },
           },
         ],
+        transitions: [],
         overlays: [],
         videos: Array.from({ length: MAX_BROWSER_VIDEOS + 1 }, () => video),
       },
@@ -219,7 +233,7 @@ async function fixture(filename: string): Promise<unknown[]> {
 
 function failure(message: string, pendingResources: string[]): unknown {
   return {
-    version: 3,
+    version: BROWSER_PROTOCOL_VERSION,
     requestId: 1,
     event: {
       type: "failed",

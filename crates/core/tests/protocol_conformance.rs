@@ -35,7 +35,7 @@ fn browser_requests_match_the_versioned_wire_contract() {
     ];
 
     assert_or_update(
-        &fixture("protocol", "browser-requests-v3.jsonl"),
+        &fixture("protocol", "browser-requests-v4.jsonl"),
         &render_json_lines(&requests),
     );
 }
@@ -63,7 +63,7 @@ fn browser_responses_match_the_versioned_wire_contract() {
     ];
 
     assert_or_update(
-        &fixture("protocol", "browser-responses-v3.jsonl"),
+        &fixture("protocol", "browser-responses-v4.jsonl"),
         &render_json_lines(&responses),
     );
 }

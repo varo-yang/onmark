@@ -16,13 +16,13 @@ use crate::syntax::{Attribute, TextNode};
 use super::diagnostic::author_diagnostic;
 use super::linked_film::{
     LinkedAudio, LinkedCue, LinkedCues, LinkedElement, LinkedFilm, LinkedFilmParts, LinkedId,
-    LinkedNode, LinkedOverlay, LinkedScene, LinkedShot, LinkedShotContent, LinkedVideo,
-    LinkedVoiceOver,
+    LinkedNode, LinkedOverlay, LinkedScene, LinkedShot, LinkedShotContent, LinkedTransition,
+    LinkedVideo, LinkedVoiceOver,
 };
 use super::resolved_film::{
     Authored, ResolvedAudio, ResolvedCue, ResolvedCues, ResolvedElement, ResolvedFilm,
     ResolvedNode, ResolvedOverlay, ResolvedScene, ResolvedShot, ResolvedShotContent, ResolvedStart,
-    ResolvedText, ResolvedVideo, ResolvedVoiceOver,
+    ResolvedText, ResolvedTransition, ResolvedVideo, ResolvedVoiceOver,
 };
 
 /// Optional typed attribute/reference output and its authored diagnostics.
@@ -190,11 +190,12 @@ impl Resolver {
     }
 
     fn resolve_shot(&mut self, shot: LinkedShot) -> ResolvedShot {
-        let (element, content, sound_effects) = shot.into_parts();
+        let (element, transition, content, sound_effects) = shot.into_parts();
         let input = ElementInput::new(element);
         let (element, mut attributes) = input.into_resolved_parts();
         let duration = self.take_positive_duration(&mut attributes, "duration");
         attributes.reject_unknown(element.kind(), &mut self.diagnostics);
+        let transition = transition.and_then(|transition| self.resolve_transition(transition));
         let mut resolved_content = Vec::with_capacity(content.len());
 
         for content in content {
@@ -206,7 +207,32 @@ impl Resolver {
             .filter_map(|audio| self.resolve_audio(audio))
             .collect();
 
-        ResolvedShot::new(element, duration, resolved_content, sound_effects)
+        ResolvedShot::new(
+            element,
+            transition,
+            duration,
+            resolved_content,
+            sound_effects,
+        )
+    }
+
+    fn resolve_transition(&mut self, transition: LinkedTransition) -> Option<ResolvedTransition> {
+        let input = ElementInput::new(transition.into_element());
+        let (element, mut attributes) = input.into_resolved_parts();
+        let duration = attributes.take("duration");
+        attributes.reject_unknown(element.kind(), &mut self.diagnostics);
+
+        let Some(duration) = duration else {
+            self.diagnostics.push(missing_attribute(
+                element.kind(),
+                "duration",
+                element.span(),
+            ));
+            return None;
+        };
+        let duration = self.resolve_duration_with(&duration, Duration::parse_positive)?;
+
+        Some(ResolvedTransition::new(element, duration))
     }
 
     fn resolve_content(&mut self, content: LinkedShotContent) -> ResolvedShotContent {

@@ -10,6 +10,10 @@ import {
   type BundleOptions,
 } from "./presentation.js";
 import {
+  BundleProjectionError,
+  readBundleProjection,
+} from "./bundle_projection.js";
+import {
   BUNDLE_FRAME_BEHAVIORS,
   BUNDLE_TEMPORAL_CAPABILITIES,
   BUNDLE_VISUAL_CAPABILITIES,
@@ -19,6 +23,7 @@ const USAGE = [
   "Usage: onmark-bundle",
   "  --html <path>",
   "  [--resolve-directory <directory>]",
+  "  [--projection <path>  # required for randomAccess]",
   "  --output <directory>",
   "  --max-output-bytes <bytes>",
   "  --frame-behavior <perFrame|placementBounded>",
@@ -34,7 +39,7 @@ type Command =
 // ── Execution ──
 
 try {
-  const command = parseArguments(process.argv.slice(2));
+  const command = await parseArguments(process.argv.slice(2));
   if (command.kind === "help") {
     process.stdout.write(USAGE);
   } else {
@@ -48,7 +53,7 @@ try {
 
 // ── Arguments ──
 
-function parseArguments(arguments_: readonly string[]): Command {
+async function parseArguments(arguments_: readonly string[]): Promise<Command> {
   const values = commandValues(arguments_);
   if (values.help !== undefined) {
     if (arguments_.length !== 1) {
@@ -75,16 +80,25 @@ function parseArguments(arguments_: readonly string[]): Command {
     frameBehavior,
     maxOutputBytes,
     outputDirectory,
-    temporalCapability,
     visualCapability,
   };
+  const common = {
+    ...controls,
+    document: oneValue(values.html, "--html"),
+    ...optionalResolveDirectory(values["resolve-directory"]),
+  };
+  if (temporalCapability === "sequential") {
+    rejectValue(values.projection, "--projection requires randomAccess");
+    return {
+      kind: "bundle",
+      options: { ...common, temporalCapability },
+    };
+  }
+  const projectionPath = oneValue(values.projection, "--projection");
+  const projection = await readBundleProjection(projectionPath);
   return {
     kind: "bundle",
-    options: {
-      ...controls,
-      document: oneValue(values.html, "--html"),
-      ...optionalResolveDirectory(values["resolve-directory"]),
-    },
+    options: { ...common, projection, temporalCapability },
   };
 }
 
@@ -99,6 +113,7 @@ function commandValues(arguments_: readonly string[]) {
         html: { type: "string", multiple: true },
         "max-output-bytes": { type: "string", multiple: true },
         output: { type: "string", multiple: true },
+        projection: { type: "string", multiple: true },
         "resolve-directory": { type: "string", multiple: true },
         "temporal-capability": { type: "string", multiple: true },
         "visual-capability": { type: "string", multiple: true },
@@ -168,6 +183,15 @@ function oneValue(values: readonly string[] | undefined, name: string): string {
   return value;
 }
 
+function rejectValue(
+  values: readonly string[] | undefined,
+  message: string,
+): void {
+  if (values !== undefined) {
+    throw configuration(message);
+  }
+}
+
 function parseByteLimit(value: string): number {
   const bytes = Number(value);
   if (!Number.isSafeInteger(bytes) || bytes <= 0) {
@@ -185,6 +209,9 @@ function configuration(message: string, cause?: unknown): BundleError {
 function commandFailure(error: unknown): BundleError {
   if (error instanceof BundleError) {
     return error;
+  }
+  if (error instanceof BundleProjectionError) {
+    return configuration(error.message, error);
   }
   return new BundleError("output", "unexpected bundler failure", error);
 }

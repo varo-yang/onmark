@@ -13,7 +13,8 @@ use crate::syntax::{Attribute, Element, Node, SourceDocument, TextNode};
 use super::diagnostic::author_diagnostic;
 use super::linked_film::{
     LinkedAudio, LinkedCue, LinkedCues, LinkedElement, LinkedFilm, LinkedId, LinkedNode,
-    LinkedOverlay, LinkedScene, LinkedShot, LinkedShotContent, LinkedVideo, LinkedVoiceOver,
+    LinkedOverlay, LinkedScene, LinkedShot, LinkedShotContent, LinkedTransition, LinkedVideo,
+    LinkedVoiceOver,
 };
 
 /// Optional structurally linked output and every recoverable binding diagnostic.
@@ -196,6 +197,7 @@ impl Binder {
         let (_, attributes, children, span) = element.into_parts();
         let linked = self.bind_element(attributes, ElementKind::Scene, span);
         let mut shots = Vec::new();
+        let mut transition = None;
 
         for node in children {
             let Some(child) = self.structural_child(node, ElementKind::Scene) else {
@@ -203,16 +205,40 @@ impl Binder {
             };
 
             match self.recognize_or_report(&child) {
-                Some(ElementKind::Shot) => shots.push(self.bind_shot(child)),
+                Some(ElementKind::Shot) => {
+                    let transition = transition
+                        .take()
+                        .map(|element| self.bind_transition(element));
+                    shots.push(self.bind_shot(child, transition));
+                }
+                Some(ElementKind::Transition) if shots.is_empty() || transition.is_some() => {
+                    self.reject_transition_boundary(&child);
+                }
+                Some(ElementKind::Transition) => transition = Some(child),
                 Some(kind) => self.reject_misplaced(&child, kind, ElementKind::Scene),
                 None => {}
             }
         }
 
+        if let Some(transition) = transition {
+            self.reject_transition_boundary(&transition);
+        }
+
         LinkedScene::new(linked, shots)
     }
 
-    fn bind_shot(&mut self, element: Element) -> LinkedShot {
+    fn bind_transition(&mut self, element: Element) -> LinkedTransition {
+        let (_, attributes, children, span) = element.into_parts();
+        let linked = self.bind_element(attributes, ElementKind::Transition, span);
+        self.reject_child_elements_and_text(children, ElementKind::Transition);
+        LinkedTransition::new(linked)
+    }
+
+    fn bind_shot(
+        &mut self,
+        element: Element,
+        incoming_transition: Option<LinkedTransition>,
+    ) -> LinkedShot {
         let (_, attributes, children, span) = element.into_parts();
         let linked = self.bind_element(attributes, ElementKind::Shot, span);
         let mut content = Vec::new();
@@ -241,7 +267,7 @@ impl Binder {
             }
         }
 
-        LinkedShot::new(linked, content, sound_effects)
+        LinkedShot::new(linked, incoming_transition, content, sound_effects)
     }
 
     fn bind_video(&mut self, element: Element) -> LinkedVideo {
@@ -334,6 +360,10 @@ impl Binder {
     fn reject_misplaced(&mut self, element: &Element, kind: ElementKind, parent: ElementKind) {
         self.diagnostics
             .push(misplaced_element(element, kind, Some(parent)));
+    }
+
+    fn reject_transition_boundary(&mut self, element: &Element) {
+        self.diagnostics.push(invalid_transition_boundary(element));
     }
 
     fn bind_element(
@@ -455,6 +485,15 @@ fn duplicate_cues(element: &Element, first: SourceSpan) -> Diagnostic {
     )
     .with_related(first, "the first <om-cues> container is here")
     .expect("the static related message is non-blank")
+}
+
+fn invalid_transition_boundary(element: &Element) -> Diagnostic {
+    author_diagnostic(
+        DiagnosticCode::InvalidTransitionBoundary,
+        element.name().span(),
+        "transition must appear between two adjacent shots",
+        "move <om-transition> between the two shots it connects",
+    )
 }
 
 fn invalid_node_id(attribute: &Attribute, kind: ElementKind, reason: InvalidNodeId) -> Diagnostic {

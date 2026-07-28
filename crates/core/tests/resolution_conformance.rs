@@ -36,6 +36,11 @@ fn native_html_attributes_and_nested_text_resolve_without_duplication() {
 }
 
 #[test]
+fn transition_duration_matches_canonical_resolution() {
+    assert_valid_fixture("transition");
+}
+
+#[test]
 fn attribute_and_reference_errors_match_stable_diagnostics() {
     let source_path = fixture("compiler/resolution", "invalid/attribute-errors.html");
     let expected_path = fixture(
@@ -70,6 +75,19 @@ fn deferred_timing_attributes_remain_unsupported() {
     let expected_path = fixture(
         "compiler/resolution",
         "invalid/deferred-timing-attributes.diagnostics.txt",
+    );
+    let report = resolve_fixture(&source_path);
+
+    assert!(report.film().is_none());
+    assert_or_update(&expected_path, &render_diagnostics(report.diagnostics()));
+}
+
+#[test]
+fn transition_attribute_errors_match_stable_diagnostics() {
+    let source_path = fixture("compiler/resolution", "invalid/transition-attributes.html");
+    let expected_path = fixture(
+        "compiler/resolution",
+        "invalid/transition-attributes.diagnostics.txt",
     );
     let report = resolve_fixture(&source_path);
 
@@ -179,6 +197,14 @@ impl ResolvedFilmRenderer {
         writeln!(self.output, "  scene id={}", id(scene.element()))?;
 
         for shot in scene.shots() {
+            if let Some(transition) = shot.incoming_transition() {
+                writeln!(
+                    self.output,
+                    "    transition id={} duration={}",
+                    id(transition.element()),
+                    transition.duration().value(),
+                )?;
+            }
             self.render_shot(shot)?;
         }
 

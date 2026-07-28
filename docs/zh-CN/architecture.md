@@ -71,8 +71,12 @@ CLI 与远程 worker 执行相同的 Render Unit 合约
 ### 分片由像素依赖决定
 
 `shot`
-是优秀的创作和缓存候选边界，却不是无条件执行边界。只有 bundle 显式声明并证明 random access，graph 才把各 shot 记录为独立 region；未知 presentation code 仍形成一个 sequential region。graph 同时记录每个 region 的直接冻结媒体依赖。这不是“shot 天然可切”的通用规则。当前 graph 尚未实现转场、贯穿元素、全局层、shader
-history 或相邻采样依赖；这些能力必须先扩展依赖表示、扩大或合并 region，才能进入分片。
+是优秀的创作和缓存候选边界，却不是无条件执行边界。只有 presentation 显式声明并证明
+random access，graph 才把各 shot 记录为独立 region；未知 presentation code 仍形成一个
+sequential region。显式 transition 会增加同时依赖两个相邻 shot 的 overlap region。
+graph 为每个 region 记录精确 shot identity 与直接冻结媒体依赖。这不是“shot 天然可切”的
+通用规则。贯穿元素、全局层、shader history 或相邻采样依赖仍未实现；这些能力必须先扩展
+依赖表示、扩大或合并 region，才能进入分片。
 
 ### 浏览器只负责画，不负责决定
 
@@ -152,11 +156,18 @@ fact，不会把 `start`、`end` 或 `begin` 属性带回 screenplay 语言。
 
 ### Render Graph
 
-Timeline IR 回答“何时存在”；Render Graph 从已求解事实和已接纳的时间能力中推导可独立求值的 region，并记录其直接冻结媒体依赖。当前图尚不包含转场、persist、全局效果或历史采样边；未来能力若产生这些依赖，必须先扩展图并扩大或合并 region，才能进入分片。
+Timeline IR 回答“何时存在”；Render Graph 从已求解事实和已接纳的时间能力中推导可独立
+求值的 region，并记录其精确 shot identity 与直接冻结媒体依赖。普通独立 shot 的
+evaluation/output 相同；显式 transition 会把边界拆成三个互不重叠的 output region，并让
+中间 overlap region 同时 evaluation 两个相邻 shot 的完整区间。persist、全局效果与历史
+采样边仍未实现；未来能力若产生这些依赖，必须先扩展图并扩大或合并 region，才能进入分片。
 
 ### Partition Plan
 
-这是 core 内的纯分片事实：每个 `RenderPartition` 记录 `output`、`evaluation` 和分配给该候选 unit 的冻结素材。它不拥有路径、browser URL、bundle、进程配置或云厂商类型。`output` 是最终提交的帧；未来依赖若需要预卷或历史采样，`evaluation` 可以扩大，但 worker 仍只发布 `output`。
+这是 core 内的纯分片事实：每个 `RenderPartition` 记录 `output`、`evaluation`、精确 selected
+shot identity，以及分配给该候选 unit 的冻结素材。它不拥有路径、browser URL、bundle、
+进程配置或云厂商类型。`output` 是最终提交的帧；`evaluation` 可以因已证明的依赖扩大，但
+worker 仍只发布 `output`。
 
 编译管线在 Timeline IR 结束，执行管线从一条独立的组合边界开始：
 
@@ -607,8 +618,10 @@ raw-RGBA fingerprint。命中、新 capture 的 miss、本地执行和 worker �
 artifact assembler，因此 warm execution 不会长出第二套编码或 audio path。
 
 production authored-HTML artifact 已由 presentation contract 准入 random access，并按
-Render Graph region 分别投影。region document 只保留 selected shot、其 owning scene/film
-shell 与已编译 motion resource，不保留 semantic sibling。presentation byte 按 semantic
+Render Graph region 分别投影。Rust 通过 versioned `BundleProjection` process contract
+传递每个 region 精确、有序的 shot index；bundler 验证后只做机械 DOM projection，不从
+interval 重新发现 graph boundary。region document 只保留 selected shot、其 owning
+scene/film shell 与已编译 motion resource，不保留其他 semantic sibling。presentation byte 按 semantic
 ownership 进入 region：shot 内的 byte 只属于该 shot；scene 内、shot 外的 byte 属于该
 scene 的所有 region；scene 外的 film/document byte 属于全部 region。因此 `:has()` 等
 selector 无法观察 region 外的 shot，而更宽层级的 style、motion 或 resource edit 会正确
@@ -1432,9 +1445,9 @@ Unit，经既有 executor 捕获并总装。native 一致性测试会在编码�
 canonical raw-RGBA sequence；release
 CLI 一致性测试则分别验证总装后的 H.264/AAC 输出帧数、画面运动、stream
 facts 与首个音频 packet 落点。它实现 Render Graph 与 `evaluation/output`
-区间。该关最初延后了转场预卷与持久复用；后续 incremental-rendering milestone 已经复用
-经过验证的 `FrameArtifact`，并把当前 production adapter 的失效范围收窄到已证明独立的
-shot region。转场预卷与更宽的依赖分类仍要等对应语法和 pixel dependency 出现后实现。
+区间。该关最初延后了转场预卷与持久复用；后续 milestone 已经复用经过验证的
+`FrameArtifact`，把失效范围收窄到已证明独立的 shot region，并接纳具有 widened
+evaluation 的显式 transition overlap region。persist 与依赖历史的 region 仍然延后。
 
 ### 第三关（已完成）：离开本机仍然成立
 
@@ -1653,6 +1666,15 @@ native raw-RGBA sequence 后准入 trim 与 speed；它不要求已知不同的 
 decode/color path 得出相同 hash。重复播放与最终帧停留在取得同样独立的 native 证据前仍走
 browser composition。runtime 只在接纳不可信 plan 时重复校验 wire-level duration
 invariant，不推导或修改 authored timing。
+
+Gate 八还在 checked-in 生成对比保持 20/20 可靠性后，接纳了显式
+`<om-transition duration="…"></om-transition>` boundary。bind 要求 marker 位于同一
+scene 的两个相邻 shot 之间；resolve 只解析一次正的精确 duration；solve 独占 overlap，
+并拒绝无法容纳的 window。Timeline IR 记录这条事实，Render Graph 将其拆成互不重叠的
+output region，同时把 overlap region 的 evaluation 扩大到两个 shot。partition 的精确
+shot set 通过 `BundleProjection` 交给 bundler，并通过 Browser Plan 交给 runtime，因此
+本地、增量与分布式执行消费同一关系。TypeScript 只接收已求解 interval 与相邻 DOM
+element 来实现像素，不选择 window，也不推导 graph dependency。
 
 Gate 八不加入 Player、Studio、preview server、source-mutation API、component marketplace、
 remote authoring command、coordinator、database、queue、lease service、cloud workflow、

@@ -15,7 +15,7 @@ import {
 } from "../src/index.js";
 
 const PLAN: BrowserPlan = {
-  timelineVersion: 2,
+  timelineVersion: 3,
   frameRate: { numerator: 30, denominator: 1 },
   timeline: { start: 0, end: 1 },
   evaluation: { start: 0, end: 1 },
@@ -23,6 +23,7 @@ const PLAN: BrowserPlan = {
   film: { nodeId: 0, authoredId: null },
   scenes: [],
   shots: [],
+  transitions: [],
   videos: [],
   overlays: [],
 };
@@ -211,6 +212,9 @@ function resourceAdapter(
     },
     bindShot(): never {
       throw new Error("the resource fixture contains no shot");
+    },
+    bindTransition(): never {
+      throw new Error("the resource fixture contains no transition");
     },
     bindVideo(): never {
       throw new Error("the resource fixture contains no video");

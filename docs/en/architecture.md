@@ -58,12 +58,13 @@ Source AST
   decision.
 - **Render Graph** derives independently evaluable regions and direct frozen
   media dependencies from solved facts and an admitted temporal capability.
-- **Partition Plan** contains pure output/evaluation intervals and the frozen
-  assets assigned to each candidate unit.
+- **Partition Plan** contains pure output/evaluation intervals, exact selected
+  shot identities, and the frozen assets assigned to each candidate unit.
 
-A render unit has separate `evaluation` and `output` intervals. The current
-graph emits equal intervals. A future dependency may widen evaluation for
-preroll, warm-up, or history, but only output frames may be published.
+A render unit has separate `evaluation` and `output` intervals. Ordinary
+independent shots use equal intervals. A transition region publishes only its
+overlap while evaluating both adjacent shots across their complete intervals.
+Only output frames may be published.
 
 The compiler pipeline ends at Timeline IR. Execution begins at a separate
 composition boundary:
@@ -140,14 +141,13 @@ range from `0%` through `100%`.
 ## End-to-end pipeline
 
 ```text
-freeze inputs ─┬→ probe media ─→ compile ───────────────┐
-               └→ bundle presentation ─────────────────┤
-                                                       ▼
-                         compose one whole-film Render Unit
-                           → materialize Executable Unit
-                             → capture/encode → mix audio → verify
-
-Partitioned execution inserts: Timeline IR → Render Graph → Partition Plan → Render Units
+freeze inputs → probe media → compile → Timeline IR
+                                      → Render Graph → Partition Plan
+source + selected-shot projection ────────────→ bundle presentation
+Timeline IR + plan + bundle ─────────────────→ Render Units
+                                                → materialize
+                                                → capture/encode
+                                                → mix audio → verify
 ```
 
 The compiler performs parse, structural bind, attribute/reference resolve, and
@@ -156,14 +156,15 @@ information to decide; solve constructs Timeline IR directly. Onmark does not
 add ceremonial `validate` or `lower` phases without a representation that proves
 a new invariant. The planner derives admitted dependency regions before
 partitioning. It records each shot as an independent region only when the
-bundle declares and proves random access; unknown presentation code remains one
-sequential region. The random-access adapter is admissible only because it
-keeps no state across shot boundaries. The graph also records each region's
-direct frozen-media dependencies. This is evidence-backed, not a general
-shot-boundary rule. The current graph has no transition, persistence,
-global-effect, or history edges. Any future capability with those dependencies
-must first extend the graph to widen or merge regions before partitioning may
-consume it.
+presentation declares and proves random access; unknown presentation code
+remains one sequential region. The random-access adapter is admissible only
+because it keeps no state across shot boundaries. An explicit transition adds
+one overlap region whose evaluation contains both adjacent shots and splits
+their non-overlap output around it. The graph records each region's exact shot
+identities and direct frozen-media dependencies. This is evidence-backed, not a
+general shot-boundary rule. Persistence, global effects, and history sampling
+remain absent. Any future capability with those dependencies must first extend
+the graph to widen or merge regions before partitioning may consume it.
 
 Structural binding and attribute/reference resolution aggregate authored
 diagnostics while building candidate outputs. An error withholds the phase value
@@ -461,9 +462,13 @@ captured misses, local execution, and worker results all enter the same artifact
 assembler, so warm execution cannot acquire a second encoding or audio path.
 
 The production authored-HTML artifact is admitted as random access by the
-presentation contract and is projected once per Render Graph region. A region
-document contains the selected shot, its owning scene and film shells, and the
-compiled motion resources. It does not retain semantic siblings. Presentation
+presentation contract and is projected once per Render Graph region. Rust emits
+a versioned `BundleProjection` process contract containing each region's exact,
+ordered shot indices. The bundler validates that contract and performs only
+mechanical DOM projection; it does not rediscover graph boundaries from
+intervals. A region document contains the selected shots, their owning scene
+and film shells, and the compiled motion resources. It does not retain other
+semantic siblings. Presentation
 bytes follow semantic ownership: bytes inside a shot belong to that shot;
 scene-level bytes outside shots belong to every region in that scene; film or
 document-level bytes outside scenes belong to every region. Selectors such as
@@ -1348,10 +1353,10 @@ raw-RGBA sequences before encoding. Release-CLI conformance separately validates
 the assembled H.264/AAC output's frame count, motion, stream facts, and
 first-audio-packet placement. It introduces the Render Graph and
 evaluation/output intervals. That gate originally deferred preroll and
-persistent reuse. The later incremental rendering milestone now reuses verified
-`FrameArtifact` values and scopes the current production adapter's invalidation
-to proved shot regions. Transition preroll and wider dependency classes remain
-deferred until their syntax and pixel dependencies exist.
+persistent reuse. Later milestones now reuse verified `FrameArtifact` values,
+scope invalidation to proved shot regions, and admit explicit transition
+overlap regions with widened evaluation. Persistence and history-dependent
+regions remain deferred.
 
 **Gate three (complete): leave the machine.** The completed data-plane slice
 projects the same deterministic, versioned worker requests used locally into a
@@ -1658,6 +1663,19 @@ selection and independent local and worker partitions produce equal native
 raw-RGBA sequences. It does not require the known-different Chromium and
 `FFmpeg` decode/color paths to hash equally. Repeated playback and final-frame
 holds remain browser-composited until the same independent native proof exists.
+
+Gate eight also admits the explicit
+`<om-transition duration="…"></om-transition>` boundary after its checked-in
+generation comparison retained 20/20 reliability. Bind requires the marker
+between adjacent shots in one scene; resolve parses one positive exact
+duration; solve owns the overlap and rejects windows that do not fit. Timeline
+IR records that fact, and Render Graph partitions it into non-overlapping
+output regions while widening the overlap region's evaluation to both shots.
+The partition's exact shot set flows through `BundleProjection` to the bundler
+and through Browser Plan to runtime, so local, incremental, and distributed
+execution consume the same relation. TypeScript receives the solved interval
+and adjacent DOM elements only to realize pixels; it never chooses the window
+or graph dependency.
 The runtime repeats only the wire-level duration invariant when admitting an
 untrusted plan; it does not derive or alter authored timing.
 

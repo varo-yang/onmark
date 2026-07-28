@@ -1,6 +1,6 @@
 # Onmark Presentation Contract
 
-> 状态：当前 browser authoring 合约已覆盖 Gate 七及分布式增量渲染。
+> 状态：当前 browser authoring 合约已覆盖进行中的 Gate 八及分布式增量渲染。
 
 `film.html` 是完整的作者入口。Onmark custom element 拥有结构、ID、cue、素材引用和时间关系；
 普通 HTML 与 inline CSS 拥有 presentation。可选的
@@ -94,9 +94,26 @@ whole-film 与 region-projected capture 仍出现了不确定的文字像素。�
 adapter。原生 exact-frame effect 应使用 `frameMotion`，ambient browser animation 仍不属于
 确定性 contract。
 
-元素内部动效只能消费该语义 target 自带的 interval。当前不准入跨 shot
-转场；它的窗口与相邻依赖必须先成为 Rust-owned Render Graph fact，不能在
-TypeScript 中再造一套 timing policy。
+元素内部动效只能消费该语义 target 自带的 interval。唯一准入的跨 shot 例外是显式
+`<om-transition>` boundary：Rust 提供已求解 overlap 与 Render Graph dependency，
+presentation code 只获得两个相邻 shot element，并在该 interval 内实现像素。
+
+两个 exact-frame adapter 都暴露一个专用 `transition` handler：
+
+```js
+export const motion = gsapMotion({
+  transition({ incomingElement, outgoingElement, timeline }) {
+    timeline
+      .to(outgoingElement, { opacity: 0, duration: 0.5 }, 0)
+      .from(incomingElement, { opacity: 0, duration: 0.5 }, 0);
+  },
+});
+```
+
+`frameMotion` 的 transition `progress` 使用精确闭合端点：overlap 第一帧为零，最后一帧
+为一；这与普通 element 的半开 local progress 有意不同。GSAP adapter 同样会在最后一帧
+精确渲染 timeline end。若 overlap 只有一帧，两个 adapter 都把这个唯一 sample 渲染为
+终态。两个 adapter 都不选择 transition duration、adjacency 或 partition scope。
 
 bundler 提取这一个可选 module、编译其 import，并在 browser body 末尾安装 generated
 runtime script。infrastructure 始终位于 semantic shot 之外，因此 region projection
@@ -147,7 +164,7 @@ interface RuntimeFrame {
 ## Runtime 握手
 
 presentation 必须用 `installRuntimeHost` 安装一个 runtime host。`Load`
-会创建 plan 中的每个 video 与 overlay node。导入字幕是 caption role 的
+会绑定 plan 中的每个 video、overlay 与 transition node。导入字幕是 caption role 的
 overlay，与其他 overlay 共用已求解 visibility path，不另造 browser timing
 engine。当前 region 内的 node 在其 solved interval 使其可见之前不进入 layout 与
 compositor；region 外的 semantic sibling 根本不进入 document，因此 selector 与 authored
@@ -213,7 +230,7 @@ presentation 收到的 placement 已经包含绝对帧区间。它可以决定 t
 
 - `createDomPresentationBindings({ document, videoSource, motion? })` 是 bundle
   infrastructure 安装的低层 facade；
-- `<om-film>`、`<om-scene>`、`<om-shot>`、`<video>`、
+- `<om-film>`、`<om-scene>`、`<om-shot>`、`<om-transition>`、`<video>`、
   `<om-title>` 与 `<om-cta>` 始终是作者写下的原始 element；
 - bound node 临时携带 `data-om-node`；authored ID 保持普通 HTML ID；
 - whole-film plan 对完整 film 使用 dense renderable-semantic preorder；每个 region plan
@@ -231,9 +248,11 @@ presentation 收到的 placement 已经包含绝对帧区间。它可以决定 t
 
 更精确地说，production adapter 会先调用 `bindFilm(plan)` 建立完整 projection，再绑定
 scene、shot container，并在 `load` 时调用 `bindVideo(placement)`、
-`bindOverlay(placement)` 与异步的
+`bindOverlay(placement)`、`bindTransition(relation)` 与异步的
 `bindExtensions(plan)`。extension 返回其待准备 resource 和拥有的精确逐帧 effect。video binding 提供浏览器 element、已 materialize 的 source、visibility effect
-和终止性 cleanup；overlay binding 提供 visibility 与终止性 cleanup。compiler-owned
+和终止性 cleanup；overlay binding 提供 visibility 与终止性 cleanup；transition binding
+提供 marker、两个相邻 shot element 与终止性 cleanup，extension 拥有视觉状态而不拥有
+timing。compiler-owned
 node identity 在每个 projection 内形成独立的 dense unit-local 顺序；跨 projection 的语义身份由
 authored ID 承担。每次 `seek` 时，runtime 先隐藏 video，再根据权威 output frame 选择已准入的
 source frame、呈现 ready video，最后应用已求解 overlay 的 visibility。
@@ -246,7 +265,7 @@ binding 拥有效果，不拥有 interval arithmetic。
 当前语言**没有** `presents`、`definePresentation`，也没有独立的 screenplay 到
 presentation props 通道。authored HTML 收到的动态事实只有 `Load(plan)` 传入的
 Rust-owned `BrowserPlan`：帧率、完整 solved film interval、evaluation/output interval、
-semantic structure 与 ownership、video placement，以及 title、CTA 或导入 caption 的
+semantic structure 与 ownership、video placement、transition relation，以及 title、CTA 或导入 caption 的
 overlay placement。与 unit 相交的 structure 与 overlay 会保留完整 solved interval；
 `evaluation` 只选择该 unit 执行的 frame，`output` 只选择其发布的 frame。
 stylesheet rule 与 inline module 静态 import 的值都是 presentation code，不是
@@ -283,7 +302,8 @@ adapter 时才使用 `combineMotion(...)`，并按声明顺序执行。
 `onmark/motion/gsap` 是由内部依赖包承载的可选 adapter：它把 semantic hook 转成 paused
 GSAP timeline，但不让 GSAP 进入 runtime 或 authoring。Three.js、Lottie 或应用本地引擎都可
 实现同一 contract；bundler 与 runtime 不包含 vendor branch。每个 GSAP hook 只收到 semantic element、compiler-owned
-duration，以及一条由 adapter 拥有、以局部秒计量的 paused timeline；adapter 在 seek 时
+duration，以及一条由 adapter 拥有、以局部秒计量的 paused timeline；transition hook
+还会收到两个相邻 shot element。adapter 在 seek 时
 抑制 callback，而且即使请求的 local time 与当前 playhead 相同也会强制 render，并拥有
 terminal cleanup。这样零时刻 `.set()` 与重复的 exact-frame 请求不会被 GSAP 当作 no-op。
 每次 `Seek(frame)` 中，effect 会在 solved video 与 overlay placement

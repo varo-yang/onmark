@@ -1,6 +1,6 @@
 # Onmark Presentation Contract
 
-> Status: current browser authoring contract through Gate seven and
+> Status: current browser authoring contract through the active Gate eight and
 > distributed incremental rendering.
 
 `film.html` is the complete authored entry. Onmark custom elements own
@@ -104,9 +104,30 @@ prove a region-safe public adapter. Native exact-frame effects should use
 contract.
 
 Element-local motion may consume only the interval attached to its semantic
-target. Cross-shot transitions are not admitted: their windows and neighbor
-dependencies must first become Rust-owned Render Graph facts rather than a
-second timing policy in TypeScript.
+target. The one admitted cross-shot exception is an explicit
+`<om-transition>` boundary. Rust supplies its solved overlap and Render Graph
+dependency; presentation code receives both adjacent shot elements and may
+only realize pixels inside that interval.
+
+Both exact-frame adapters expose one specialized `transition` handler:
+
+```js
+export const motion = gsapMotion({
+  transition({ incomingElement, outgoingElement, timeline }) {
+    timeline
+      .to(outgoingElement, { opacity: 0, duration: 0.5 }, 0)
+      .from(incomingElement, { opacity: 0, duration: 0.5 }, 0);
+  },
+});
+```
+
+`frameMotion` additionally supplies transition `progress` with exact closed
+endpoints: the first overlap frame is zero and the last is one. This differs
+intentionally from an ordinary element's half-open local progress. The GSAP
+adapter likewise renders its timeline's exact end on the final overlap frame.
+A one-frame overlap has only one sample, so both adapters render that sample as
+the terminal state. Neither adapter chooses transition duration, adjacency, or
+partition scope.
 
 The bundler extracts that one optional module, compiles its imports, and
 installs the generated runtime script at the end of the browser body. Keeping
@@ -166,7 +187,8 @@ an alternate scheduling clock or a source of timing decisions.
 ## Runtime handshake
 
 The presentation must install exactly one runtime host with
-`installRuntimeHost`. `Load` creates every video and overlay node in the plan.
+`installRuntimeHost`. `Load` binds every video, overlay, and transition node in
+the plan.
 Imported captions are caption-role overlays; they use the same solved visibility
 path rather than a second browser timing engine.
 Nodes in the current region remain outside layout and compositing until their
@@ -224,7 +246,7 @@ The boundary is strict:
 
 | Owner                            | Owns                                                                       |
 | -------------------------------- | -------------------------------------------------------------------------- |
-| Screenplay and imported captions | authored structure, text, media references, cues, local delays             |
+| Screenplay and imported captions | authored structure, text, media references, cues, local relationships      |
 | Rust compiler                    | parsing, normalization, reference resolution, exact timing, Timeline IR    |
 | Runtime                          | protocol state, frame clock, decoded video readiness, visibility intervals |
 | Authored HTML and motion         | DOM shape, layout, typography, and browser effects                         |
@@ -241,7 +263,7 @@ or derive a new media duration from the DOM.
 
 - `createDomPresentationBindings({ document, videoSource, motion? })`
   is the infrastructure facade installed by the bundle entry.
-- `<om-film>`, `<om-scene>`, `<om-shot>`, `<video>`,
+- `<om-film>`, `<om-scene>`, `<om-shot>`, `<om-transition>`, `<video>`,
   `<om-title>`, and `<om-cta>` remain the exact authored elements.
 - Every bound node temporarily carries `data-om-node`; authored IDs remain
   ordinary HTML IDs.
@@ -263,13 +285,16 @@ or derive a new media duration from the DOM.
 
 More precisely, the production adapter calls `bindFilm(plan)` to establish the
 complete projection, then binds scene and shot containers before content and
-calls `bindVideo(placement)`, `bindOverlay(placement)`, and the asynchronous
-`bindExtensions(plan)` once during `load`. An extension returns
+calls `bindVideo(placement)`, `bindOverlay(placement)`,
+`bindTransition(relation)`, and the asynchronous `bindExtensions(plan)` once
+during `load`. An extension returns
 the resources it needs prepared and the exact-frame effects it owns. A video
 binding supplies the browser element, its materialized source, visibility
 effect, and terminal cleanup. An overlay binding supplies visibility and
-terminal cleanup. Node identity is complete and canonical within each accepted
-plan. On every `seek`, the runtime first hides videos, selects an admitted source frame from
+terminal cleanup. A transition binding supplies its marker, both adjacent shot
+elements, and terminal cleanup; the extension owns visual state, not timing.
+Node identity is complete and canonical within each accepted plan. On every
+`seek`, the runtime first hides videos, selects an admitted source frame from
 the authoritative output frame, presents ready videos, then applies solved
 overlay visibility. A video readiness timeout names its unit-local node and
 phase as `video:<nodeId>:loadeddata`, `video:<nodeId>:seeked`, or
@@ -281,8 +306,9 @@ The current language does **not** have `presents`, `definePresentation`, or a
 separate screenplay-to-presentation props channel. The dynamic facts delivered
 to authored HTML are the Rust-owned `BrowserPlan` facts
 sent by `Load(plan)`: frame rate, the complete solved film interval, evaluation
-and output intervals, semantic structure and ownership, video placements, and
-title, CTA, or imported-caption overlay placements. Structural and overlay
+and output intervals, semantic structure and ownership, video placements,
+transition relations, and title, CTA, or imported-caption overlay placements.
+Structural and overlay
 placements retain their complete solved intervals when they intersect a unit;
 `evaluation` selects frames executed by that unit and `output` selects frames
 it publishes. Stylesheet
@@ -330,11 +356,12 @@ GSAP into runtime or authoring.
 Three.js, Lottie, or an application-local engine can implement the same
 contract; neither the bundler nor the runtime contains a vendor branch. Each
 GSAP hook receives a semantic element, its compiler-owned duration, and an
-adapter-owned paused timeline measured in local seconds. The adapter seeks that
-timeline with callbacks suppressed, forces rendering even when the requested
-local time equals its current playhead, and owns terminal cleanup. This makes a
-time-zero `.set()` and repeated exact-frame requests observable instead of
-letting GSAP treat them as no-ops. On each
+adapter-owned paused timeline measured in local seconds; a transition hook also
+receives both adjacent shot elements. The adapter seeks that timeline with
+callbacks suppressed, forces rendering even when the requested local time
+equals its current playhead, and owns terminal cleanup. This makes a time-zero
+`.set()` and repeated exact-frame requests observable instead of letting GSAP
+treat them as no-ops. On each
 `Seek(frame)`, effects apply
 in declaration order after solved video and overlay placement, and all returned
 promises resolve before `FrameStaged(frame)`. Effects receive the exact

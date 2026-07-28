@@ -8,6 +8,7 @@ export {
   type BundleFile,
   type BundleManifest,
   type BundleOptions,
+  type BundleProjection,
 } from "./presentation.js";
 
 export {

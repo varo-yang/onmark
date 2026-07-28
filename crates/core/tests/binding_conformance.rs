@@ -29,6 +29,11 @@ fn native_html_remains_presentation_owned_during_binding() {
 }
 
 #[test]
+fn transition_boundaries_match_canonical_binding() {
+    assert_valid_fixture("transition");
+}
+
+#[test]
 fn structural_errors_match_stable_diagnostics() {
     assert_invalid_fixture("structural-errors");
 }
@@ -36,6 +41,11 @@ fn structural_errors_match_stable_diagnostics() {
 #[test]
 fn root_errors_match_stable_diagnostics() {
     assert_invalid_fixture("root-errors");
+}
+
+#[test]
+fn invalid_transition_boundaries_match_stable_diagnostics() {
+    assert_invalid_fixture("transition-boundaries");
 }
 
 fn assert_invalid_fixture(name: &str) {
@@ -122,6 +132,13 @@ impl LinkedFilmRenderer {
         writeln!(self.output, "  scene id={}", id(scene.element()))?;
 
         for shot in scene.shots() {
+            if let Some(transition) = shot.incoming_transition() {
+                writeln!(
+                    self.output,
+                    "    transition id={}",
+                    id(transition.element()),
+                )?;
+            }
             self.render_shot(shot)?;
         }
 

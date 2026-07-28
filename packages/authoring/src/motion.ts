@@ -9,16 +9,33 @@ import type {
   RuntimePlan,
 } from "@onmark/runtime/types";
 
-export type PresentationTargetKind =
+export type PresentationElementTargetKind =
   "film" | "scene" | "shot" | "video" | "title" | "callToAction" | "caption";
 
-/** One semantic element and its compiler-owned active interval. */
-export interface PresentationTarget {
-  readonly kind: PresentationTargetKind;
+export type PresentationTargetKind =
+  PresentationElementTargetKind | "transition";
+
+interface PresentationTargetBase {
   readonly element: HTMLElement;
   readonly interval: RuntimePlan["evaluation"];
   readonly node: RuntimeNode;
 }
+
+/** One semantic element and its compiler-owned active interval. */
+export interface PresentationElementTarget extends PresentationTargetBase {
+  readonly kind: PresentationElementTargetKind;
+}
+
+/** One transition marker and the exact adjacent elements it relates. */
+export interface PresentationTransitionTarget extends PresentationTargetBase {
+  readonly kind: "transition";
+  readonly incomingElement: HTMLElement;
+  readonly outgoingElement: HTMLElement;
+}
+
+/** Closed browser-owned view of one compiler-projected semantic target. */
+export type PresentationTarget =
+  PresentationElementTarget | PresentationTransitionTarget;
 
 /** Complete immutable DOM view delivered after all solved facts are bound. */
 export interface PresentationExtensionContext {

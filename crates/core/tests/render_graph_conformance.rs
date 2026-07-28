@@ -13,7 +13,7 @@ use onmark_core::model::{
     VideoDimensions, VideoMetadata, VideoTiming,
 };
 use onmark_core::render_graph::{PartitionPlan, RenderGraph};
-use onmark_core::timeline::TimelineIr;
+use onmark_core::timeline::{TimelineIr, TimelineShotIndex};
 
 use conformance::{assert_or_update, fixture};
 
@@ -42,6 +42,27 @@ fn independent_shots_form_separate_scoped_units() {
         .expect("rendering into a String cannot fail");
 
     assert_eq!(plan.units().len(), 2);
+    assert_or_update(&expected_path, &renderer.finish());
+}
+
+#[test]
+fn transition_regions_widen_evaluation_without_overlapping_output() {
+    let source_path = fixture("compiler/render-graph", "valid/transition.html");
+    let expected_path = fixture("compiler/render-graph", "valid/transition.plan.txt");
+    let assets = frozen_assets([("before.mp4", "2s"), ("after.mp4", "2s")]);
+    let timeline = solve_fixture(&source_path, &assets);
+    let graph = RenderGraph::from_timeline(&timeline, PresentationTemporalCapability::RandomAccess)
+        .expect("the transition fixture has complete render ownership");
+    let mut renderer = PlanRenderer::new();
+    renderer
+        .render_graph(&graph)
+        .expect("rendering into a String cannot fail");
+    let plan = graph.into_partition();
+    renderer
+        .render_plan(&plan)
+        .expect("rendering into a String cannot fail");
+
+    assert_eq!(plan.units().len(), 3);
     assert_or_update(&expected_path, &renderer.finish());
 }
 
@@ -124,9 +145,10 @@ impl PlanRenderer {
         for region in graph.regions() {
             writeln!(
                 self.output,
-                "  region evaluation={} output={} assets={}",
+                "  region evaluation={} output={} shots={} assets={}",
                 frames(region.evaluation()),
                 frames(region.output()),
+                shots(region.shots()),
                 assets(region.media_assets()),
             )?;
         }
@@ -145,9 +167,10 @@ impl PlanRenderer {
         for unit in plan.units() {
             writeln!(
                 self.output,
-                "  unit evaluation={} output={} assets={}",
+                "  unit evaluation={} output={} shots={} assets={}",
                 frames(unit.evaluation()),
                 frames(unit.output()),
+                shots(unit.shots()),
                 assets(unit.media_assets()),
             )?;
         }
@@ -167,6 +190,13 @@ fn frames(interval: FrameInterval) -> String {
 fn assets<'a>(assets: impl Iterator<Item = &'a FrozenAssetId>) -> String {
     assets
         .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn shots<'a>(shots: impl Iterator<Item = &'a TimelineShotIndex>) -> String {
+    shots
+        .map(|shot| shot.get().to_string())
         .collect::<Vec<_>>()
         .join(",")
 }

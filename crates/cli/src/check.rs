@@ -175,12 +175,13 @@ async fn validate_resolved(input: ResolvedInput) -> Result<Validation, CliError>
     };
     let timeline = compiler::import_captions(timeline, caption_track)?;
 
-    let bundle = PresentationBundler::new(executables.bundler)
-        .bundle(&source, source_directory(&args.screenplay))
-        .await?;
+    let bundler = PresentationBundler::new(executables.bundler);
     let partitions =
-        RenderGraph::from_timeline(&timeline, bundle.manifest().temporal_capability())?
+        RenderGraph::from_timeline(&timeline, PresentationBundler::temporal_capability())?
             .into_partition();
+    let bundle = bundler
+        .bundle(&source, source_directory(&args.screenplay), &partitions)
+        .await?;
     let manifests = (0..partitions.units().len())
         .map(|index| bundle.region(index))
         .collect::<Result<Vec<_>, _>>()?

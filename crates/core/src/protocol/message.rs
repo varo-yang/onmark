@@ -20,14 +20,14 @@ const MAX_PENDING_RESOURCE_CHARACTERS: usize = 1_024;
 
 /// Version of the native-to-browser message contract.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[cfg_attr(feature = "schema", schemars(extend("const" = 3)))]
+#[cfg_attr(feature = "schema", schemars(extend("const" = 4)))]
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(transparent)]
 pub struct ProtocolVersion(u16);
 
 impl ProtocolVersion {
     /// Only browser protocol version accepted by this build.
-    pub const CURRENT: Self = Self(3);
+    pub const CURRENT: Self = Self(4);
 
     /// Returns the stable integer representation.
     #[must_use]

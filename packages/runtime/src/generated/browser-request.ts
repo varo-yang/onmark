@@ -75,7 +75,7 @@ export type RequestId = number;
 /**
  * Version of the native-to-browser message contract.
  */
-export type ProtocolVersion = 3;
+export type ProtocolVersion = 4;
 
 /**
  * One versioned command sent from the native executor to the browser.
@@ -106,7 +106,11 @@ export interface BrowserPlan {
    */
   shots: BrowserShot[];
   timeline: WireInterval;
-  timelineVersion: 2;
+  timelineVersion: 3;
+  /**
+   * @maxItems 10000
+   */
+  transitions: BrowserTransition[];
   /**
    * @maxItems 10000
    */
@@ -157,6 +161,15 @@ export interface BrowserShot {
   interval: WireInterval;
   node: BrowserNode;
   sceneId: BrowserNodeId;
+}
+/**
+ * One solved transition between two adjacent browser shots.
+ */
+export interface BrowserTransition {
+  incomingShotId: BrowserNodeId;
+  interval: WireInterval;
+  node: BrowserNode;
+  outgoingShotId: BrowserNodeId;
 }
 /**
  * One primary video placement consumed by the browser presentation adapter.

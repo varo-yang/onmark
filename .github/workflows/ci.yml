@@ -92,6 +92,7 @@ jobs:
         run: |
           cargo xtask eval audio
           cargo xtask eval html
+          cargo xtask eval transition
 
       - name: Check TypeScript
         run: pnpm typecheck
