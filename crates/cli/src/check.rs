@@ -21,7 +21,7 @@ use crate::arguments::{CheckArgs, source_directory};
 use crate::assets::FrozenCatalog;
 use crate::bundler::{BundleRegion, PresentationBundler};
 use crate::compilation;
-use crate::diagnostic::{self, JsonDiagnostic};
+use crate::diagnostic::{self, AuthoredReport, JsonDiagnostic};
 use crate::environment::CheckExecutables;
 use crate::execution;
 use crate::failure::CliError;
@@ -29,12 +29,6 @@ use crate::input;
 use crate::subtitle::SubtitleImport;
 
 const REPORT_VERSION: u16 = 1;
-
-pub(super) struct AuthoredReport {
-    pub(super) path: PathBuf,
-    pub(super) source: String,
-    pub(super) diagnostics: Vec<Diagnostic>,
-}
 
 pub(super) struct Validation {
     pub(super) report: AuthoredReport,

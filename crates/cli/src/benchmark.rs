@@ -7,12 +7,10 @@ use std::time::Duration;
 use serde::Serialize;
 
 use crate::arguments::BenchmarkArgs;
-use crate::diagnostic::{self, JsonDiagnostic};
+use crate::diagnostic::{self, AuthoredReport, JsonDiagnostic};
 use crate::failure::CliError;
 use crate::progress::Progress;
-use crate::render::{
-    AuthoredReport, BenchmarkAttempt, BenchmarkSample, RenderTimings, run_uncached,
-};
+use crate::render::{BenchmarkAttempt, BenchmarkSample, RenderTimings, run_uncached};
 
 const REPORT_VERSION: u16 = 1;
 

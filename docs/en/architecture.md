@@ -727,10 +727,12 @@ semantics.
 The authored native surface stays narrow: `onmark check <film.html>` validates
 through Render Unit planning without Chromium, `onmark inspect <film.html>`
 explains the solved and planned facts, including exact video source selection
-and rate, and `onmark render <film.html>` executes them. `onmark doctor`
-validates the admitted local toolchain, while `onmark info` reports the
-installed product and host identity. Machine-readable command reports carry an
-explicit version and preserve stable diagnostic codes and byte spans.
+and rate, `onmark snapshot <film.html> --frame <index>` captures one exact
+production frame as lossless PNG, and `onmark render <film.html>` executes the
+complete output. `onmark doctor` validates the admitted local toolchain, while
+`onmark info` reports the installed product and host identity. Machine-readable
+command reports carry an explicit version and preserve stable diagnostic codes
+and byte spans.
 The authored HTML contains both screenplay custom elements and presentation
 DOM/CSS. At most one inline module marked `type="module" data-om-motion`
 exports the declarative `motion` value; the generated infrastructure entry owns
@@ -1607,6 +1609,25 @@ nine inside a private workspace, forces ephemeral frame artifacts so every
 sample measures a complete capture, and reports every phase sample plus its
 median. It calls the production render pipeline directly and cannot substitute
 a reduced benchmark-only executor.
+
+`snapshot` closes the first exact visual-feedback loop without introducing a
+preview runtime. Planning, region bundling, visual admission, and cross-region
+visual-path normalization complete exactly as they do for a full render. Only
+then does the CLI consume the region that publishes the requested absolute
+frame and narrow its output to that one frame; evaluation bounds, selected
+shots, presentation bytes, media dependencies, and the chosen browser/native
+path remain unchanged. Capture writes the ordinary verified frame-artifact
+contract, reads its sole validated PNG and raw-RGBA fingerprint, and publishes
+the PNG without clobbering an existing file. The default destination is
+`renders/<screenplay-stem>-frame-<index>.png`; JSON also reports the owning
+region, evaluation and output bounds, shot indices, capture mode, graphics
+backend, reuse, fingerprint, and phase timings.
+
+The command is a local authoring surface, not a distributed task shape. It does
+not create a second renderer, final video encoder, remote single-frame request,
+contact-sheet scheduler, visual scorer, approximate frame, or black-frame
+fallback. Its conformance claim is canonical raw-RGBA equality with the same
+frame in a complete production artifact under one locked capture environment.
 
 The second slice admits broader media inputs, output profiles, and native
 placements only through typed facts and locked evidence. VFR input retains its

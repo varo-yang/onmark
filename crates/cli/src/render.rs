@@ -4,7 +4,6 @@
 //! graph rule is recreated at this I/O boundary.
 
 use std::fmt;
-use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -27,19 +26,14 @@ use crate::artifact_cache::{ArtifactCache, ArtifactReuse, CacheAdmission};
 use crate::assets::FrozenCatalog;
 use crate::bundler::{BundleArtifact, BundleRegion, PresentationBundler};
 use crate::compilation;
-use crate::diagnostic::{self, JsonDiagnostic};
+use crate::diagnostic::{self, AuthoredReport, JsonDiagnostic};
 use crate::environment::Executables;
 use crate::execution;
 use crate::failure::CliError;
 use crate::input;
+use crate::output;
 use crate::progress::Progress;
 use crate::subtitle::SubtitleImport;
-
-pub(super) struct AuthoredReport {
-    pub(super) path: PathBuf,
-    pub(super) source: String,
-    pub(super) diagnostics: Vec<Diagnostic>,
-}
 
 struct LocalExecutorOptions {
     browser: PathBuf,
@@ -303,9 +297,9 @@ async fn prepare_render(
         None => None,
     };
 
-    reject_existing_output(&output)?;
+    output::reject_existing(&output)?;
     let executables = Executables::discover(&args).await?;
-    create_output_directory(&output)?;
+    output::create_parent(&output)?;
     let ffprobe = ffprobe(executables.ffprobe.clone());
     let frozen = FrozenCatalog::freeze(&film, source_directory(&args.screenplay), &ffprobe).await?;
     let solved = compilation::solve(
@@ -380,7 +374,7 @@ async fn execute_render(
 
     let graphics_backend = args
         .graphics_backend()
-        .unwrap_or_else(local_graphics_backend);
+        .unwrap_or_else(execution::local_graphics_backend);
     let executed = LocalExecutorOptions {
         browser: executables.browser.path,
         capture_mode: executables.browser.capture_mode,
@@ -453,21 +447,6 @@ fn materialize_units(
         .collect::<Result<Vec<_>, _>>()?;
 
     Ok(units)
-}
-
-fn reject_existing_output(output: &Path) -> Result<(), CliError> {
-    if output.exists() {
-        return Err(CliError::OutputExists(output.to_owned()));
-    }
-    Ok(())
-}
-
-fn create_output_directory(output: &Path) -> Result<(), CliError> {
-    let parent = output
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-        .unwrap_or_else(|| Path::new("."));
-    fs::create_dir_all(parent).map_err(|error| CliError::create_output_directory(parent, error))
 }
 
 fn ffprobe(executable: PathBuf) -> Ffprobe {
@@ -548,16 +527,6 @@ impl LocalExecutorOptions {
             encode_profile,
         })
     }
-}
-
-#[cfg(target_os = "macos")]
-const fn local_graphics_backend() -> BrowserGraphicsBackend {
-    BrowserGraphicsBackend::Metal
-}
-
-#[cfg(not(target_os = "macos"))]
-const fn local_graphics_backend() -> BrowserGraphicsBackend {
-    BrowserGraphicsBackend::SwiftShader
 }
 
 fn write_report(writer: &mut impl Write, report: &AuthoredReport) -> io::Result<()> {

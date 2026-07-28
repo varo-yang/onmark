@@ -11,9 +11,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use onmark_core::model::{
-    AudioChannelLayout, AudioGain, AudioSampleConversionOverflow, AudioSampleCount, FrameInterval,
-    FrameRate, FrozenAsset, FrozenAssetId, PresentationDocumentScope, PresentationVisualCapability,
-    Rounding, VideoColorProfile, VideoDimensions, VideoTiming,
+    AudioChannelLayout, AudioGain, AudioSampleConversionOverflow, AudioSampleCount, FrameCount,
+    FrameIndex, FrameInterval, FrameRate, FrozenAsset, FrozenAssetId, PresentationDocumentScope,
+    PresentationVisualCapability, Rounding, VideoColorProfile, VideoDimensions, VideoTiming,
 };
 use onmark_core::protocol::{BrowserPlan, BundleManifest, InvalidBrowserPlan};
 use onmark_core::render_graph::{PartitionPlan, RenderPartition};
@@ -483,6 +483,36 @@ impl RenderUnit {
     pub(crate) fn into_execution_plans(self) -> (BrowserPlan, VisualExecutionPlan, AudioPlan) {
         (self.browser_plan, self.visual_execution, self.audio)
     }
+
+    /// Narrows this normalized unit to one exact published frame.
+    ///
+    /// The operation consumes an already-composed unit so visual-path
+    /// normalization, evaluation dependencies, presentation bytes, and media
+    /// admission remain identical to the production sequence. Audio is omitted
+    /// because a PNG snapshot has no audio output.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InvalidRenderUnit::FrameOutsideOutput`] when `frame` is not
+    /// published by this unit.
+    pub fn into_frame(mut self, frame: FrameIndex) -> Result<Self, InvalidRenderUnit> {
+        let output = self.browser_plan.output();
+        if frame.get() < output.start().get() || frame.get() >= output.end().get() {
+            return Err(InvalidRenderUnit::FrameOutsideOutput(frame));
+        }
+        let end = frame
+            .checked_advance(FrameCount::new(1))
+            .ok_or(InvalidRenderUnit::FrameOutsideOutput(frame))?;
+        let interval = FrameInterval::new(frame, end)
+            .map_err(|_| InvalidRenderUnit::FrameOutsideOutput(frame))?;
+
+        self.browser_plan = self
+            .browser_plan
+            .into_output(interval)
+            .map_err(InvalidRenderUnit::BrowserPlan)?;
+        self.audio = AudioPlan::empty();
+        Ok(self)
+    }
 }
 
 fn normalize_visual_execution(units: &mut [RenderUnit]) {
@@ -535,6 +565,8 @@ pub enum InvalidRenderUnit {
     AudioOutsideTimeline(FrozenAssetId),
     /// Materialized bytes do not contain the audio stream solved by core.
     MissingAudioStream(FrozenAssetId),
+    /// A requested snapshot frame is not published by this render unit.
+    FrameOutsideOutput(FrameIndex),
     /// A solved placement cannot be projected onto the source sample grid.
     AudioSampleConversion {
         /// Identity of the rejected audio artifact.
@@ -583,6 +615,13 @@ impl fmt::Display for InvalidRenderUnit {
             Self::MissingAudioStream(id) => {
                 write!(formatter, "materialized audio {id} has no audio stream")
             }
+            Self::FrameOutsideOutput(frame) => {
+                write!(
+                    formatter,
+                    "frame {} lies outside this render unit's output",
+                    frame.get()
+                )
+            }
             Self::AudioSampleConversion { id, source } => {
                 write!(
                     formatter,
@@ -608,7 +647,8 @@ impl Error for InvalidRenderUnit {
             | Self::MissingAsset(_)
             | Self::AudioTrackLimit
             | Self::AudioOutsideTimeline(_)
-            | Self::MissingAudioStream(_) => None,
+            | Self::MissingAudioStream(_)
+            | Self::FrameOutsideOutput(_) => None,
         }
     }
 }
@@ -766,10 +806,10 @@ mod tests {
     use onmark_core::compiler;
     use onmark_core::model::{
         AssetMetadata, AssetRef, AudioChannelLayout, AudioGain, AudioSampleRate, Duration,
-        FrameRate, FrozenAsset, FrozenAssetId, MediaTimebase, PresentationDocumentScope,
-        PresentationFrameBehavior, PresentationTemporalCapability, PresentationVisualCapability,
-        SourceId, Timebase, VideoColorProfile, VideoDimensions, VideoFrameMap, VideoMetadata,
-        VideoTiming,
+        FrameIndex, FrameRate, FrozenAsset, FrozenAssetId, MediaTimebase,
+        PresentationDocumentScope, PresentationFrameBehavior, PresentationTemporalCapability,
+        PresentationVisualCapability, SourceId, Timebase, VideoColorProfile, VideoDimensions,
+        VideoFrameMap, VideoMetadata, VideoTiming,
     };
     use onmark_core::protocol::BundleFile;
     use onmark_core::render_graph::RenderGraph;
@@ -1396,6 +1436,49 @@ mod tests {
             units
                 .iter()
                 .all(|unit| unit.visual_execution().layered_media().is_none())
+        );
+    }
+
+    #[test]
+    fn narrows_a_normalized_unit_without_replanning_its_visual_path() {
+        let timeline = solve_with_assets(
+            concat!(
+                "<om-film><om-scene>",
+                r#"<om-shot duration="1s"><om-title>Opening</om-title></om-shot>"#,
+                "</om-scene></om-film>",
+            ),
+            &BTreeMap::new(),
+        );
+        let unit = RenderUnit::whole_film(&timeline, bundle_manifest(), render_profile(), [])
+            .expect("the fixture forms one complete unit");
+        let expected_visual = unit.visual_execution().clone();
+
+        let frame = unit
+            .into_frame(FrameIndex::new(7))
+            .expect("the requested frame is published by the unit");
+
+        assert_eq!(frame.browser_plan().output().start().get(), 7);
+        assert_eq!(frame.browser_plan().output().end().get(), 8);
+        assert_eq!(frame.visual_execution(), &expected_visual);
+        assert_eq!(frame.audio_tracks().len(), 0);
+    }
+
+    #[test]
+    fn rejects_a_frame_outside_the_existing_unit_output() {
+        let timeline = solve_with_assets(
+            concat!(
+                "<om-film><om-scene>",
+                r#"<om-shot duration="1s"></om-shot>"#,
+                "</om-scene></om-film>",
+            ),
+            &BTreeMap::new(),
+        );
+        let unit = RenderUnit::whole_film(&timeline, bundle_manifest(), render_profile(), [])
+            .expect("the fixture forms one complete unit");
+
+        assert_eq!(
+            unit.into_frame(FrameIndex::new(30)),
+            Err(InvalidRenderUnit::FrameOutsideOutput(FrameIndex::new(30))),
         );
     }
 

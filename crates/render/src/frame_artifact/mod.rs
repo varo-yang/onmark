@@ -19,7 +19,7 @@ use reader::{FrameArtifactFingerprintSequence, open_verified};
 pub(crate) use reader::FrameArtifactReader;
 pub(crate) use writer::FrameArtifactWriter;
 
-use crate::{CaptureEnvironmentId, ExecutableUnit};
+use crate::{CaptureEnvironmentId, CapturedFrame, ExecutableUnit};
 
 const MAX_FRAMES: u64 = 10_000_000;
 const MAX_BYTES: u64 = 1 << 40;
@@ -246,6 +246,63 @@ impl FrameArtifact {
         let mut reader = self.reader().await?;
         while reader.next_recorded_fingerprint().await?.is_some() {}
         Ok(())
+    }
+
+    /// Reads one verified frame by its zero-based position in this artifact.
+    ///
+    /// The reader validates the complete payload checksum while decoding only
+    /// the requested PNG. This is intended for exact authoring feedback and
+    /// inspection, not random access into a large artifact.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FrameArtifactError`] when the position is absent or any
+    /// artifact record fails validation.
+    pub async fn frame(&self, position: u64) -> Result<CapturedFrame, FrameArtifactError> {
+        if position >= self.frames() {
+            return Err(FrameArtifactError::invalid(
+                &self.path,
+                "requested frame position lies outside the artifact",
+            ));
+        }
+
+        let mut reader = self.reader().await?;
+        for _ in 0..position {
+            reader
+                .next_recorded_fingerprint()
+                .await?
+                .ok_or_else(|| self.missing_requested_frame())?;
+        }
+        let frame = reader
+            .next_frame()
+            .await?
+            .ok_or_else(|| self.missing_requested_frame())?;
+        while reader.next_recorded_fingerprint().await?.is_some() {}
+
+        Ok(frame)
+    }
+
+    /// Reads the sole verified frame from a single-frame artifact.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FrameArtifactError`] when this is not a single-frame artifact
+    /// or its retained record fails validation.
+    pub async fn single_frame(&self) -> Result<CapturedFrame, FrameArtifactError> {
+        if self.frames() != 1 {
+            return Err(FrameArtifactError::invalid(
+                &self.path,
+                "single-frame output requires an artifact containing exactly one frame",
+            ));
+        }
+        self.frame(0).await
+    }
+
+    fn missing_requested_frame(&self) -> FrameArtifactError {
+        FrameArtifactError::invalid(
+            &self.path,
+            "frame artifact ended before the requested position",
+        )
     }
 
     /// Verifies that two same-environment artifact sequences have equal
@@ -593,6 +650,50 @@ mod tests {
             .expect("the artifact contains one frame");
 
         assert_eq!(frame.raw_rgba_hash(), expected);
+    }
+
+    #[tokio::test]
+    async fn reads_one_verified_frame_without_retaining_the_artifact_sequence() {
+        let directory = tempdir().expect("the fixture directory is available");
+        let artifact = artifact(&directory.path().join("frames.onmark-frames"), &[1, 2]).await;
+        let expected = CapturedFrame::from_png(encoded_png(2), descriptor().profile)
+            .expect("the expected fixture frame has canonical pixels");
+
+        let frame = artifact
+            .frame(1)
+            .await
+            .expect("the requested artifact frame verifies");
+        let single_error = artifact
+            .single_frame()
+            .await
+            .expect_err("a sequence is not a single-frame artifact");
+
+        assert_eq!(frame.raw_rgba_hash(), expected.raw_rgba_hash());
+        assert_eq!(single_error.kind(), FrameArtifactErrorKind::InvalidArtifact);
+    }
+
+    #[tokio::test]
+    async fn one_frame_read_still_verifies_the_complete_artifact_payload() {
+        let directory = tempdir().expect("the fixture directory is available");
+        let path = directory.path().join("frames.onmark-frames");
+        let artifact = artifact(&path, &[1, 2]).await;
+        let mut bytes = tokio::fs::read(&path)
+            .await
+            .expect("the fixture artifact is readable");
+        let final_byte = bytes
+            .last_mut()
+            .expect("the fixture artifact contains a final fingerprint");
+        *final_byte ^= 1;
+        tokio::fs::write(&path, bytes)
+            .await
+            .expect("the corrupted fixture artifact is writable");
+
+        let error = artifact
+            .frame(0)
+            .await
+            .expect_err("a trailing checksum mismatch invalidates an earlier frame read");
+
+        assert_eq!(error.kind(), FrameArtifactErrorKind::InvalidArtifact);
     }
 
     #[tokio::test]

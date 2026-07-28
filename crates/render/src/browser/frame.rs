@@ -3,6 +3,7 @@
 //! Encoded bytes prove artifact integrity; decoded pixels prove equivalence
 //! across independently captured or compressed artifacts.
 
+use std::fmt;
 use std::io::Cursor;
 use std::sync::{Arc, OnceLock};
 
@@ -125,6 +126,15 @@ impl RawRgbaHash {
     #[must_use]
     pub const fn as_bytes(&self) -> &[u8; Self::BYTE_LENGTH] {
         &self.0
+    }
+}
+
+impl fmt::Display for RawRgbaHash {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for byte in self.as_bytes() {
+            formatter.write_fmt(format_args!("{byte:02x}"))?;
+        }
+        Ok(())
     }
 }
 
@@ -269,6 +279,7 @@ mod tests {
 
         let expected: [u8; super::RawRgbaHash::BYTE_LENGTH] = sha2::Sha256::digest(pixels).into();
         assert_eq!(frame.raw_rgba_hash().as_bytes(), &expected);
+        assert_eq!(frame.raw_rgba_hash().to_string().len(), 64);
     }
 
     #[test]

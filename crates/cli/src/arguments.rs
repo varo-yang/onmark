@@ -35,6 +35,8 @@ pub(super) enum Command {
     Inspect(InspectArgs),
     /// Compile and render one screenplay into an admitted video profile.
     Render(RenderArgs),
+    /// Capture one exact production frame as a lossless PNG.
+    Snapshot(SnapshotArgs),
     /// Execute one already-planned worker task without recompiling source.
     Worker(WorkerArgs),
 }
@@ -271,6 +273,38 @@ pub(super) struct RenderArgs {
     pub(super) subtitle: Option<PathBuf>,
 }
 
+#[derive(Debug, Args)]
+pub(super) struct SnapshotArgs {
+    #[command(flatten)]
+    pub(super) validation: ValidationArgs,
+
+    /// Zero-based absolute Timeline frame to capture.
+    #[arg(long, default_value_t = 0)]
+    pub(super) frame: u64,
+
+    /// Lossless PNG destination.
+    #[arg(short, long)]
+    output: Option<PathBuf>,
+
+    /// Browser executable. Defaults to headless shell on Linux and Chrome elsewhere.
+    #[arg(long, help_heading = "Execution overrides")]
+    pub(super) browser: Option<PathBuf>,
+
+    /// Browser graphics implementation. Omit to use the admitted host default.
+    #[arg(long, value_enum, help_heading = "Execution overrides")]
+    graphics: Option<GraphicsBackend>,
+
+    /// `FFmpeg` executable used when the admitted visual path owns native media.
+    #[arg(
+        long,
+        env = "ONMARK_FFMPEG",
+        hide_env = true,
+        default_value = "ffmpeg",
+        help_heading = "Execution overrides"
+    )]
+    pub(super) ffmpeg: PathBuf,
+}
+
 impl RenderArgs {
     pub(super) fn output(&self) -> PathBuf {
         self.output.clone().unwrap_or_else(|| {
@@ -302,6 +336,33 @@ impl RenderArgs {
 
     pub(super) const fn video_encoder_threads(&self) -> usize {
         self.video_encoder_threads
+    }
+}
+
+impl SnapshotArgs {
+    pub(super) fn output(&self) -> Result<PathBuf, InvalidSnapshotOutputExtension> {
+        let output = self.output.clone().unwrap_or_else(|| {
+            let stem = self
+                .validation
+                .screenplay
+                .file_stem()
+                .unwrap_or_else(|| self.validation.screenplay.as_os_str());
+            Path::new("renders")
+                .join(format!("{}-frame-{}", stem.to_string_lossy(), self.frame))
+                .with_extension("png")
+        });
+        let is_png = output
+            .extension()
+            .and_then(|value| value.to_str())
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("png"));
+        if !is_png {
+            return Err(InvalidSnapshotOutputExtension(output));
+        }
+        Ok(output)
+    }
+
+    pub(super) fn graphics_backend(&self) -> Option<BrowserGraphicsBackend> {
+        self.graphics.map(GraphicsBackend::into_render_backend)
     }
 }
 
@@ -338,6 +399,21 @@ impl fmt::Display for InvalidOutputExtension {
 }
 
 impl Error for InvalidOutputExtension {}
+
+#[derive(Debug)]
+pub(super) struct InvalidSnapshotOutputExtension(PathBuf);
+
+impl fmt::Display for InvalidSnapshotOutputExtension {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "snapshot output {} must use the .png extension",
+            self.0.display(),
+        )
+    }
+}
+
+impl Error for InvalidSnapshotOutputExtension {}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
 enum GraphicsBackend {
@@ -549,6 +625,51 @@ mod tests {
         assert_eq!(args.frame_rate.denominator(), 1_001);
 
         assert!(Cli::try_parse_from(["onmark", "render", "film.html", "--fps", "29.97",]).is_err());
+    }
+
+    #[test]
+    fn accepts_one_exact_snapshot_frame_and_png_destination() {
+        let cli = Cli::try_parse_from([
+            "onmark",
+            "snapshot",
+            "project/film.html",
+            "--frame",
+            "127",
+            "--output",
+            "review/frame.png",
+        ])
+        .expect("one exact snapshot request is valid");
+        let Command::Snapshot(args) = cli.command else {
+            panic!("the fixture must parse as a snapshot command");
+        };
+
+        assert_eq!(args.validation.screenplay, Path::new("project/film.html"));
+        assert_eq!(args.frame, 127);
+        assert_eq!(
+            args.output().expect("the PNG extension is valid"),
+            Path::new("review/frame.png"),
+        );
+    }
+
+    #[test]
+    fn derives_a_stable_snapshot_destination_and_rejects_other_formats() {
+        let cli = Cli::try_parse_from(["onmark", "snapshot", "project/film.html"])
+            .expect("the default snapshot request is valid");
+        let Command::Snapshot(args) = cli.command else {
+            panic!("the fixture must parse as a snapshot command");
+        };
+
+        assert_eq!(
+            args.output().expect("the default destination is PNG"),
+            Path::new("renders/film-frame-0.png"),
+        );
+
+        let cli = Cli::try_parse_from(["onmark", "snapshot", "film.html", "--output", "frame.jpg"])
+            .expect("format validation belongs to the checked argument value");
+        let Command::Snapshot(args) = cli.command else {
+            panic!("the fixture must parse as a snapshot command");
+        };
+        assert!(args.output().is_err());
     }
 
     #[test]

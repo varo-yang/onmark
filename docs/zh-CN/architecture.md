@@ -851,10 +851,11 @@ S3 contract 不会变成桌面 installer 语义。
 
 当前 authored native surface 刻意保持很窄：`onmark check <film.html>` 不启动
 Chromium，验证到 Render Unit planning；`onmark inspect <film.html>` 解释已经求解和规划的
-fact，包括精确的 video source selection 与 rate；`onmark render <film.html>` 执行这些
-fact。`onmark doctor` 验证已准入的本地工具链，`onmark info` 报告已安装产品与 host
-identity。machine-readable command report 带显式版本，并保留稳定 diagnostic code 与 byte
-span。
+fact，包括精确的 video source selection 与 rate；`onmark snapshot <film.html>
+--frame <index>` 把一张生产帧捕获为 lossless PNG；`onmark render <film.html>` 执行完整
+output。`onmark doctor` 验证已准入的本地工具链，`onmark info` 报告已安装产品与 host
+identity。machine-readable command report 带显式版本，并保留稳定 diagnostic code 与
+byte span。
 
 authored HTML 同时包含 screenplay custom element 与 presentation DOM/CSS；至多一个带
 `type="module" data-om-motion` 的 inline module 导出 declarative `motion` value，
@@ -1623,6 +1624,22 @@ contract。每个 handshake 都校验 role-specific signature，并从每条 pip
 workspace 内执行一至九次有界奇数样本，强制使用 ephemeral frame artifact，使每份
 样本都测量完整 capture，并报告所有阶段样本及中位数。它直接调用生产 render pipeline，
 不得替换成缩水的 benchmark-only executor。
+
+`snapshot` 在不引入 preview runtime 的前提下闭合第一条精确视觉反馈链。planning、region
+bundling、visual admission 与跨 region 的 visual-path normalization 必须先与完整 render
+一样完成；之后 CLI 才消费负责发布目标绝对帧的既有 region，并把 output 收窄为这一帧。
+evaluation bound、selected shot、presentation byte、media dependency 与已经选择的
+browser/native path 都不得变化。capture 仍写入普通 verified frame-artifact contract，
+再读取其中唯一一张经过校验的 PNG 与 raw-RGBA fingerprint，并以 no-clobber 方式发布 PNG。
+默认目标为 `renders/<screenplay-stem>-frame-<index>.png`；JSON 同时报告所属 region、
+evaluation/output bound、shot index、capture mode、graphics backend、reuse、fingerprint
+与 phase timing。
+
+这是一项本地 authoring surface，不是 distributed task shape。它不会创建第二套 renderer、
+final video encoder、remote single-frame request、contact-sheet scheduler、visual scorer、
+approximate frame 或 black-frame fallback。它的 conformance claim 是：在同一个 locked
+capture environment 中，与完整 production artifact 的对应帧具有相同 canonical
+raw-RGBA。
 
 第二个切片只通过 typed fact 与锁定证据接纳更广的媒体输入、输出 profile 与 native placement。
 VFR 输入保留冻结的源字节，并要求完整的 frame timestamp map；Onmark 不会把它转码成隐式 CFR

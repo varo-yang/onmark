@@ -182,6 +182,29 @@ impl BrowserPlan {
         self.output
     }
 
+    /// Narrows this already-projected unit to a nonempty published interval.
+    ///
+    /// Evaluation and every projected placement remain unchanged. This is the
+    /// exact-output operation used by authoring feedback: it cannot widen a
+    /// unit or choose different render dependencies.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InvalidBrowserPlan`] when the interval is empty, falls outside
+    /// the existing output, or cannot cross the JavaScript wire boundary.
+    pub fn into_output(mut self, output: FrameInterval) -> Result<Self, InvalidBrowserPlan> {
+        let output = WireInterval::try_from(output)?;
+        if output.is_empty() {
+            return Err(InvalidBrowserPlan::EmptyOutput);
+        }
+        if !self.output.contains_interval(output) {
+            return Err(InvalidBrowserPlan::OutputOutsideOriginalOutput);
+        }
+
+        self.output = output;
+        Ok(self)
+    }
+
     /// Returns the semantic film root retained from Timeline IR.
     #[must_use]
     pub const fn film(&self) -> &BrowserNode {
@@ -1377,6 +1400,8 @@ pub enum InvalidBrowserPlan {
     EvaluationOutsideTimeline,
     /// The published interval lies outside the unit evaluation interval.
     OutputOutsideEvaluation,
+    /// A narrowed published interval lies outside the original output.
+    OutputOutsideOriginalOutput,
     /// The published interval contains no frame.
     EmptyOutput,
     /// A render region selects no shot or one outside this Timeline IR.
@@ -1455,6 +1480,9 @@ impl fmt::Display for InvalidBrowserPlan {
                 "browser evaluation interval lies outside the solved film"
             }
             Self::OutputOutsideEvaluation => "browser output interval lies outside evaluation",
+            Self::OutputOutsideOriginalOutput => {
+                "narrowed browser output lies outside the original output"
+            }
             Self::EmptyOutput => "browser output interval is empty",
             Self::InvalidShotSelection => "browser region contains an invalid shot selection",
             Self::EmptyVideo => "browser video interval is empty",
@@ -1514,6 +1542,7 @@ impl Error for InvalidBrowserPlan {
             Self::UnsupportedTimelineVersion
             | Self::EvaluationOutsideTimeline
             | Self::OutputOutsideEvaluation
+            | Self::OutputOutsideOriginalOutput
             | Self::EmptyOutput
             | Self::InvalidShotSelection
             | Self::EmptyVideo
@@ -2041,6 +2070,34 @@ mod tests {
                 interval(0, 2),
             ),
             Err(InvalidBrowserPlan::OutputOutsideEvaluation),
+        );
+    }
+
+    #[test]
+    fn narrows_only_the_existing_published_interval() {
+        let timeline = timeline_with_content_in(
+            vec![overlay(ElementKind::Title, interval(0, 4), "Opening")],
+            interval(0, 4),
+        );
+        let plan = BrowserPlan::from_timeline(&timeline, &BTreeMap::new())
+            .expect("the fixture forms one browser plan");
+
+        let narrowed = plan
+            .clone()
+            .into_output(interval(2, 3))
+            .expect("one existing output frame can be selected");
+
+        assert_eq!(narrowed.output().start().get(), 2);
+        assert_eq!(narrowed.output().end().get(), 3);
+        assert_eq!(narrowed.evaluation(), plan.evaluation());
+        assert_eq!(narrowed.overlays(), plan.overlays());
+        assert_eq!(
+            plan.clone().into_output(interval(4, 5)),
+            Err(InvalidBrowserPlan::OutputOutsideOriginalOutput),
+        );
+        assert_eq!(
+            plan.into_output(interval(2, 2)),
+            Err(InvalidBrowserPlan::EmptyOutput),
         );
     }
 

@@ -17,7 +17,7 @@ use onmark_render::{
 use serde::Serialize;
 use tokio::task::JoinError;
 
-use crate::arguments::InvalidOutputExtension;
+use crate::arguments::{InvalidOutputExtension, InvalidSnapshotOutputExtension};
 use crate::artifact_cache::ArtifactCacheError;
 use crate::assets::AssetError;
 use crate::bundler::BundleError;
@@ -51,6 +51,7 @@ pub(super) enum CliError {
     },
     OutputExists(PathBuf),
     InvalidOutputExtension(InvalidOutputExtension),
+    InvalidSnapshotOutputExtension(InvalidSnapshotOutputExtension),
     InvalidProfile(InvalidRenderProfile),
     InvalidFfmpeg(InvalidFfmpeg),
     ArtifactCache(ArtifactCacheError),
@@ -63,6 +64,7 @@ pub(super) enum CliError {
     RenderUnit(InvalidRenderUnit),
     UnitRoot(UnitRootError),
     Render(RenderError),
+    Snapshot(crate::snapshot::SnapshotError),
 }
 
 impl CliError {
@@ -148,6 +150,7 @@ impl fmt::Display for CliError {
                 write!(formatter, "output {} already exists", path.display())
             }
             Self::InvalidOutputExtension(source) => source.fmt(formatter),
+            Self::InvalidSnapshotOutputExtension(source) => source.fmt(formatter),
             Self::InvalidProfile(source) => source.fmt(formatter),
             Self::InvalidFfmpeg(source) => source.fmt(formatter),
             Self::ArtifactCache(source) => source.fmt(formatter),
@@ -160,6 +163,7 @@ impl fmt::Display for CliError {
             Self::RenderUnit(source) => source.fmt(formatter),
             Self::UnitRoot(source) => source.fmt(formatter),
             Self::Render(source) => source.fmt(formatter),
+            Self::Snapshot(source) => source.fmt(formatter),
         }
     }
 }
@@ -179,6 +183,7 @@ impl Error for CliError {
             Self::WorkerTask(source) => Some(source),
             Self::OutputExists(_) | Self::BenchmarkDrift(_) => None,
             Self::InvalidOutputExtension(source) => Some(source),
+            Self::InvalidSnapshotOutputExtension(source) => Some(source),
             Self::InvalidProfile(source) => Some(source),
             Self::InvalidFfmpeg(source) => Some(source),
             Self::ArtifactCache(source) => Some(source),
@@ -191,6 +196,7 @@ impl Error for CliError {
             Self::RenderUnit(source) => Some(source),
             Self::UnitRoot(source) => Some(source),
             Self::Render(source) => Some(source),
+            Self::Snapshot(source) => Some(source),
         }
     }
 }
@@ -216,6 +222,12 @@ impl From<InvalidRenderProfile> for CliError {
 impl From<InvalidOutputExtension> for CliError {
     fn from(source: InvalidOutputExtension) -> Self {
         Self::InvalidOutputExtension(source)
+    }
+}
+
+impl From<InvalidSnapshotOutputExtension> for CliError {
+    fn from(source: InvalidSnapshotOutputExtension) -> Self {
+        Self::InvalidSnapshotOutputExtension(source)
     }
 }
 
@@ -282,6 +294,12 @@ impl From<UnitRootError> for CliError {
 impl From<RenderError> for CliError {
     fn from(source: RenderError) -> Self {
         Self::Render(source)
+    }
+}
+
+impl From<crate::snapshot::SnapshotError> for CliError {
+    fn from(source: crate::snapshot::SnapshotError) -> Self {
+        Self::Snapshot(source)
     }
 }
 

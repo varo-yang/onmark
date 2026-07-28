@@ -24,6 +24,13 @@ Static films need no authored JavaScript:
 onmark render film.html
 ```
 
+During authoring, capture an exact production frame without encoding the whole
+film:
+
+```bash
+onmark snapshot film.html --frame 42
+```
+
 CSS is ordinary inline HTML:
 
 ```html

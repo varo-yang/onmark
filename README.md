@@ -84,9 +84,15 @@ Validate or inspect the same production plan without launching Chromium:
 ```bash
 onmark check film.html
 onmark inspect film.html --json
+onmark snapshot film.html --frame 42
 onmark doctor
 onmark benchmark film.html --runs 3 --json
 ```
+
+`snapshot` writes a lossless production frame to
+`renders/film-frame-42.png`. It uses the same render region, browser/native
+path, and verified pixel contract as the complete film; it is not a preview
+approximation.
 
 Use the default opaque H.264/AAC MP4 for delivery, or select the
 alpha-preserving ProRes 4444/PCM MOV profile by filename:

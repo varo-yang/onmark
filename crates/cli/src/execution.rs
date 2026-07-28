@@ -10,6 +10,7 @@ use onmark_render::{BrowserLimits, EncodeLimits, FrameArtifactLimits, UnitRootLi
 const PROCESS_DEADLINE: Duration = Duration::from_mins(2);
 const ENCODER_INACTIVITY_TIMEOUT: Duration = Duration::from_mins(1);
 const MAX_CAPTURE_BYTES: usize = 64 * 1024 * 1024;
+const MAX_SNAPSHOT_ARTIFACT_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_ENCODED_FRAMES: u64 = 1_000_000;
 const MAX_ENCODER_INPUT_BYTES: u64 = 128 * 1024 * 1024 * 1024;
 const MAX_PROCESS_STDERR_BYTES: usize = 1024 * 1024;
@@ -55,7 +56,22 @@ pub(super) fn frame_artifact_limits() -> FrameArtifactLimits {
     .expect("the CLI worker-artifact policy stays within the render safety envelope")
 }
 
+pub(super) fn snapshot_artifact_limits() -> FrameArtifactLimits {
+    FrameArtifactLimits::new(1, MAX_SNAPSHOT_ARTIFACT_BYTES, MAX_CAPTURE_BYTES)
+        .expect("the CLI snapshot policy stays within the render safety envelope")
+}
+
 pub(super) fn unit_root_limits() -> UnitRootLimits {
     UnitRootLimits::new(MAX_UNIT_FILES, MAX_UNIT_BYTES)
         .expect("the CLI unit policy stays within the render safety envelope")
+}
+
+#[cfg(target_os = "macos")]
+pub(super) const fn local_graphics_backend() -> onmark_render::BrowserGraphicsBackend {
+    onmark_render::BrowserGraphicsBackend::Metal
+}
+
+#[cfg(not(target_os = "macos"))]
+pub(super) const fn local_graphics_backend() -> onmark_render::BrowserGraphicsBackend {
+    onmark_render::BrowserGraphicsBackend::SwiftShader
 }
