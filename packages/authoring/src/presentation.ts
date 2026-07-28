@@ -2,6 +2,7 @@
 // Rust owns structure and timing; this module owns browser node lifetimes.
 
 import type {
+  BrowserMediaPlacement,
   ContainerPresentation,
   OverlayPresentation,
   PresentationBindings,
@@ -158,15 +159,14 @@ class AuthoredDocument {
       "video",
       ELEMENTS.video,
     ) as HTMLVideoElement;
-    const bound = bindElement(element, placement.node);
     element.muted = true;
     element.playsInline = true;
     this.#record("video", element, placement.node, placement.interval);
-    return {
-      ...bound,
+    return bindVideoElement(
       element,
-      source: this.#videoSource(placement),
-    };
+      placement.node,
+      this.#videoSource(placement),
+    );
   }
 
   bindTransition(placement: RuntimeTransition): TransitionPresentation {
@@ -386,6 +386,163 @@ function bindElement(
       release?.();
     },
   };
+}
+
+function bindVideoElement(
+  element: HTMLVideoElement,
+  node: RuntimeNode,
+  source: string,
+): VideoPresentation {
+  const bound = bindElement(element, node);
+  const authoredVisibility = element.style.visibility;
+  let layoutVisible = false;
+
+  return {
+    element,
+    source,
+    setVisible: bound.setVisible,
+    setLayoutVisible(visible): void {
+      if (visible) {
+        element.style.visibility = "hidden";
+        bound.setVisible(true);
+      } else {
+        bound.setVisible(false);
+        element.style.visibility = authoredVisibility;
+      }
+      layoutVisible = visible;
+    },
+    measureLayout(): BrowserMediaPlacement {
+      if (!layoutVisible) {
+        throw new Error("video layout requires a visible layout-only element");
+      }
+      return measureVideoLayout(element, node.nodeId);
+    },
+    dispose(): void {
+      bound.setVisible(false);
+      element.style.visibility = authoredVisibility;
+      bound.dispose();
+    },
+  };
+}
+
+function measureVideoLayout(
+  element: HTMLVideoElement,
+  nodeId: number,
+): BrowserMediaPlacement {
+  requireStaticVideoStyle(element);
+  const rectangle = pixelRectangle(element.getBoundingClientRect());
+  const style = getComputedStyle(element);
+  return Object.freeze({
+    nodeId,
+    objectFit: objectFit(style.objectFit),
+    objectPosition: objectPosition(style.objectPosition),
+    rectangle,
+  });
+}
+
+function requireStaticVideoStyle(element: HTMLVideoElement): void {
+  const style = getComputedStyle(element);
+  const unsupported = [
+    ["border-radius", style.borderRadius, "0px"],
+    ["filter", style.filter, "none"],
+    ["mix-blend-mode", style.mixBlendMode, "normal"],
+    ["opacity", style.opacity, "1"],
+    ["transform", style.transform, "none"],
+  ] as const;
+  for (const [name, actual, expected] of unsupported) {
+    if (actual !== expected) {
+      throw new Error(
+        `layout-only video requires ${name}: ${expected}, found ${actual}`,
+      );
+    }
+  }
+  for (const name of [
+    "borderBottomWidth",
+    "borderLeftWidth",
+    "borderRightWidth",
+    "borderTopWidth",
+    "paddingBottom",
+    "paddingLeft",
+    "paddingRight",
+    "paddingTop",
+  ] as const) {
+    if (style[name] !== "0px") {
+      throw new Error(`layout-only video requires ${cssName(name)}: 0`);
+    }
+  }
+  if (style.clipPath !== "none") {
+    throw new Error("layout-only video requires clip-path: none");
+  }
+}
+
+function pixelRectangle(
+  rectangle: DOMRect,
+): BrowserMediaPlacement["rectangle"] {
+  const values = [rectangle.x, rectangle.y, rectangle.width, rectangle.height];
+  if (
+    devicePixelRatio !== 1 ||
+    !values.every(Number.isSafeInteger) ||
+    rectangle.x < 0 ||
+    rectangle.y < 0 ||
+    rectangle.width <= 0 ||
+    rectangle.height <= 0 ||
+    rectangle.right > document.documentElement.clientWidth ||
+    rectangle.bottom > document.documentElement.clientHeight
+  ) {
+    throw new Error(
+      "layout-only video requires a positive, pixel-aligned viewport rectangle",
+    );
+  }
+  return Object.freeze({
+    height: rectangle.height,
+    width: rectangle.width,
+    x: rectangle.x,
+    y: rectangle.y,
+  });
+}
+
+function objectFit(value: string): BrowserMediaPlacement["objectFit"] {
+  if (value === "fill" || value === "contain" || value === "cover") {
+    return value;
+  }
+  throw new Error(`layout-only video does not support object-fit: ${value}`);
+}
+
+function objectPosition(
+  value: string,
+): BrowserMediaPlacement["objectPosition"] {
+  const [x, y, ...rest] = value.trim().split(/\s+/u);
+  if (x === undefined || y === undefined || rest.length > 0) {
+    throw new Error("layout-only video requires two percentage positions");
+  }
+  return Object.freeze({
+    x: percentageMillionths(x),
+    y: percentageMillionths(y),
+  });
+}
+
+function percentageMillionths(value: string): number {
+  const match = /^(?<whole>[0-9]{1,3})(?:\.(?<fraction>[0-9]{1,4}))?%$/u.exec(
+    value,
+  );
+  if (match?.groups === undefined) {
+    throw new Error(
+      "layout-only video object-position must use exact percentages",
+    );
+  }
+  const whole = Number(match.groups["whole"]);
+  const fraction = Number((match.groups["fraction"] ?? "").padEnd(4, "0"));
+  const millionths = whole * 10_000 + fraction;
+  if (millionths > 1_000_000) {
+    throw new Error(
+      "layout-only video object-position must lie between 0% and 100%",
+    );
+  }
+  return millionths;
+}
+
+function cssName(value: string): string {
+  return value.replace(/[A-Z]/gu, (character) => `-${character.toLowerCase()}`);
 }
 
 function requireAuthoredId(element: HTMLElement, node: RuntimeNode): void {

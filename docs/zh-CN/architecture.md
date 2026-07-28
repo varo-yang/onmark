@@ -1632,6 +1632,46 @@ pixel contract。native crop、scale、picture-in-picture 与 multi-video placem
 显式 layout fact，并通过 whole-film、partitioned 与 distributed raw-pixel equivalence，才能
 绕过 Chromium。
 
+获准的 browser-backdrop path 显式声明为 `separableBackdrop`；authored presentation
+没有这项声明时仍是 `browserComposite`。planning 只接纳 1 到 16 个 CFR、BT.709
+limited-range video placement，并要求其 source treatment 已被 native path 支持。声明的
+candidate 若无法通过 admission 会直接失败，不会静默送回 Chromium。
+
+browser 独占 CSS evaluation，但不会成为第二个 planner。capture 之前 executor 以
+`layoutOnly` mode 加载 unit，并接收一组经过 protocol versioning、按 node 排序的整数
+viewport rectangle，以及封闭的 `object-fit` 和 fixed-point `object-position` fact。
+Rust 用 Render Unit 里的预期 media identity、source dimension、output profile 与 solved
+interval 校验这份 evidence。只有精确且不越界的 crop/scale 算术可以通过；native rectangle
+若同时在空间和 solved interval 上重叠则被拒绝。校验后的 placement 会成为该 capture
+transaction 唯一且不可变的 `BackdropLayoutPlan`。
+shot projection 会在零 native media 的 browser-only region 上保留该 capability。这类
+region 单独执行时正常走 browser capture，与同一 sequence 中包含 native media 的 region
+仍保持兼容；本地 media set 为空不会改写其 visual contract。
+
+随后一条连续且有界的 `FFmpeg` process 把 Chromium 的 opaque 或 alpha-preserving output
+作为 canvas，再以显式 trim、PTS offset、crop、scale 与 destination coordinate 叠加每个
+time-bounded native source。它既不拥有 screenplay timing，也不解释 CSS。local sequence、
+worker artifact 与 distributed assembly 共用这条 executor branch；不存在另一套 worker
+compositor，也不会逐帧启动 decoder。
+
+这条 branch 冻结的是 CSS geometry，不是 Chromium 的 media-rasterization algorithm。
+通过 admission 后，video pixel 由 locked native decoder、color conversion 与 scaler
+定义。conformance 因此要求这条 branch 的 whole、partitioned、local 与 worker
+execution 拥有相同 canonical raw-RGBA；它不宣称与另一种 `browserComposite` pixel
+ownership contract 逐字节相同。
+
+cache identity 刻意记录能确定 browser layout 的输入，而不重复保存它的派生 response：
+bundle identity、Browser Plan、render profile、预期 native-media plan 与 capture
+environment。若把 response 本身加入 key，每次 cache lookup 前都必须先启动 Chromium，
+会直接破坏 warm incremental reuse。capture environment 会锁定 browser、native compositor
+policy 与 binary；cache miss 在发布任何输出前冻结并校验派生 evidence。
+
+仓库中的
+[`backdrop-layout-admission`](../../conformance/evidence/backdrop-layout-admission.md)
+记录包含 whole/partition/worker 的 raw-pixel 证明，以及首轮同机
+browser-versus-native 性能样本。目前 measured native candidate 与 browser composition
+接近，但并没有更快；后续任何性能优势声明都必须重新进行锁定实验。
+
 获准的替代输出是面向剪辑且保留 alpha 的 MOV：`ProRes` 4444
 （编码为 `yuva444p10le`，锁定工具链解码为 `yuva444p12le`）配 48 kHz
 双声道 24-bit PCM。原有交付配置仍是 MP4 中的不透明 x264 H.264

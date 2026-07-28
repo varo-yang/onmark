@@ -12,7 +12,7 @@ use serde::Serialize;
 use crate::check::{Inspection, RegionInspection, Validation};
 use crate::diagnostic::JsonDiagnostic;
 
-const REPORT_VERSION: u16 = 2;
+const REPORT_VERSION: u16 = 3;
 
 pub(super) fn write(validation: &Validation) -> io::Result<()> {
     let report = &validation.report;
@@ -394,6 +394,7 @@ struct JsonRegion<'a> {
     output: JsonInterval,
     visual_mode: &'a str,
     capture_cadence: &'a str,
+    native_media: usize,
     bundle_id: &'a str,
 }
 
@@ -410,6 +411,7 @@ impl<'a> From<&'a RegionInspection> for JsonRegion<'a> {
             },
             visual_mode: region.visual_mode,
             capture_cadence: region.capture_cadence,
+            native_media: region.native_media,
             bundle_id: &region.bundle_id,
         }
     }
@@ -424,8 +426,29 @@ mod tests {
         VideoDimensions, VideoMetadata, VideoTiming,
     };
 
-    use super::JsonTimeline;
+    use super::{JsonRegion, JsonTimeline};
+    use crate::check::RegionInspection;
     use crate::compilation;
+
+    #[test]
+    fn projects_native_media_count_as_a_versioned_region_fact() {
+        let region = RegionInspection {
+            evaluation_start: 0,
+            evaluation_end: 60,
+            output_start: 0,
+            output_end: 60,
+            visual_mode: "separableBackdrop",
+            capture_cadence: "placementBounded",
+            native_media: 2,
+            bundle_id: "sha256:fixture".into(),
+        };
+
+        let document = serde_json::to_value(JsonRegion::from(&region))
+            .expect("the region projection serializes");
+
+        assert_eq!(document["nativeMedia"], 2);
+        assert_eq!(document["visualMode"], "separableBackdrop");
+    }
 
     #[test]
     fn projects_timing_provenance_without_reconstructing_the_timeline() {

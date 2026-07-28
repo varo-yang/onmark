@@ -408,11 +408,21 @@ selectors, as undeclared shared state.
 
 `PresentationVisualCapability` states which pixels Chromium may own. It is build
 metadata, not screenplay spelling, and is never inferred from authored browser
-code. The CLI conservatively declares `browserComposite`. The low-level
-conformance bundler requires an explicit value for an already-proved artifact.
+code. Authored HTML may declare it once:
+
+```html
+<meta name="onmark:visual-capability" content="separableBackdrop" />
+```
+
+An absent declaration means `browserComposite`. A configured low-level bundler
+value must agree with the authored value; disagreement is an error rather than
+an override.
 
 - `browserComposite` means Chromium owns the complete frame, including primary
   video. It is the conservative capability for unknown presentation code.
+- `separableBackdrop` means Chromium owns a browser backdrop below one or more
+  native video rectangles. The renderer may measure those rectangles, omit
+  browser video pixels, and place native media above the captured backdrop.
 - `separableOverlay` means Chromium produces only a transparent foreground that
   is independent of primary-video pixels. Native execution may decode and place
   primary video before source-over compositing that foreground.
@@ -425,20 +435,59 @@ modes, or otherwise make foreground pixels depend on the primary image beneath
 them. The declaration is admitted by conformance, not trusted because a source
 scan happened to find no forbidden token.
 
-The current native path is deliberately narrower than the presentation promise:
-one primary video must cover the complete published interval, its frozen source
-dimensions must equal the output profile, and its complete color tuple must be
-the admitted BT.709 limited-range profile. These checks avoid reconstructing
-CSS layout in Rust. Capability is permission, not an execution command: planning
-selects `separableOverlay` only when these facts prove the native profile and
-otherwise records `browserComposite`. The resulting execution plan is immutable;
-a worker never changes paths after launch, and a transported plan that exceeds
-its capability still fails validation.
+`separableBackdrop` is a similarly strong author contract. Browser-owned pixels
+must remain below every declared native video, and each video rectangle,
+`object-fit`, and `object-position` must remain constant throughout its unit.
+Presentation motion must not mutate a video or an ancestor in a way that changes
+that geometry. The current closed subset admits at most 16 videos, device pixel
+ratio one, positive integer viewport rectangles, `fill`, `contain`, or `cover`,
+and two exact percentage positions. A video must have zero border and padding
+and must not use radius, transform, filter, clip path, opacity, or blend mode.
+The derived source crop and destination scale must also be integral and in
+bounds. Native video rectangles may share pixels only when their solved
+intervals do not overlap.
+
+Before capture, the runtime loads the same immutable Browser Plan in
+`layoutOnly` mode. It makes one shot structure visible at a time, keeps video
+pixels hidden without removing their layout boxes, and returns node-keyed
+geometry through the versioned browser protocol. Rust validates count, order,
+identity, bounds, exact crop/scale arithmetic, and spatial/temporal overlap,
+then freezes the result as the capture transaction's `BackdropLayoutPlan`.
+Chromium is subsequently loaded with media omitted, while one persistent
+`FFmpeg` process places the native media above the browser backdrop. A rejected
+declaration fails with a typed plan/runtime error; execution never falls back to
+a different pixel path.
+
+The browser evidence makes CSS geometry exact; it does not make two independent
+video renderers pixel-identical. Once `separableBackdrop` is declared, the
+locked native decoder, color conversion, and scaler own video pixels.
+`browserComposite` remains the contract for presentations that require
+Chromium's exact media rasterization. Onmark proves raw-RGBA equality across
+whole, partitioned, local, and worker executions of the selected native path,
+not between these two different ownership contracts.
+
+The `separableOverlay` path remains deliberately narrower than its presentation
+promise: one primary video must cover the complete published interval, its
+frozen source dimensions must equal the output profile, and its complete color
+tuple must be the admitted BT.709 limited-range profile. These checks avoid
+reconstructing CSS layout in Rust. Capability is permission, not an execution
+command: planning selects `separableOverlay` only when these facts prove the
+native profile and otherwise records `browserComposite`. The resulting
+execution plan is immutable; a worker never changes paths after launch, and a
+transported plan that exceeds its capability still fails validation.
 
 The current bundle manifest places temporal and visual capabilities in canonical
 bundle identity together with the frame behavior below. Bundles are
 reproducible build products rather than authored data; only the current
 manifest version is accepted, and older bundles are rebuilt.
+
+For `separableBackdrop`, artifact identity binds every input from which layout
+evidence is derived: content-addressed bundle bytes, Browser Plan, render
+profile, expected native media facts, and the locked capture environment. The
+browser response is not duplicated into the portable Render Unit or cache key.
+Doing so would require launching Chromium before every cache lookup. Local and
+distributed execution instead run the same bounded preflight from the same
+Render Unit, then compare canonical raw-RGBA output in conformance.
 
 ## Frame behavior
 

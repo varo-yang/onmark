@@ -2,6 +2,10 @@
 // Rust owns every interval; presentation callbacks own DOM and layout effects.
 
 import type { RuntimeFrame } from "./clock.js";
+import type {
+  BrowserMediaLayout,
+  BrowserMediaPlacement,
+} from "./generated/browser-response.js";
 import {
   videoFrameSelection,
   type RuntimeVideo,
@@ -10,6 +14,7 @@ import {
 import {
   RuntimeAdapterError,
   type RuntimeAdapter,
+  type RuntimeMediaMode,
   type RuntimePlan,
 } from "./session.js";
 import { DecodedVideo, type BrowserVideoElement } from "./video.js";
@@ -52,6 +57,10 @@ export interface ContainerPresentation {
 export interface VideoPresentation {
   readonly element: BrowserVideoElement;
   readonly source: string;
+  /** Includes the media box in layout without exposing its pixels. */
+  setLayoutVisible(visible: boolean): void;
+  /** Measures one visible layout-only media box. */
+  measureLayout(): BrowserMediaPlacement;
   setVisible(visible: boolean): void;
   dispose(): void;
 }
@@ -103,6 +112,11 @@ interface BoundVideo {
   readonly resource: DecodedVideo;
 }
 
+interface BoundLayoutVideo {
+  readonly placement: RuntimeVideo;
+  readonly presentation: VideoPresentation;
+}
+
 interface BoundOverlay {
   readonly placement: RuntimeOverlay;
   readonly presentation: OverlayPresentation;
@@ -133,6 +147,7 @@ interface LoadedPresentation {
   readonly structure: BoundStructure;
   readonly transitions: readonly TransitionPresentation[];
   readonly videos: readonly BoundVideo[];
+  readonly layoutVideos: readonly BoundLayoutVideo[];
   readonly overlays: readonly BoundOverlay[];
 }
 
@@ -176,7 +191,10 @@ export class PresentationRuntimeAdapter implements RuntimeAdapter {
     this.#readinessTimeoutMilliseconds = readinessTimeoutMilliseconds;
   }
 
-  async load(plan: RuntimePlan): Promise<void> {
+  async load(
+    plan: RuntimePlan,
+    mediaMode: RuntimeMediaMode = "decoded",
+  ): Promise<void> {
     if (this.#state.kind !== "empty") {
       throw new RuntimeAdapterError(
         "operation",
@@ -193,12 +211,13 @@ export class PresentationRuntimeAdapter implements RuntimeAdapter {
     };
     let boundStructure: BoundStructure;
     const videos: BoundVideo[] = [];
+    const layoutVideos: BoundLayoutVideo[] = [];
     const overlays: BoundOverlay[] = [];
     const transitions: TransitionPresentation[] = [];
     try {
       boundStructure = this.#bindStructure(plan, structure);
       this.#bindTransitions(plan, transitions);
-      this.#bindVideos(plan, videos);
+      this.#bindVideos(plan, mediaMode, videos, layoutVideos);
       this.#bindOverlays(plan, overlays);
       const extensions = await this.#bindings.bindExtensions(plan);
       // Take both returned collections before either ownership projection or
@@ -217,6 +236,7 @@ export class PresentationRuntimeAdapter implements RuntimeAdapter {
         structure,
         transitions,
         videos,
+        layoutVideos,
         overlays,
       );
       // A binding attempt may mutate author-owned state that generic cleanup
@@ -233,20 +253,25 @@ export class PresentationRuntimeAdapter implements RuntimeAdapter {
       structure: boundStructure,
       transitions,
       videos,
+      layoutVideos,
       overlays,
     };
   }
 
-  async prepare(_frame: RuntimeFrame): Promise<void> {
+  async prepare(_frame: RuntimeFrame): Promise<BrowserMediaLayout> {
     const state = this.#loadedState("prepare");
     try {
       await preparePresentationResources(
         state.resources,
         this.#readinessTimeoutMilliseconds,
       );
+      return measureMediaLayout(state.layoutVideos, state.structure);
     } catch (error) {
       this.#state = { ...state, kind: "failed" };
-      throw error;
+      throw RuntimeAdapterError.fromUnknown(
+        error,
+        "presentation preparation failed",
+      );
     }
   }
 
@@ -311,6 +336,7 @@ export class PresentationRuntimeAdapter implements RuntimeAdapter {
       loaded?.structure,
       loaded?.transitions ?? [],
       loaded?.videos ?? [],
+      loaded?.layoutVideos ?? [],
       loaded?.overlays ?? [],
     );
     if (failure !== undefined) {
@@ -347,9 +373,22 @@ export class PresentationRuntimeAdapter implements RuntimeAdapter {
     };
   }
 
-  #bindVideos(plan: RuntimePlan, videos: BoundVideo[]): void {
+  #bindVideos(
+    plan: RuntimePlan,
+    mediaMode: RuntimeMediaMode,
+    videos: BoundVideo[],
+    layoutVideos: BoundLayoutVideo[],
+  ): void {
+    if (mediaMode === "omitted") {
+      return;
+    }
     for (const placement of plan.videos) {
       const presentation = this.#bindings.bindVideo(placement);
+      if (mediaMode === "layoutOnly") {
+        layoutVideos.push({ placement, presentation });
+        presentation.setVisible(false);
+        continue;
+      }
       const resource = new DecodedVideo({
         element: presentation.element,
         nodeId: placement.node.nodeId,
@@ -572,6 +611,7 @@ async function releasePresentation(
   structure: PendingStructure | BoundStructure | undefined,
   transitions: readonly TransitionPresentation[],
   videos: readonly BoundVideo[],
+  layoutVideos: readonly BoundLayoutVideo[],
   overlays: readonly BoundOverlay[],
 ): Promise<unknown | undefined> {
   let failure = await releaseFrameEffects(effects);
@@ -579,6 +619,10 @@ async function releasePresentation(
   failure ??= resourceFailure;
   for (const video of videos) {
     const releaseFailure = releaseVideo(video);
+    failure ??= releaseFailure;
+  }
+  for (const video of layoutVideos) {
+    const releaseFailure = releaseLayoutVideo(video);
     failure ??= releaseFailure;
   }
   for (const overlay of overlays) {
@@ -592,6 +636,95 @@ async function releasePresentation(
   const structureFailure = releaseStructure(structure);
   failure ??= structureFailure;
   return failure;
+}
+
+function measureMediaLayout(
+  videos: readonly BoundLayoutVideo[],
+  structure: BoundStructure,
+): BrowserMediaLayout {
+  try {
+    return collectMediaLayout(videos, structure);
+  } catch (error) {
+    throw mediaLayoutFailure(error);
+  }
+}
+
+function collectMediaLayout(
+  videos: readonly BoundLayoutVideo[],
+  structure: BoundStructure,
+): BrowserMediaLayout {
+  const byShot = groupLayoutVideos(videos);
+  const scenes = new Map(
+    structure.scenes.map((scene) => [scene.placement.node.nodeId, scene]),
+  );
+  const placements: BrowserMediaPlacement[] = [];
+
+  for (const shot of structure.shots) {
+    const group = byShot.get(shot.placement.node.nodeId);
+    if (group === undefined) {
+      continue;
+    }
+    const scene = scenes.get(shot.placement.sceneId);
+    if (scene === undefined) {
+      throw new RuntimeAdapterError(
+        "operation",
+        "layout-only video names an unbound scene",
+      );
+    }
+    scene.presentation.setVisible(true);
+    shot.presentation.setVisible(true);
+    for (const video of group) {
+      video.presentation.setLayoutVisible(true);
+    }
+    try {
+      for (const video of group) {
+        const placement = video.presentation.measureLayout();
+        if (placement.nodeId !== video.placement.node.nodeId) {
+          throw new RuntimeAdapterError(
+            "operation",
+            "measured video layout names the wrong browser node",
+          );
+        }
+        placements.push(placement);
+      }
+    } finally {
+      for (const video of group) {
+        video.presentation.setLayoutVisible(false);
+      }
+      shot.presentation.setVisible(false);
+      scene.presentation.setVisible(false);
+    }
+  }
+
+  // Freeze the owned array in place; generated JSON types remain mutable-shaped.
+  Object.freeze(placements);
+  return placements;
+}
+
+function mediaLayoutFailure(error: unknown): RuntimeAdapterError {
+  if (error instanceof RuntimeAdapterError) {
+    return error;
+  }
+  const message =
+    error instanceof Error
+      ? error.message
+      : "browser media layout measurement failed";
+  return new RuntimeAdapterError("operation", message);
+}
+
+function groupLayoutVideos(
+  videos: readonly BoundLayoutVideo[],
+): ReadonlyMap<number, readonly BoundLayoutVideo[]> {
+  const groups = new Map<number, BoundLayoutVideo[]>();
+  for (const video of videos) {
+    const group = groups.get(video.placement.shotId);
+    if (group === undefined) {
+      groups.set(video.placement.shotId, [video]);
+    } else {
+      group.push(video);
+    }
+  }
+  return groups;
 }
 
 function releaseTransition(
@@ -659,6 +792,13 @@ function releaseVideo(video: BoundVideo): unknown | undefined {
   return releaseAll([
     () => video.presentation.setVisible(false),
     () => video.resource.dispose(),
+    () => video.presentation.dispose(),
+  ]);
+}
+
+function releaseLayoutVideo(video: BoundLayoutVideo): unknown | undefined {
+  return releaseAll([
+    () => video.presentation.setLayoutVisible(false),
     () => video.presentation.dispose(),
   ]);
 }

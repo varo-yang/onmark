@@ -9,7 +9,7 @@ use std::fmt;
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize};
 
-use super::{BrowserPlan, WireFrame};
+use super::{BrowserMediaLayout, BrowserPlan, WireFrame};
 
 /// Browser-global capability installed by every compatible runtime bundle.
 pub const RUNTIME_HOST_NAME: &str = "__ONMARK_RUNTIME__";
@@ -20,14 +20,14 @@ const MAX_PENDING_RESOURCE_CHARACTERS: usize = 1_024;
 
 /// Version of the native-to-browser message contract.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[cfg_attr(feature = "schema", schemars(extend("const" = 4)))]
+#[cfg_attr(feature = "schema", schemars(extend("const" = 5)))]
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(transparent)]
 pub struct ProtocolVersion(u16);
 
 impl ProtocolVersion {
     /// Only browser protocol version accepted by this build.
-    pub const CURRENT: Self = Self(4);
+    pub const CURRENT: Self = Self(5);
 
     /// Returns the stable integer representation.
     #[must_use]
@@ -127,7 +127,9 @@ pub enum BrowserCommand {
     /// Install one immutable browser plan.
     Load {
         /// Solved frame facts consumed by the runtime clock.
-        plan: BrowserPlan,
+        plan: Box<BrowserPlan>,
+        /// Browser responsibility for primary-media elements.
+        media_mode: BrowserMediaMode,
     },
     /// Stabilize resources at the evaluation start frame.
     Prepare {
@@ -146,6 +148,31 @@ pub enum BrowserCommand {
     },
     /// Release page-owned resources for this session.
     Dispose,
+}
+
+impl BrowserCommand {
+    /// Own one plan without inflating every small runtime command.
+    #[must_use]
+    pub fn load(plan: BrowserPlan, media_mode: BrowserMediaMode) -> Self {
+        Self::Load {
+            plan: Box::new(plan),
+            media_mode,
+        }
+    }
+}
+
+/// Browser responsibility for video elements in one loaded plan.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", schemars(rename_all = "camelCase"))]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum BrowserMediaMode {
+    /// Chromium decodes and composites every active video placement.
+    Decoded,
+    /// Chromium omits video elements from its captured pixels.
+    Omitted,
+    /// Chromium omits video pixels but returns static layout evidence.
+    LayoutOnly,
 }
 
 /// One versioned event returned by the browser runtime.
@@ -196,6 +223,12 @@ impl BrowserResponse {
     pub const fn event(&self) -> &BrowserEvent {
         &self.event
     }
+
+    /// Consumes the envelope and returns its browser event.
+    #[must_use]
+    pub fn into_event(self) -> BrowserEvent {
+        self.event
+    }
 }
 
 /// Closed events emitted by the browser runtime.
@@ -214,6 +247,8 @@ pub enum BrowserEvent {
     Prepared {
         /// Frame at which preparation completed.
         evaluation_start: WireFrame,
+        /// Exact static media layout observed by the browser.
+        media_layout: BrowserMediaLayout,
     },
     /// One requested frame has been staged for the compositor.
     FrameStaged {
@@ -413,7 +448,7 @@ pub enum ProtocolFailureCode {
 #[cfg(test)]
 mod tests {
     use super::{
-        BrowserResponse, InvalidProtocolFailure, MAX_FAILURE_MESSAGE_CHARACTERS,
+        BrowserEvent, BrowserResponse, InvalidProtocolFailure, MAX_FAILURE_MESSAGE_CHARACTERS,
         MAX_PENDING_RESOURCE_CHARACTERS, MAX_PENDING_RESOURCES, ProtocolFailure,
         ProtocolFailureCode,
     };
@@ -426,6 +461,39 @@ mod tests {
             "event": { "type": "loaded" },
         });
         assert!(serde_json::from_value::<BrowserResponse>(encoded).is_err());
+    }
+
+    #[test]
+    fn parses_exact_prepared_media_layout_evidence() {
+        let encoded = serde_json::json!({
+            "version": 5,
+            "requestId": 2,
+            "event": {
+                "type": "prepared",
+                "evaluationStart": 0,
+                "mediaLayout": [{
+                    "nodeId": 3,
+                    "rectangle": {
+                        "x": 80,
+                        "y": 45,
+                        "width": 640,
+                        "height": 360,
+                    },
+                    "objectFit": "cover",
+                    "objectPosition": {
+                        "x": 500_000,
+                        "y": 500_000,
+                    },
+                }],
+            },
+        });
+        let response: BrowserResponse =
+            serde_json::from_value(encoded).expect("exact media layout evidence parses");
+        let BrowserEvent::Prepared { media_layout, .. } = response.event() else {
+            panic!("the response must retain prepared layout evidence");
+        };
+        assert_eq!(media_layout.placements()[0].rectangle().width(), 640);
+        assert_eq!(media_layout.placements()[0].object_position().x(), 500_000);
     }
 
     #[test]

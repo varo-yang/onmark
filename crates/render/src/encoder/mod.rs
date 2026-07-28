@@ -16,5 +16,6 @@ pub use session::{EncodedVideo, Ffmpeg, FfmpegSession};
 
 pub(crate) use audio::AudioInput;
 pub(crate) use layered::{
-    CanonicalFrame, LayeredCompletion, LayeredJob, LayeredMediaInput, LayeredOutput, LayeredSession,
+    BackdropMediaInput, CanonicalFrame, LayeredCompletion, LayeredInputs, LayeredJob,
+    LayeredMediaInput, LayeredOutput, LayeredSession,
 };

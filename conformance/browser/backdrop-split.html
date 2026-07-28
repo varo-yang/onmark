@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="onmark:visual-capability" content="separableBackdrop" />
+    <style>
+      html,
+      body,
+      om-film,
+      om-scene,
+      om-shot {
+        height: 100%;
+        margin: 0;
+        width: 100%;
+      }
+
+      body {
+        background: #111827;
+        overflow: hidden;
+      }
+
+      video {
+        height: 160px;
+        object-fit: cover;
+        object-position: 50% 50%;
+        position: fixed;
+        top: 10px;
+        width: 144px;
+      }
+
+      video:first-of-type {
+        left: 10px;
+      }
+
+      video:last-of-type {
+        right: 10px;
+      }
+    </style>
+  </head>
+  <body>
+    <om-film>
+      <om-scene>
+        <om-shot>
+          <video src="source.mp4"></video>
+          <video src="source.mp4"></video>
+        </om-shot>
+      </om-scene>
+    </om-film>
+  </body>
+</html>

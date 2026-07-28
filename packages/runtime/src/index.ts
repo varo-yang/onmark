@@ -7,7 +7,11 @@ export {
   decodeBrowserResponse,
 } from "./generated/codec.js";
 export type { BrowserRequest } from "./generated/browser-request.js";
-export type { BrowserResponse } from "./generated/browser-response.js";
+export type {
+  BrowserMediaLayout,
+  BrowserMediaPlacement,
+  BrowserResponse,
+} from "./generated/browser-response.js";
 export type { BrowserPlan, BrowserVideo } from "./generated/browser-request.js";
 export { runtimeFrameAt, type RuntimeFrame } from "./clock.js";
 export {
@@ -50,6 +54,8 @@ export {
 } from "./generated/bundle-layout.js";
 export {
   BROWSER_PROTOCOL_VERSION,
+  BROWSER_OBJECT_POSITION_SCALE,
+  MAX_BROWSER_MEDIA_LAYOUTS,
   MAX_BROWSER_OVERLAYS,
   MAX_BROWSER_OVERLAY_TEXT_CHARACTERS,
   MAX_BROWSER_VIDEOS,
@@ -68,5 +74,6 @@ export {
   RuntimeSession,
   type RuntimeAdapter,
   type RuntimeAdapterFailureKind,
+  type RuntimeMediaMode,
   type RuntimePlan,
 } from "./session.js";

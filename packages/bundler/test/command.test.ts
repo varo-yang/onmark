@@ -15,7 +15,14 @@ test("publishes a bundle through the executable boundary", async () => {
   try {
     const document = join(workspace, "film.html");
     const outputDirectory = join(workspace, "bundle");
-    await writeFile(document, "<om-film></om-film>\n", "utf8");
+    await writeFile(
+      document,
+      [
+        '<meta name="onmark:visual-capability" content="separableBackdrop">',
+        "<om-film></om-film>",
+      ].join("\n"),
+      "utf8",
+    );
 
     const result = await invoke([
       "--html",
@@ -28,8 +35,6 @@ test("publishes a bundle through the executable boundary", async () => {
       "perFrame",
       "--temporal-capability",
       "sequential",
-      "--visual-capability",
-      "browserComposite",
     ]);
 
     assert.equal(result.code, 0, result.stderr);
@@ -37,7 +42,10 @@ test("publishes a bundle through the executable boundary", async () => {
     const manifest = JSON.parse(
       await readFile(join(outputDirectory, "manifest.json"), "utf8"),
     ) as unknown;
-    assert.equal(typeof manifest, "object");
+    assert.equal(
+      (manifest as { visualCapability?: unknown }).visualCapability,
+      "separableBackdrop",
+    );
   } finally {
     await rm(workspace, { force: true, recursive: true });
   }

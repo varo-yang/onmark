@@ -145,13 +145,14 @@ fn write_region(
 ) -> io::Result<()> {
     writeln!(
         output,
-        "Region {index}: evaluate {}..{}, output {}..{}, {}, {}, bundle {}",
+        "Region {index}: evaluate {}..{}, output {}..{}, {}, {}, {} native media, bundle {}",
         region.evaluation_start,
         region.evaluation_end,
         region.output_start,
         region.output_end,
         region.visual_mode,
         region.capture_cadence,
+        region.native_media,
         region.bundle_id,
     )
 }
@@ -197,4 +198,35 @@ impl fmt::Display for Timing<'_> {
 
 fn text(runs: &[TimelineText]) -> String {
     runs.iter().map(TimelineText::text).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::write_region;
+    use crate::check::RegionInspection;
+
+    #[test]
+    fn names_native_media_in_each_render_region() {
+        let region = RegionInspection {
+            evaluation_start: 0,
+            evaluation_end: 60,
+            output_start: 0,
+            output_end: 60,
+            visual_mode: "separableBackdrop",
+            capture_cadence: "placementBounded",
+            native_media: 2,
+            bundle_id: "sha256:fixture".into(),
+        };
+        let mut output = Vec::new();
+
+        write_region(&mut output, 0, &region).expect("the region is printable");
+
+        assert_eq!(
+            String::from_utf8(output).expect("inspection text is UTF-8"),
+            concat!(
+                "Region 0: evaluate 0..60, output 0..60, separableBackdrop, ",
+                "placementBounded, 2 native media, bundle sha256:fixture\n",
+            ),
+        );
+    }
 }

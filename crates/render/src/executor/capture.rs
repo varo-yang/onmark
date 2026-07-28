@@ -9,8 +9,8 @@ use std::path::Path;
 use std::time::Instant;
 
 use onmark_core::protocol::{
-    BrowserCommand, BrowserEvent, BrowserPlan, BrowserRequest, BrowserResponse, RequestId,
-    WireFrame, WireFrameRate,
+    BrowserCommand, BrowserEvent, BrowserMediaMode, BrowserPlan, BrowserRequest, BrowserResponse,
+    RequestId, WireFrame, WireFrameRate,
 };
 use url::Url;
 
@@ -24,6 +24,7 @@ use crate::{
 
 const LOAD_REQUEST: RequestId = RequestId::new(1);
 const PREPARE_REQUEST: RequestId = RequestId::new(2);
+const PREFLIGHT_DISPOSE_REQUEST: RequestId = RequestId::new(3);
 const FIRST_FRAME_REQUEST: u32 = 3;
 
 /// Sole authority for frame and disposal request identities in one session.
@@ -124,6 +125,7 @@ pub(super) struct CaptureTask<'a> {
     pub(super) entry_url: &'a Url,
     pub(super) resource_root: &'a Path,
     pub(super) surface: CaptureSurface,
+    pub(super) media_mode: BrowserMediaMode,
     pub(super) cadence: BrowserCaptureCadence,
     pub(super) output: &'a Path,
 }
@@ -140,6 +142,7 @@ pub(super) async fn render_session(
         entry_url,
         resource_root,
         surface,
+        media_mode,
         cadence,
         output,
     } = task;
@@ -156,8 +159,14 @@ pub(super) async fn render_session(
         .await
         .map_err(|source| RenderError::browser(output, source))?;
     let execution = async {
-        load_runtime(browser, plan, output).await?;
-        prepare_runtime(browser, plan, output).await?;
+        load_runtime(browser, plan, media_mode, output).await?;
+        let media_layout = prepare_runtime(browser, plan, output).await?;
+        if !media_layout.placements().is_empty() {
+            return Err(invalid_plan(
+                output,
+                "capture received media layout without a layout preflight",
+            ));
+        }
         browser
             .initialize_capture_surface(plan.frame_rate())
             .await
@@ -172,6 +181,36 @@ pub(super) async fn render_session(
     let disposal = dispose_runtime(browser, requests.disposal(), output).await;
 
     finish_runtime_session(execution, disposal)
+}
+
+pub(super) async fn preflight_media_layout(
+    browser: &mut BrowserSession,
+    plan: &BrowserPlan,
+    entry_url: &Url,
+    resource_root: &Path,
+    metrics: &mut FrameCaptureMetrics,
+    output: &Path,
+) -> Result<onmark_core::protocol::BrowserMediaLayout, RenderError> {
+    let started = Instant::now();
+    browser
+        .navigate(entry_url, resource_root)
+        .await
+        .map_err(|source| RenderError::browser(output, source))?;
+    let preflight = async {
+        load_runtime(browser, plan, BrowserMediaMode::LayoutOnly, output).await?;
+        prepare_runtime(browser, plan, output).await
+    }
+    .await;
+    metrics.runtime_setup += started.elapsed();
+    let disposal = dispose_runtime(browser, PREFLIGHT_DISPOSE_REQUEST, output).await;
+
+    match (preflight, disposal) {
+        (Ok(layout), Ok(())) => Ok(layout),
+        (Err(error), Ok(())) | (Ok(_), Err(error)) => Err(error),
+        (Err(preflight), Err(disposal)) => {
+            Err(preflight.with_cleanup_failure("browser runtime disposal", disposal))
+        }
+    }
 }
 
 fn finish_runtime_session(
@@ -197,9 +236,10 @@ pub(super) enum CaptureSurface {
 async fn load_runtime(
     browser: &BrowserSession,
     plan: &BrowserPlan,
+    media_mode: BrowserMediaMode,
     output: &Path,
 ) -> Result<(), RenderError> {
-    let request = BrowserRequest::new(LOAD_REQUEST, BrowserCommand::Load { plan: plan.clone() });
+    let request = BrowserRequest::new(LOAD_REQUEST, BrowserCommand::load(plan.clone(), media_mode));
     dispatch_expected(browser, request, BrowserEvent::Loaded, output).await
 }
 
@@ -207,15 +247,23 @@ async fn prepare_runtime(
     browser: &BrowserSession,
     plan: &BrowserPlan,
     output: &Path,
-) -> Result<(), RenderError> {
+) -> Result<onmark_core::protocol::BrowserMediaLayout, RenderError> {
     let evaluation_start = plan.evaluation().start();
     let request = BrowserRequest::new(
         PREPARE_REQUEST,
         BrowserCommand::Prepare { evaluation_start },
     );
-    let expected = BrowserEvent::Prepared { evaluation_start };
-
-    dispatch_expected(browser, request, expected, output).await
+    match dispatch(browser, request, output).await?.into_event() {
+        BrowserEvent::Prepared {
+            evaluation_start: prepared_start,
+            media_layout,
+        } if prepared_start == evaluation_start => Ok(media_layout),
+        BrowserEvent::Failed(failure) => Err(RenderError::runtime_failure(output, &failure)),
+        _ => Err(RenderError::protocol(
+            output,
+            "browser response does not match the requested phase",
+        )),
+    }
 }
 
 async fn dispose_runtime(
@@ -493,6 +541,18 @@ async fn dispatch_expected(
     expected: BrowserEvent,
     output: &Path,
 ) -> Result<(), RenderError> {
+    let response = dispatch(browser, request, output).await?;
+    if response.event() != &expected {
+        return Err(unexpected_event(output, &response));
+    }
+    Ok(())
+}
+
+async fn dispatch(
+    browser: &BrowserSession,
+    request: BrowserRequest,
+    output: &Path,
+) -> Result<BrowserResponse, RenderError> {
     let request_id = request.request_id();
     let response = browser
         .dispatch(&request)
@@ -505,10 +565,7 @@ async fn dispatch_expected(
             "browser response has the wrong request identity",
         ));
     }
-    if response.event() != &expected {
-        return Err(unexpected_event(output, &response));
-    }
-    Ok(())
+    Ok(response)
 }
 
 fn unexpected_event(output: &Path, response: &BrowserResponse) -> RenderError {

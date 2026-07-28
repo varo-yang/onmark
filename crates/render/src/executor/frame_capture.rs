@@ -3,11 +3,13 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use onmark_core::protocol::BrowserMediaMode;
+
 use super::capture::{
-    CaptureSurface, CaptureTask, FrameSink, RequestSequence, render_session, validate_plan,
-    write_canonical_artifact,
+    CaptureSurface, CaptureTask, FrameSink, RequestSequence, preflight_media_layout,
+    render_session, validate_plan, write_canonical_artifact,
 };
-use super::{RenderError, invalid_plan, layered_job};
+use super::{RenderError, RenderErrorKind, backdrop_job, invalid_plan, layered_job};
 use crate::encoder::{LayeredCompletion, LayeredOutput};
 use crate::frame_artifact::FrameArtifactWriter;
 use crate::{
@@ -350,12 +352,22 @@ impl FrameCaptureExecutor {
         requests: RequestSequence,
         output: &Path,
     ) -> Result<(), RenderError> {
-        if unit.visual_execution().layered_media().is_none() {
+        if !unit.visual_execution().uses_native_media() {
             let mut frames = FrameSink::Artifact(writer);
             return session.capture(unit, &mut frames, requests, output).await;
         }
 
-        let job = layered_job(std::slice::from_ref(unit), LayeredOutput::Frames, output)?;
+        let job = if unit.visual_execution().backdrop_media().is_some() {
+            let layout = session.preflight_backdrop(unit, output).await?;
+            backdrop_job(
+                std::slice::from_ref(unit),
+                std::slice::from_ref(&layout),
+                LayeredOutput::Frames,
+                output,
+            )?
+        } else {
+            layered_job(std::slice::from_ref(unit), LayeredOutput::Frames, output)?
+        };
         let mut compositor = self
             .ffmpeg
             .start_layered(job)
@@ -500,30 +512,60 @@ impl FrameCaptureSession {
         requests: RequestSequence,
         output: &Path,
     ) -> Result<(), RenderError> {
-        let foreground = unit
-            .visual_execution()
-            .layered_media()
-            .is_some()
-            .then(|| unit.browser_plan().foreground_only());
-        let (plan, surface) = match foreground.as_ref() {
-            Some(plan) => (plan, CaptureSurface::Transparent),
-            None => (unit.browser_plan(), capture_surface(unit.profile().alpha())),
+        let (surface, media_mode) = if unit.visual_execution().layered_media().is_some() {
+            (CaptureSurface::Transparent, BrowserMediaMode::Omitted)
+        } else if unit.visual_execution().backdrop_media().is_some() {
+            (
+                capture_surface(unit.profile().alpha()),
+                BrowserMediaMode::Omitted,
+            )
+        } else {
+            (
+                capture_surface(unit.profile().alpha()),
+                BrowserMediaMode::Decoded,
+            )
         };
         render_session(
             &mut self.browser,
             frames,
             &mut self.metrics,
             CaptureTask {
-                plan,
+                plan: unit.browser_plan(),
                 requests,
                 entry_url: unit.entry_url(),
                 resource_root: unit.resource_root(),
                 surface,
+                media_mode,
                 cadence: unit.visual_execution().capture_cadence(),
                 output,
             },
         )
         .await
+    }
+
+    pub(super) async fn preflight_backdrop(
+        &mut self,
+        unit: &ExecutableUnit,
+        output: &Path,
+    ) -> Result<crate::visual::BackdropLayoutPlan, RenderError> {
+        let evidence = preflight_media_layout(
+            &mut self.browser,
+            unit.browser_plan(),
+            unit.entry_url(),
+            unit.resource_root(),
+            &mut self.metrics,
+            output,
+        )
+        .await?;
+        unit.visual_execution()
+            .resolve_backdrop_layout(&evidence, unit.profile(), unit.browser_plan())
+            .map_err(|source| {
+                RenderError::new(
+                    RenderErrorKind::InvalidPlan,
+                    output,
+                    format!("browser media layout violates its declared capability: {source}"),
+                )
+            })
     }
 
     pub(super) async fn finish(
@@ -546,6 +588,13 @@ impl FrameCaptureSession {
             (Err(render), Err(shutdown)) => {
                 Err(render.with_cleanup_failure("browser shutdown", shutdown))
             }
+        }
+    }
+
+    pub(super) async fn fail(self, error: RenderError, output: &Path) -> RenderError {
+        match self.finish(Err(error), output).await {
+            Err(error) => error,
+            Ok(_) => unreachable!("a failed capture session cannot finish successfully"),
         }
     }
 }

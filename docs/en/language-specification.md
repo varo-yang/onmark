@@ -68,6 +68,12 @@ Illustrative syntax:
 `cue="offer"` aligns an overlay to a named cue.
 Free-form `begin`, `end`, and `until` expressions are not part of the language.
 
+An HTML-head declaration such as
+`<meta name="onmark:visual-capability" content="separableBackdrop">` belongs to
+the presentation build contract, not this screenplay vocabulary. It can select
+an already-admitted pixel-ownership path but cannot change structure, timing,
+Timeline IR, or render dependencies.
+
 ## HTML syntax
 
 A screenplay is one authored HTML document. Ordinary HTML owns layout and

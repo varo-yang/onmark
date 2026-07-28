@@ -479,6 +479,30 @@ test("builds deterministic artifacts with capability-owned identity", async () =
   });
 });
 
+test("admits one explicit authored visual capability", async () => {
+  await withWorkspace(async (workspace) => {
+    const document = await authoredDocument(
+      workspace,
+      [
+        '<meta name="onmark:visual-capability" content="separableBackdrop">',
+        film("<video></video>"),
+      ].join("\n"),
+    );
+    const configured = options(document, join(workspace, "bundle"));
+    const { visualCapability: _, ...authored } = configured;
+    const artifact = await bundlePresentation(authored);
+
+    assert.equal(artifact.manifest.visualCapability, "separableBackdrop");
+    await assert.rejects(
+      bundlePresentation({
+        ...configured,
+        outputDirectory: join(workspace, "conflict"),
+      }),
+      /configured and authored visual capabilities disagree/u,
+    );
+  });
+});
+
 test("rejects placement-bounded pixels without random access", async () => {
   await withWorkspace(async (workspace) => {
     const document = await authoredDocument(workspace, film(""));

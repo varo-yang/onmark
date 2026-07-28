@@ -12,9 +12,7 @@ use std::path::{Path, PathBuf};
 use std::process::{ExitStatus, Stdio};
 use std::time::Duration;
 
-use onmark_core::model::{
-    PresentationFrameBehavior, PresentationTemporalCapability, PresentationVisualCapability,
-};
+use onmark_core::model::{PresentationFrameBehavior, PresentationTemporalCapability};
 use onmark_core::protocol::{
     BundleManifest, BundleProjection, BundleProjectionRegion, InvalidBundleProjection,
 };
@@ -48,7 +46,6 @@ pub(super) enum BundlerProcess {
 #[derive(Clone, Copy)]
 struct PresentationCapabilities {
     temporal: PresentationTemporalCapability,
-    visual: PresentationVisualCapability,
     frame_behavior: PresentationFrameBehavior,
 }
 
@@ -56,7 +53,6 @@ impl PresentationCapabilities {
     const fn authored_html() -> Self {
         Self {
             temporal: PresentationTemporalCapability::RandomAccess,
-            visual: PresentationVisualCapability::BrowserComposite,
             frame_behavior: PresentationFrameBehavior::PerFrame,
         }
     }
@@ -140,8 +136,6 @@ impl PresentationBundler {
             .arg(capabilities.frame_behavior.as_str())
             .arg("--temporal-capability")
             .arg(capabilities.temporal.as_str())
-            .arg("--visual-capability")
-            .arg(capabilities.visual.as_str())
             .kill_on_drop(true)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -524,9 +518,7 @@ mod tests {
     use std::path::PathBuf;
     use std::time::Duration;
 
-    use onmark_core::model::{
-        PresentationFrameBehavior, PresentationTemporalCapability, PresentationVisualCapability,
-    };
+    use onmark_core::model::{PresentationFrameBehavior, PresentationTemporalCapability};
 
     use super::{
         BundleError, BundlerProcess, CapturedStderr, PresentationCapabilities, append_tail,
@@ -554,10 +546,6 @@ mod tests {
         assert_eq!(
             capabilities.temporal,
             PresentationTemporalCapability::RandomAccess
-        );
-        assert_eq!(
-            capabilities.visual,
-            PresentationVisualCapability::BrowserComposite
         );
         assert_eq!(
             capabilities.frame_behavior,

@@ -16,7 +16,9 @@ import {
 
 const adapter: RuntimeAdapter = {
   async load(_plan: RuntimePlan): Promise<void> {},
-  async prepare(_frame: RuntimeFrame): Promise<void> {},
+  async prepare(_frame: RuntimeFrame): Promise<[]> {
+    return [];
+  },
   async seek(_frame: RuntimeFrame): Promise<void> {},
   async confirm(_frame: RuntimeFrame): Promise<void> {},
   async dispose(): Promise<void> {},
@@ -37,6 +39,7 @@ test("installs one immutable host that decodes before dispatch", async () => {
       requestId: 1,
       command: {
         type: "load",
+        mediaMode: "decoded",
         plan: {
           timelineVersion: 3,
           frameRate: { numerator: 30, denominator: 1 },

@@ -7,6 +7,7 @@
 mod bundle;
 mod bundle_projection;
 mod frame;
+mod layout;
 mod message;
 mod plan;
 mod projection;
@@ -21,10 +22,16 @@ pub use bundle_projection::{
 pub use frame::{
     InvalidWireFrame, WireFrame, WireFrameRate, WireInterval, WireMediaTimebase, WirePlaybackRate,
 };
+pub use layout::{
+    BROWSER_OBJECT_POSITION_SCALE, BrowserMediaLayout, BrowserMediaPlacement, BrowserObjectFit,
+    BrowserObjectPosition, BrowserPixelRectangle, InvalidBrowserMediaLayout,
+    InvalidBrowserObjectPosition, InvalidBrowserPixelRectangle, MAX_BROWSER_MEDIA_LAYOUTS,
+};
 
 pub use message::{
-    BrowserCommand, BrowserEvent, BrowserRequest, BrowserResponse, InvalidProtocolFailure,
-    ProtocolFailure, ProtocolFailureCode, ProtocolVersion, RUNTIME_HOST_NAME, RequestId,
+    BrowserCommand, BrowserEvent, BrowserMediaMode, BrowserRequest, BrowserResponse,
+    InvalidProtocolFailure, ProtocolFailure, ProtocolFailureCode, ProtocolVersion,
+    RUNTIME_HOST_NAME, RequestId,
 };
 pub use plan::{
     BrowserNode, BrowserNodeId, BrowserOverlay, BrowserOverlayKind, BrowserPlan, BrowserScene,

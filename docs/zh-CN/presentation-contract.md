@@ -341,11 +341,21 @@ selector 等方式把已省略的 semantic sibling 当作未声明的共享状�
 ## Visual capability
 
 `PresentationVisualCapability` 声明 Chromium 可以拥有哪些像素。它是 build metadata，
-不是 screenplay spelling，也绝不从 authored browser code 猜测。CLI 保守声明
-`browserComposite`；底层 conformance bundler 只为已证明产物显式传值。
+不是 screenplay spelling，也绝不从 authored browser code 猜测。authored HTML
+可以且只能声明一次：
+
+```html
+<meta name="onmark:visual-capability" content="separableBackdrop" />
+```
+
+没有声明时使用 `browserComposite`。底层 bundler 若同时收到显式配置，该配置必须与
+authored value 一致；冲突是错误，不是覆盖。
 
 - `browserComposite` 表示 Chromium 拥有包括主视频在内的完整画面，是未知
   presentation code 的保守能力；
+- `separableBackdrop` 表示 Chromium 拥有位于一个或多个 native video rectangle
+  下面的 browser backdrop。renderer 可以测量这些 rectangle、省略 browser video
+  pixel，再把 native media 放到捕获的 backdrop 上方；
 - `separableOverlay` 表示 Chromium 只产出与主视频像素无关的透明前景，native
   execution 可以先解码并安放主视频，再以 source-over 合成该前景。
 
@@ -355,16 +365,49 @@ visual resource；不得把 video 采样进 Canvas/WebGL，不得读取 media pi
 背景的 filter 或 blend mode，也不得让前景像素以其他方式依赖下面的主画面。能力由
 conformance 接纳，不能因为 source scan 暂时没找到禁用 token 就获得信任。
 
-当前 native path 刻意比 presentation promise 更窄：必须恰好有一个覆盖完整 published
-interval 的主视频，冻结的 source dimensions 必须与 output profile 完全一致，并且完整
-color tuple 必须属于已准入的 BT.709 limited-range profile。这些检查避免 Rust 重造 CSS
-layout。capability 是许可而不是执行命令：planning 只在这些事实证明 native profile 时选择
-`separableOverlay`，否则把 `browserComposite` 明确写进 execution plan。计划一旦生成便不可
-变；worker 启动后绝不换路，transported plan 若超出 capability 仍会校验失败。
+`separableBackdrop` 同样是一项强 author contract。browser-owned pixel 必须始终位于
+每个声明的 native video 下面；video rectangle、`object-fit` 与 `object-position`
+在整个 unit 内必须保持不变。presentation motion 不得通过修改 video 或 ancestor
+改变这些 geometry。当前封闭子集最多接纳 16 个 video、device pixel ratio 1、正的
+整数 viewport rectangle、`fill`/`contain`/`cover`，以及两个精确 percentage
+position。video 的 border 与 padding 必须为零，也不得使用 radius、transform、
+filter、clip path、opacity 或 blend mode。导出的 source crop 与 destination scale
+也必须为整数且不越界。native video rectangle 只有在 solved interval 不重叠时才可
+占用同一像素区域。
+
+capture 之前，runtime 会以 `layoutOnly` 模式加载同一份 immutable Browser Plan。
+它逐个显示 shot structure，在保留 video layout box 的同时隐藏其像素，并通过带版本的
+browser protocol 返回 node-keyed geometry。Rust 校验数量、顺序、identity、边界、
+精确 crop/scale 算术与时空重叠，然后把结果冻结成当前 capture transaction 的
+`BackdropLayoutPlan`。随后 Chromium 以 media omitted 模式加载，由一条 persistent
+`FFmpeg` process 把 native media 放到 browser backdrop 上方。声明不成立时通过 typed
+plan/runtime error 失败，execution 绝不切换到另一条像素路径兜底。
+
+browser evidence 保证 CSS geometry 精确，并不意味着两个独立 video renderer 会逐像素
+相同。声明 `separableBackdrop` 后，video pixel 由 locked native decoder、color
+conversion 与 scaler 负责。若 presentation 需要 Chromium 的确切 media rasterization，
+应继续使用 `browserComposite`。Onmark 证明所选 native path 在 whole、partitioned、
+local 与 worker execution 间的 raw-RGBA 相等，而不宣称两种不同 pixel ownership
+contract 彼此相等。
+
+`separableOverlay` path 刻意比它的 presentation promise 更窄：必须恰好有一个覆盖完整
+published interval 的主视频，冻结的 source dimensions 必须与 output profile 完全一致，
+并且完整 color tuple 必须属于已准入的 BT.709 limited-range profile。这些检查避免 Rust
+重造 CSS layout。capability 是许可而不是执行命令：planning 只在这些事实证明 native
+profile 时选择 `separableOverlay`，否则把 `browserComposite` 明确写进 execution plan。
+计划一旦生成便不可变；worker 启动后绝不换路，transported plan 若超出 capability 仍会
+校验失败。
 
 当前 Bundle Manifest 把 temporal、visual capability 与下面的 frame behavior 都纳入
 canonical identity。bundle 是可重建产物而非 authored data；reader 只接受当前版本，
 旧 bundle 直接重建。
+
+对 `separableBackdrop`，artifact identity 会绑定布局证据的全部推导输入：
+content-addressed bundle byte、Browser Plan、render profile、预期 native media fact
+与 locked capture environment。browser response 不会被重复塞进 portable Render Unit
+或 cache key；否则每次 cache lookup 前都必须先启动 Chromium。local 与 distributed
+execution 会从同一 Render Unit 执行同一项 bounded preflight，再在 conformance 中比较
+canonical raw-RGBA output。
 
 ## Frame behavior
 

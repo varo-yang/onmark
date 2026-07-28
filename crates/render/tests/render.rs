@@ -9,12 +9,12 @@ use std::time::Duration;
 
 use onmark_core::compiler;
 use onmark_core::model::{
-    AssetRef, FrameRate, FrozenAsset, FrozenAssetId, PresentationTemporalCapability, SourceId,
-    Timebase,
+    AssetRef, FrameRate, FrozenAsset, FrozenAssetId, PresentationTemporalCapability,
+    PresentationVisualCapability, SourceId, Timebase,
 };
 use onmark_core::protocol::{
-    BrowserCommand, BrowserEvent, BrowserOverlayKind, BrowserPlan, BrowserRequest, BundleManifest,
-    RequestId, WireFrame,
+    BrowserCommand, BrowserEvent, BrowserMediaMode, BrowserOverlayKind, BrowserPlan,
+    BrowserRequest, BundleManifest, RequestId, WireFrame,
 };
 use onmark_core::render_graph::{PartitionPlan, RenderGraph};
 use onmark_media::{Ffprobe, SubtitleLimits, parse_webvtt};
@@ -158,9 +158,7 @@ async fn bounds_a_runtime_adapter_that_never_finishes_loading() {
 
     let request = BrowserRequest::new(
         RequestId::new(1),
-        BrowserCommand::Load {
-            plan: browser_plan_fixture(),
-        },
+        BrowserCommand::load(browser_plan_fixture(), BrowserMediaMode::Decoded),
     );
     let error = session
         .dispatch(&request)
@@ -375,6 +373,140 @@ async fn renders_and_repeats_the_production_layered_path() {
     assert_eq!(rendered.frames(), FRAME_COUNT);
     assert_video_stream(&output, FRAME_COUNT).await;
     assert_decodable_motion(&output).await;
+}
+
+#[tokio::test]
+#[ignore = "requires ONMARK_BUNDLER, ONMARK_FFMPEG, ONMARK_FFPROBE, and a supported browser"]
+async fn preserves_backdrop_layout_across_whole_local_and_worker_execution() {
+    let directory = tempdir().expect("the experiment workspace must be available");
+    let source = repository().join("conformance/browser/backdrop-sequence.html");
+    let bundle = FixtureBundle::build_from(
+        directory.path(),
+        "backdrop-bundle",
+        &source,
+        "randomAccess",
+        "separableBackdrop",
+        "perFrame",
+        TWO_SHOT_PROJECTION,
+    )
+    .await;
+    let fixture = BackdropFixture::materialize(directory.path(), &source, &bundle).await;
+    let executor = layered_executor(TWO_UNIT_FRAME_COUNT);
+    let whole_path = directory.path().join("whole.onmark-frames");
+    let local_output = directory.path().join("local.mp4");
+    let assembled_output = directory.path().join("assembled.mp4");
+
+    let whole = capture_and_reuse_static(&executor, &fixture.whole_film, &whole_path).await;
+    let partitions = capture_partition_artifacts(
+        &executor,
+        directory.path(),
+        "backdrop-partition",
+        &fixture.partitioned_units,
+    )
+    .await;
+    FrameArtifact::verify_raw_rgba_equivalence(std::slice::from_ref(&whole), &partitions)
+        .await
+        .expect("whole and distributed backdrop capture must produce equal raw pixels");
+
+    let local = executor
+        .render_partitioned(
+            &fixture.partition_plan,
+            fixture.partitioned_units,
+            &local_output,
+        )
+        .await
+        .expect("local backdrop partitions must render");
+    let assembled = executor
+        .assemble_frame_artifacts(
+            &fixture.partition_plan,
+            &fixture.assembly_units,
+            &partitions,
+            capture_environment(),
+            &assembled_output,
+        )
+        .await
+        .expect("worker backdrop artifacts must assemble");
+
+    assert_eq!(local.frames(), TWO_UNIT_FRAME_COUNT);
+    assert_eq!(assembled.frames(), TWO_UNIT_FRAME_COUNT);
+    assert_eq!(
+        decoded_hashes(&local_output, "0:v:0").await,
+        decoded_hashes(&assembled_output, "0:v:0").await,
+        "local and distributed backdrop output must decode equally",
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires ONMARK_BUNDLER, ONMARK_FFMPEG, ONMARK_FFPROBE, and a supported browser"]
+async fn renders_multiple_backdrop_videos_in_one_shot() {
+    let directory = tempdir().expect("the experiment workspace must be available");
+    let source = repository().join("conformance/browser/backdrop-split.html");
+    let bundle = FixtureBundle::build_from(
+        directory.path(),
+        "backdrop-split-bundle",
+        &source,
+        "randomAccess",
+        "separableBackdrop",
+        "perFrame",
+        ONE_SHOT_PROJECTION,
+    )
+    .await;
+    let video_path = directory.path().join("source.mp4");
+    generate_source_video(&video_path, "1").await;
+    let video = freeze_asset(&video_path).await;
+    let assets = BTreeMap::from([(asset_ref("source.mp4"), video.clone())]);
+    let screenplay = fs::read_to_string(source).expect("the backdrop screenplay is readable");
+    let timeline = solve_timeline(&screenplay, &assets);
+    let materialized =
+        MaterializedAsset::new(video, video_path).expect("the backdrop source path is present");
+    let unit = RenderUnit::whole_film(
+        &timeline,
+        bundle.manifest.clone(),
+        render_profile(),
+        [materialized],
+    )
+    .expect("the split-screen backdrop forms one render unit");
+    assert_eq!(
+        unit.visual_execution()
+            .backdrop_media()
+            .expect("split-screen video must use native backdrop media")
+            .media()
+            .len(),
+        2,
+    );
+    let output = unit.browser_plan().output();
+    let expected_frames = output.end().get() - output.start().get();
+    let unit = bundle.materialize(unit);
+    let executor = layered_executor(expected_frames);
+    let first_path = directory.path().join("split-first.onmark-frames");
+    let second_path = directory.path().join("split-second.onmark-frames");
+
+    let first = executor
+        .capture_frame_artifact(
+            &unit,
+            capture_environment(),
+            &first_path,
+            frame_artifact_limits(),
+        )
+        .await
+        .expect("the first split-screen worker capture must publish");
+    let second = executor
+        .capture_frame_artifact(
+            &unit,
+            capture_environment(),
+            &second_path,
+            frame_artifact_limits(),
+        )
+        .await
+        .expect("the repeated split-screen worker capture must publish");
+
+    FrameArtifact::verify_raw_rgba_equivalence(
+        std::slice::from_ref(&first),
+        std::slice::from_ref(&second),
+    )
+    .await
+    .expect("independent split-screen workers must produce equal raw pixels");
+    assert_eq!(first.frames(), expected_frames);
 }
 
 #[tokio::test]
@@ -1156,7 +1288,7 @@ async fn load_and_prepare(
     let loaded = session
         .dispatch(&BrowserRequest::new(
             RequestId::new(1),
-            BrowserCommand::Load { plan },
+            BrowserCommand::load(plan, BrowserMediaMode::Decoded),
         ))
         .await?;
     assert_eq!(loaded.event(), &BrowserEvent::Loaded);
@@ -1170,7 +1302,10 @@ async fn load_and_prepare(
         .await?;
     assert_eq!(
         prepared.event(),
-        &BrowserEvent::Prepared { evaluation_start },
+        &BrowserEvent::Prepared {
+            evaluation_start,
+            media_layout: onmark_core::protocol::BrowserMediaLayout::empty(),
+        },
     );
     session.initialize_capture_surface(frame_rate).await?;
     Ok(())
@@ -1713,6 +1848,84 @@ fn video_timeline_fixture(frozen: FrozenAsset) -> onmark_core::timeline::Timelin
         ),
         &assets,
     )
+}
+
+struct BackdropFixture {
+    partition_plan: PartitionPlan,
+    whole_film: ExecutableUnit,
+    partitioned_units: Vec<ExecutableUnit>,
+    assembly_units: Vec<ExecutableUnit>,
+}
+
+impl BackdropFixture {
+    async fn materialize(workspace: &Path, source: &Path, bundle: &FixtureBundle) -> Self {
+        let video_path = workspace.join("source.mp4");
+        generate_source_video(&video_path, "1").await;
+        let video = freeze_asset(&video_path).await;
+        let assets = BTreeMap::from([(asset_ref("source.mp4"), video.clone())]);
+        let source = fs::read_to_string(source).expect("the backdrop screenplay is readable");
+        let timeline = solve_timeline(&source, &assets);
+        let partition_plan =
+            RenderGraph::from_timeline(&timeline, bundle.manifest.temporal_capability())
+                .expect("the backdrop fixture has complete render ownership")
+                .into_partition();
+        assert_eq!(partition_plan.units().len(), 2);
+
+        let materialized =
+            MaterializedAsset::new(video, video_path).expect("the backdrop source path is present");
+        let whole_film = RenderUnit::whole_film(
+            &timeline,
+            bundle.manifest.clone(),
+            render_profile(),
+            [materialized.clone()],
+        )
+        .expect("the complete backdrop fixture forms one unit");
+        assert!(whole_film.visual_execution().backdrop_media().is_some());
+        let whole_film = bundle.materialize(whole_film);
+        let partitioned_units =
+            Self::partition_units(&timeline, &partition_plan, bundle, materialized.clone());
+        let assembly_units =
+            Self::partition_units(&timeline, &partition_plan, bundle, materialized);
+
+        Self {
+            partition_plan,
+            whole_film,
+            partitioned_units,
+            assembly_units,
+        }
+    }
+
+    fn partition_units(
+        timeline: &onmark_core::timeline::TimelineIr,
+        partitions: &PartitionPlan,
+        bundle: &FixtureBundle,
+        materialized: MaterializedAsset,
+    ) -> Vec<ExecutableUnit> {
+        let manifests = bundle.region_manifests(partitions.units().len());
+        RenderUnit::from_partitioned_bundles(
+            timeline,
+            partitions,
+            manifests,
+            render_profile(),
+            [materialized],
+        )
+        .expect("each backdrop partition forms one unit")
+        .into_iter()
+        .enumerate()
+        .map(|(index, unit)| {
+            if index == 0 {
+                assert!(unit.visual_execution().backdrop_media().is_some());
+            } else {
+                assert!(unit.visual_execution().backdrop_media().is_none());
+                assert_eq!(
+                    unit.visual_execution().capability(),
+                    PresentationVisualCapability::SeparableBackdrop,
+                );
+            }
+            bundle.materialize_region(index, unit)
+        })
+        .collect()
+    }
 }
 
 struct AudioSubtitleFixture {

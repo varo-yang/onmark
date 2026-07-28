@@ -81,11 +81,16 @@
       ]
     },
     "PresentationVisualCapability": {
-      "description": "Proven relationship between browser presentation pixels and primary media.\n\nUnknown presentation code requires `BrowserComposite`. A separable overlay\nis an explicit claim that the browser output is a transparent foreground\nindependent of the primary video beneath it.",
+      "description": "Proven relationship between browser presentation pixels and primary media.\n\nUnknown presentation code requires `BrowserComposite`. A separable layer\nexplicitly limits browser ownership to one side of native media.",
       "oneOf": [
         {
           "const": "browserComposite",
           "description": "Chromium owns the complete frame, including primary media.",
+          "type": "string"
+        },
+        {
+          "const": "separableBackdrop",
+          "description": "Chromium owns only the browser backdrop beneath native media.",
           "type": "string"
         },
         {

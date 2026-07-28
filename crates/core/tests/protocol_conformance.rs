@@ -11,8 +11,8 @@ use onmark_core::model::{
     SourceId, Timebase, VideoDimensions, VideoFrameMap, VideoMetadata, VideoTiming,
 };
 use onmark_core::protocol::{
-    BrowserCommand, BrowserEvent, BrowserPlan, BrowserRequest, BrowserResponse, BundleManifest,
-    InvalidBrowserPlan, ProtocolFailure, ProtocolFailureCode, RequestId, WireFrame,
+    BrowserCommand, BrowserEvent, BrowserMediaMode, BrowserPlan, BrowserRequest, BrowserResponse,
+    BundleManifest, InvalidBrowserPlan, ProtocolFailure, ProtocolFailureCode, RequestId, WireFrame,
 };
 use onmark_core::timeline::TimelineIr;
 
@@ -22,7 +22,7 @@ use conformance::{assert_or_update, fixture};
 fn browser_requests_match_the_versioned_wire_contract() {
     let plan = browser_plan_fixture();
     let requests = [
-        request(1, BrowserCommand::Load { plan }),
+        request(1, BrowserCommand::load(plan, BrowserMediaMode::Decoded)),
         request(
             2,
             BrowserCommand::Prepare {
@@ -35,7 +35,7 @@ fn browser_requests_match_the_versioned_wire_contract() {
     ];
 
     assert_or_update(
-        &fixture("protocol", "browser-requests-v4.jsonl"),
+        &fixture("protocol", "browser-requests-v5.jsonl"),
         &render_json_lines(&requests),
     );
 }
@@ -54,6 +54,7 @@ fn browser_responses_match_the_versioned_wire_contract() {
             2,
             BrowserEvent::Prepared {
                 evaluation_start: frame(0),
+                media_layout: onmark_core::protocol::BrowserMediaLayout::empty(),
             },
         ),
         response(3, BrowserEvent::FrameStaged { frame: frame(15) }),
@@ -63,7 +64,7 @@ fn browser_responses_match_the_versioned_wire_contract() {
     ];
 
     assert_or_update(
-        &fixture("protocol", "browser-responses-v4.jsonl"),
+        &fixture("protocol", "browser-responses-v5.jsonl"),
         &render_json_lines(&responses),
     );
 }

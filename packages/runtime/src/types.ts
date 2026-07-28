@@ -1,13 +1,17 @@
 // Type-only public contracts consumed by higher browser product layers.
 
 export type { RuntimeFrame } from "./clock.js";
+export type {
+  BrowserMediaLayout,
+  BrowserMediaPlacement,
+} from "./generated/browser-response.js";
 export type { RuntimeVideo } from "./media.js";
 export type {
   PresentationFrameBehavior,
   PresentationTemporalCapability,
   PresentationVisualCapability,
 } from "./generated/bundle-layout.js";
-export type { RuntimePlan } from "./session.js";
+export type { RuntimeMediaMode, RuntimePlan } from "./session.js";
 export type {
   ContainerPresentation,
   FrameEffect,

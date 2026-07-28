@@ -1,9 +1,10 @@
-//! Persistent native composition of one transparent browser layer over video.
+//! Persistent native composition across one browser layer and native video.
 //!
-//! One process owns decode, exact CFR selection, source-over composition, and
-//! the selected terminal output. Foreground stdin is always backpressured;
-//! worker artifacts additionally return canonical RGBA through a capacity-one
-//! frame channel, while local video stays entirely inside `FFmpeg`.
+//! One process owns decode, exact CFR selection, ordered source-over
+//! composition, and the selected terminal output. Browser stdin is always
+//! backpressured; worker artifacts additionally return canonical RGBA through a
+//! capacity-one frame channel, while local video stays entirely inside
+//! `FFmpeg`.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -24,6 +25,7 @@ use super::layered_process::{frame_bytes, read_frames, spawn, take_pipe, validat
 use super::limits::EncodeLimits;
 use super::process::{CapturedStderr, capture_stderr};
 use super::session::{EncodedVideo, with_stderr};
+use crate::visual::PixelRegion;
 use crate::{DecodedRgba, RawRgbaHash, RenderProfile};
 
 const CLEANUP_TIMEOUT: Duration = Duration::from_secs(5);
@@ -85,9 +87,38 @@ pub(crate) struct LayeredMediaInput {
     pub(crate) frames: u64,
 }
 
+/// One time-bounded native video placed above browser-owned pixels.
+pub(crate) struct BackdropMediaInput {
+    pub(crate) path: PathBuf,
+    pub(crate) source_frame_rate: WireFrameRate,
+    pub(crate) source: MediaSource,
+    pub(crate) source_skip: u64,
+    pub(crate) output_start: u64,
+    pub(crate) frames: u64,
+    pub(crate) source_region: PixelRegion,
+    pub(crate) destination_region: PixelRegion,
+}
+
+/// Direction and media facts for one native composition process.
+pub(crate) enum LayeredInputs {
+    /// Sequential full-frame media beneath transparent browser pixels.
+    VideoBase(Vec<LayeredMediaInput>),
+    /// Time-bounded media above one browser-owned backdrop.
+    BrowserBase(Vec<BackdropMediaInput>),
+}
+
+impl LayeredInputs {
+    pub(super) fn media_count(&self) -> usize {
+        match self {
+            Self::VideoBase(media) => media.len(),
+            Self::BrowserBase(media) => media.len(),
+        }
+    }
+}
+
 /// Checked facts required to start one native composition stream.
 pub(crate) struct LayeredJob {
-    pub(crate) media: Vec<LayeredMediaInput>,
+    pub(crate) inputs: LayeredInputs,
     pub(crate) output_frame_rate: WireFrameRate,
     pub(crate) frames: u64,
     pub(crate) profile: RenderProfile,

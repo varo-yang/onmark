@@ -25,6 +25,10 @@
               "$ref": "#/$defs/WireFrame",
               "description": "Frame at which preparation completed."
             },
+            "mediaLayout": {
+              "$ref": "#/$defs/BrowserMediaLayout",
+              "description": "Exact static media layout observed by the browser."
+            },
             "type": {
               "const": "prepared",
               "type": "string"
@@ -32,7 +36,8 @@
           },
           "required": [
             "type",
-            "evaluationStart"
+            "evaluationStart",
+            "mediaLayout"
           ],
           "type": "object"
         },
@@ -127,6 +132,122 @@
         }
       ]
     },
+    "BrowserMediaLayout": {
+      "description": "Canonically ordered layout evidence for browser video placements.",
+      "items": {
+        "$ref": "#/$defs/BrowserMediaPlacement"
+      },
+      "maxItems": 16,
+      "type": "array"
+    },
+    "BrowserMediaPlacement": {
+      "additionalProperties": false,
+      "description": "One video element's static, axis-aligned browser layout.",
+      "properties": {
+        "nodeId": {
+          "$ref": "#/$defs/BrowserNodeId"
+        },
+        "objectFit": {
+          "$ref": "#/$defs/BrowserObjectFit"
+        },
+        "objectPosition": {
+          "$ref": "#/$defs/BrowserObjectPosition"
+        },
+        "rectangle": {
+          "$ref": "#/$defs/BrowserPixelRectangle"
+        }
+      },
+      "required": [
+        "nodeId",
+        "rectangle",
+        "objectFit",
+        "objectPosition"
+      ],
+      "type": "object"
+    },
+    "BrowserNodeId": {
+      "description": "Browser identity for one Timeline element or imported caption.\n\nIDs form dense renderable-semantic preorder within one Browser Plan.\n\nAuthored IDs, rather than this unit-local key, retain cross-projection\nsemantic identity.",
+      "format": "uint32",
+      "maximum": 4294967295,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "BrowserObjectFit": {
+      "description": "Closed CSS object-fit subset admitted by native media.",
+      "oneOf": [
+        {
+          "const": "fill",
+          "description": "Distort source pixels to fill the element rectangle.",
+          "type": "string"
+        },
+        {
+          "const": "contain",
+          "description": "Preserve aspect ratio while fitting completely inside the rectangle.",
+          "type": "string"
+        },
+        {
+          "const": "cover",
+          "description": "Preserve aspect ratio while covering the complete rectangle.",
+          "type": "string"
+        }
+      ]
+    },
+    "BrowserObjectPosition": {
+      "additionalProperties": false,
+      "description": "Fixed-point CSS object-position, where one million represents 100%.",
+      "properties": {
+        "x": {
+          "format": "uint32",
+          "maximum": 1000000,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "y": {
+          "format": "uint32",
+          "maximum": 1000000,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "x",
+        "y"
+      ],
+      "type": "object"
+    },
+    "BrowserPixelRectangle": {
+      "additionalProperties": false,
+      "description": "Positive pixel rectangle relative to the output viewport.",
+      "properties": {
+        "height": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "width": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "x": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "y": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "x",
+        "y",
+        "width",
+        "height"
+      ],
+      "type": "object"
+    },
     "ProtocolFailureCode": {
       "description": "Stable browser protocol failure category.",
       "oneOf": [
@@ -173,7 +294,7 @@
       ]
     },
     "ProtocolVersion": {
-      "const": 4,
+      "const": 5,
       "description": "Version of the native-to-browser message contract.",
       "format": "uint16",
       "maximum": 65535,
@@ -195,7 +316,7 @@
       "type": "integer"
     }
   },
-  "$id": "https://onmark.dev/schemas/browser-response-v4.schema.json",
+  "$id": "https://onmark.dev/schemas/browser-response-v5.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "One versioned event returned by the browser runtime.",

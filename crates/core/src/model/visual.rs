@@ -58,9 +58,8 @@ impl std::error::Error for InvalidPresentationDocumentScope {}
 
 /// Proven relationship between browser presentation pixels and primary media.
 ///
-/// Unknown presentation code requires `BrowserComposite`. A separable overlay
-/// is an explicit claim that the browser output is a transparent foreground
-/// independent of the primary video beneath it.
+/// Unknown presentation code requires `BrowserComposite`. A separable layer
+/// explicitly limits browser ownership to one side of native media.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "schema", schemars(rename_all = "camelCase"))]
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -68,6 +67,8 @@ pub enum PresentationVisualCapability {
     /// Chromium owns the complete frame, including primary media.
     #[default]
     BrowserComposite,
+    /// Chromium owns only the browser backdrop beneath native media.
+    SeparableBackdrop,
     /// Chromium owns only a transparent foreground over native primary media.
     SeparableOverlay,
 }
@@ -78,6 +79,7 @@ impl PresentationVisualCapability {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::BrowserComposite => "browserComposite",
+            Self::SeparableBackdrop => "separableBackdrop",
             Self::SeparableOverlay => "separableOverlay",
         }
     }
@@ -95,6 +97,7 @@ impl FromStr for PresentationVisualCapability {
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value {
             "browserComposite" => Ok(Self::BrowserComposite),
+            "separableBackdrop" => Ok(Self::SeparableBackdrop),
             "separableOverlay" => Ok(Self::SeparableOverlay),
             _ => Err(InvalidPresentationVisualCapability),
         }
@@ -107,7 +110,7 @@ pub struct InvalidPresentationVisualCapability;
 
 impl fmt::Display for InvalidPresentationVisualCapability {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("expected browserComposite or separableOverlay")
+        formatter.write_str("expected browserComposite, separableBackdrop, or separableOverlay")
     }
 }
 
@@ -190,6 +193,7 @@ mod tests {
     fn canonical_spellings_round_trip() {
         for capability in [
             PresentationVisualCapability::BrowserComposite,
+            PresentationVisualCapability::SeparableBackdrop,
             PresentationVisualCapability::SeparableOverlay,
         ] {
             assert_eq!(capability.as_str().parse(), Ok(capability));

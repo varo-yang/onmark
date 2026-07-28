@@ -70,6 +70,63 @@ test("presents videos and overlays on their Rust-owned intervals", async () => {
   assert.equal(recorder.allDisposed(), true);
 });
 
+test("measures layout-only videos without decoding their media", async () => {
+  const recorder = new PresentationRecorder();
+  const adapter = new PresentationRuntimeAdapter(recorder.bindings, 100);
+  const plan = presentationPlan();
+
+  await adapter.load(plan, "layoutOnly");
+  const layout = await adapter.prepare(runtimeFrameAt(10, plan.frameRate));
+
+  assert.deepEqual(layout, [
+    {
+      nodeId: 3,
+      objectFit: "cover",
+      objectPosition: { x: 500_000, y: 500_000 },
+      rectangle: { x: 0, y: 0, width: 16, height: 9 },
+    },
+    {
+      nodeId: 8,
+      objectFit: "cover",
+      objectPosition: { x: 500_000, y: 500_000 },
+      rectangle: { x: 0, y: 0, width: 16, height: 9 },
+    },
+  ]);
+  assert.deepEqual(
+    recorder.videos.map(({ element }) => element.hasSource),
+    [false, false],
+  );
+  assert.deepEqual(
+    recorder.videos.map(({ layoutVisible }) => layoutVisible),
+    [false, false],
+  );
+
+  await adapter.dispose();
+  assert.equal(recorder.allDisposed(), true);
+});
+
+test("reports authored layout failures through the typed runtime boundary", async () => {
+  const recorder = new PresentationRecorder();
+  recorder.rejectLayoutAt(1);
+  const adapter = new PresentationRuntimeAdapter(recorder.bindings, 100);
+  const plan = presentationPlan();
+
+  await adapter.load(plan, "layoutOnly");
+  await assert.rejects(
+    adapter.prepare(runtimeFrameAt(10, plan.frameRate)),
+    (error: unknown) =>
+      error instanceof RuntimeAdapterError &&
+      error.message === "video layout is outside the admitted CSS subset",
+  );
+  assert.deepEqual(
+    recorder.videos.map(({ layoutVisible }) => layoutVisible),
+    [false, false],
+  );
+
+  await adapter.dispose();
+  assert.equal(recorder.allDisposed(), true);
+});
+
 test("presents both adjacent shots throughout a transition overlap", async () => {
   const recorder = new PresentationRecorder();
   const adapter = new PresentationRuntimeAdapter(recorder.bindings, 100);
@@ -468,6 +525,7 @@ interface RecordedVideo {
   readonly element: FakeVideoElement;
   readonly index: number;
   disposed: boolean;
+  layoutVisible: boolean;
   visible: boolean;
   rejectVisibility(): void;
 }
@@ -502,6 +560,7 @@ class PresentationRecorder {
   readonly videos: RecordedVideo[] = [];
   #rejectEffectCleanup = false;
   #rejectedContainerCleanupIndex: number | undefined;
+  #rejectedLayoutIndex: number | undefined;
   #rejectedOverlayNodeId: number | undefined;
   #rejectedVideoCleanupIndex: number | undefined;
 
@@ -525,12 +584,14 @@ class PresentationRecorder {
       const index = this.videos.length;
       const element = new FakeVideoElement(true);
       const rejectCleanup = index === this.#rejectedVideoCleanupIndex;
+      const rejectLayout = index === this.#rejectedLayoutIndex;
       let visibilityError: Error | undefined;
       let visibilityCalls = 0;
       const recorded: RecordedVideo = {
         element,
         index,
         disposed: false,
+        layoutVisible: false,
         visible: false,
         rejectVisibility(): void {
           visibilityError = new Error("video visibility failed");
@@ -540,6 +601,20 @@ class PresentationRecorder {
       return {
         element,
         source: `./assets/${placement.assetId.slice("sha256:".length)}`,
+        setLayoutVisible(visible): void {
+          recorded.layoutVisible = visible;
+        },
+        measureLayout() {
+          if (rejectLayout) {
+            throw new Error("video layout is outside the admitted CSS subset");
+          }
+          return {
+            nodeId: placement.node.nodeId,
+            objectFit: "cover" as const,
+            objectPosition: { x: 500_000, y: 500_000 },
+            rectangle: { x: 0, y: 0, width: 16, height: 9 },
+          };
+        },
         setVisible(visible): void {
           visibilityCalls += 1;
           if (rejectCleanup && visibilityCalls > 1) {
@@ -609,6 +684,10 @@ class PresentationRecorder {
 
   rejectContainerCleanupAt(index: number): void {
     this.#rejectedContainerCleanupIndex = index;
+  }
+
+  rejectLayoutAt(index: number): void {
+    this.#rejectedLayoutIndex = index;
   }
 
   rejectOverlayBindingAt(nodeId: number): void {
@@ -741,6 +820,15 @@ function videoBindings(
       return {
         element,
         source: `./assets/${placement.assetId.slice("sha256:".length)}`,
+        setLayoutVisible(): void {},
+        measureLayout() {
+          return {
+            nodeId: placement.node.nodeId,
+            objectFit: "cover" as const,
+            objectPosition: { x: 500_000, y: 500_000 },
+            rectangle: { x: 0, y: 0, width: 16, height: 9 },
+          };
+        },
         setVisible(): void {},
         dispose(): void {},
       };

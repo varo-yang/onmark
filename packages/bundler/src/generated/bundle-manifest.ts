@@ -27,12 +27,11 @@ export type BundleVersion = 1;
 /**
  * Proven relationship between browser presentation pixels and primary media.
  *
- * Unknown presentation code requires `BrowserComposite`. A separable overlay
- * is an explicit claim that the browser output is a transparent foreground
- * independent of the primary video beneath it.
+ * Unknown presentation code requires `BrowserComposite`. A separable layer
+ * explicitly limits browser ownership to one side of native media.
  */
 export type PresentationVisualCapability =
-  "browserComposite" | "separableOverlay";
+  "browserComposite" | "separableBackdrop" | "separableOverlay";
 
 /**
  * Stable description of one immutable presentation artifact.
@@ -67,6 +66,7 @@ export const BUNDLE_TEMPORAL_CAPABILITIES = Object.freeze([
 ] as const);
 export const BUNDLE_VISUAL_CAPABILITIES = Object.freeze([
   "browserComposite",
+  "separableBackdrop",
   "separableOverlay",
 ] as const);
 export const BUNDLE_FRAME_BEHAVIORS = Object.freeze([
