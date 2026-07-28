@@ -15,6 +15,7 @@ import {
   bundlePresentation,
   type BundleManifest,
   type BundleOptions,
+  type BundleProjection,
 } from "../src/index.js";
 
 // ── Authored document
@@ -146,10 +147,9 @@ test("publishes one independently identified browser bundle per shot", async () 
         "</om-scene></om-film>",
       ].join("\n"),
     );
-    const first = await bundlePresentation({
-      ...options(baseline, join(workspace, "baseline-regions")),
-      temporalCapability: "randomAccess",
-    });
+    const first = await bundlePresentation(
+      randomAccessOptions(baseline, join(workspace, "baseline-regions"), 2),
+    );
     const edited = await authoredDocument(
       workspace,
       [
@@ -159,10 +159,9 @@ test("publishes one independently identified browser bundle per shot", async () 
         "</om-scene></om-film>",
       ].join("\n"),
     );
-    const second = await bundlePresentation({
-      ...options(edited, join(workspace, "edited-regions")),
-      temporalCapability: "randomAccess",
-    });
+    const second = await bundlePresentation(
+      randomAccessOptions(edited, join(workspace, "edited-regions"), 2),
+    );
 
     assert.equal(first.regions.length, 2);
     assert.equal(second.regions.length, 2);
@@ -181,6 +180,63 @@ test("publishes one independently identified browser bundle per shot", async () 
     );
     assert.match(opening, /Opening/u);
     assert.doesNotMatch(opening, /Closing/u);
+  });
+});
+
+test("projects one transition region with both adjacent shots", async () => {
+  await withWorkspace(async (workspace) => {
+    const document = await authoredDocument(
+      workspace,
+      [
+        "<om-film><om-scene>",
+        '  <om-shot duration="2s"><video plays="2" hold-last="1s"></video><om-title>Before</om-title></om-shot>',
+        '  <om-transition class="wipe" duration="500ms"></om-transition>',
+        '  <om-shot duration="2s"><om-title>After</om-title></om-shot>',
+        "</om-scene></om-film>",
+      ].join("\n"),
+    );
+    const artifact = await bundlePresentation({
+      ...bundleControls(document, join(workspace, "transition-regions")),
+      projection: bundleProjection([0], [0, 1], [1]),
+      temporalCapability: "randomAccess",
+    });
+    const documents = await Promise.all(
+      artifact.regions.map((region) =>
+        readFile(join(region.directory, BUNDLE_ENTRY_POINT), "utf8"),
+      ),
+    );
+
+    assert.equal(documents.length, 3);
+    assert.match(documents[0]!, /Before/u);
+    assert.doesNotMatch(documents[0]!, /om-transition|After/u);
+    assert.match(documents[1]!, /Before/u);
+    assert.match(documents[1]!, /<om-transition class="wipe">/u);
+    assert.doesNotMatch(documents[1]!, /duration=|hold-last=|plays=/u);
+    assert.match(documents[1]!, /After/u);
+    assert.doesNotMatch(documents[2]!, /Before|om-transition/u);
+    assert.match(documents[2]!, /After/u);
+  });
+});
+
+test("rejects an invalid projection through the library boundary", async () => {
+  await withWorkspace(async (workspace) => {
+    const document = await authoredDocument(workspace, film("Projection"));
+    const projection = {
+      regions: [],
+      version: 1,
+    } as unknown as BundleProjection;
+
+    await assert.rejects(
+      bundlePresentation({
+        ...bundleControls(document, join(workspace, "invalid-projection")),
+        projection,
+        temporalCapability: "randomAccess",
+      }),
+      (error: unknown) =>
+        error instanceof BundleError &&
+        error.kind === "configuration" &&
+        /projection/u.test(error.message),
+    );
   });
 });
 
@@ -311,10 +367,9 @@ test("keeps runtime infrastructure outside every projected shot", async () => {
       ].join("\n"),
       "utf8",
     );
-    const artifact = await bundlePresentation({
-      ...options(document, join(workspace, "bundle")),
-      temporalCapability: "randomAccess",
-    });
+    const artifact = await bundlePresentation(
+      randomAccessOptions(document, join(workspace, "bundle"), 2),
+    );
     const closing = await readFile(
       join(artifact.regions[1]!.directory, BUNDLE_ENTRY_POINT),
       "utf8",
@@ -340,10 +395,9 @@ test("bundles public motion adapters from the inline module", async () => {
         "});",
       ].join("\n"),
     );
-    const artifact = await bundlePresentation({
-      ...options(document, join(workspace, "bundle")),
-      temporalCapability: "randomAccess",
-    });
+    const artifact = await bundlePresentation(
+      randomAccessOptions(document, join(workspace, "bundle"), 1),
+    );
 
     assert.equal(artifact.manifest.temporalCapability, "randomAccess");
   });
@@ -363,10 +417,9 @@ test("bundles the public authoring facade from the inline module", async () => {
         "});",
       ].join("\n"),
     );
-    const artifact = await bundlePresentation({
-      ...options(document, join(workspace, "bundle")),
-      temporalCapability: "randomAccess",
-    });
+    const artifact = await bundlePresentation(
+      randomAccessOptions(document, join(workspace, "bundle"), 1),
+    );
 
     assert.equal(artifact.manifest.temporalCapability, "randomAccess");
   });
@@ -383,18 +436,16 @@ test("builds deterministic artifacts with capability-owned identity", async () =
     const second = await bundlePresentation(
       options(document, join(workspace, "second")),
     );
-    const randomAccess = await bundlePresentation({
-      ...options(document, join(workspace, "random-access")),
-      temporalCapability: "randomAccess",
-    });
+    const randomAccess = await bundlePresentation(
+      randomAccessOptions(document, join(workspace, "random-access"), 1),
+    );
     const separableOverlay = await bundlePresentation({
       ...options(document, join(workspace, "separable-overlay")),
       visualCapability: "separableOverlay",
     });
     const placementBounded = await bundlePresentation({
-      ...options(document, join(workspace, "placement-bounded")),
+      ...randomAccessOptions(document, join(workspace, "placement-bounded"), 1),
       frameBehavior: "placementBounded",
-      temporalCapability: "randomAccess",
     });
 
     assert.deepEqual(first.manifest, second.manifest);
@@ -539,10 +590,9 @@ test("freezes native HTML images within their shot regions", async () => {
         "</om-scene></om-film>",
       ].join("\n"),
     );
-    const artifact = await bundlePresentation({
-      ...options(document, join(workspace, "bundle")),
-      temporalCapability: "randomAccess",
-    });
+    const artifact = await bundlePresentation(
+      randomAccessOptions(document, join(workspace, "bundle"), 2),
+    );
 
     const whole = await readFile(
       join(artifact.directory, BUNDLE_ENTRY_POINT),
@@ -730,13 +780,13 @@ test("keeps the checked-in browser bundle current", async () => {
     const repository = fileURLToPath(new URL("../../../..", import.meta.url));
     const expected = join(repository, "conformance/protocol/bundle-v1");
     const outputDirectory = join(workspace, "bundle");
-    await bundlePresentation({
-      ...options(
+    await bundlePresentation(
+      randomAccessOptions(
         join(repository, "conformance/browser/video-presentation.html"),
         outputDirectory,
+        1,
       ),
-      temporalCapability: "randomAccess",
-    });
+    );
 
     const files = await artifactFiles(expected);
     assert.deepEqual(await artifactFiles(outputDirectory), files);
@@ -758,13 +808,13 @@ test("keeps the remote-partition bundle current", async () => {
       "conformance/protocol/remote-partition-v1",
     );
     const outputDirectory = join(workspace, "bundle");
-    await bundlePresentation({
-      ...options(
+    await bundlePresentation(
+      randomAccessOptions(
         join(repository, "conformance/cli/partitioned.html"),
         outputDirectory,
+        2,
       ),
-      temporalCapability: "randomAccess",
-    });
+    );
 
     const files = await artifactFiles(expected);
     assert.deepEqual(await artifactFiles(outputDirectory), files);
@@ -783,12 +833,12 @@ test("bundles the temporal experiment with its browser libraries", async () => {
     const repository = fileURLToPath(new URL("../../../..", import.meta.url));
     const outputDirectory = join(workspace, "bundle");
     await bundlePresentation({
-      ...options(
+      ...randomAccessOptions(
         join(repository, "conformance/browser/temporal-effects.html"),
         outputDirectory,
+        1,
       ),
       maxOutputBytes: 2_000_000,
-      temporalCapability: "randomAccess",
     });
 
     assert.deepEqual((await readdir(outputDirectory)).sort(), [
@@ -804,12 +854,53 @@ test("bundles the temporal experiment with its browser libraries", async () => {
 
 function options(document: string, outputDirectory: string): BundleOptions {
   return {
+    ...bundleControls(document, outputDirectory),
+    temporalCapability: "sequential",
+  };
+}
+
+function randomAccessOptions(
+  document: string,
+  outputDirectory: string,
+  shotCount: number,
+): BundleOptions {
+  return {
+    ...bundleControls(document, outputDirectory),
+    projection: shotProjection(shotCount),
+    temporalCapability: "randomAccess",
+  };
+}
+
+function bundleControls(document: string, outputDirectory: string) {
+  return {
     document,
-    frameBehavior: "perFrame",
+    frameBehavior: "perFrame" as const,
     maxOutputBytes: 1_000_000,
     outputDirectory,
-    temporalCapability: "sequential",
-    visualCapability: "browserComposite",
+    visualCapability: "browserComposite" as const,
+  };
+}
+
+function shotProjection(shotCount: number) {
+  const regions = Array.from(
+    { length: shotCount },
+    (_, index): [number, ...number[]] => [index],
+  );
+  const [first, ...rest] = regions;
+  assert.ok(first, "test projection must contain at least one region");
+  return bundleProjection(first, ...rest);
+}
+
+function bundleProjection(
+  first: readonly [number, ...number[]],
+  ...rest: readonly (readonly [number, ...number[]])[]
+): BundleProjection {
+  return {
+    regions: [
+      { shotIndices: first },
+      ...rest.map((shotIndices) => ({ shotIndices })),
+    ],
+    version: 1 as const,
   };
 }
 
@@ -862,10 +953,9 @@ async function regionIdentities(
   markup: string,
 ): Promise<readonly string[]> {
   const document = await authoredDocument(workspace, markup);
-  const artifact = await bundlePresentation({
-    ...options(document, join(workspace, label)),
-    temporalCapability: "randomAccess",
-  });
+  const artifact = await bundlePresentation(
+    randomAccessOptions(document, join(workspace, label), 2),
+  );
   return artifact.regions.map((region) => region.manifest.bundleId);
 }
 

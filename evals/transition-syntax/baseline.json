@@ -1,0 +1,14 @@
+{
+  "boundary-element": {
+    "passed": 20,
+    "total": 20,
+    "authoredBytes": 6794
+  },
+  "incoming-attribute": {
+    "passed": 20,
+    "total": 20,
+    "authoredBytes": 6112
+  },
+  "admitted": "boundary-element",
+  "reason": "Equal generation and edit reliability; the explicit edge is independently identifiable, source-locatable, and extensible without making an incoming shot own a relationship."
+}

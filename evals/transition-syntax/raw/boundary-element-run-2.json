@@ -1,0 +1,44 @@
+{
+  "results": [
+    {
+      "caseId": "one-boundary",
+      "screenplay": "<om-film>\n  <om-scene>\n    <om-shot id=\"intro\">\n      <video src=\"media/intro.mp4\"></video>\n    </om-shot>\n    <om-transition duration=\"500ms\"></om-transition>\n    <om-shot id=\"product\">\n      <video src=\"media/product.mp4\"></video>\n    </om-shot>\n  </om-scene>\n</om-film>"
+    },
+    {
+      "caseId": "middle-boundary-only",
+      "screenplay": "<om-film>\n  <om-scene>\n    <om-shot id=\"problem\">\n      <video src=\"media/problem.mp4\"></video>\n    </om-shot>\n    <om-shot id=\"bridge\">\n      <video src=\"media/bridge.mp4\"></video>\n    </om-shot>\n    <om-transition duration=\"350ms\"></om-transition>\n    <om-shot id=\"answer\">\n      <video src=\"media/answer.mp4\"></video>\n    </om-shot>\n  </om-scene>\n</om-film>"
+    },
+    {
+      "caseId": "two-boundaries",
+      "screenplay": "<om-film>\n  <om-scene>\n    <om-shot id=\"first\">\n      <video src=\"media/first.mp4\"></video>\n    </om-shot>\n    <om-transition duration=\"250ms\"></om-transition>\n    <om-shot id=\"second\">\n      <video src=\"media/second.mp4\"></video>\n    </om-shot>\n    <om-transition duration=\"600ms\"></om-transition>\n    <om-shot id=\"third\">\n      <video src=\"media/third.mp4\"></video>\n    </om-shot>\n  </om-scene>\n</om-film>"
+    },
+    {
+      "caseId": "hard-cuts-only",
+      "screenplay": "<om-film>\n  <om-scene>\n    <om-shot id=\"a\">\n      <video src=\"media/a.mp4\"></video>\n    </om-shot>\n    <om-shot id=\"b\">\n      <video src=\"media/b.mp4\"></video>\n    </om-shot>\n    <om-shot id=\"c\">\n      <video src=\"media/c.mp4\"></video>\n    </om-shot>\n  </om-scene>\n</om-film>"
+    },
+    {
+      "caseId": "insert-shot",
+      "screenplay": "<om-film>\n  <om-scene>\n    <om-shot id=\"before\">\n      <video src=\"media/before.mp4\"></video>\n    </om-shot>\n    <om-shot id=\"inserted\">\n      <video src=\"media/inserted.mp4\"></video>\n    </om-shot>\n    <om-transition duration=\"400ms\"></om-transition>\n    <om-shot id=\"after\">\n      <video src=\"media/after.mp4\"></video>\n    </om-shot>\n  </om-scene>\n</om-film>"
+    },
+    {
+      "caseId": "remove-transition",
+      "screenplay": "<om-film>\n  <om-scene>\n    <om-shot id=\"open\">\n      <video src=\"media/open.mp4\"></video>\n    </om-shot>\n    <om-transition duration=\"300ms\"></om-transition>\n    <om-shot id=\"detail\">\n      <video src=\"media/detail.mp4\"></video>\n    </om-shot>\n    <om-shot id=\"close\">\n      <video src=\"media/close.mp4\"></video>\n    </om-shot>\n  </om-scene>\n</om-film>"
+    },
+    {
+      "caseId": "retime-transition",
+      "screenplay": "<om-film>\n  <om-scene>\n    <om-shot id=\"question\">\n      <video src=\"media/question.mp4\"></video>\n    </om-shot>\n    <om-transition duration=\"750ms\"></om-transition>\n    <om-shot id=\"reveal\">\n      <video src=\"media/reveal.mp4\"></video>\n    </om-shot>\n  </om-scene>\n</om-film>"
+    },
+    {
+      "caseId": "reorder-shots",
+      "screenplay": "<om-film>\n  <om-scene>\n    <om-shot id=\"beta\">\n      <video src=\"media/beta.mp4\"></video>\n    </om-shot>\n    <om-shot id=\"alpha\">\n      <video src=\"media/alpha.mp4\"></video>\n    </om-shot>\n    <om-transition duration=\"300ms\"></om-transition>\n    <om-shot id=\"gamma\">\n      <video src=\"media/gamma.mp4\"></video>\n    </om-shot>\n  </om-scene>\n</om-film>"
+    },
+    {
+      "caseId": "separate-accents",
+      "screenplay": "<om-film>\n  <om-scene>\n    <om-shot id=\"one\">\n      <video src=\"media/one.mp4\"></video>\n    </om-shot>\n    <om-transition duration=\"200ms\"></om-transition>\n    <om-shot id=\"two\">\n      <video src=\"media/two.mp4\"></video>\n    </om-shot>\n    <om-shot id=\"three\">\n      <video src=\"media/three.mp4\"></video>\n    </om-shot>\n    <om-transition duration=\"550ms\"></om-transition>\n    <om-shot id=\"four\">\n      <video src=\"media/four.mp4\"></video>\n    </om-shot>\n  </om-scene>\n</om-film>"
+    },
+    {
+      "caseId": "short-transition",
+      "screenplay": "<om-film>\n  <om-scene>\n    <om-shot id=\"flash\">\n      <video src=\"media/flash.mp4\"></video>\n    </om-shot>\n    <om-transition duration=\"100ms\"></om-transition>\n    <om-shot id=\"mark\">\n      <video src=\"media/mark.mp4\"></video>\n    </om-shot>\n  </om-scene>\n</om-film>"
+    }
+  ]
+}

@@ -23,7 +23,7 @@
     "generate:check": "cargo xtask schema --check",
     "format": "prettier --write \"packages/**/*.{ts,js,mjs,json}\" \"scripts/**/*.{js,mjs,json}\" \"conformance/browser/**/*.{ts,js,mjs,json,css,html}\" \"showcases/**/*.{html,json,md}\" \"*.{js,mjs,json}\" \".github/workflows/*.{yml,yaml}\" pnpm-workspace.yaml",
     "format:check": "prettier --check \"packages/**/*.{ts,js,mjs,json}\" \"scripts/**/*.{js,mjs,json}\" \"conformance/browser/**/*.{ts,js,mjs,json,css,html}\" \"showcases/**/*.{html,json,md}\" \"*.{js,mjs,json}\" \".github/workflows/*.{yml,yaml}\" pnpm-workspace.yaml",
-    "lint": "oxlint packages scripts conformance/browser --ignore-pattern \"**/node_modules/**\" --ignore-pattern \"packages/runtime/src/generated/**\" --deny-warnings && node scripts/typescript/shape.mjs",
+    "lint": "oxlint packages scripts conformance/browser --ignore-pattern \"**/node_modules/**\" --ignore-pattern \"packages/*/src/generated/**\" --deny-warnings && node scripts/typescript/shape.mjs",
     "test": "pnpm --recursive test && node --test scripts/release/npm/test/*.test.mjs scripts/release/media-toolchain/*.test.mjs",
     "typecheck": "pnpm --recursive typecheck"
   },

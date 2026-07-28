@@ -20,14 +20,14 @@ export interface AuthoredHtml {
   readonly document: string;
   readonly motion: string | undefined;
   readonly resources: readonly HtmlImageResource[];
-  readonly regions: readonly AuthoredHtmlRegion[];
+  readonly shots: readonly AuthoredHtmlShot[];
   readonly regionStructure: AuthoredHtmlRegionStructure;
   readonly resolveDirectory: string;
   readonly runtimeOffset: number;
 }
 
-/** One shot selection within the shared authored-document structure. */
-export interface AuthoredHtmlRegion {
+/** One dense screenplay-order shot within the authored document. */
+export interface AuthoredHtmlShot {
   readonly scene: number;
   readonly shot: number;
 }
@@ -39,10 +39,22 @@ export interface AuthoredHtmlRegionStructure {
 
 export interface AuthoredHtmlScene {
   readonly range: SourceRange;
-  readonly shots: readonly SourceRange[];
+  readonly shots: readonly AuthoredHtmlShotRange[];
+  readonly transitions: readonly AuthoredHtmlTransitionRange[];
 }
 
-/** One materialized shot-scoped browser document. */
+export interface AuthoredHtmlShotRange {
+  readonly index: number;
+  readonly range: SourceRange;
+}
+
+export interface AuthoredHtmlTransitionRange {
+  readonly incomingShot: number;
+  readonly outgoingShot: number;
+  readonly range: SourceRange;
+}
+
+/** One materialized render-region browser document. */
 export interface AuthoredHtmlRegionDocument {
   readonly document: string;
   readonly runtimeOffset: number;
@@ -138,7 +150,7 @@ interface InstalledHtml {
 }
 
 interface HtmlProjection extends InstalledHtml {
-  readonly regions: readonly AuthoredHtmlRegion[];
+  readonly shots: readonly AuthoredHtmlShot[];
   readonly regionStructure: AuthoredHtmlRegionStructure;
 }
 
@@ -202,56 +214,110 @@ function installRuntime(source: string): InstalledHtml {
 
 function projectShotStructure(
   source: string,
-): Pick<HtmlProjection, "regions" | "regionStructure"> {
+): Pick<HtmlProjection, "shots" | "regionStructure"> {
   const document = parseDocument(source);
   const film = findElement(document, "om-film");
   if (film === undefined) {
     return {
-      regions: Object.freeze([]),
+      shots: Object.freeze([]),
       regionStructure: Object.freeze({ scenes: Object.freeze([]) }),
     };
   }
 
-  const scenes = childElements(film, "om-scene").map((scene) => {
-    const shots = childElements(scene, "om-shot").map((shot) =>
-      removableElementRange(source, shot),
-    );
-    return Object.freeze({
-      range: removableElementRange(source, scene),
-      shots: Object.freeze(shots),
-    });
-  });
-  const regions = scenes.flatMap((scene, sceneIndex) =>
-    scene.shots.map((_, shotIndex) =>
-      Object.freeze({ scene: sceneIndex, shot: shotIndex }),
-    ),
+  const shots: AuthoredHtmlShot[] = [];
+  const scenes = childElements(film, "om-scene").map((scene, sceneIndex) =>
+    projectSceneStructure(source, scene, sceneIndex, shots),
   );
   return {
-    regions: Object.freeze(regions),
+    shots: Object.freeze(shots),
     regionStructure: Object.freeze({ scenes: Object.freeze(scenes) }),
   };
 }
 
-/** Materializes one shot projection without retaining every projected document. */
-export function projectShotDocument(
-  html: AuthoredHtml,
-  region: AuthoredHtmlRegion,
-): AuthoredHtmlRegionDocument {
-  const selectedScene = html.regionStructure.scenes[region.scene];
-  const selectedShot = selectedScene?.shots[region.shot];
-  if (selectedScene === undefined || selectedShot === undefined) {
-    throw new AuthoredHtmlError("browser projection selects an unknown shot");
+function projectSceneStructure(
+  source: string,
+  scene: DefaultTreeAdapterTypes.Element,
+  sceneIndex: number,
+  documentShots: AuthoredHtmlShot[],
+): AuthoredHtmlScene {
+  const shots: AuthoredHtmlShotRange[] = [];
+  const transitions: AuthoredHtmlTransitionRange[] = [];
+  let outgoingShot: number | undefined;
+  let pendingTransition: SourceRange | undefined;
+
+  for (const element of directElements(scene)) {
+    if (element.tagName === "om-transition") {
+      if (outgoingShot === undefined || pendingTransition !== undefined) {
+        throw transitionProjectionError();
+      }
+      pendingTransition = removableElementRange(source, element);
+      continue;
+    }
+    if (element.tagName !== "om-shot") {
+      continue;
+    }
+
+    const index = documentShots.length;
+    const shot = Object.freeze({ scene: sceneIndex, shot: shots.length });
+    documentShots.push(shot);
+    shots.push(
+      Object.freeze({
+        index,
+        range: removableElementRange(source, element),
+      }),
+    );
+    if (pendingTransition !== undefined && outgoingShot !== undefined) {
+      transitions.push(
+        Object.freeze({
+          incomingShot: index,
+          outgoingShot,
+          range: pendingTransition,
+        }),
+      );
+      pendingTransition = undefined;
+    }
+    outgoingShot = index;
   }
 
+  if (pendingTransition !== undefined) {
+    throw transitionProjectionError();
+  }
+  return Object.freeze({
+    range: removableElementRange(source, scene),
+    shots: Object.freeze(shots),
+    transitions: Object.freeze(transitions),
+  });
+}
+
+function transitionProjectionError(): AuthoredHtmlError {
+  return new AuthoredHtmlError(
+    "compiled transition boundaries cannot be projected into browser regions",
+  );
+}
+
+/** Materializes one Rust-planned region without retaining every projection. */
+export function projectRegionDocument(
+  html: AuthoredHtml,
+  shotIndices: readonly number[],
+): AuthoredHtmlRegionDocument {
+  const selectedShots = selectedShotSet(html, shotIndices);
   const ranges: SourceRange[] = [];
-  for (const [sceneIndex, scene] of html.regionStructure.scenes.entries()) {
-    if (sceneIndex !== region.scene) {
+  for (const scene of html.regionStructure.scenes) {
+    if (!scene.shots.some((shot) => selectedShots.has(shot.index))) {
       ranges.push(scene.range);
       continue;
     }
-    for (const [shotIndex, shot] of scene.shots.entries()) {
-      if (shotIndex !== region.shot) {
-        ranges.push(shot);
+    for (const shot of scene.shots) {
+      if (!selectedShots.has(shot.index)) {
+        ranges.push(shot.range);
+      }
+    }
+    for (const transition of scene.transitions) {
+      const retained =
+        selectedShots.has(transition.outgoingShot) &&
+        selectedShots.has(transition.incomingShot);
+      if (!retained) {
+        ranges.push(transition.range);
       }
     }
   }
@@ -260,6 +326,22 @@ export function projectShotDocument(
     document: removeRanges(html.document, ranges),
     runtimeOffset: projectOffset(html.runtimeOffset, ranges),
   });
+}
+
+function selectedShotSet(
+  html: AuthoredHtml,
+  shotIndices: readonly number[],
+): ReadonlySet<number> {
+  const selected = new Set<number>();
+  for (const index of shotIndices) {
+    if (html.shots[index] === undefined) {
+      throw new AuthoredHtmlError(
+        `browser projection selects unknown shot ${index}`,
+      );
+    }
+    selected.add(index);
+  }
+  return selected;
 }
 
 function parseDocument(source: string): DefaultTreeAdapterTypes.Document {
@@ -356,6 +438,14 @@ function childElements(
   return parent.childNodes.filter(
     (child): child is DefaultTreeAdapterTypes.Element =>
       "tagName" in child && child.tagName === name,
+  );
+}
+
+function directElements(
+  parent: DefaultTreeAdapterTypes.Element,
+): DefaultTreeAdapterTypes.Element[] {
+  return parent.childNodes.filter(
+    (child): child is DefaultTreeAdapterTypes.Element => "tagName" in child,
   );
 }
 
@@ -500,10 +590,13 @@ function isCompilerOnlyAttribute(
     case "om-title":
       return attributeName === "cue" || attributeName === "delay";
     case "om-shot":
+    case "om-transition":
       return attributeName === "duration";
     case "video":
       return (
         attributeName === "delay" ||
+        attributeName === "hold-last" ||
+        attributeName === "plays" ||
         attributeName === "speed" ||
         attributeName === "src" ||
         attributeName === "trim"

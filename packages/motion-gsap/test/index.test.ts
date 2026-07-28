@@ -60,6 +60,71 @@ test("renders timeline state when the first requested frame is local zero", asyn
   await effect.dispose();
 });
 
+test("renders the completed transition on its final overlap frame", async () => {
+  const outgoing = { value: 100 };
+  const incoming = { value: 0 };
+  const outgoingElement = outgoing as unknown as HTMLElement;
+  const incomingElement = incoming as unknown as HTMLElement;
+  const motion = gsapMotion({
+    transition({ incomingElement, outgoingElement, timeline }) {
+      timeline.to(outgoingElement, { duration: 0.5, value: 0 }, 0);
+      timeline.to(incomingElement, { duration: 0.5, value: 100 }, 0);
+    },
+  });
+  const extension = await motion.bind({
+    frameRate: CONTEXT.frameRate,
+    targets: [
+      {
+        element: {} as HTMLElement,
+        incomingElement,
+        interval: { start: 45, end: 60 },
+        kind: "transition",
+        node: { nodeId: 3, authoredId: "reveal" },
+        outgoingElement,
+      },
+    ],
+  });
+  const [effect] = extension.effects;
+  assert.ok(effect);
+
+  await effect.apply({ index: 45, timeSeconds: 1.5 });
+  assert.equal(outgoing.value, 100);
+  assert.equal(incoming.value, 0);
+  await effect.apply({ index: 59, timeSeconds: 59 / 30 });
+  assert.equal(outgoing.value, 0);
+  assert.equal(incoming.value, 100);
+  await effect.dispose();
+});
+
+test("renders a one-frame transition at its terminal playhead", async () => {
+  const state = { value: 0 };
+  const motion = gsapMotion({
+    transition({ durationSeconds, timeline }) {
+      timeline.to(state, { duration: durationSeconds, value: 100 }, 0);
+    },
+  });
+  const extension = await motion.bind({
+    frameRate: CONTEXT.frameRate,
+    targets: [
+      {
+        element: {} as HTMLElement,
+        incomingElement: {} as HTMLElement,
+        interval: { start: 45, end: 46 },
+        kind: "transition",
+        node: { nodeId: 3, authoredId: "reveal" },
+        outgoingElement: {} as HTMLElement,
+      },
+    ],
+  });
+  const [effect] = extension.effects;
+  assert.ok(effect);
+
+  await effect.apply({ index: 45, timeSeconds: 1.5 });
+
+  assert.equal(state.value, 100);
+  await effect.dispose();
+});
+
 test("rejects motion that escapes its compiler-owned interval", async () => {
   const motion = gsapMotion({
     shot({ timeline }) {

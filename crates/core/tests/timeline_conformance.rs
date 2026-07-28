@@ -26,6 +26,11 @@ fn explicit_duration_and_overlays_match_canonical_timeline() {
 }
 
 #[test]
+fn adjacent_shots_overlap_during_a_transition() {
+    assert_valid_fixture("transition", BTreeMap::new());
+}
+
+#[test]
 fn media_duration_and_longest_content_match_canonical_timeline() {
     let assets = frozen_assets([("clip.mp4", "2s"), ("voice.mp3", "1s")]);
 
@@ -65,6 +70,20 @@ fn timing_errors_match_stable_diagnostics() {
     let expected_path = fixture("compiler/timeline", "invalid/timing-errors.diagnostics.txt");
     let assets = frozen_assets([("clip.mp4", "2s")]);
     let report = solve_fixture(&source_path, &assets).expect("all referenced assets were probed");
+
+    assert!(report.timeline().is_none());
+    assert_or_update(&expected_path, &render_diagnostics(report.diagnostics()));
+}
+
+#[test]
+fn transition_overlap_errors_match_stable_diagnostics() {
+    let source_path = fixture("compiler/timeline", "invalid/transition-overlap.html");
+    let expected_path = fixture(
+        "compiler/timeline",
+        "invalid/transition-overlap.diagnostics.txt",
+    );
+    let report =
+        solve_fixture(&source_path, &BTreeMap::new()).expect("the fixture has no external assets");
 
     assert!(report.timeline().is_none());
     assert_or_update(&expected_path, &render_diagnostics(report.diagnostics()));
@@ -349,6 +368,14 @@ impl TimelineRenderer {
         )?;
 
         for shot in scene.shots() {
+            if let Some(transition) = shot.incoming_transition() {
+                writeln!(
+                    self.output,
+                    "    transition {} {}",
+                    element(transition.element()),
+                    timing(transition.timing()),
+                )?;
+            }
             self.render_shot(shot)?;
         }
 
@@ -453,6 +480,7 @@ fn reason(reason: &TimingReason) -> String {
     match reason {
         TimingReason::FilmStart => "film-start".to_owned(),
         TimingReason::Sequential => "sequential".to_owned(),
+        TimingReason::Transition(_) => "transition".to_owned(),
         TimingReason::ShotStart => "shot-start".to_owned(),
         TimingReason::AuthoredDelay(_) => "authored-delay".to_owned(),
         TimingReason::Event { event, .. } => match event {

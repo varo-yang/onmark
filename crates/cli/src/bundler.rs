@@ -15,7 +15,10 @@ use std::time::Duration;
 use onmark_core::model::{
     PresentationFrameBehavior, PresentationTemporalCapability, PresentationVisualCapability,
 };
-use onmark_core::protocol::BundleManifest;
+use onmark_core::protocol::{
+    BundleManifest, BundleProjection, BundleProjectionRegion, InvalidBundleProjection,
+};
+use onmark_core::render_graph::PartitionPlan;
 use tempfile::TempDir;
 use tokio::io::{AsyncRead, AsyncReadExt as _};
 use tokio::process::Command;
@@ -68,7 +71,9 @@ impl PresentationBundler {
         &self,
         document: &str,
         resolve_directory: &Path,
+        partitions: &PartitionPlan,
     ) -> Result<BundleArtifact, BundleError> {
+        let projection = bundle_projection(partitions)?;
         let root = tempfile::Builder::new()
             .prefix("onmark-bundle-")
             .tempdir()
@@ -77,8 +82,14 @@ impl PresentationBundler {
         tokio::fs::write(&snapshot, document)
             .await
             .map_err(BundleError::Snapshot)?;
+        let projection_path = root.path().join("projection.json");
+        let projection_bytes =
+            serde_json::to_vec(&projection).map_err(BundleError::ProjectionEncode)?;
+        tokio::fs::write(&projection_path, projection_bytes)
+            .await
+            .map_err(BundleError::ProjectionSnapshot)?;
         let directory = root.path().join("presentation");
-        let mut child = self.spawn(&snapshot, resolve_directory, &directory)?;
+        let mut child = self.spawn(&snapshot, resolve_directory, &projection_path, &directory)?;
         let stderr = child
             .stderr
             .take()
@@ -99,16 +110,17 @@ impl PresentationBundler {
         }
 
         let manifest_path = directory.join(BundleManifest::FILE_NAME);
-        let manifest = tokio::task::spawn_blocking(move || read_manifest(&manifest_path))
+        tokio::task::spawn_blocking(move || read_manifest(&manifest_path))
             .await
             .map_err(BundleError::ManifestTask)??;
-        Ok(BundleArtifact { manifest, root })
+        Ok(BundleArtifact { root })
     }
 
     fn spawn(
         &self,
         document: &Path,
         resolve_directory: &Path,
+        projection: &Path,
         output: &Path,
     ) -> Result<tokio::process::Child, BundleError> {
         let mut command = self.process.command();
@@ -118,6 +130,8 @@ impl PresentationBundler {
             .arg(document)
             .arg("--resolve-directory")
             .arg(resolve_directory)
+            .arg("--projection")
+            .arg(projection)
             .arg("--output")
             .arg(output)
             .arg("--max-output-bytes")
@@ -137,6 +151,21 @@ impl PresentationBundler {
             source,
         })
     }
+
+    pub(super) const fn temporal_capability() -> PresentationTemporalCapability {
+        PresentationCapabilities::authored_html().temporal
+    }
+}
+
+fn bundle_projection(
+    partitions: &PartitionPlan,
+) -> Result<BundleProjection, InvalidBundleProjection> {
+    let regions = partitions
+        .units()
+        .iter()
+        .map(|partition| BundleProjectionRegion::new(partition.shots().copied()))
+        .collect::<Result<Vec<_>, _>>()?;
+    BundleProjection::new(regions)
 }
 
 impl BundlerProcess {
@@ -160,17 +189,12 @@ impl BundlerProcess {
 
 #[derive(Debug)]
 pub(super) struct BundleArtifact {
-    manifest: BundleManifest,
     root: TempDir,
 }
 
 impl BundleArtifact {
     pub(super) fn directory(&self) -> PathBuf {
         self.root.path().join("presentation")
-    }
-
-    pub(super) const fn manifest(&self) -> &BundleManifest {
-        &self.manifest
     }
 
     pub(super) fn region(&self, index: usize) -> Result<BundleRegion, BundleError> {
@@ -201,6 +225,9 @@ impl BundleRegion {
 pub(super) enum BundleError {
     TemporaryDirectory(io::Error),
     Snapshot(io::Error),
+    Projection(InvalidBundleProjection),
+    ProjectionEncode(serde_json::Error),
+    ProjectionSnapshot(io::Error),
     Spawn {
         executable: PathBuf,
         source: io::Error,
@@ -241,6 +268,15 @@ impl fmt::Display for BundleError {
             }
             Self::Snapshot(_) => {
                 formatter.write_str("failed to snapshot the authored HTML for bundling")
+            }
+            Self::Projection(_) => {
+                formatter.write_str("render partitions cannot form a bundle projection")
+            }
+            Self::ProjectionEncode(_) => {
+                formatter.write_str("failed to encode the bundle projection")
+            }
+            Self::ProjectionSnapshot(_) => {
+                formatter.write_str("failed to snapshot the bundle projection")
             }
             Self::Spawn { executable, .. } => {
                 write!(
@@ -303,6 +339,7 @@ impl Error for BundleError {
         match self {
             Self::TemporaryDirectory(source)
             | Self::Snapshot(source)
+            | Self::ProjectionSnapshot(source)
             | Self::Wait(source)
             | Self::Terminate(source)
             | Self::DiagnosticRead(source)
@@ -310,7 +347,8 @@ impl Error for BundleError {
             | Self::ManifestOpen { source, .. }
             | Self::ManifestRead { source, .. } => Some(source),
             Self::DiagnosticTask(source) | Self::ManifestTask(source) => Some(source),
-            Self::ManifestDecode { source, .. } => Some(source),
+            Self::Projection(source) => Some(source),
+            Self::ProjectionEncode(source) | Self::ManifestDecode { source, .. } => Some(source),
             Self::MissingDiagnosticPipe
             | Self::DiagnosticTimeout
             | Self::TerminateTimeout
@@ -318,6 +356,12 @@ impl Error for BundleError {
             | Self::Failed { .. }
             | Self::ManifestLimit(_) => None,
         }
+    }
+}
+
+impl From<InvalidBundleProjection> for BundleError {
+    fn from(source: InvalidBundleProjection) -> Self {
+        Self::Projection(source)
     }
 }
 

@@ -3,7 +3,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { combineMotion, createDomPresentationBindings } from "../src/index.js";
+import {
+  combineMotion,
+  createDomPresentationBindings,
+  type PresentationTarget,
+} from "../src/index.js";
 import type {
   FrameEffect,
   PresentationResource,
@@ -67,6 +71,77 @@ test("binds solved structure without replacing authored HTML", () => {
     ),
     true,
   );
+});
+
+test("binds a transition to both adjacent shot elements", async () => {
+  const browser = new FakeDocument();
+  const transition = new FakeElement("om-transition");
+  transition.id = "reveal";
+  const closing = authoredScene("unused", "closing", "After");
+  browser.authored.scene.append(transition, closing.shot);
+  let transitionTarget:
+    Extract<PresentationTarget, { readonly kind: "transition" }> | undefined;
+  const plan: RuntimePlan = {
+    ...PLAN,
+    timeline: { start: 0, end: 105 },
+    evaluation: { start: 0, end: 105 },
+    output: { start: 0, end: 105 },
+    scenes: [{ ...PLAN.scenes[0]!, interval: { start: 0, end: 105 } }],
+    shots: [
+      { ...PLAN.shots[0]!, interval: { start: 0, end: 60 } },
+      {
+        node: { nodeId: 6, authoredId: "closing" },
+        sceneId: 1,
+        interval: { start: 45, end: 105 },
+      },
+    ],
+    transitions: [
+      {
+        incomingShotId: 6,
+        interval: { start: 45, end: 60 },
+        node: { nodeId: 5, authoredId: "reveal" },
+        outgoingShotId: 2,
+      },
+    ],
+    overlays: [
+      { ...PLAN.overlays[0]!, interval: { start: 0, end: 60 } },
+      {
+        node: { nodeId: 7, authoredId: null },
+        shotId: 6,
+        kind: "title",
+        text: "After",
+        interval: { start: 45, end: 105 },
+      },
+    ],
+  };
+  const bindings = createDomPresentationBindings({
+    document: asBrowserDocument(browser),
+    motion: {
+      bind({ targets }) {
+        transitionTarget = targets.find(
+          (target) => target.kind === "transition",
+        );
+        return { effects: [], resources: [] };
+      },
+    },
+    videoSource: () => "./video.mp4",
+  });
+
+  bindings.bindFilm(plan);
+  bindings.bindScene(plan.scenes[0]!);
+  bindings.bindShot(plan.shots[0]!);
+  bindings.bindVideo(plan.videos[0]!);
+  bindings.bindOverlay(plan.overlays[0]!);
+  const bound = bindings.bindTransition(plan.transitions[0]!);
+  bindings.bindShot(plan.shots[1]!);
+  bindings.bindOverlay(plan.overlays[1]!);
+  await bindings.bindExtensions(plan);
+
+  assert.equal(bound.element, transition);
+  assert.equal(bound.outgoingElement, browser.authored.shot);
+  assert.equal(bound.incomingElement, closing.shot);
+  assert.equal(transitionTarget?.outgoingElement, browser.authored.shot);
+  assert.equal(transitionTarget?.incomingElement, closing.shot);
 });
 
 test("projects native video out of dense foreground identity", () => {
@@ -156,6 +231,7 @@ test("owns bound and omitted semantic visibility independently of authored CSS",
       "[data-om-node][hidden],",
       "om-film > om-scene:not([data-om-node]),",
       "om-scene > om-shot:not([data-om-node]),",
+      "om-scene > om-transition,",
       "om-shot > :is(video, om-title, om-cta):not([data-om-node]) {",
       "  display: none !important;",
       "}",
@@ -367,7 +443,7 @@ test("releases prior extensions when later motion binding fails", async () => {
 // ── Fixture ──
 
 const PLAN: RuntimePlan = {
-  timelineVersion: 2,
+  timelineVersion: 3,
   frameRate: { numerator: 30, denominator: 1 },
   timeline: { start: 0, end: 90 },
   evaluation: { start: 0, end: 60 },
@@ -386,6 +462,7 @@ const PLAN: RuntimePlan = {
       interval: { start: 0, end: 60 },
     },
   ],
+  transitions: [],
   videos: [
     {
       node: { nodeId: 3, authoredId: null },

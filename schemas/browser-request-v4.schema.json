@@ -218,11 +218,18 @@
           "$ref": "#/$defs/WireInterval"
         },
         "timelineVersion": {
-          "const": 2,
+          "const": 3,
           "format": "uint16",
           "maximum": 65535,
           "minimum": 0,
           "type": "integer"
+        },
+        "transitions": {
+          "items": {
+            "$ref": "#/$defs/BrowserTransition"
+          },
+          "maxItems": 10000,
+          "type": "array"
         },
         "videos": {
           "items": {
@@ -241,6 +248,7 @@
         "film",
         "scenes",
         "shots",
+        "transitions",
         "videos",
         "overlays"
       ],
@@ -280,6 +288,31 @@
       "required": [
         "node",
         "sceneId",
+        "interval"
+      ],
+      "type": "object"
+    },
+    "BrowserTransition": {
+      "additionalProperties": false,
+      "description": "One solved transition between two adjacent browser shots.",
+      "properties": {
+        "incomingShotId": {
+          "$ref": "#/$defs/BrowserNodeId"
+        },
+        "interval": {
+          "$ref": "#/$defs/WireInterval"
+        },
+        "node": {
+          "$ref": "#/$defs/BrowserNode"
+        },
+        "outgoingShotId": {
+          "$ref": "#/$defs/BrowserNodeId"
+        }
+      },
+      "required": [
+        "node",
+        "outgoingShotId",
+        "incomingShotId",
         "interval"
       ],
       "type": "object"
@@ -419,7 +452,7 @@
       ]
     },
     "ProtocolVersion": {
-      "const": 3,
+      "const": 4,
       "description": "Version of the native-to-browser message contract.",
       "format": "uint16",
       "maximum": 65535,
@@ -527,7 +560,7 @@
       "type": "object"
     }
   },
-  "$id": "https://onmark.dev/schemas/browser-request-v3.schema.json",
+  "$id": "https://onmark.dev/schemas/browser-request-v4.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "One versioned command sent from the native executor to the browser.",

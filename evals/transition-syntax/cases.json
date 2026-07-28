@@ -1,0 +1,102 @@
+{
+  "cases": [
+    {
+      "id": "one-boundary",
+      "shots": [
+        { "id": "intro", "src": "media/intro.mp4" },
+        { "id": "product", "src": "media/product.mp4" }
+      ],
+      "transitions": [{ "from": "intro", "to": "product", "duration": "500ms" }]
+    },
+    {
+      "id": "middle-boundary-only",
+      "shots": [
+        { "id": "problem", "src": "media/problem.mp4" },
+        { "id": "bridge", "src": "media/bridge.mp4" },
+        { "id": "answer", "src": "media/answer.mp4" }
+      ],
+      "transitions": [{ "from": "bridge", "to": "answer", "duration": "350ms" }]
+    },
+    {
+      "id": "two-boundaries",
+      "shots": [
+        { "id": "first", "src": "media/first.mp4" },
+        { "id": "second", "src": "media/second.mp4" },
+        { "id": "third", "src": "media/third.mp4" }
+      ],
+      "transitions": [
+        { "from": "first", "to": "second", "duration": "250ms" },
+        { "from": "second", "to": "third", "duration": "600ms" }
+      ]
+    },
+    {
+      "id": "hard-cuts-only",
+      "shots": [
+        { "id": "a", "src": "media/a.mp4" },
+        { "id": "b", "src": "media/b.mp4" },
+        { "id": "c", "src": "media/c.mp4" }
+      ],
+      "transitions": []
+    },
+    {
+      "id": "insert-shot",
+      "shots": [
+        { "id": "before", "src": "media/before.mp4" },
+        { "id": "inserted", "src": "media/inserted.mp4" },
+        { "id": "after", "src": "media/after.mp4" }
+      ],
+      "transitions": [
+        { "from": "inserted", "to": "after", "duration": "400ms" }
+      ]
+    },
+    {
+      "id": "remove-transition",
+      "shots": [
+        { "id": "open", "src": "media/open.mp4" },
+        { "id": "detail", "src": "media/detail.mp4" },
+        { "id": "close", "src": "media/close.mp4" }
+      ],
+      "transitions": [{ "from": "open", "to": "detail", "duration": "300ms" }]
+    },
+    {
+      "id": "retime-transition",
+      "shots": [
+        { "id": "question", "src": "media/question.mp4" },
+        { "id": "reveal", "src": "media/reveal.mp4" }
+      ],
+      "transitions": [
+        { "from": "question", "to": "reveal", "duration": "750ms" }
+      ]
+    },
+    {
+      "id": "reorder-shots",
+      "shots": [
+        { "id": "beta", "src": "media/beta.mp4" },
+        { "id": "alpha", "src": "media/alpha.mp4" },
+        { "id": "gamma", "src": "media/gamma.mp4" }
+      ],
+      "transitions": [{ "from": "alpha", "to": "gamma", "duration": "300ms" }]
+    },
+    {
+      "id": "separate-accents",
+      "shots": [
+        { "id": "one", "src": "media/one.mp4" },
+        { "id": "two", "src": "media/two.mp4" },
+        { "id": "three", "src": "media/three.mp4" },
+        { "id": "four", "src": "media/four.mp4" }
+      ],
+      "transitions": [
+        { "from": "one", "to": "two", "duration": "200ms" },
+        { "from": "three", "to": "four", "duration": "550ms" }
+      ]
+    },
+    {
+      "id": "short-transition",
+      "shots": [
+        { "id": "flash", "src": "media/flash.mp4" },
+        { "id": "mark", "src": "media/mark.mp4" }
+      ],
+      "transitions": [{ "from": "flash", "to": "mark", "duration": "100ms" }]
+    }
+  ]
+}

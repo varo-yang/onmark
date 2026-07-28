@@ -5,6 +5,7 @@
 //! the Node/native presentation-bundle manifest.
 
 mod bundle;
+mod bundle_projection;
 mod frame;
 mod message;
 mod plan;
@@ -13,6 +14,9 @@ mod projection;
 pub use bundle::{
     BundleFile, BundleIdentity, BundleManifest, BundleVersion, InvalidBundleFile,
     InvalidBundleManifest,
+};
+pub use bundle_projection::{
+    BundleProjection, BundleProjectionRegion, BundleProjectionVersion, InvalidBundleProjection,
 };
 pub use frame::{
     InvalidWireFrame, WireFrame, WireFrameRate, WireInterval, WireMediaTimebase, WirePlaybackRate,
@@ -24,5 +28,6 @@ pub use message::{
 };
 pub use plan::{
     BrowserNode, BrowserNodeId, BrowserOverlay, BrowserOverlayKind, BrowserPlan, BrowserScene,
-    BrowserShot, BrowserVideo, BrowserVideoSource, BrowserVideoTiming, InvalidBrowserPlan,
+    BrowserShot, BrowserTransition, BrowserVideo, BrowserVideoSource, BrowserVideoTiming,
+    InvalidBrowserPlan,
 };

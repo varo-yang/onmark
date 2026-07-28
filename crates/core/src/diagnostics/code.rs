@@ -27,6 +27,8 @@ pub enum DiagnosticCode {
     DuplicateCues,
     /// Authored text appears in a structural or empty element.
     UnexpectedText,
+    /// A transition does not connect exactly two adjacent shots.
+    InvalidTransitionBoundary,
     /// An authored duration violates the exact duration grammar or range.
     InvalidDuration,
     /// A shot has no rule that determines its duration.
@@ -41,6 +43,8 @@ pub enum DiagnosticCode {
     EmptyFilm,
     /// A selected video source interval lies outside its frozen artifact.
     SourceIntervalOutsideAsset,
+    /// A transition overlap cannot fit within both adjacent shots.
+    TransitionOutsideShots,
     /// Renderable media omits its frozen artifact reference.
     MissingMediaSource,
     /// A media element references an artifact without its required track.
@@ -94,6 +98,7 @@ impl DiagnosticCode {
             Self::MisplacedElement => "ONM-STRUCT-004",
             Self::DuplicateCues => "ONM-STRUCT-005",
             Self::UnexpectedText => "ONM-STRUCT-006",
+            Self::InvalidTransitionBoundary => "ONM-STRUCT-007",
             Self::InvalidDuration => "ONM-TIME-001",
             Self::MissingDurationSource => "ONM-TIME-002",
             Self::ConflictingDurationSources => "ONM-TIME-003",
@@ -101,6 +106,7 @@ impl DiagnosticCode {
             Self::FrameConversionOverflow => "ONM-TIME-005",
             Self::EmptyFilm => "ONM-TIME-006",
             Self::SourceIntervalOutsideAsset => "ONM-TIME-007",
+            Self::TransitionOutsideShots => "ONM-TIME-008",
             Self::MissingMediaSource => "ONM-ASSET-001",
             Self::IncompatibleMediaSource => "ONM-ASSET-002",
             Self::UnknownCueReference => "ONM-REF-001",
@@ -135,6 +141,7 @@ impl DiagnosticCode {
             | Self::MisplacedElement
             | Self::DuplicateCues
             | Self::UnexpectedText
+            | Self::InvalidTransitionBoundary
             | Self::InvalidDuration
             | Self::MissingDurationSource
             | Self::ConflictingDurationSources
@@ -142,6 +149,7 @@ impl DiagnosticCode {
             | Self::FrameConversionOverflow
             | Self::EmptyFilm
             | Self::SourceIntervalOutsideAsset
+            | Self::TransitionOutsideShots
             | Self::MissingMediaSource
             | Self::IncompatibleMediaSource
             | Self::UnknownCueReference
@@ -206,6 +214,7 @@ mod tests {
             (DiagnosticCode::MisplacedElement, "ONM-STRUCT-004"),
             (DiagnosticCode::DuplicateCues, "ONM-STRUCT-005"),
             (DiagnosticCode::UnexpectedText, "ONM-STRUCT-006"),
+            (DiagnosticCode::InvalidTransitionBoundary, "ONM-STRUCT-007"),
             (DiagnosticCode::InvalidDuration, "ONM-TIME-001"),
             (DiagnosticCode::MissingDurationSource, "ONM-TIME-002"),
             (DiagnosticCode::ConflictingDurationSources, "ONM-TIME-003"),
@@ -213,6 +222,7 @@ mod tests {
             (DiagnosticCode::FrameConversionOverflow, "ONM-TIME-005"),
             (DiagnosticCode::EmptyFilm, "ONM-TIME-006"),
             (DiagnosticCode::SourceIntervalOutsideAsset, "ONM-TIME-007"),
+            (DiagnosticCode::TransitionOutsideShots, "ONM-TIME-008"),
             (DiagnosticCode::MissingMediaSource, "ONM-ASSET-001"),
             (DiagnosticCode::IncompatibleMediaSource, "ONM-ASSET-002"),
             (DiagnosticCode::UnknownCueReference, "ONM-REF-001"),

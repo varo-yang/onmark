@@ -16,11 +16,27 @@ pub struct TimelineVersion(u16);
 
 impl TimelineVersion {
     /// Only Timeline IR version accepted by this build.
-    pub const CURRENT: Self = Self(2);
+    pub const CURRENT: Self = Self(3);
 
     /// Returns the stable integer representation.
     #[must_use]
     pub const fn get(self) -> u16 {
+        self.0
+    }
+}
+
+/// Dense screenplay-order identity for one shot in a Timeline IR.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct TimelineShotIndex(usize);
+
+impl TimelineShotIndex {
+    pub(crate) const fn new(value: usize) -> Self {
+        Self(value)
+    }
+
+    /// Returns the dense position within this Timeline IR.
+    #[must_use]
+    pub const fn get(self) -> usize {
         self.0
     }
 }
@@ -99,6 +115,13 @@ impl TimelineIr {
     /// Returns shots in screenplay order without exposing the scene walk.
     pub fn shots(&self) -> impl Iterator<Item = &TimelineShot> {
         self.scenes.iter().flat_map(|scene| &scene.shots)
+    }
+
+    /// Returns shots with their dense screenplay-order identities.
+    pub fn indexed_shots(&self) -> impl Iterator<Item = (TimelineShotIndex, &TimelineShot)> {
+        self.shots()
+            .enumerate()
+            .map(|(index, shot)| (TimelineShotIndex::new(index), shot))
     }
 
     /// Returns primary videos in screenplay order without exposing tree walks.
@@ -303,6 +326,7 @@ impl TimelineScene {
 pub struct TimelineShot {
     element: TimelineElement,
     timing: TimelineTiming,
+    incoming_transition: Option<TimelineTransition>,
     content: Vec<TimelineContent>,
 }
 
@@ -310,11 +334,13 @@ impl TimelineShot {
     pub(crate) const fn new(
         element: TimelineElement,
         timing: TimelineTiming,
+        incoming_transition: Option<TimelineTransition>,
         content: Vec<TimelineContent>,
     ) -> Self {
         Self {
             element,
             timing,
+            incoming_transition,
             content,
         }
     }
@@ -331,10 +357,61 @@ impl TimelineShot {
         &self.timing
     }
 
+    /// Returns the solved overlap with the preceding shot.
+    #[must_use]
+    pub const fn incoming_transition(&self) -> Option<&TimelineTransition> {
+        self.incoming_transition.as_ref()
+    }
+
     /// Returns shot content in authored order.
     #[must_use]
     pub fn content(&self) -> &[TimelineContent] {
         &self.content
+    }
+}
+
+/// One solved overlap between this shot and its predecessor.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TimelineTransition {
+    element: TimelineElement,
+    timing: TimelineTiming,
+}
+
+impl TimelineTransition {
+    pub(crate) const fn new(
+        element: TimelineElement,
+        interval: FrameInterval,
+        authored_at: SourceSpan,
+    ) -> Self {
+        Self {
+            element,
+            timing: TimelineTiming::new(
+                interval,
+                TimingReason::Transition(authored_at),
+                TimingReason::Sequential,
+            ),
+        }
+    }
+
+    /// Returns the transition identity and source facts.
+    #[must_use]
+    pub const fn element(&self) -> &TimelineElement {
+        &self.element
+    }
+
+    /// Returns the exact overlap interval.
+    #[must_use]
+    pub const fn timing(&self) -> &TimelineTiming {
+        &self.timing
+    }
+
+    /// Returns the authored duration that established this overlap.
+    #[must_use]
+    pub fn authored_at(&self) -> SourceSpan {
+        let TimingReason::Transition(span) = self.timing.start_reason() else {
+            unreachable!("TimelineTransition constructs its own start reason");
+        };
+        *span
     }
 }
 
@@ -350,7 +427,9 @@ pub enum TimelineContent {
 }
 
 impl TimelineContent {
-    fn as_video(&self) -> Option<&TimelineVideo> {
+    /// Returns the video placement when this content owns primary video.
+    #[must_use]
+    pub const fn as_video(&self) -> Option<&TimelineVideo> {
         match self {
             Self::Video(video) => Some(video),
             Self::VoiceOver(_) | Self::Overlay(_) => None,
@@ -687,6 +766,8 @@ pub enum TimingReason {
     FilmStart,
     /// The end of the preceding sequential element.
     Sequential,
+    /// An authored transition overlaps this boundary with the preceding shot.
+    Transition(SourceSpan),
     /// The owning shot's start frame.
     ShotStart,
     /// An authored delay from the owning shot.
@@ -721,6 +802,7 @@ impl TimingReason {
         match self {
             Self::FilmStart => "filmStart",
             Self::Sequential => "sequential",
+            Self::Transition(_) => "transition",
             Self::ShotStart => "shotStart",
             Self::AuthoredDelay(_) => "authoredDelay",
             Self::Event { .. } => "event",
@@ -739,6 +821,7 @@ impl TimingReason {
     pub const fn authored_at(&self) -> Option<SourceSpan> {
         match self {
             Self::AuthoredDelay(span)
+            | Self::Transition(span)
             | Self::ExplicitDuration(span)
             | Self::LongestContent(span) => Some(*span),
             Self::Event { authored_at, .. } => Some(*authored_at),
@@ -760,6 +843,7 @@ impl TimingReason {
             Self::Event { event, .. } => Some(event),
             Self::FilmStart
             | Self::Sequential
+            | Self::Transition(_)
             | Self::ShotStart
             | Self::AuthoredDelay(_)
             | Self::ExplicitDuration(_)

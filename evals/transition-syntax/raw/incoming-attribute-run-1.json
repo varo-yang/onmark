@@ -1,0 +1,44 @@
+{
+  "results": [
+    {
+      "caseId": "one-boundary",
+      "screenplay": "<om-film>\n  <om-scene>\n    <om-shot id=\"intro\">\n      <video src=\"media/intro.mp4\"></video>\n    </om-shot>\n    <om-shot id=\"product\" transition-in=\"500ms\">\n      <video src=\"media/product.mp4\"></video>\n    </om-shot>\n  </om-scene>\n</om-film>"
+    },
+    {
+      "caseId": "middle-boundary-only",
+      "screenplay": "<om-film>\n  <om-scene>\n    <om-shot id=\"problem\">\n      <video src=\"media/problem.mp4\"></video>\n    </om-shot>\n    <om-shot id=\"bridge\">\n      <video src=\"media/bridge.mp4\"></video>\n    </om-shot>\n    <om-shot id=\"answer\" transition-in=\"350ms\">\n      <video src=\"media/answer.mp4\"></video>\n    </om-shot>\n  </om-scene>\n</om-film>"
+    },
+    {
+      "caseId": "two-boundaries",
+      "screenplay": "<om-film>\n  <om-scene>\n    <om-shot id=\"first\">\n      <video src=\"media/first.mp4\"></video>\n    </om-shot>\n    <om-shot id=\"second\" transition-in=\"250ms\">\n      <video src=\"media/second.mp4\"></video>\n    </om-shot>\n    <om-shot id=\"third\" transition-in=\"600ms\">\n      <video src=\"media/third.mp4\"></video>\n    </om-shot>\n  </om-scene>\n</om-film>"
+    },
+    {
+      "caseId": "hard-cuts-only",
+      "screenplay": "<om-film>\n  <om-scene>\n    <om-shot id=\"a\">\n      <video src=\"media/a.mp4\"></video>\n    </om-shot>\n    <om-shot id=\"b\">\n      <video src=\"media/b.mp4\"></video>\n    </om-shot>\n    <om-shot id=\"c\">\n      <video src=\"media/c.mp4\"></video>\n    </om-shot>\n  </om-scene>\n</om-film>"
+    },
+    {
+      "caseId": "insert-shot",
+      "screenplay": "<om-film>\n  <om-scene>\n    <om-shot id=\"before\">\n      <video src=\"media/before.mp4\"></video>\n    </om-shot>\n    <om-shot id=\"inserted\">\n      <video src=\"media/inserted.mp4\"></video>\n    </om-shot>\n    <om-shot id=\"after\" transition-in=\"400ms\">\n      <video src=\"media/after.mp4\"></video>\n    </om-shot>\n  </om-scene>\n</om-film>"
+    },
+    {
+      "caseId": "remove-transition",
+      "screenplay": "<om-film>\n  <om-scene>\n    <om-shot id=\"open\">\n      <video src=\"media/open.mp4\"></video>\n    </om-shot>\n    <om-shot id=\"detail\" transition-in=\"300ms\">\n      <video src=\"media/detail.mp4\"></video>\n    </om-shot>\n    <om-shot id=\"close\">\n      <video src=\"media/close.mp4\"></video>\n    </om-shot>\n  </om-scene>\n</om-film>"
+    },
+    {
+      "caseId": "retime-transition",
+      "screenplay": "<om-film>\n  <om-scene>\n    <om-shot id=\"question\">\n      <video src=\"media/question.mp4\"></video>\n    </om-shot>\n    <om-shot id=\"reveal\" transition-in=\"750ms\">\n      <video src=\"media/reveal.mp4\"></video>\n    </om-shot>\n  </om-scene>\n</om-film>"
+    },
+    {
+      "caseId": "reorder-shots",
+      "screenplay": "<om-film>\n  <om-scene>\n    <om-shot id=\"beta\">\n      <video src=\"media/beta.mp4\"></video>\n    </om-shot>\n    <om-shot id=\"alpha\">\n      <video src=\"media/alpha.mp4\"></video>\n    </om-shot>\n    <om-shot id=\"gamma\" transition-in=\"300ms\">\n      <video src=\"media/gamma.mp4\"></video>\n    </om-shot>\n  </om-scene>\n</om-film>"
+    },
+    {
+      "caseId": "separate-accents",
+      "screenplay": "<om-film>\n  <om-scene>\n    <om-shot id=\"one\">\n      <video src=\"media/one.mp4\"></video>\n    </om-shot>\n    <om-shot id=\"two\" transition-in=\"200ms\">\n      <video src=\"media/two.mp4\"></video>\n    </om-shot>\n    <om-shot id=\"three\">\n      <video src=\"media/three.mp4\"></video>\n    </om-shot>\n    <om-shot id=\"four\" transition-in=\"550ms\">\n      <video src=\"media/four.mp4\"></video>\n    </om-shot>\n  </om-scene>\n</om-film>"
+    },
+    {
+      "caseId": "short-transition",
+      "screenplay": "<om-film>\n  <om-scene>\n    <om-shot id=\"flash\">\n      <video src=\"media/flash.mp4\"></video>\n    </om-shot>\n    <om-shot id=\"mark\" transition-in=\"100ms\">\n      <video src=\"media/mark.mp4\"></video>\n    </om-shot>\n  </om-scene>\n</om-film>"
+    }
+  ]
+}

@@ -36,6 +36,9 @@ const WIDTH: u32 = 320;
 const HEIGHT: u32 = 180;
 const FRAME_COUNT: u64 = 75;
 const TWO_UNIT_FRAME_COUNT: u64 = 60;
+const ONE_SHOT_PROJECTION: &[&[u32]] = &[&[0]];
+const TWO_SHOT_PROJECTION: &[&[u32]] = &[&[0], &[1]];
+const TRANSITION_PROJECTION: &[&[u32]] = &[&[0], &[0, 1], &[1]];
 const UNIT_ROOT_FILE_LIMIT: usize = 16;
 const TEMPORAL_SEEK_SEQUENCE: [u64; 4] = [17, 3, 29, 17];
 const MICROS_PER_SECOND: i64 = 1_000_000;
@@ -496,6 +499,7 @@ async fn preserves_alpha_across_whole_partitioned_and_worker_output() {
         "randomAccess",
         "browserComposite",
         "perFrame",
+        TWO_SHOT_PROJECTION,
     )
     .await;
     let local =
@@ -558,6 +562,7 @@ async fn isolates_one_authored_html_edit_to_its_render_partition() {
         "randomAccess",
         "browserComposite",
         "placementBounded",
+        TWO_SHOT_PROJECTION,
     )
     .await;
     let edited_bundle = FixtureBundle::build_from(
@@ -567,6 +572,7 @@ async fn isolates_one_authored_html_edit_to_its_render_partition() {
         "randomAccess",
         "browserComposite",
         "placementBounded",
+        TWO_SHOT_PROJECTION,
     )
     .await;
     let baseline = StaticPartitionFixture::materialize(&baseline_source, &baseline_bundle);
@@ -618,6 +624,7 @@ async fn retains_exact_motion_across_partition_evaluations() {
         "randomAccess",
         "browserComposite",
         "perFrame",
+        TWO_SHOT_PROJECTION,
     )
     .await;
     let fixture = StaticPartitionFixture::materialize(&source, &bundle);
@@ -632,6 +639,42 @@ async fn retains_exact_motion_across_partition_evaluations() {
     )
     .await
     .expect("partition evaluations must retain exact local motion");
+}
+
+#[tokio::test]
+#[ignore = "requires ONMARK_BUNDLER, ONMARK_FFMPEG, and a supported browser"]
+async fn transition_regions_match_the_whole_film_pixel_sequence() {
+    let directory = tempdir().expect("the experiment workspace must be available");
+    let source = directory.path().join("transition.html");
+    fs::write(&source, transition_partition_source())
+        .expect("the transition source must be writable");
+    let bundle = FixtureBundle::build_from(
+        directory.path(),
+        "transition-bundle",
+        &source,
+        "randomAccess",
+        "browserComposite",
+        "perFrame",
+        TRANSITION_PROJECTION,
+    )
+    .await;
+    let fixture = StaticPartitionFixture::materialize_with_region_count(
+        &source,
+        &bundle,
+        render_profile(),
+        3,
+    );
+    let executor = layered_executor(45);
+
+    let captured =
+        capture_static_fixture(&executor, directory.path(), "transition", &fixture).await;
+
+    FrameArtifact::verify_raw_rgba_equivalence(
+        std::slice::from_ref(&captured.whole),
+        &captured.partitions,
+    )
+    .await
+    .expect("transition regions must reproduce their whole-film pixels");
 }
 
 #[tokio::test]
@@ -652,6 +695,7 @@ async fn shot_projection_blocks_cross_partition_css_observation() {
         "randomAccess",
         "browserComposite",
         "placementBounded",
+        TWO_SHOT_PROJECTION,
     )
     .await;
     let edited_bundle = FixtureBundle::build_from(
@@ -661,6 +705,7 @@ async fn shot_projection_blocks_cross_partition_css_observation() {
         "randomAccess",
         "browserComposite",
         "placementBounded",
+        TWO_SHOT_PROJECTION,
     )
     .await;
     let baseline = StaticPartitionFixture::materialize(&baseline_source, &baseline_bundle);
@@ -782,6 +827,43 @@ export const motion = combineMotion(
     },
   }),
 );
+</script>
+</body></html>
+"#
+}
+
+fn transition_partition_source() -> &'static str {
+    r#"<!doctype html>
+<html><head><style>
+html, body, om-film, om-scene, om-shot {
+  display: block; height: 100%; margin: 0; overflow: hidden; width: 100%;
+}
+om-scene { display: block; position: relative; }
+om-shot {
+  align-items: center;
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  position: absolute;
+}
+.outgoing { background: #ff593d; }
+.incoming { background: #315cff; }
+om-title { color: white; font: 700 28px sans-serif; }
+</style></head><body>
+<om-film><om-scene>
+  <om-shot class="outgoing" duration="1s"><om-title>Outgoing</om-title></om-shot>
+  <om-transition duration="500ms"></om-transition>
+  <om-shot class="incoming" duration="1s"><om-title>Incoming</om-title></om-shot>
+</om-scene></om-film>
+<script type="module" data-om-motion>
+import { frameMotion } from "onmark/authoring";
+
+export const motion = frameMotion({
+  transition({ incomingElement, outgoingElement, progress }) {
+    outgoingElement.style.transform = `translateX(${-100 * progress}%)`;
+    incomingElement.style.transform = `translateX(${100 * (1 - progress)}%)`;
+  },
+});
 </script>
 </body></html>
 "#
@@ -1753,13 +1835,22 @@ struct StaticPartitionFixture {
 
 impl StaticPartitionFixture {
     fn materialize(source: &Path, bundle: &FixtureBundle) -> Self {
-        Self::materialize_with_profile(source, bundle, render_profile())
+        Self::materialize_with_region_count(source, bundle, render_profile(), 2)
     }
 
     fn materialize_with_profile(
         source: &Path,
         bundle: &FixtureBundle,
         profile: RenderProfile,
+    ) -> Self {
+        Self::materialize_with_region_count(source, bundle, profile, 2)
+    }
+
+    fn materialize_with_region_count(
+        source: &Path,
+        bundle: &FixtureBundle,
+        profile: RenderProfile,
+        expected_regions: usize,
     ) -> Self {
         let source =
             fs::read_to_string(source).expect("the static presentation source must be readable");
@@ -1770,8 +1861,8 @@ impl StaticPartitionFixture {
                 .into_partition();
         assert_eq!(
             partitions.units().len(),
-            2,
-            "the static fixture must produce two independent units",
+            expected_regions,
+            "the static fixture must produce its expected render regions",
         );
 
         let whole_film = RenderUnit::whole_film(&timeline, bundle.manifest.clone(), profile, [])
@@ -1784,7 +1875,7 @@ impl StaticPartitionFixture {
             profile,
             [],
         )
-        .expect("the static fixture forms two partition units")
+        .expect("the static fixture forms its partition units")
         .into_iter()
         .enumerate()
         .map(|(index, unit)| bundle.materialize_region(index, unit))
@@ -1885,6 +1976,20 @@ fn caption_track() -> onmark_core::model::CaptionTrack {
     track.expect("the fixture subtitle is valid")
 }
 
+fn write_projection(path: &Path, regions: &[&[u32]]) {
+    let regions = regions
+        .iter()
+        .map(|shot_indices| serde_json::json!({ "shotIndices": shot_indices }))
+        .collect::<Vec<_>>();
+    let projection = serde_json::json!({
+        "version": 1,
+        "regions": regions,
+    });
+    let encoded =
+        serde_json::to_vec(&projection).expect("the fixture projection must encode as JSON");
+    fs::write(path, encoded).expect("the fixture projection must be writable");
+}
+
 struct FixtureBundle {
     directory: PathBuf,
     manifest: BundleManifest,
@@ -1904,6 +2009,7 @@ impl FixtureBundle {
             "randomAccess",
             "browserComposite",
             "perFrame",
+            ONE_SHOT_PROJECTION,
         )
         .await
     }
@@ -1916,6 +2022,7 @@ impl FixtureBundle {
             "randomAccess",
             "browserComposite",
             "perFrame",
+            TWO_SHOT_PROJECTION,
         )
         .await
     }
@@ -1928,6 +2035,7 @@ impl FixtureBundle {
             "randomAccess",
             "separableOverlay",
             "placementBounded",
+            TWO_SHOT_PROJECTION,
         )
         .await
     }
@@ -1952,6 +2060,7 @@ impl FixtureBundle {
             "randomAccess",
             "separableOverlay",
             frame_behavior,
+            ONE_SHOT_PROJECTION,
         )
         .await
     }
@@ -1963,6 +2072,7 @@ impl FixtureBundle {
         temporal_capability: &str,
         visual_capability: &str,
         frame_behavior: &str,
+        projection: &[&[u32]],
     ) -> Self {
         Self::build_from(
             workspace,
@@ -1971,6 +2081,7 @@ impl FixtureBundle {
             temporal_capability,
             visual_capability,
             frame_behavior,
+            projection,
         )
         .await
     }
@@ -1982,14 +2093,19 @@ impl FixtureBundle {
         temporal_capability: &str,
         visual_capability: &str,
         frame_behavior: &str,
+        projection: &[&[u32]],
     ) -> Self {
         let directory = workspace.join(directory_name);
+        let projection_path = workspace.join(format!("{directory_name}-projection.json"));
+        write_projection(&projection_path, projection);
         let bundled = Command::new(required_path("ONMARK_BUNDLER"))
             .args(["--html"])
             .arg(document)
             .args(["--output"])
             .arg(&directory)
             .args(["--max-output-bytes", "2000000"])
+            .args(["--projection"])
+            .arg(&projection_path)
             .args(["--frame-behavior", frame_behavior])
             .args(["--temporal-capability", temporal_capability])
             .args(["--visual-capability", visual_capability])

@@ -9,6 +9,7 @@ import type {
 } from "./generated/browser-request.js";
 import type { BrowserResponse } from "./generated/browser-response.js";
 import {
+  BROWSER_PROTOCOL_VERSION,
   MAX_FAILURE_MESSAGE_CHARACTERS,
   MAX_PENDING_RESOURCE_CHARACTERS,
   MAX_PENDING_RESOURCES,
@@ -294,7 +295,11 @@ type OperationFailureCode = Exclude<
 >;
 
 function response(requestId: number, event: BrowserEvent): BrowserResponse {
-  return decodeBrowserResponse({ version: 3, requestId, event });
+  return decodeBrowserResponse({
+    version: BROWSER_PROTOCOL_VERSION,
+    requestId,
+    event,
+  });
 }
 
 function invalidRequest(requestId: number, message: string): BrowserResponse {
@@ -372,6 +377,7 @@ function planViolation(plan: BrowserPlan): string | undefined {
   if (
     !hasCanonicalNodeOrder(plan.scenes) ||
     !hasCanonicalNodeOrder(plan.shots) ||
+    !hasCanonicalNodeOrder(plan.transitions) ||
     !hasCanonicalNodeOrder(plan.videos) ||
     !hasCanonicalNodeOrder(plan.overlays)
   ) {
@@ -397,7 +403,7 @@ function planViolation(plan: BrowserPlan): string | undefined {
     sceneIntervals.set(scene.node.nodeId, scene.interval);
   }
 
-  const shotIntervals = new Map<number, BrowserPlan["timeline"]>();
+  const shots = new Map<number, PlanShot>();
   for (const shot of plan.shots) {
     const nodeViolation = claimNode(shot.node, nodeIds, authoredIds);
     if (nodeViolation !== undefined) {
@@ -413,7 +419,26 @@ function planViolation(plan: BrowserPlan): string | undefined {
     if (!insideInterval(shot.interval, sceneInterval)) {
       return "plan shot interval falls outside its scene";
     }
-    shotIntervals.set(shot.node.nodeId, shot.interval);
+    shots.set(shot.node.nodeId, {
+      interval: shot.interval,
+      order: shots.size,
+      sceneId: shot.sceneId,
+    });
+  }
+
+  for (const transition of plan.transitions) {
+    const nodeViolation = claimNode(transition.node, nodeIds, authoredIds);
+    if (nodeViolation !== undefined) {
+      return nodeViolation;
+    }
+    const relationViolation = transitionRelationViolation(
+      transition,
+      shots,
+      plan,
+    );
+    if (relationViolation !== undefined) {
+      return relationViolation;
+    }
   }
 
   for (const video of plan.videos) {
@@ -421,14 +446,14 @@ function planViolation(plan: BrowserPlan): string | undefined {
     if (nodeViolation !== undefined) {
       return nodeViolation;
     }
-    const shotInterval = shotIntervals.get(video.shotId);
-    if (shotInterval === undefined) {
+    const shot = shots.get(video.shotId);
+    if (shot === undefined) {
       return "plan video names an unknown shot";
     }
     if (!insideEvaluation(video.interval, plan.evaluation)) {
       return "plan video interval falls outside evaluation";
     }
-    if (!insideInterval(video.interval, shotInterval)) {
+    if (!insideInterval(video.interval, shot.interval)) {
       return "plan video interval falls outside its shot";
     }
     if (!videoSourceMappingIsValid(video, plan.frameRate)) {
@@ -441,7 +466,7 @@ function planViolation(plan: BrowserPlan): string | undefined {
     if (nodeViolation !== undefined) {
       return nodeViolation;
     }
-    const parentViolation = overlayParentViolation(overlay, shotIntervals);
+    const parentViolation = overlayParentViolation(overlay, shots);
     if (parentViolation !== undefined) {
       return parentViolation;
     }
@@ -451,6 +476,41 @@ function planViolation(plan: BrowserPlan): string | undefined {
   }
   if (!hasDenseNodeIdentity(nodeIds)) {
     return "plan node identity is not dense";
+  }
+  return undefined;
+}
+
+interface PlanShot {
+  readonly interval: BrowserPlan["timeline"];
+  readonly order: number;
+  readonly sceneId: number;
+}
+
+function transitionRelationViolation(
+  transition: BrowserPlan["transitions"][number],
+  shots: ReadonlyMap<number, PlanShot>,
+  plan: BrowserPlan,
+): string | undefined {
+  const outgoing = shots.get(transition.outgoingShotId);
+  const incoming = shots.get(transition.incomingShotId);
+  if (
+    outgoing === undefined ||
+    incoming === undefined ||
+    incoming.order !== outgoing.order + 1 ||
+    outgoing.sceneId !== incoming.sceneId
+  ) {
+    return "plan transition does not connect adjacent projected shots";
+  }
+  if (!validPlacement(transition.interval, plan.timeline, plan.evaluation)) {
+    return "plan transition interval is invalid for this evaluation";
+  }
+  if (
+    !insideInterval(transition.interval, outgoing.interval) ||
+    !insideInterval(transition.interval, incoming.interval) ||
+    transition.interval.start !== incoming.interval.start ||
+    transition.interval.end !== outgoing.interval.end
+  ) {
+    return "plan transition interval does not match its adjacent shot boundary";
   }
   return undefined;
 }
@@ -479,7 +539,7 @@ function hasCanonicalNodeOrder(
 
 function overlayParentViolation(
   overlay: BrowserPlan["overlays"][number],
-  shotIntervals: ReadonlyMap<number, BrowserPlan["timeline"]>,
+  shots: ReadonlyMap<number, PlanShot>,
 ): string | undefined {
   if (overlay.kind === "caption") {
     return overlay.shotId === undefined || overlay.shotId === null
@@ -489,11 +549,11 @@ function overlayParentViolation(
   if (overlay.shotId === undefined || overlay.shotId === null) {
     return "plan overlay names an unknown shot";
   }
-  const shotInterval = shotIntervals.get(overlay.shotId);
-  if (shotInterval === undefined) {
+  const shot = shots.get(overlay.shotId);
+  if (shot === undefined) {
     return "plan overlay names an unknown shot";
   }
-  if (!insideInterval(overlay.interval, shotInterval)) {
+  if (!insideInterval(overlay.interval, shot.interval)) {
     return "plan overlay interval falls outside its shot";
   }
   return undefined;
@@ -568,6 +628,7 @@ function snapshotPlan(plan: BrowserPlan): RuntimePlan {
   const film = snapshotNode(plan.film);
   const scenes = Object.freeze(plan.scenes.map(snapshotScene));
   const shots = Object.freeze(plan.shots.map(snapshotShot));
+  const transitions = Object.freeze(plan.transitions.map(snapshotTransition));
   const videos = Object.freeze(plan.videos.map(snapshotVideo));
   const overlays = Object.freeze(plan.overlays.map(snapshotOverlay));
 
@@ -580,8 +641,20 @@ function snapshotPlan(plan: BrowserPlan): RuntimePlan {
     film,
     scenes,
     shots,
+    transitions,
     videos,
     overlays,
+  });
+}
+
+function snapshotTransition(
+  transition: BrowserPlan["transitions"][number],
+): RuntimePlan["transitions"][number] {
+  return Object.freeze({
+    incomingShotId: transition.incomingShotId,
+    interval: Object.freeze({ ...transition.interval }),
+    node: snapshotNode(transition.node),
+    outgoingShotId: transition.outgoingShotId,
   });
 }
 

@@ -7,23 +7,27 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
 
 use onmark_aws_lambda::{CaptureInvocation, CaptureResult};
-use onmark_core::protocol::{BrowserRequest, BrowserResponse, BundleManifest};
+use onmark_core::protocol::{BrowserRequest, BrowserResponse, BundleManifest, BundleProjection};
 use schemars::{JsonSchema, schema_for};
 use serde_json::Value;
 
 pub(super) fn generate(repository: &Path, mode: GenerationMode) -> Result<(), Box<dyn Error>> {
     let artifacts = [
         SchemaArtifact::new::<BrowserRequest>(
-            "https://onmark.dev/schemas/browser-request-v3.schema.json",
-            "browser-request-v3.schema.json",
+            "https://onmark.dev/schemas/browser-request-v4.schema.json",
+            "browser-request-v4.schema.json",
         )?,
         SchemaArtifact::new::<BrowserResponse>(
-            "https://onmark.dev/schemas/browser-response-v3.schema.json",
-            "browser-response-v3.schema.json",
+            "https://onmark.dev/schemas/browser-response-v4.schema.json",
+            "browser-response-v4.schema.json",
         )?,
         SchemaArtifact::new::<BundleManifest>(
             "https://onmark.dev/schemas/bundle-manifest-v1.schema.json",
             "bundle-manifest-v1.schema.json",
+        )?,
+        SchemaArtifact::new::<BundleProjection>(
+            "https://onmark.dev/schemas/bundle-projection-v1.schema.json",
+            "bundle-projection-v1.schema.json",
         )?,
         SchemaArtifact::new::<CaptureInvocation>(
             "https://onmark.dev/schemas/aws-capture-invocation-v1.schema.json",

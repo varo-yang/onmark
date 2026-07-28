@@ -48,12 +48,17 @@ import {
   type BundleManifest as WireBundleManifest,
   type PresentationDocumentScope,
 } from "./generated/bundle-manifest.js";
+import type { BundleProjection as WireBundleProjection } from "./generated/bundle-projection.js";
 import {
   AuthoredHtmlError,
-  projectShotDocument,
+  projectRegionDocument,
   readAuthoredHtml,
   type AuthoredHtml,
 } from "./authored_html.js";
+import {
+  BundleProjectionError,
+  decodeBundleProjection,
+} from "./bundle_projection.js";
 import {
   HtmlImageError,
   HtmlImageLimitError,
@@ -102,18 +107,30 @@ export type BundleFile = Immutable<WireBundleFile>;
 /** Immutable view of the versioned Rust-owned bundle manifest. */
 export type BundleManifest = Immutable<WireBundleManifest>;
 
-/** Explicit inputs for one authored HTML document. */
-export interface BundleOptions {
-  /** Authored document or a private snapshot containing its exact bytes. */
+/** Immutable view of Rust-owned render-region shot selection. */
+export type BundleProjection = Immutable<WireBundleProjection>;
+
+interface BundleControls {
   readonly document: string;
-  /** Base for inline-module imports when `document` is a private snapshot. */
   readonly resolveDirectory?: string;
   readonly outputDirectory: string;
   readonly maxOutputBytes: number;
-  readonly temporalCapability: PresentationTemporalCapability;
   readonly visualCapability: PresentationVisualCapability;
   readonly frameBehavior: PresentationFrameBehavior;
 }
+
+/** Explicit inputs for one authored HTML document. */
+export type BundleOptions = BundleControls &
+  (
+    | {
+        readonly temporalCapability: "sequential";
+        readonly projection?: never;
+      }
+    | {
+        readonly temporalCapability: "randomAccess";
+        readonly projection: BundleProjection;
+      }
+  );
 
 /** Published directory and its owned immutable manifest snapshot. */
 export interface BundleArtifact {
@@ -152,14 +169,28 @@ interface PendingRegion {
   readonly manifest: BundleManifest;
 }
 
-interface BundleInput {
-  readonly html: AuthoredHtml;
+interface PreparedBundleControls {
   readonly outputDirectory: string;
   readonly maxOutputBytes: number;
-  readonly temporalCapability: PresentationTemporalCapability;
   readonly visualCapability: PresentationVisualCapability;
   readonly frameBehavior: PresentationFrameBehavior;
 }
+
+type BundleControlsSnapshot = PreparedBundleControls &
+  (
+    | {
+        readonly temporalCapability: "sequential";
+        readonly projection?: never;
+      }
+    | {
+        readonly temporalCapability: "randomAccess";
+        readonly projection: BundleProjection;
+      }
+  );
+
+type BundleInput = BundleControlsSnapshot & {
+  readonly html: AuthoredHtml;
+};
 
 type NonEmpty<T> = readonly [T, ...T[]];
 
@@ -169,12 +200,12 @@ type NonEmpty<T> = readonly [T, ...T[]];
 export async function bundlePresentation(
   options: BundleOptions,
 ): Promise<BundleArtifact> {
-  const maxOutputBytes = validateOutputByteLimit(options.maxOutputBytes);
+  const controls = snapshotControls(options);
   let html;
   try {
     html = await readAuthoredHtml(
       options.document,
-      maxOutputBytes,
+      controls.maxOutputBytes,
       options.resolveDirectory,
     );
   } catch (error) {
@@ -187,18 +218,15 @@ export async function bundlePresentation(
     throw error;
   }
 
-  return bundle({
-    html,
-    maxOutputBytes,
-    outputDirectory: options.outputDirectory,
-    temporalCapability: options.temporalCapability,
-    visualCapability: options.visualCapability,
-    frameBehavior: options.frameBehavior,
-  });
+  return bundle(
+    Object.freeze({
+      ...controls,
+      html: Object.freeze({ ...html }),
+    }),
+  );
 }
 
-async function bundle(options: BundleInput): Promise<BundleArtifact> {
-  const input = validateInput(options);
+async function bundle(input: BundleInput): Promise<BundleArtifact> {
   await requireAbsent(input.outputDirectory);
   await mkdir(dirname(input.outputDirectory), { recursive: true });
   const staging = await mkdtemp(
@@ -264,7 +292,7 @@ async function buildArtifact(
   });
 }
 
-function validateInput(options: BundleInput): BundleInput {
+function snapshotControls(options: BundleOptions): BundleControlsSnapshot {
   if (options.outputDirectory.length === 0) {
     throw new BundleError("configuration", "output directory cannot be empty");
   }
@@ -293,24 +321,66 @@ function validateInput(options: BundleInput): BundleInput {
     );
   }
 
-  return Object.freeze({
+  const input = {
     outputDirectory: resolve(options.outputDirectory),
     maxOutputBytes: options.maxOutputBytes,
-    html: Object.freeze({ ...options.html }),
-    temporalCapability,
     visualCapability,
     frameBehavior,
+  };
+  return temporalCapability === "randomAccess"
+    ? Object.freeze({
+        ...input,
+        projection: snapshotProjection(requireProjection(options.projection)),
+        temporalCapability,
+      })
+    : Object.freeze({ ...input, temporalCapability });
+}
+
+function requireProjection(
+  projection: BundleProjection | undefined,
+): BundleProjection {
+  if (projection === undefined) {
+    throw new BundleError(
+      "configuration",
+      "random-access presentation requires a bundle projection",
+    );
+  }
+  return projection;
+}
+
+function snapshotProjection(projection: BundleProjection): BundleProjection {
+  try {
+    projection = decodeBundleProjection(projection);
+  } catch (error) {
+    if (error instanceof BundleProjectionError) {
+      throw new BundleError("configuration", error.message, error);
+    }
+    throw error;
+  }
+  const [first, ...rest] = projection.regions;
+  const regions = [
+    snapshotProjectionRegion(first),
+    ...rest.map(snapshotProjectionRegion),
+  ] satisfies BundleProjection["regions"];
+  return Object.freeze({
+    version: projection.version,
+    regions: Object.freeze(regions),
   });
 }
 
-function validateOutputByteLimit(value: number): number {
-  if (!Number.isSafeInteger(value) || value <= 0) {
-    throw new BundleError(
-      "configuration",
-      "maximum output bytes must be a positive safe integer",
-    );
-  }
-  return value;
+function snapshotProjectionRegion(
+  region: BundleProjection["regions"][number],
+): BundleProjection["regions"][number] {
+  return Object.freeze({
+    shotIndices: snapshotShotIndices(region.shotIndices),
+  });
+}
+
+function snapshotShotIndices(
+  indices: readonly [number, ...number[]],
+): readonly [number, ...number[]] {
+  const [first, ...rest] = indices;
+  return Object.freeze([first, ...rest]);
 }
 
 function validateTemporalCapability(
@@ -648,14 +718,14 @@ async function writeRegionArtifacts(
     return [];
   }
   validateRegionCount(
-    input.html.regions.length,
+    input.projection.regions.length,
     generated.length + resources.length,
   );
 
   let remaining = initialBudget;
   const regions: PendingRegion[] = [];
-  for (const [index, region] of input.html.regions.entries()) {
-    const document = projectShotDocument(input.html, region);
+  for (const [index, region] of input.projection.regions.entries()) {
+    const document = projectRegionDocument(input.html, region.shotIndices);
     const files = presentationFiles(
       [
         ...generated,
@@ -675,7 +745,7 @@ async function writeRegionArtifacts(
     const manifestBytes = encodeManifest(manifest);
     const entry = files.find((file) => file.path === BUNDLE_ENTRY_POINT);
     if (entry === undefined) {
-      throw new BundleError("build", "shot-scoped bundle has no entry point");
+      throw new BundleError("build", "render-region bundle has no entry point");
     }
     remaining = consumeOutputBudget(remaining, entry.contents.byteLength);
     remaining = consumeOutputBudget(remaining, manifestBytes.byteLength);
@@ -709,14 +779,14 @@ function validateRegionCount(regions: number, generated: number): void {
   if (regions > MAX_REGION_ARTIFACTS) {
     throw new BundleError(
       "outputLimit",
-      "presentation exceeds the shot-scoped bundle limit",
+      "presentation exceeds the render-region bundle limit",
     );
   }
   const links = regions * generated;
   if (!Number.isSafeInteger(links) || links > MAX_REGION_LINKS) {
     throw new BundleError(
       "outputLimit",
-      "presentation exceeds the shot-scoped bundle file limit",
+      "presentation exceeds the render-region bundle file limit",
     );
   }
 }

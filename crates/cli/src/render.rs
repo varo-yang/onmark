@@ -100,10 +100,10 @@ impl fmt::Display for RenderTimings {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             formatter,
-            "prepare {} ms, bundle {} ms, plan {} ms, capture {} ms, assemble {} ms, total {} ms",
+            "prepare {} ms, plan {} ms, bundle {} ms, capture {} ms, assemble {} ms, total {} ms",
             self.prepare.as_millis(),
-            self.bundle.as_millis(),
             self.plan.as_millis(),
+            self.bundle.as_millis(),
             self.capture.as_millis(),
             self.assemble.as_millis(),
             self.total.as_millis(),
@@ -359,19 +359,24 @@ async fn execute_render(
         executables,
         elapsed: prepare,
     } = prepared;
+    progress.started("plan")?;
+    let plan_started = Instant::now();
+    let bundler = PresentationBundler::new(executables.bundler);
+    let partitions =
+        RenderGraph::from_timeline(&timeline, PresentationBundler::temporal_capability())?
+            .into_partition();
+    let plan = plan_started.elapsed();
+    progress.completed("plan", plan)?;
+
     progress.started("bundle")?;
     let bundle_started = Instant::now();
-    let bundle_artifact = PresentationBundler::new(executables.bundler)
-        .bundle(&source, source_directory(&args.screenplay))
+    let bundle_artifact = bundler
+        .bundle(&source, source_directory(&args.screenplay), &partitions)
         .await?;
     let bundle = bundle_started.elapsed();
     progress.completed("bundle", bundle)?;
 
-    progress.started("plan")?;
-    let plan_started = Instant::now();
-    let (partitions, units) = materialize_units(&timeline, profile, &bundle_artifact, frozen)?;
-    let plan = plan_started.elapsed();
-    progress.completed("plan", plan)?;
+    let units = materialize_units(&timeline, profile, &partitions, &bundle_artifact, frozen)?;
 
     let graphics_backend = args
         .graphics_backend()
@@ -422,12 +427,11 @@ fn read_screenplay(args: &RenderArgs) -> Result<String, CliError> {
 fn materialize_units(
     timeline: &TimelineIr,
     profile: RenderProfile,
+    partitions: &PartitionPlan,
     bundle: &BundleArtifact,
     frozen: FrozenCatalog,
-) -> Result<(PartitionPlan, Vec<ExecutableUnit>), CliError> {
+) -> Result<Vec<ExecutableUnit>, CliError> {
     let materialized = frozen.into_materialized()?;
-    let partitions = RenderGraph::from_timeline(timeline, bundle.manifest().temporal_capability())?
-        .into_partition();
     let regions = (0..partitions.units().len())
         .map(|index| bundle.region(index))
         .collect::<Result<Vec<_>, _>>()?;
@@ -435,7 +439,7 @@ fn materialize_units(
         regions.into_iter().map(BundleRegion::into_parts).unzip();
     let planned = RenderUnit::from_partitioned_bundles(
         timeline,
-        &partitions,
+        partitions,
         manifests,
         profile,
         materialized.assets().iter().cloned(),
@@ -448,7 +452,7 @@ fn materialize_units(
         })
         .collect::<Result<Vec<_>, _>>()?;
 
-    Ok((partitions, units))
+    Ok(units)
 }
 
 fn reject_existing_output(output: &Path) -> Result<(), CliError> {

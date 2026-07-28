@@ -16,15 +16,16 @@ use crate::model::{
 };
 use crate::timeline::{
     TimelineAudio, TimelineAudioKind, TimelineContent, TimelineElement, TimelineEvent, TimelineIr,
-    TimelineOverlay, TimelineScene, TimelineShot, TimelineText, TimelineTiming, TimelineVideo,
-    TimelineVoiceOver, TimingReason,
+    TimelineOverlay, TimelineScene, TimelineShot, TimelineText, TimelineTiming, TimelineTransition,
+    TimelineVideo, TimelineVoiceOver, TimingReason,
 };
 
 use super::diagnostic::author_diagnostic;
 use super::resolved_film::{
     Authored, ResolvedAudio, ResolvedCues, ResolvedElement, ResolvedFilm, ResolvedFilmParts,
     ResolvedMedia, ResolvedOverlay, ResolvedScene, ResolvedShot, ResolvedShotContent,
-    ResolvedStart, ResolvedText, ResolvedVideo, ResolvedVideoTreatment, ResolvedVoiceOver,
+    ResolvedShotParts, ResolvedStart, ResolvedText, ResolvedTransition, ResolvedVideo,
+    ResolvedVideoTreatment, ResolvedVoiceOver,
 };
 
 /// Optional Timeline IR and the authored diagnostics produced while solving it.
@@ -177,7 +178,8 @@ impl<'a> Solver<'a> {
         let mut timeline_shots = Vec::with_capacity(shots.len());
 
         for shot in shots {
-            if let Some(shot) = self.solve_shot(shot)? {
+            let previous = timeline_shots.last().map(PreviousShot::from_timeline);
+            if let Some(shot) = self.solve_shot(shot, previous)? {
                 timeline_shots.push(shot);
             }
         }
@@ -192,22 +194,54 @@ impl<'a> Solver<'a> {
         Ok(TimelineScene::new(element, timing, timeline_shots))
     }
 
-    fn solve_shot(&mut self, shot: ResolvedShot) -> Result<Option<TimelineShot>, SolveError> {
-        let (element, duration, content, sound_effects) = shot.into_parts();
+    fn solve_shot(
+        &mut self,
+        shot: ResolvedShot,
+        previous: Option<PreviousShot>,
+    ) -> Result<Option<TimelineShot>, SolveError> {
+        let ResolvedShotParts {
+            element,
+            transition,
+            duration,
+            content,
+            sound_effects,
+        } = shot.into_parts();
         let source = element.span();
         let prepared = self.prepare_contents(content)?;
         let sound_effects = self.prepare_audio_tracks(sound_effects)?;
         let explicit = self.explicit_duration(duration);
         let duration = self.shot_duration(explicit, prepared.primary, source);
-        let Some(timing) = self.place_shot(duration, source) else {
+        let transition = self.prepare_transition(transition);
+        let Some(placement) = self.place_shot(duration, transition, previous, source) else {
             return Ok(None);
         };
-        let content = self.lower_contents(prepared.content, timing.interval());
-        self.lower_sound_effects(sound_effects, timing.interval());
+        let content = self.lower_contents(prepared.content, placement.timing.interval());
+        self.lower_sound_effects(sound_effects, placement.timing.interval());
         let element = timeline_element(element);
-        let shot = TimelineShot::new(element, timing, content);
+        let shot = TimelineShot::new(
+            element,
+            placement.timing,
+            placement.incoming_transition,
+            content,
+        );
 
         Ok(Some(shot))
+    }
+
+    fn prepare_transition(
+        &mut self,
+        transition: Option<ResolvedTransition>,
+    ) -> Option<PreparedTransition> {
+        let transition = transition?;
+        let (element, duration) = transition.into_parts();
+        let (duration, authored_at) = duration.into_parts();
+        let frames = frames_for(self.timebase, duration, authored_at, &mut self.diagnostics)?;
+
+        Some(PreparedTransition {
+            element,
+            frames,
+            authored_at,
+        })
     }
 
     fn prepare_contents(
@@ -255,27 +289,81 @@ impl<'a> Solver<'a> {
     fn place_shot(
         &mut self,
         duration: Option<ShotDuration>,
+        transition: Option<PreparedTransition>,
+        previous: Option<PreviousShot>,
         source: SourceSpan,
-    ) -> Option<TimelineTiming> {
-        let (start, start_reason) = self.cursor.next_shot()?;
+    ) -> Option<ShotPlacement> {
+        let (sequential_start, sequential_reason) = self.cursor.next_shot()?;
 
         let Some(duration) = duration else {
             self.rejected_shot_timing = true;
-            self.cursor = PlacementCursor::Lost(start);
+            self.cursor = PlacementCursor::Lost(sequential_start);
             return None;
         };
-        let Some(end) = advance(start, duration.frames, source, &mut self.diagnostics) else {
+        let start = self.place_transition(
+            transition,
+            previous,
+            sequential_start,
+            sequential_reason,
+            duration.frames,
+        );
+        let Some(end) = advance(start.at, duration.frames, source, &mut self.diagnostics) else {
             self.rejected_shot_timing = true;
-            self.cursor = PlacementCursor::Lost(start);
+            self.cursor = PlacementCursor::Lost(start.at);
             return None;
         };
 
         self.cursor = PlacementCursor::Sequential(end);
-        Some(TimelineTiming::new(
-            interval(start, end),
-            start_reason,
-            duration.reason,
-        ))
+        Some(ShotPlacement {
+            timing: TimelineTiming::new(interval(start.at, end), start.reason, duration.reason),
+            incoming_transition: start.incoming_transition,
+        })
+    }
+
+    fn place_transition(
+        &mut self,
+        transition: Option<PreparedTransition>,
+        previous: Option<PreviousShot>,
+        sequential_start: FrameIndex,
+        sequential_reason: TimingReason,
+        shot_duration: FrameCount,
+    ) -> ShotStart {
+        let Some(transition) = transition else {
+            return ShotStart::sequential(sequential_start, sequential_reason);
+        };
+        let Some(previous) = previous else {
+            self.diagnostics
+                .push(transition_outside_shots(transition.authored_at));
+            return ShotStart::sequential(sequential_start, sequential_reason);
+        };
+        if transition.frames > previous.interval.len() || transition.frames > shot_duration {
+            self.diagnostics
+                .push(transition_outside_shots(transition.authored_at));
+            return ShotStart::sequential(sequential_start, sequential_reason);
+        }
+
+        let start = FrameIndex::new(sequential_start.get() - transition.frames.get());
+        if let Some(incoming) = previous
+            .incoming_transition
+            .filter(|incoming| incoming.interval.end() > start)
+        {
+            self.diagnostics.push(overlapping_transitions(
+                transition.authored_at,
+                incoming.authored_at,
+            ));
+            return ShotStart::sequential(sequential_start, sequential_reason);
+        }
+
+        let incoming_transition = TimelineTransition::new(
+            timeline_element(transition.element),
+            interval(start, sequential_start),
+            transition.authored_at,
+        );
+        ShotStart {
+            at: start,
+            reason: TimingReason::Transition(transition.authored_at),
+            incoming_transition: Some(incoming_transition),
+        }
     }
 
     fn prepare_content(
@@ -736,6 +824,61 @@ impl ShotDuration {
     }
 }
 
+/// Typed transition duration before its adjacent shot intervals are known.
+struct PreparedTransition {
+    element: ResolvedElement,
+    frames: FrameCount,
+    authored_at: SourceSpan,
+}
+
+struct ShotPlacement {
+    timing: TimelineTiming,
+    incoming_transition: Option<TimelineTransition>,
+}
+
+struct ShotStart {
+    at: FrameIndex,
+    reason: TimingReason,
+    incoming_transition: Option<TimelineTransition>,
+}
+
+impl ShotStart {
+    fn sequential(at: FrameIndex, reason: TimingReason) -> Self {
+        Self {
+            at,
+            reason,
+            incoming_transition: None,
+        }
+    }
+}
+
+/// Solved facts required to admit one transition into the next shot.
+#[derive(Clone, Copy)]
+struct PreviousShot {
+    interval: FrameInterval,
+    incoming_transition: Option<PreviousTransition>,
+}
+
+#[derive(Clone, Copy)]
+struct PreviousTransition {
+    interval: FrameInterval,
+    authored_at: SourceSpan,
+}
+
+impl PreviousShot {
+    fn from_timeline(shot: &TimelineShot) -> Self {
+        Self {
+            interval: shot.timing().interval(),
+            incoming_transition: shot
+                .incoming_transition()
+                .map(|transition| PreviousTransition {
+                    interval: transition.timing().interval(),
+                    authored_at: transition.authored_at(),
+                }),
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 struct PrimaryEnd {
     frames: FrameCount,
@@ -1071,6 +1214,29 @@ fn source_interval_outside_asset(
         ),
         "choose a non-empty trim interval within the frozen video duration",
     )
+}
+
+fn transition_outside_shots(primary: SourceSpan) -> Diagnostic {
+    author_diagnostic(
+        DiagnosticCode::TransitionOutsideShots,
+        primary,
+        "transition duration does not fit within both adjacent shots",
+        "shorten the transition or lengthen the adjacent shots",
+    )
+}
+
+fn overlapping_transitions(primary: SourceSpan, previous: SourceSpan) -> Diagnostic {
+    author_diagnostic(
+        DiagnosticCode::TransitionOutsideShots,
+        primary,
+        "transition overlaps the preceding transition within their shared shot",
+        "shorten one transition so their overlap windows do not intersect",
+    )
+    .with_related(
+        previous,
+        "the preceding transition starts this shared-shot overlap",
+    )
+    .expect("the static transition relation is non-blank")
 }
 
 fn missing_duration_source(primary: SourceSpan) -> Diagnostic {

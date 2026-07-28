@@ -1,0 +1,7 @@
+# onmark diagnostic test rendering; not a wire format
+ONM-STRUCT-007 error @0:28..41 transition must appear between two adjacent shots
+  help: move <om-transition> between the two shots it connects
+ONM-STRUCT-007 error @0:172..185 transition must appear between two adjacent shots
+  help: move <om-transition> between the two shots it connects
+ONM-STRUCT-007 error @0:263..276 transition must appear between two adjacent shots
+  help: move <om-transition> between the two shots it connects

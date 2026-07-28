@@ -1,6 +1,6 @@
 # Onmark 语言规格书
 
-> 状态：当前剧本语言已覆盖 Gate 七及分布式增量渲染。Gate 四是最后一个新增剧本拼写的已完成关卡；后续工作只改变 presentation 与 execution。延后语言能力会被明确列出，不与当前语义混写。
+> 状态：当前剧本语言已覆盖进行中的 Gate 八及分布式增量渲染。Gate 八只接纳具有 checked-in 生成证据的新拼写；延后能力会被明确列出，不与当前语义混写。
 
 ## 1. 语言为什么存在
 
@@ -38,6 +38,7 @@ Onmark 语言的目标不是用另一套标签重画时间轴，而是让创作�
 | `cue`   | 有名字的时间事件                   | 显式对齐来源      |
 | `scene` | 叙事段落                           | 顺序容器          |
 | `shot`  | 一次连续画面表达                   | 基本顺序单元      |
+| `transition` | 相邻 shot 之间的显式过渡关系 | shot 重叠边界     |
 | `video` | 当前唯一的视觉媒体元素             | 主内容时长来源    |
 | `vo`    | 旁白铭文及对应音频                 | 内容时长来源      |
 | `music` | 影片级音乐                         | film 绝对音频     |
@@ -60,6 +61,9 @@ Onmark 语言的目标不是用另一套标签重画时间轴，而是让创作�
       <video src="product.mp4"></video>
       <om-sfx src="reveal.wav" delay="250ms"></om-sfx>
       <om-title cue="offer">30% OFF</om-title>
+    </om-shot>
+    <om-transition id="reveal" duration="500ms"></om-transition>
+    <om-shot id="closing" duration="3s">
       <om-cta cue="cta">立即购买</om-cta>
     </om-shot>
   </om-scene>
@@ -108,7 +112,8 @@ linked film。root cardinality、已知 `om-*` 名称、合法包含关系、必
 
 ### Scene
 
-scene 表达叙事分组，不等于渲染分片。scene 内的 shot 默认顺序播放。scene 时长由其 shot 推导。
+scene 表达叙事分组，不等于渲染分片。scene 内的 shot 默认顺序播放，显式 transition
+可以让相邻 shot 在边界处重叠。scene 时长由 shot 与这些重叠关系共同推导。
 
 ### Shot
 
@@ -132,7 +137,7 @@ timing error。
 
 作者时间值采用精确文法
 `整数[.小数](s|ms)`，不允许空白或正负号。秒最多九位小数，毫秒最多六位小数，因此每个合法值都能精确表示为无符号整数纳秒。shot 的
-`duration` 必须大于零；cue time 与 delay 可以为零。语言不接受帧单位或浮点近似。
+shot 与 transition 的 `duration` 必须大于零；cue time 与 delay 可以为零。语言不接受帧单位或浮点近似。
 
 video 可以用 `trim="起点..终点"` 选择素材内部的半开区间。两个边界可省略其一，但不能同时省略：
 省略起点表示素材零点，省略终点表示探测到的素材末端。边界沿用上述 duration 文法，并且必须满足
@@ -171,7 +176,24 @@ because cue offer = 90f
 and owning shot ends = 210f
 ```
 
-## 6. 两种显式时间关系
+## 6. 显式时间关系
+
+### Transition boundary
+
+`<om-transition duration="500ms"></om-transition>` 只能写在同一 scene 的两个相邻 shot
+之间。它表达这两个 shot 的关系，不是可渲染子内容、第三个 shot 或自由时间坐标。compiler
+让 incoming shot 与 outgoing shot 的尾部按作者给定时长精确重叠，因此 scene 与 film
+的总时长会减去这段重叠。
+
+transition duration 必须同时容纳于两个相邻 shot。若一个中间 shot 两侧都有 transition，
+两段 window 也不得在该 shot 内互相覆盖。违反这些约束属于 authored timing error；
+compiler 不会裁剪或静默缩短 transition。跨 scene transition，以及从 presentation code
+推断 window，都不属于当前语言。
+
+这个空元素的 `id`、`class` 与普通 presentation attribute 会留给 CSS 和 motion code；
+compiler-owned `duration` 会从 browser projection 移除。语言不规定 effect enum，也不
+内置视觉模板。transition motion handler 接收已求解 overlap 与两个相邻 shot element，
+只负责用 exact-frame browser effect 实现该事实。
 
 ### 局部延迟
 
@@ -244,15 +266,16 @@ error，不能静默裁掉尾部。
 ### 属性与引用解析
 
 结构 bind 之后执行属性与引用 resolve。`film`、`cues`、`scene`
-不接受 ID 以外的属性；`cue` 必须有 `id` 与 `time`；`shot` 可有
-`duration`；`video` 可有 `src`、`delay`、`trim`、`speed`、`plays` 与
+不接受 ID 以外的 compiler attribute；`cue` 必须有 `id` 与 `time`；`shot` 可有
+`duration`，`transition` 必须有 `duration`；`video` 可有 `src`、`delay`、`trim`、`speed`、`plays` 与
 `hold-last`，`vo` 可有 `src`
 与 `delay`；`title`、`cta` 可有 `cue` 或
 `delay`；`music` 必须有 `src`，可有 `gain`；`sfx` 必须有 `src`，可有 `delay`
 与 `gain`。同一个 overlay 不能同时写 `cue` 与
 `delay`，因为两者定义互相竞争的起点规则。`video` 或 `vo` 缺少 `src`
 时仍可用于静态分析；`music` 与 `sfx` 则在 resolve 阶段要求 `src`。任何元素显式写空
-`src` 都非法。未知属性一律报错。
+`src` 都非法。未知 compiler attribute 一律报错；封闭的 HTML global presentation
+attribute 集合仍由 presentation 拥有。
 
 ## 9. 诊断契约
 
@@ -310,6 +333,7 @@ ONM-TIME-004 标题“立即购买”从第 13 秒开始，但所属 shot 在第
 | `ONM-STRUCT-004` | 已知元素不在合法父元素内                      |
 | `ONM-STRUCT-005` | film 包含多个 `cues` 容器                     |
 | `ONM-STRUCT-006` | 结构元素或空元素中出现了文本                  |
+| `ONM-STRUCT-007` | transition 没有位于两个相邻 shot 之间        |
 | `ONM-TIME-001`   | 时长格式非法、精度过高或超出精确范围          |
 | `ONM-TIME-002`   | shot 没有媒体推导或显式的时长来源             |
 | `ONM-TIME-003`   | 显式 shot duration 与媒体推导时长互相竞争     |
@@ -317,6 +341,7 @@ ONM-TIME-004 标题“立即购买”从第 13 秒开始，但所属 shot 在第
 | `ONM-TIME-005`   | 精确时间无法装入所选帧域                      |
 | `ONM-TIME-006`   | film 没有求解出任何持续时间为正的 shot        |
 | `ONM-TIME-007`   | video 所选素材区间落在冻结素材范围之外        |
+| `ONM-TIME-008`   | transition 无法在相邻 shot 内形成合法重叠     |
 | `ONM-ASSET-001`  | 可渲染媒体没有冻结素材引用                    |
 | `ONM-ASSET-002`  | 媒体元素引用的素材没有所需轨道                |
 | `ONM-REF-001`    | 格式良好的 overlay cue 引用没有指向已解析 cue |
@@ -356,9 +381,11 @@ props channel，也不是第二条 presentation timeline。
 
 compiler attribute 不是 presentation prop。编译完成后，browser projection 会移除 cue
 declaration、native audio element，以及 `src`、`duration`、`delay`、`cue`、`gain`
-这些 authored spelling。presentation code 只在适用时消费 Browser Plan 中的 solved
-fact，不能根据 compiler spelling 选择 CSS 或 motion behavior。ID、class、普通 HTML
-attribute、嵌套 markup、inline style 与 authored overlay text 仍是 presentation input。
+`trim`、`speed`、`plays`、`hold-last` 这些 authored spelling。transition marker
+只会保留在同时包含两个相邻 shot 的 projection 中，并且只是空的 presentation target。
+presentation code 只消费 Browser Plan 中的 solved fact，不能从 compiler spelling
+反推 timing。ID、class、普通 HTML attribute、嵌套 markup、inline style 与 authored
+overlay text 仍是 presentation input。
 
 普通 `<img src>` 属于 presentation markup，不是 screenplay image element，也不提供
 duration。其本地 AVIF、GIF、JPEG、PNG、SVG 或 WebP bytes 会被冻结进 browser bundle，
@@ -390,7 +417,7 @@ effect，并满足下方语言实验门槛。在那之前，stylesheet rule 与�
 - flex 与一般线性方程混用；
 - 条件分支和运行时未知数量循环；
 - speed ramp、倒放和音频响应式动画；
-- 跨 scene persist 和内容感知转场；
+- 跨 scene persist，以及推断 window 或跨 scene 的转场；
 - screenplay 选择的 presentation 或 props；
 - 自动 TTS 或联网素材生成。
 

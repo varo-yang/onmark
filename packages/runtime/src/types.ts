@@ -18,6 +18,8 @@ export type {
   RuntimeNode,
   RuntimeScene,
   RuntimeShot,
+  RuntimeTransition,
+  TransitionPresentation,
   VideoPresentation,
 } from "./presentation.js";
 export type {

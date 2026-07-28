@@ -33,6 +33,8 @@ export {
   type RuntimeNode,
   type RuntimeScene,
   type RuntimeShot,
+  type RuntimeTransition,
+  type TransitionPresentation,
   type VideoPresentation,
 } from "./presentation.js";
 export {
@@ -47,9 +49,11 @@ export {
   type PresentationTemporalCapability,
 } from "./generated/bundle-layout.js";
 export {
+  BROWSER_PROTOCOL_VERSION,
   MAX_BROWSER_OVERLAYS,
   MAX_BROWSER_OVERLAY_TEXT_CHARACTERS,
   MAX_BROWSER_VIDEOS,
+  MAX_BROWSER_TRANSITIONS,
   MAX_FAILURE_MESSAGE_CHARACTERS,
   MAX_PENDING_RESOURCE_CHARACTERS,
   MAX_PENDING_RESOURCES,

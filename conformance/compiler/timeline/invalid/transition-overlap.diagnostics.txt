@@ -1,0 +1,6 @@
+# onmark diagnostic test rendering; not a wire format
+ONM-TIME-008 error @0:90..94 transition duration does not fit within both adjacent shots
+  help: shorten the transition or lengthen the adjacent shots
+ONM-TIME-008 error @0:336..341 transition overlaps the preceding transition within their shared shot
+  help: shorten one transition so their overlap windows do not intersect
+  related @0:245..250 the preceding transition starts this shared-shot overlap

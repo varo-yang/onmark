@@ -42,13 +42,13 @@ pub use bind::{BindReport, bind};
 pub use captions::{CaptionProjectionError, import_captions};
 pub use linked_film::{
     LinkedAudio, LinkedCue, LinkedCues, LinkedElement, LinkedFilm, LinkedNode, LinkedOverlay,
-    LinkedScene, LinkedShot, LinkedShotContent, LinkedVideo, LinkedVoiceOver,
+    LinkedScene, LinkedShot, LinkedShotContent, LinkedTransition, LinkedVideo, LinkedVoiceOver,
 };
 pub use parse::{ParseReport, parse};
 pub use resolve::{ResolveReport, resolve};
 pub use resolved_film::{
     Authored, ResolvedAudio, ResolvedCue, ResolvedCues, ResolvedElement, ResolvedFilm,
     ResolvedNode, ResolvedOverlay, ResolvedScene, ResolvedShot, ResolvedShotContent, ResolvedStart,
-    ResolvedText, ResolvedVideo, ResolvedVoiceOver,
+    ResolvedText, ResolvedTransition, ResolvedVideo, ResolvedVoiceOver,
 };
 pub use solve::{SolveError, SolveReport, solve};

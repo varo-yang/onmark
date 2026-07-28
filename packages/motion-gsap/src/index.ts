@@ -5,8 +5,9 @@ import { gsap } from "gsap";
 import type {
   PresentationExtension,
   PresentationExtensionContext,
+  PresentationElementTargetKind,
   PresentationTarget,
-  PresentationTargetKind,
+  PresentationTransitionTarget,
 } from "@onmark/authoring/types";
 
 // ── Public contract ──
@@ -21,18 +22,29 @@ export interface GsapMotionContext {
 /** Adds local animation to one Onmark-owned paused timeline. */
 export type GsapMotionHandler = (context: GsapMotionContext) => void;
 
+/** Local GSAP transition facts with both adjacent shot elements. */
+export interface GsapTransitionContext extends GsapMotionContext {
+  readonly incomingElement: HTMLElement;
+  readonly outgoingElement: HTMLElement;
+}
+
+/** Adds local animation across one compiler-owned shot overlap. */
+export type GsapTransitionHandler = (context: GsapTransitionContext) => void;
+
 /** Semantic handlers and optional selector handlers for local motion. */
 export type GsapMotionDefinition = Readonly<
-  Partial<Record<PresentationTargetKind, GsapMotionHandler>> & {
+  Partial<Record<PresentationElementTargetKind, GsapMotionHandler>> & {
     readonly selectors?: Readonly<Record<string, GsapMotionHandler>>;
+    readonly transition?: GsapTransitionHandler;
   }
 >;
 
 interface GsapMotionRules {
   readonly kinds: Readonly<
-    Record<PresentationTargetKind, GsapMotionHandler | undefined>
+    Record<PresentationElementTargetKind, GsapMotionHandler | undefined>
   >;
   readonly selectors: readonly GsapSelectorRule[];
+  readonly transition: GsapTransitionHandler | undefined;
 }
 
 interface GsapSelectorRule {
@@ -47,6 +59,11 @@ interface GsapFrame {
 interface GsapFrameEffect {
   apply(frame: GsapFrame): void;
   dispose(): void;
+}
+
+interface MatchingGsapMotion {
+  readonly elements: readonly GsapMotionHandler[];
+  readonly transition: GsapTransitionHandler | undefined;
 }
 
 /** Creates exact-frame GSAP effects without exposing runtime lifecycle code. */
@@ -74,7 +91,7 @@ function bindGsapEffects(
   try {
     for (const target of context.targets) {
       const handlers = matchingHandlers(rules, target);
-      if (handlers.length === 0) {
+      if (handlers.elements.length === 0 && handlers.transition === undefined) {
         continue;
       }
       effects.push(bindGsapEffect(handlers, target, context));
@@ -93,7 +110,7 @@ function bindGsapEffects(
 }
 
 function bindGsapEffect(
-  handlers: readonly GsapMotionHandler[],
+  handlers: MatchingGsapMotion,
   target: PresentationTarget,
   context: PresentationExtensionContext,
 ): GsapFrameEffect {
@@ -101,12 +118,15 @@ function bindGsapEffect(
   const timeline = gsap.timeline({ paused: true });
 
   try {
-    const motion = Object.freeze({
+    const motion: GsapMotionContext = Object.freeze({
       durationSeconds,
       element: target.element,
       timeline,
     });
-    for (const handler of handlers) {
+    if (target.kind === "transition" && handlers.transition !== undefined) {
+      handlers.transition(transitionContext(motion, target));
+    }
+    for (const handler of handlers.elements) {
       handler(motion);
     }
     requireLocalTimeline(timeline, durationSeconds, target.kind);
@@ -162,7 +182,11 @@ function ownRules(definition: GsapMotionDefinition): GsapMotionRules {
   const selectors = Object.freeze(
     Object.entries(definition.selectors ?? {}).map(ownSelector),
   );
-  return Object.freeze({ kinds, selectors });
+  return Object.freeze({
+    kinds,
+    selectors,
+    transition: definition.transition,
+  });
 }
 
 function ownSelector([selector, animate]: [
@@ -178,9 +202,10 @@ function ownSelector([selector, animate]: [
 function matchingHandlers(
   rules: GsapMotionRules,
   target: PresentationTarget,
-): readonly GsapMotionHandler[] {
+): MatchingGsapMotion {
   const handlers: GsapMotionHandler[] = [];
-  const kind = rules.kinds[target.kind];
+  const kind =
+    target.kind === "transition" ? undefined : rules.kinds[target.kind];
   if (kind !== undefined) {
     handlers.push(kind);
   }
@@ -189,7 +214,10 @@ function matchingHandlers(
       handlers.push(rule.animate);
     }
   }
-  return handlers;
+  return Object.freeze({
+    elements: Object.freeze(handlers),
+    transition: target.kind === "transition" ? rules.transition : undefined,
+  });
 }
 
 // ── Exact-frame playheads ──
@@ -212,9 +240,25 @@ function localSeconds(
     0,
     Math.min(frame.index - target.interval.start, durationFrames),
   );
+  if (target.kind === "transition") {
+    const finalFrame = durationFrames - 1;
+    const progress = finalFrame === 0 ? 1 : localFrame / finalFrame;
+    return intervalSeconds(target, context) * progress;
+  }
   return (
     (localFrame / context.frameRate.numerator) * context.frameRate.denominator
   );
+}
+
+function transitionContext(
+  context: GsapMotionContext,
+  target: PresentationTransitionTarget,
+): GsapTransitionContext {
+  return Object.freeze({
+    ...context,
+    incomingElement: target.incomingElement,
+    outgoingElement: target.outgoingElement,
+  });
 }
 
 function requireLocalTimeline(
