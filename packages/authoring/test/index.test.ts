@@ -443,7 +443,7 @@ test("releases prior extensions when later motion binding fails", async () => {
 // ── Fixture ──
 
 const PLAN: RuntimePlan = {
-  timelineVersion: 3,
+  timelineVersion: 4,
   frameRate: { numerator: 30, denominator: 1 },
   timeline: { start: 0, end: 90 },
   evaluation: { start: 0, end: 60 },

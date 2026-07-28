@@ -195,6 +195,11 @@ transition duration 必须同时容纳于两个相邻 shot。若一个中间 sho
 compiler 不会裁剪或静默缩短 transition。跨 scene transition，以及从 presentation code
 推断 window，都不属于当前语言。
 
+这段 overlap 只定义视觉关系，不会静默决定旁白混音策略。若相邻 shot 已求解的
+voice-over 区间在 transition 内相交，compiler 会在该边界报告 `ONM-AUDIO-001`。作者
+必须缩短 transition 或延后 incoming voice-over；Onmark 不会裁剪语音或擅自生成
+crossfade。
+
 这个空元素的 `id`、`class` 与普通 presentation attribute 会留给 CSS 和 motion code；
 compiler-owned `duration` 会从 browser projection 移除。语言不规定 effect enum，也不
 内置视觉模板。transition motion handler 接收已求解 overlap 与两个相邻 shot element，
@@ -236,6 +241,7 @@ cue 把业务时间命名后供 overlay 对齐。当前 cue 只来自作者声�
 
 renderer 会把每条已经求解的旁白素材复制到私有 render
 root，并在浏览器捕获之后按其求解出的帧区间混入输出。presentation 不播放、不延迟、也不混音旁白。
+voice-over 可以使用下文定义的精确 `fade-in`/`fade-out` envelope。
 
 没有 `src`
 时，是否允许只做静态检查而禁止渲染，需要由命令模式决定，不能静默假设一个朗读速度。
@@ -257,6 +263,18 @@ error，不能静默裁掉尾部。
 采用精确文法 `整数%`，范围为 `0%` 到 `100%`（含端点），默认 `100%`；它表示线性振幅比例，不是分贝。引用素材必须含有音轨。混音和 mux
 属于原生执行边界，浏览器不播放这些元素。
 
+`vo`、`music` 与 `sfx` 可选写 `fade-in` 和 `fade-out` 时长。fade-in 从已求解
+placement 起点开始，fade-out 在其 exclusive end 结束；二者都是 silence 与 authored/default
+gain 之间的 linear-amplitude ramp。fade 只改变振幅，不会移动、缩短或延长 placement；两者之和
+必须能装入实际求解出的 placement，包括在 film 末端被裁短的 music，否则 solve 报告
+`ONM-AUDIO-002`。Rust 先把时长转换成精确帧事实，再投影到整数 output-sample
+boundary；browser code 不拥有另一条 audio envelope。
+
+已入库的 `audio-envelope-syntax` 实验比较了 flat `fade-in`/`fade-out` attribute 与
+`om-envelope` child。两臂各做两次独立重复，都保持 20/20 semantic accuracy；flat attribute
+只使用 4,914 authored bytes，另一臂为 5,868，并且不会把 treatment child 混入 voice-over
+铭文，因此语言只接纳 flat attribute。
+
 ## 8. ID、作用域与引用
 
 - 所有显式 ID（包括 cue ID）在 film 内共享一个全局唯一的声明空间；
@@ -273,10 +291,10 @@ error，不能静默裁掉尾部。
 结构 bind 之后执行属性与引用 resolve。`film`、`cues`、`scene`
 不接受 ID 以外的 compiler attribute；`cue` 必须有 `id` 与 `time`；`shot` 可有
 `duration`，`transition` 必须有 `duration`；`video` 可有 `src`、`delay`、`trim`、`speed`、`plays` 与
-`hold-last`，`vo` 可有 `src`
-与 `delay`；`title`、`cta` 可有 `cue` 或
-`delay`；`music` 必须有 `src`，可有 `gain`；`sfx` 必须有 `src`，可有 `delay`
-与 `gain`。同一个 overlay 不能同时写 `cue` 与
+`hold-last`，`vo` 可有 `src`、`delay`、`fade-in` 与
+`fade-out`；`title`、`cta` 可有 `cue` 或
+`delay`；`music` 必须有 `src`，可有 `gain`、`fade-in` 与 `fade-out`；`sfx`
+必须有 `src`，可有 `delay`、`gain`、`fade-in` 与 `fade-out`。同一个 overlay 不能同时写 `cue` 与
 `delay`，因为两者定义互相竞争的起点规则。`video` 或 `vo` 缺少 `src`
 时仍可用于静态分析；`music` 与 `sfx` 则在 resolve 阶段要求 `src`。任何元素显式写空
 `src` 都非法。未知 compiler attribute 一律报错；封闭的 HTML global presentation
@@ -347,6 +365,8 @@ ONM-TIME-004 标题“立即购买”从第 13 秒开始，但所属 shot 在第
 | `ONM-TIME-006`   | film 没有求解出任何持续时间为正的 shot        |
 | `ONM-TIME-007`   | video 所选素材区间落在冻结素材范围之外        |
 | `ONM-TIME-008`   | transition 无法在相邻 shot 内形成合法重叠     |
+| `ONM-AUDIO-001`  | transition 使相邻的已求解 voice-over 区间重叠 |
+| `ONM-AUDIO-002`  | audio fade 相互重叠或超出已求解 placement     |
 | `ONM-ASSET-001`  | 可渲染媒体没有冻结素材引用                    |
 | `ONM-ASSET-002`  | 媒体元素引用的素材没有所需轨道                |
 | `ONM-REF-001`    | 格式良好的 overlay cue 引用没有指向已解析 cue |

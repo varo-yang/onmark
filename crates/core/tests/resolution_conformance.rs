@@ -259,23 +259,27 @@ impl ResolvedFilmRenderer {
     fn render_audio(&mut self, audio: &ResolvedAudio, indent: &str) -> std::fmt::Result {
         writeln!(
             self.output,
-            "{indent}{} id={} src={} delay={} gain={}/{}",
+            "{indent}{} id={} src={} delay={} gain={}/{} fade-in={} fade-out={}",
             audio.element().kind(),
             id(audio.element()),
             audio.src().value(),
             duration(audio.delay()),
             audio.gain().numerator(),
             audio.gain().denominator(),
+            duration(audio.envelope().fade_in()),
+            duration(audio.envelope().fade_out()),
         )
     }
 
     fn render_voice_over(&mut self, voice_over: &ResolvedVoiceOver) -> std::fmt::Result {
         writeln!(
             self.output,
-            "      vo id={} src={} delay={}",
+            "      vo id={} src={} delay={} fade-in={} fade-out={}",
             id(voice_over.element()),
             asset(voice_over.src()),
             duration(voice_over.delay()),
+            duration(voice_over.envelope().fade_in()),
+            duration(voice_over.envelope().fade_out()),
         )?;
 
         self.render_text(voice_over.text())

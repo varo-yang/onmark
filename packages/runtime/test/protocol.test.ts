@@ -28,17 +28,17 @@ const PROTOCOL_FIXTURES = new URL(
 // ── Decoding boundaries ──
 
 test("decodes every checked-in browser protocol example", async () => {
-  for (const request of await fixture("browser-requests-v5.jsonl")) {
+  for (const request of await fixture("browser-requests-v6.jsonl")) {
     assert.deepEqual(decodeBrowserRequest(request), request);
   }
-  for (const response of await fixture("browser-responses-v5.jsonl")) {
+  for (const response of await fixture("browser-responses-v6.jsonl")) {
     assert.deepEqual(decodeBrowserResponse(response), response);
   }
 });
 
 test("rejects values outside the versioned browser contract", () => {
   const invalidRequests = [
-    { version: 3, requestId: 1, command: { type: "dispose" } },
+    { version: 5, requestId: 1, command: { type: "dispose" } },
     {
       version: BROWSER_PROTOCOL_VERSION,
       requestId: 1,
@@ -134,7 +134,7 @@ test("rejects protocol payloads outside generated resource budgets", () => {
       type: "load",
       mediaMode: "decoded",
       plan: {
-        timelineVersion: 3,
+        timelineVersion: 4,
         frameRate: { numerator: 30, denominator: 1 },
         timeline: { start: 0, end: 1 },
         evaluation: { start: 0, end: 1 },

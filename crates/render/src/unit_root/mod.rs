@@ -248,15 +248,7 @@ impl ExecutableUnit {
         self.audio.tracks().map(move |track| {
             let start = rebase_audio_start(track.interval().start(), origin);
             let source = self.root.path().join(track.asset().unit_relative_path());
-            AudioInput::new(
-                track.mix_order(),
-                source,
-                start,
-                track.interval().len(),
-                track.samples(),
-                track.channel_layout(),
-                track.gain(),
-            )
+            AudioInput::from_track(track, source, start)
         })
     }
 

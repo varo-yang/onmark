@@ -21,10 +21,10 @@ await main(process.argv.slice(2)).catch(reportFailure);
 async function main(arguments_) {
   const mode = generationMode(arguments_);
   const requestSchema = await readJson(
-    "schemas/browser-request-v5.schema.json",
+    "schemas/browser-request-v6.schema.json",
   );
   const responseSchema = await readJson(
-    "schemas/browser-response-v5.schema.json",
+    "schemas/browser-response-v6.schema.json",
   );
   const bundleSchema = await readJson("schemas/bundle-manifest-v1.schema.json");
   const projectionSchema = await readJson(

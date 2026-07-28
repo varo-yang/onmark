@@ -36,7 +36,10 @@ pub(super) const MAX_BROWSER_OVERLAY_TEXT_BYTES: usize = 1 << 20;
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct BrowserPlan {
-    #[cfg_attr(feature = "schema", schemars(extend("const" = 3)))]
+    #[cfg_attr(
+        feature = "schema",
+        schemars(extend("const" = TimelineVersion::CURRENT.get()))
+    )]
     timeline_version: u16,
     frame_rate: WireFrameRate,
     timeline: WireInterval,
@@ -1610,7 +1613,7 @@ mod tests {
     #[test]
     fn parses_only_validated_browser_plan_facts() {
         let plan = r#"{
-            "timelineVersion":3,
+            "timelineVersion":4,
             "frameRate":{"numerator":30,"denominator":1},
             "timeline":{"start":0,"end":1},
             "evaluation":{"start":0,"end":1},
@@ -1693,7 +1696,7 @@ mod tests {
     #[test]
     fn rejects_duplicate_node_identity_at_the_wire_boundary() {
         let plan = r#"{
-            "timelineVersion":3,
+            "timelineVersion":4,
             "frameRate":{"numerator":30,"denominator":1},
             "timeline":{"start":0,"end":1},
             "evaluation":{"start":0,"end":1},
@@ -1715,7 +1718,7 @@ mod tests {
     #[test]
     fn rejects_non_dense_node_identity_at_the_wire_boundary() {
         let plan = r#"{
-            "timelineVersion":3,
+            "timelineVersion":4,
             "frameRate":{"numerator":30,"denominator":1},
             "timeline":{"start":0,"end":1},
             "evaluation":{"start":0,"end":1},
@@ -1739,7 +1742,7 @@ mod tests {
     #[test]
     fn rejects_a_child_interval_outside_its_structural_parent() {
         let plan = r#"{
-            "timelineVersion":3,
+            "timelineVersion":4,
             "frameRate":{"numerator":30,"denominator":1},
             "timeline":{"start":0,"end":4},
             "evaluation":{"start":0,"end":4},
@@ -1758,7 +1761,7 @@ mod tests {
     #[test]
     fn rejects_noncanonical_browser_node_order() {
         let plan = r#"{
-            "timelineVersion":3,
+            "timelineVersion":4,
             "frameRate":{"numerator":30,"denominator":1},
             "timeline":{"start":0,"end":4},
             "evaluation":{"start":0,"end":4},
@@ -1783,7 +1786,7 @@ mod tests {
     #[test]
     fn rejects_a_transition_across_scene_ownership() {
         let plan = r#"{
-            "timelineVersion":3,
+            "timelineVersion":4,
             "frameRate":{"numerator":30,"denominator":1},
             "timeline":{"start":0,"end":4},
             "evaluation":{"start":0,"end":4},
@@ -1816,7 +1819,7 @@ mod tests {
     #[test]
     fn rejects_a_transition_that_does_not_match_the_shot_boundary() {
         let plan = r#"{
-            "timelineVersion":3,
+            "timelineVersion":4,
             "frameRate":{"numerator":30,"denominator":1},
             "timeline":{"start":0,"end":6},
             "evaluation":{"start":0,"end":6},
@@ -1885,7 +1888,7 @@ mod tests {
     #[test]
     fn enumerates_structural_placement_boundaries_without_content() {
         let plan = r#"{
-            "timelineVersion":3,
+            "timelineVersion":4,
             "frameRate":{"numerator":30,"denominator":1},
             "timeline":{"start":0,"end":4},
             "evaluation":{"start":0,"end":4},

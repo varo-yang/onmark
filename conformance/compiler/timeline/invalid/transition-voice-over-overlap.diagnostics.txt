@@ -1,0 +1,5 @@
+# onmark diagnostic test rendering; not a wire format
+ONM-AUDIO-001 error @0:140..145 transition makes adjacent voice-over tracks overlap
+  help: shorten the transition or delay the incoming voice-over
+  related @0:43..95 the outgoing voice-over remains active in the overlap
+  related @0:184..235 the incoming voice-over starts inside the overlap

@@ -1,5 +1,10 @@
 <om-film>
-  <om-music src="music.wav" gain="25%"></om-music>
+  <om-music
+    src="music.wav"
+    gain="25%"
+    fade-in="250ms"
+    fade-out="250ms"
+  ></om-music>
   <om-scene>
     <om-shot>
       <video src="source.mp4" trim="0s..500ms" speed="0.5x"></video>
@@ -7,8 +12,15 @@
     </om-shot>
     <om-shot>
       <video src="source.mp4" trim="500ms..1s" speed="0.5x"></video>
-      <om-vo src="voice.m4a">A partitioned voice-over.</om-vo>
-      <om-sfx src="effect.wav" delay="250ms"></om-sfx>
+      <om-vo src="voice.m4a" fade-in="100ms" fade-out="100ms">
+        A partitioned voice-over.
+      </om-vo>
+      <om-sfx
+        src="effect.wav"
+        delay="250ms"
+        fade-in="50ms"
+        fade-out="50ms"
+      ></om-sfx>
       <om-cta>Closing unit</om-cta>
     </om-shot>
   </om-scene>

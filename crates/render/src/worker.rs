@@ -24,7 +24,7 @@ pub struct WorkerCaptureVersion(u16);
 
 impl WorkerCaptureVersion {
     /// Only worker capture-request version accepted by this build.
-    pub const CURRENT: Self = Self(4);
+    pub const CURRENT: Self = Self(5);
 
     /// Returns the stable integer representation.
     #[must_use]
@@ -279,10 +279,10 @@ mod tests {
 
     #[test]
     fn accepts_only_the_current_request_version() {
+        assert!(serde_json::from_str::<WorkerCaptureVersion>("4").is_err());
         assert!(serde_json::from_str::<WorkerCaptureVersion>("3").is_err());
-        assert!(serde_json::from_str::<WorkerCaptureVersion>("2").is_err());
         assert_eq!(
-            serde_json::from_str::<WorkerCaptureVersion>("4")
+            serde_json::from_str::<WorkerCaptureVersion>("5")
                 .expect("the current worker request version parses"),
             WorkerCaptureVersion::CURRENT,
         );

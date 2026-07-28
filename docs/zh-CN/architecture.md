@@ -203,6 +203,10 @@ grid：时间戳仍早于 Timeline exclusive end 的 sample 会被保留。每�
 kHz mix grid。Rust 用向上取整把 frame start 投影到该 grid，因此 `FFmpeg` 收到整数 `adelay` sample count，而不是自行计算 decimal 或 floating timing expression。canonical rational linear
 gain 通过 `volume` 应用；`amix` normalization 被明确关闭，避免多轨重叠时静默改写 authored gain。最终 AAC path 按 visual frame count 在同一 output sample grid 上的投影 trim 或 pad 混音，再由 visual stream 通过
 `-shortest` 封口容器。因此跨 partition 的 owner track 不能让单独渲染的 unit 长于其 visual output。screenplay
+Timeline IR 还把每条已接纳 fade 保留为精确 frame count。encoder 把 fade-in end 与
+fade-out start 投影到同一个 48 kHz grid，并生成显式指定 linear curve、silence 与 unity
+level 的 sample-indexed `afade` filter。fade-out rounding 由 placement end 独占，因此在
+frame grid 上刚好相接的 ramp 不会因为两次独立 sample rounding 而重叠。
 已入库的 audio-syntax eval 用四十条真实模型输出比较了语义元素 `<om-music>`/`<om-sfx>` 与泛化的
 `<audio kind="...">`。两臂都保持 20/20 generation reliability，因此 Gate 四接纳语义元素：元素类型直接编码 role 与合法 containment，不再引入第二套 kind/parent
 有效性矩阵。authored gain 是 `0%` 到 `100%`（含端点）的精确闭区间。
@@ -978,8 +982,8 @@ sidecar staging 的 `tempfile`；它会
 AWS。任何产品 crate/package 都不得反向依赖它。Lambda 依赖只为发布该部署边界的
 schema，不得借此把 AWS 偷渡进 core。相邻的 Node generator 可使用固定版本的
 schema-to-TypeScript 与验证工具链。`cargo xtask schema` 先写全部 versioned schema，
-再调用该 generator；`cargo xtask eval audio` 与 `cargo xtask eval html` 分别重新
-评分已冻结的 audio language experiment 与 native HTML authoring experiment。
+再调用该 generator；`cargo xtask eval audio`、`audio-envelope`、`html`、`transition`
+与 `video` 会在不调用 live model 的前提下分别重新评分已冻结的 language experiment。
 `cargo xtask release prepare/verify` 独占产品版本修改与一致性检查；
 `cargo xtask release sidecar` 只装配 native platform payload。相邻 release scripts
 负责装配并准入公开 npm package 与媒体；只有受保护的 release workflow 会调用 registry

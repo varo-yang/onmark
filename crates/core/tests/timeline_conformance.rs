@@ -31,6 +31,13 @@ fn adjacent_shots_overlap_during_a_transition() {
 }
 
 #[test]
+fn delayed_voice_over_can_follow_a_visual_transition() {
+    let assets = frozen_assets([("outgoing.wav", "1s"), ("incoming.wav", "1s")]);
+
+    assert_valid_fixture("transition-voice-over-gap", assets);
+}
+
+#[test]
 fn media_duration_and_longest_content_match_canonical_timeline() {
     let assets = frozen_assets([("clip.mp4", "2s"), ("voice.mp3", "1s")]);
 
@@ -90,6 +97,23 @@ fn transition_overlap_errors_match_stable_diagnostics() {
 }
 
 #[test]
+fn a_transition_cannot_create_an_implicit_voice_over_mix() {
+    let source_path = fixture(
+        "compiler/timeline",
+        "invalid/transition-voice-over-overlap.html",
+    );
+    let expected_path = fixture(
+        "compiler/timeline",
+        "invalid/transition-voice-over-overlap.diagnostics.txt",
+    );
+    let assets = frozen_assets([("outgoing.wav", "1s"), ("incoming.wav", "1s")]);
+    let report = solve_fixture(&source_path, &assets).expect("both voice-over assets were probed");
+
+    assert!(report.timeline().is_none());
+    assert_or_update(&expected_path, &render_diagnostics(report.diagnostics()));
+}
+
+#[test]
 fn a_sound_effect_cannot_escape_its_shot() {
     let source_path = fixture(
         "compiler/timeline",
@@ -101,6 +125,23 @@ fn a_sound_effect_cannot_escape_its_shot() {
     );
     let assets = frozen_assets([("hit.wav", "500ms")]);
     let report = solve_fixture(&source_path, &assets).expect("the sound effect was probed");
+
+    assert!(report.timeline().is_none());
+    assert_or_update(&expected_path, &render_diagnostics(report.diagnostics()));
+}
+
+#[test]
+fn an_audio_envelope_must_fit_its_solved_placement() {
+    let source_path = fixture(
+        "compiler/timeline",
+        "invalid/audio-envelope-outside-placement.html",
+    );
+    let expected_path = fixture(
+        "compiler/timeline",
+        "invalid/audio-envelope-outside-placement.diagnostics.txt",
+    );
+    let assets = frozen_assets([("music.wav", "2s")]);
+    let report = solve_fixture(&source_path, &assets).expect("the music was probed");
 
     assert!(report.timeline().is_none());
     assert_or_update(&expected_path, &render_diagnostics(report.diagnostics()));
@@ -421,10 +462,12 @@ impl TimelineRenderer {
             }
             TimelineContent::VoiceOver(voice_over) => writeln!(
                 self.output,
-                "      vo {} {} asset={} text={:?}",
+                "      vo {} {} asset={} fade-in={} fade-out={} text={:?}",
                 element(voice_over.element()),
                 timing(voice_over.timing()),
                 voice_over.asset_id(),
+                voice_over.audio().envelope().fade_in().get(),
+                voice_over.audio().envelope().fade_out().get(),
                 text(voice_over.text()),
             ),
             TimelineContent::Overlay(overlay) => writeln!(
@@ -440,12 +483,14 @@ impl TimelineRenderer {
     fn render_audio(&mut self, audio: &TimelineAudio) -> std::fmt::Result {
         writeln!(
             self.output,
-            "  audio kind={} {} asset={} gain={}/{}",
+            "  audio kind={} {} asset={} gain={}/{} fade-in={} fade-out={}",
             audio_kind(audio.kind()),
             timing(audio.timing()),
             audio.asset_id(),
             audio.gain().numerator(),
             audio.gain().denominator(),
+            audio.envelope().fade_in().get(),
+            audio.envelope().fade_out().get(),
         )
     }
 }

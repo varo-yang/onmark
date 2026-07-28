@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use onmark_core::model::{
-    AudioChannelLayout, AudioGain, AudioSampleConversionOverflow, AudioSampleCount,
+    AudioChannelLayout, AudioEnvelope, AudioGain, AudioSampleConversionOverflow, AudioSampleCount,
     AudioSampleRate, FrameCount, FrameIndex, FrameRate, Rounding,
 };
 use onmark_core::protocol::WireFrameRate;
@@ -23,6 +23,7 @@ use super::limits::EncodeLimits;
 use super::process::{CapturedStderr, capture_stderr};
 use super::profile::EncodeProfile;
 use super::session::{EncodedVideo, with_stderr};
+use crate::RenderAudio;
 
 const CLEANUP_TIMEOUT: Duration = Duration::from_secs(5);
 const OUTPUT_SAMPLE_RATE_HZ: u32 = 48_000;
@@ -37,26 +38,34 @@ pub(crate) struct AudioInput {
     samples: AudioSampleCount,
     channel_layout: AudioChannelLayout,
     gain: AudioGain,
+    envelope: AudioEnvelope,
 }
 
 impl AudioInput {
-    pub(crate) fn new(
-        mix_order: usize,
-        source: PathBuf,
-        start: FrameIndex,
-        duration: FrameCount,
-        samples: AudioSampleCount,
-        channel_layout: AudioChannelLayout,
-        gain: AudioGain,
-    ) -> Self {
+    pub(crate) fn from_track(track: &RenderAudio, source: PathBuf, start: FrameIndex) -> Self {
         Self {
-            mix_order,
+            mix_order: track.mix_order(),
             source,
             start,
-            duration,
-            samples,
-            channel_layout,
-            gain,
+            duration: track.interval().len(),
+            samples: track.samples(),
+            channel_layout: track.channel_layout(),
+            gain: track.gain(),
+            envelope: track.envelope(),
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn fixture(source: PathBuf) -> Self {
+        Self {
+            mix_order: 0,
+            source,
+            start: FrameIndex::ZERO,
+            duration: FrameCount::new(30),
+            samples: AudioSampleCount::new(48_000),
+            channel_layout: AudioChannelLayout::Stereo,
+            gain: AudioGain::UNITY,
+            envelope: AudioEnvelope::NONE,
         }
     }
 
@@ -87,10 +96,16 @@ impl AudioInput {
         .expect("writing into a String cannot fail");
         write!(
             output,
-            "adelay=delays={}S:all=1,volume={}/{}[audio{index}];",
-            placement.delay.get(),
+            "volume={}/{},",
             self.gain.numerator(),
             self.gain.denominator(),
+        )
+        .expect("writing into a String cannot fail");
+        placement.envelope.write_filters(output);
+        write!(
+            output,
+            "adelay=delays={}S:all=1[audio{index}];",
+            placement.delay.get(),
         )
         .expect("writing into a String cannot fail");
     }
@@ -107,6 +122,37 @@ fn channel_filter(layout: AudioChannelLayout) -> &'static str {
 struct AudioPlacement {
     delay: AudioSampleCount,
     samples: AudioSampleCount,
+    envelope: AudioSampleEnvelope,
+}
+
+/// One envelope after both frame boundaries enter the output sample grid.
+#[derive(Clone, Copy)]
+struct AudioSampleEnvelope {
+    in_samples: AudioSampleCount,
+    out_start: AudioSampleCount,
+    out_samples: AudioSampleCount,
+}
+
+impl AudioSampleEnvelope {
+    fn write_filters(self, output: &mut String) {
+        if self.in_samples.get() > 0 {
+            let samples = self.in_samples.get();
+            write!(
+                output,
+                "afade=t=in:ss=0:ns={samples}:curve=tri:silence=0:unity=1,"
+            )
+            .expect("writing into a String cannot fail");
+        }
+        if self.out_samples.get() > 0 {
+            let start = self.out_start.get();
+            let samples = self.out_samples.get();
+            write!(
+                output,
+                "afade=t=out:ss={start}:ns={samples}:curve=tri:silence=0:unity=1,"
+            )
+            .expect("writing into a String cannot fail");
+        }
+    }
 }
 
 /// `FFmpeg` must retain access to its private filter script until process exit.
@@ -290,7 +336,16 @@ fn audio_filter(
         )?;
         let samples =
             output_sample_rate().samples_for(input.duration, frame_rate, Rounding::Ceil)?;
-        input.write_filter(&mut filter, index, AudioPlacement { delay, samples });
+        let envelope = sample_envelope(input.envelope, input.duration, samples, frame_rate)?;
+        input.write_filter(
+            &mut filter,
+            index,
+            AudioPlacement {
+                delay,
+                samples,
+                envelope,
+            },
+        );
     }
     for index in 0..inputs.len() {
         write!(filter, "[audio{index}]").expect("writing into a String cannot fail");
@@ -310,6 +365,35 @@ fn audio_filter(
     )
     .expect("writing into a String cannot fail");
     Ok(filter)
+}
+
+fn sample_envelope(
+    envelope: AudioEnvelope,
+    duration: FrameCount,
+    samples: AudioSampleCount,
+    frame_rate: FrameRate,
+) -> Result<AudioSampleEnvelope, AudioSampleConversionOverflow> {
+    let sample_rate = output_sample_rate();
+    let in_samples = sample_rate.samples_for(envelope.fade_in(), frame_rate, Rounding::Ceil)?;
+    let out_start = duration
+        .get()
+        .checked_sub(envelope.fade_out().get())
+        .map(FrameCount::new)
+        .expect("the envelope was validated against this placement");
+    let out_start = sample_rate.samples_for(out_start, frame_rate, Rounding::Ceil)?;
+    // The placement end owns rounding. Subtracting the projected start from
+    // that end keeps touching frame ramps touching on the sample grid too.
+    let out_samples = samples
+        .get()
+        .checked_sub(out_start.get())
+        .map(AudioSampleCount::new)
+        .expect("ceiling projection is monotonic");
+
+    Ok(AudioSampleEnvelope {
+        in_samples,
+        out_start,
+        out_samples,
+    })
 }
 
 fn output_samples(
@@ -400,9 +484,10 @@ fn discard_partial_output(output: &Path) {
 
 #[cfg(test)]
 mod tests {
-    use super::{AudioInput, audio_filter, output_samples};
+    use super::{AudioInput, audio_filter, output_samples, sample_envelope};
     use onmark_core::model::{
-        AudioChannelLayout, AudioGain, AudioSampleCount, FrameCount, FrameIndex, FrameRate,
+        AudioChannelLayout, AudioEnvelope, AudioGain, AudioSampleCount, FrameCount, FrameIndex,
+        FrameRate,
     };
 
     #[test]
@@ -410,24 +495,31 @@ mod tests {
         let rate = FrameRate::new(30, 1).expect("rate is valid");
         let output_samples = AudioSampleCount::new(96_000);
         let inputs = [
-            AudioInput::new(
-                0,
-                "first.m4a".into(),
-                FrameIndex::new(0),
-                FrameCount::new(30),
-                AudioSampleCount::new(48_000),
-                AudioChannelLayout::Stereo,
-                AudioGain::UNITY,
-            ),
-            AudioInput::new(
-                1,
-                "second.m4a".into(),
-                FrameIndex::new(15),
-                FrameCount::new(15),
-                AudioSampleCount::new(24_000),
-                AudioChannelLayout::Mono,
-                AudioGain::new(1, 2).expect("one half is a valid gain"),
-            ),
+            AudioInput {
+                mix_order: 0,
+                source: "first.m4a".into(),
+                start: FrameIndex::ZERO,
+                duration: FrameCount::new(30),
+                samples: AudioSampleCount::new(48_000),
+                channel_layout: AudioChannelLayout::Stereo,
+                gain: AudioGain::UNITY,
+                envelope: AudioEnvelope::NONE,
+            },
+            AudioInput {
+                mix_order: 1,
+                source: "second.m4a".into(),
+                start: FrameIndex::new(15),
+                duration: FrameCount::new(15),
+                samples: AudioSampleCount::new(24_000),
+                channel_layout: AudioChannelLayout::Mono,
+                gain: AudioGain::new(1, 2).expect("one half is a valid gain"),
+                envelope: AudioEnvelope::new(
+                    FrameCount::new(3),
+                    FrameCount::new(6),
+                    FrameCount::new(15),
+                )
+                .expect("the fades fit the placement"),
+            },
         ];
 
         assert_eq!(
@@ -438,12 +530,15 @@ mod tests {
                 "aresample=48000,anull,",
                 "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,",
                 "atrim=end_sample=48000,asetpts=N/SR/TB,",
-                "adelay=delays=0S:all=1,volume=1/1[audio0];",
+                "volume=1/1,adelay=delays=0S:all=1[audio0];",
                 "[2:a]atrim=end_sample=24000,asetpts=N/SR/TB,",
                 "aresample=48000,pan=stereo|c0=c0|c1=c0,",
                 "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,",
                 "atrim=end_sample=24000,asetpts=N/SR/TB,",
-                "adelay=delays=24000S:all=1,volume=1/2[audio1];",
+                "volume=1/2,",
+                "afade=t=in:ss=0:ns=4800:curve=tri:silence=0:unity=1,",
+                "afade=t=out:ss=14400:ns=9600:curve=tri:silence=0:unity=1,",
+                "adelay=delays=24000S:all=1[audio1];",
                 "[audio0][audio1]",
                 "amix=inputs=2:duration=longest:dropout_transition=0:normalize=0[mixed];",
                 "[mixed]aresample=48000,atrim=end_sample=96000,",
@@ -455,15 +550,16 @@ mod tests {
     #[test]
     fn trims_again_on_the_output_grid_after_resampling() {
         let rate = FrameRate::new(30_000, 1_001).expect("rate is valid");
-        let input = AudioInput::new(
-            0,
-            "voice-44k.m4a".into(),
-            FrameIndex::ZERO,
-            FrameCount::new(1),
-            AudioSampleCount::new(1_472),
-            AudioChannelLayout::Stereo,
-            AudioGain::UNITY,
-        );
+        let input = AudioInput {
+            mix_order: 0,
+            source: "voice-44k.m4a".into(),
+            start: FrameIndex::ZERO,
+            duration: FrameCount::new(1),
+            samples: AudioSampleCount::new(1_472),
+            channel_layout: AudioChannelLayout::Stereo,
+            gain: AudioGain::UNITY,
+            envelope: AudioEnvelope::NONE,
+        };
 
         let filter = audio_filter(&[input], rate, AudioSampleCount::new(1_602))
             .expect("one frame fits both sample grids");
@@ -473,6 +569,21 @@ mod tests {
              aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,\
              atrim=end_sample=1602,asetpts=N/SR/TB"
         ));
+    }
+
+    #[test]
+    fn preserves_touching_fades_on_a_fractional_frame_grid() {
+        let rate = FrameRate::new(30_000, 1_001).expect("rate is valid");
+        let duration = FrameCount::new(3);
+        let samples = AudioSampleCount::new(4_805);
+        let envelope = AudioEnvelope::new(FrameCount::new(1), FrameCount::new(2), duration)
+            .expect("the fades meet without overlapping");
+
+        let envelope = sample_envelope(envelope, duration, samples, rate)
+            .expect("the envelope fits the output sample grid");
+
+        assert_eq!(envelope.in_samples, envelope.out_start);
+        assert_eq!(envelope.out_samples.get(), 3_203);
     }
 
     #[test]

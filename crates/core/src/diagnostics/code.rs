@@ -45,6 +45,10 @@ pub enum DiagnosticCode {
     SourceIntervalOutsideAsset,
     /// A transition overlap cannot fit within both adjacent shots.
     TransitionOutsideShots,
+    /// A visual transition creates an implicit overlap between adjacent narration tracks.
+    TransitionVoiceOverOverlap,
+    /// Authored fades overlap or exceed their solved audio placement.
+    AudioEnvelopeOutsidePlacement,
     /// Renderable media omits its frozen artifact reference.
     MissingMediaSource,
     /// A media element references an artifact without its required track.
@@ -107,6 +111,8 @@ impl DiagnosticCode {
             Self::EmptyFilm => "ONM-TIME-006",
             Self::SourceIntervalOutsideAsset => "ONM-TIME-007",
             Self::TransitionOutsideShots => "ONM-TIME-008",
+            Self::TransitionVoiceOverOverlap => "ONM-AUDIO-001",
+            Self::AudioEnvelopeOutsidePlacement => "ONM-AUDIO-002",
             Self::MissingMediaSource => "ONM-ASSET-001",
             Self::IncompatibleMediaSource => "ONM-ASSET-002",
             Self::UnknownCueReference => "ONM-REF-001",
@@ -150,6 +156,8 @@ impl DiagnosticCode {
             | Self::EmptyFilm
             | Self::SourceIntervalOutsideAsset
             | Self::TransitionOutsideShots
+            | Self::TransitionVoiceOverOverlap
+            | Self::AudioEnvelopeOutsidePlacement
             | Self::MissingMediaSource
             | Self::IncompatibleMediaSource
             | Self::UnknownCueReference
@@ -223,6 +231,11 @@ mod tests {
             (DiagnosticCode::EmptyFilm, "ONM-TIME-006"),
             (DiagnosticCode::SourceIntervalOutsideAsset, "ONM-TIME-007"),
             (DiagnosticCode::TransitionOutsideShots, "ONM-TIME-008"),
+            (DiagnosticCode::TransitionVoiceOverOverlap, "ONM-AUDIO-001"),
+            (
+                DiagnosticCode::AudioEnvelopeOutsidePlacement,
+                "ONM-AUDIO-002",
+            ),
             (DiagnosticCode::MissingMediaSource, "ONM-ASSET-001"),
             (DiagnosticCode::IncompatibleMediaSource, "ONM-ASSET-002"),
             (DiagnosticCode::UnknownCueReference, "ONM-REF-001"),

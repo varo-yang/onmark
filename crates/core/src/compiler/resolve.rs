@@ -20,9 +20,9 @@ use super::linked_film::{
     LinkedVideo, LinkedVoiceOver,
 };
 use super::resolved_film::{
-    Authored, ResolvedAudio, ResolvedCue, ResolvedCues, ResolvedElement, ResolvedFilm,
-    ResolvedNode, ResolvedOverlay, ResolvedScene, ResolvedShot, ResolvedShotContent, ResolvedStart,
-    ResolvedText, ResolvedTransition, ResolvedVideo, ResolvedVoiceOver,
+    Authored, ResolvedAudio, ResolvedAudioEnvelope, ResolvedCue, ResolvedCues, ResolvedElement,
+    ResolvedFilm, ResolvedNode, ResolvedOverlay, ResolvedScene, ResolvedShot, ResolvedShotContent,
+    ResolvedStart, ResolvedText, ResolvedTransition, ResolvedVideo, ResolvedVoiceOver,
 };
 
 /// Optional typed attribute/reference output and its authored diagnostics.
@@ -273,20 +273,28 @@ impl Resolver {
 
     fn resolve_voice_over(&mut self, voice_over: LinkedVoiceOver) -> ResolvedVoiceOver {
         let (element, text) = voice_over.into_parts();
-        let media = self.resolve_media_attributes(element);
-        ResolvedVoiceOver::new(media.element, media.src, media.delay, resolve_text(text))
+        let media = self.resolve_voice_over_attributes(element);
+        ResolvedVoiceOver::new(
+            media.element,
+            media.src,
+            media.delay,
+            media.envelope,
+            resolve_text(text),
+        )
     }
 
-    fn resolve_media_attributes(&mut self, element: LinkedElement) -> MediaAttributes {
+    fn resolve_voice_over_attributes(&mut self, element: LinkedElement) -> VoiceOverAttributes {
         let input = ElementInput::new(element);
         let (element, mut attributes) = input.into_resolved_parts();
         let src = self.take_asset(&mut attributes, "src");
         let delay = self.take_duration(&mut attributes, "delay");
+        let envelope = self.take_audio_envelope(&mut attributes);
         attributes.reject_unknown(element.kind(), &mut self.diagnostics);
-        MediaAttributes {
+        VoiceOverAttributes {
             element,
             src,
             delay,
+            envelope,
         }
     }
 
@@ -300,6 +308,7 @@ impl Resolver {
             GeneralAudioKind::SoundEffect => attributes.take("delay"),
         };
         let gain_attribute = attributes.take("gain");
+        let envelope = self.take_audio_envelope(&mut attributes);
         attributes.reject_unknown(element.kind(), &mut self.diagnostics);
 
         let source = self.resolve_required_asset(source_attribute, &element);
@@ -315,7 +324,16 @@ impl Resolver {
             return None;
         };
 
-        Some(ResolvedAudio::new(kind, element, source, delay, gain))
+        Some(ResolvedAudio::new(
+            kind, element, source, delay, gain, envelope,
+        ))
+    }
+
+    fn take_audio_envelope(&mut self, attributes: &mut Attributes) -> ResolvedAudioEnvelope {
+        let fade_in = self.take_duration(attributes, "fade-in");
+        let fade_out = self.take_duration(attributes, "fade-out");
+
+        ResolvedAudioEnvelope::new(fade_in, fade_out)
     }
 
     fn resolve_audio_gain(&mut self, attribute: &Attribute) -> Option<AudioGain> {
@@ -519,10 +537,11 @@ struct CueState {
 }
 
 /// Attributes shared by media-bearing elements after raw names are consumed.
-struct MediaAttributes {
+struct VoiceOverAttributes {
     element: ResolvedElement,
     src: Option<Authored<AssetRef>>,
     delay: Option<Authored<Duration>>,
+    envelope: ResolvedAudioEnvelope,
 }
 
 /// Destructured linked element whose attributes still require typed resolution.

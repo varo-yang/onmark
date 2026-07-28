@@ -2,7 +2,9 @@
 
 use std::io::{self, Write};
 
-use onmark_core::model::{EventRef, FrameInterval, MediaSource, NodeId, PlaybackRate, SourceSpan};
+use onmark_core::model::{
+    AudioEnvelope, EventRef, FrameInterval, MediaSource, NodeId, PlaybackRate, SourceSpan,
+};
 use onmark_core::timeline::{
     TimelineAudio, TimelineCaption, TimelineContent, TimelineElement, TimelineEvent, TimelineIr,
     TimelineScene, TimelineShot, TimelineText, TimelineTiming, TimingReason,
@@ -12,7 +14,7 @@ use serde::Serialize;
 use crate::check::{Inspection, RegionInspection, Validation};
 use crate::diagnostic::JsonDiagnostic;
 
-const REPORT_VERSION: u16 = 3;
+const REPORT_VERSION: u16 = 4;
 
 pub(super) fn write(validation: &Validation) -> io::Result<()> {
     let report = &validation.report;
@@ -220,6 +222,8 @@ struct JsonContent<'a> {
     source: Option<JsonMediaSource>,
     #[serde(skip_serializing_if = "Option::is_none")]
     text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    envelope: Option<JsonEnvelope>,
 }
 
 impl<'a> From<&'a TimelineContent> for JsonContent<'a> {
@@ -231,6 +235,7 @@ impl<'a> From<&'a TimelineContent> for JsonContent<'a> {
                 asset_id: Some(video.asset_id().to_string()),
                 source: Some(video.source().into()),
                 text: None,
+                envelope: None,
             },
             TimelineContent::VoiceOver(voice_over) => Self {
                 element: voice_over.element().into(),
@@ -238,6 +243,7 @@ impl<'a> From<&'a TimelineContent> for JsonContent<'a> {
                 asset_id: Some(voice_over.asset_id().to_string()),
                 source: None,
                 text: Some(text(voice_over.text())),
+                envelope: Some(voice_over.audio().envelope().into()),
             },
             TimelineContent::Overlay(overlay) => Self {
                 element: overlay.element().into(),
@@ -245,6 +251,7 @@ impl<'a> From<&'a TimelineContent> for JsonContent<'a> {
                 asset_id: None,
                 source: None,
                 text: Some(text(overlay.text())),
+                envelope: None,
             },
         }
     }
@@ -297,6 +304,7 @@ struct JsonAudio<'a> {
     timing: JsonTiming<'a>,
     asset_id: String,
     gain: JsonGain,
+    envelope: JsonEnvelope,
 }
 
 impl<'a> From<&'a TimelineAudio> for JsonAudio<'a> {
@@ -310,6 +318,23 @@ impl<'a> From<&'a TimelineAudio> for JsonAudio<'a> {
                 numerator: gain.numerator(),
                 denominator: gain.denominator(),
             },
+            envelope: audio.envelope().into(),
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct JsonEnvelope {
+    fade_in_frames: u64,
+    fade_out_frames: u64,
+}
+
+impl From<AudioEnvelope> for JsonEnvelope {
+    fn from(envelope: AudioEnvelope) -> Self {
+        Self {
+            fade_in_frames: envelope.fade_in().get(),
+            fade_out_frames: envelope.fade_out().get(),
         }
     }
 }
@@ -422,8 +447,8 @@ mod tests {
     use std::collections::BTreeMap;
 
     use onmark_core::model::{
-        AssetMetadata, AssetRef, Duration, FrameRate, FrozenAsset, FrozenAssetId, Timebase,
-        VideoDimensions, VideoMetadata, VideoTiming,
+        AssetMetadata, AssetRef, AudioChannelLayout, AudioSampleRate, Duration, FrameRate,
+        FrozenAsset, FrozenAssetId, Timebase, VideoDimensions, VideoMetadata, VideoTiming,
     };
 
     use super::{JsonRegion, JsonTimeline};
@@ -527,6 +552,58 @@ mod tests {
         assert_eq!(video["source"]["playbackRate"]["denominator"], 1);
         assert_eq!(video["source"]["plays"], 2);
         assert_eq!(video["source"]["holdLastNanoseconds"], "1000000000");
+    }
+
+    #[test]
+    fn projects_exact_audio_envelopes() {
+        let source = concat!(
+            r#"<om-film><om-music src="bed.wav" fade-in="500ms" fade-out="1s"></om-music>"#,
+            "<om-scene><om-shot>",
+            r#"<om-vo src="voice.wav" fade-in="250ms" fade-out="250ms">Read.</om-vo>"#,
+            "</om-shot></om-scene></om-film>",
+        );
+        let (film, diagnostics) = compilation::resolve(source).into_parts();
+        assert!(diagnostics.is_empty());
+        let assets = BTreeMap::from([
+            fixture_audio("bed.wav", 1, "3s"),
+            fixture_audio("voice.wav", 2, "2s"),
+        ]);
+        let rate = FrameRate::new(30, 1).expect("the fixture rate is valid");
+        let (timeline, diagnostics) = compilation::solve(
+            film.expect("the fixture resolves"),
+            &assets,
+            Timebase::new(rate),
+            diagnostics,
+        )
+        .expect("the fixture solves")
+        .into_parts();
+        assert!(diagnostics.is_empty());
+
+        let document = serde_json::to_value(JsonTimeline::from(
+            &timeline.expect("the fixture produces Timeline IR"),
+        ))
+        .expect("the inspection projection serializes");
+
+        let music = document["audio"]
+            .as_array()
+            .expect("the audio projection is an array")
+            .iter()
+            .find(|audio| audio["kind"] == "music")
+            .expect("the projection retains the music track");
+        assert_eq!(music["envelope"]["fadeInFrames"], 15);
+        assert_eq!(music["envelope"]["fadeOutFrames"], 30);
+        let voice_over = &document["scenes"][0]["shots"][0]["content"][0];
+        assert_eq!(voice_over["envelope"]["fadeInFrames"], 8);
+        assert_eq!(voice_over["envelope"]["fadeOutFrames"], 8);
+    }
+
+    fn fixture_audio(asset: &str, identity: u8, duration: &str) -> (AssetRef, FrozenAsset) {
+        let asset = AssetRef::parse(asset).expect("the fixture asset reference is valid");
+        let duration = Duration::parse(duration).expect("the fixture duration is valid");
+        let sample_rate = AudioSampleRate::new(48_000).expect("the fixture sample rate is valid");
+        let metadata = AssetMetadata::audio(duration, sample_rate, AudioChannelLayout::Stereo);
+        let frozen = FrozenAsset::new(FrozenAssetId::from_sha256([identity; 32]), metadata);
+        (asset, frozen)
     }
 
     fn fixture_video(asset: &str, rate: FrameRate) -> (AssetRef, FrozenAsset) {

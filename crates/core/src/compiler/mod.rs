@@ -47,8 +47,8 @@ pub use linked_film::{
 pub use parse::{ParseReport, parse};
 pub use resolve::{ResolveReport, resolve};
 pub use resolved_film::{
-    Authored, ResolvedAudio, ResolvedCue, ResolvedCues, ResolvedElement, ResolvedFilm,
-    ResolvedNode, ResolvedOverlay, ResolvedScene, ResolvedShot, ResolvedShotContent, ResolvedStart,
-    ResolvedText, ResolvedTransition, ResolvedVideo, ResolvedVoiceOver,
+    Authored, ResolvedAudio, ResolvedAudioEnvelope, ResolvedCue, ResolvedCues, ResolvedElement,
+    ResolvedFilm, ResolvedNode, ResolvedOverlay, ResolvedScene, ResolvedShot, ResolvedShotContent,
+    ResolvedStart, ResolvedText, ResolvedTransition, ResolvedVideo, ResolvedVoiceOver,
 };
 pub use solve::{SolveError, SolveReport, solve};

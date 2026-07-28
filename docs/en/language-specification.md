@@ -184,6 +184,12 @@ authored timing errors; the compiler never clips or silently shortens a
 transition. Cross-scene transitions and transitions whose window is inferred
 from presentation code are not part of the language.
 
+The overlap is visual; it does not silently choose a narration-mixing policy.
+When the solved voice-over intervals of the adjacent shots intersect inside the
+transition, the compiler reports `ONM-AUDIO-001` at that boundary. The author
+must shorten the transition or delay the incoming voice-over. Onmark does not
+trim speech or invent a crossfade.
+
 The empty element's `id`, `class`, and ordinary presentation attributes remain
 available to CSS and motion code. `duration` is compiler-owned and is removed
 from the browser projection. The language does not prescribe an effect enum or
@@ -203,6 +209,7 @@ upstream. The compiler is offline and deterministic, and content hashes detect
 stale text/artifact pairs. The renderer materializes each solved voice-over into the
 private render root and mixes it outside browser capture at its solved frame
 interval. The presentation does not play, delay, or mix voice-over audio.
+Voice-over may use the exact `fade-in` and `fade-out` envelope described below.
 
 ## General audio
 
@@ -229,6 +236,22 @@ amplitude ratio, not decibels. The referenced artifact must contain an audio
 stream. Mixing and muxing remain native execution concerns; the browser does
 not play these elements.
 
+`vo`, `music`, and `sfx` admit optional `fade-in` and `fade-out` durations.
+The fade-in begins at the solved placement start; the fade-out ends at its
+exclusive end. Both are linear-amplitude ramps between silence and the authored
+or default gain. Fades change amplitude only: they never move, shorten, or
+extend the placement. Their sum must fit the actual solved placement, including
+music clipped at the film end, or solving reports `ONM-AUDIO-002`. Rust converts
+the durations to exact frame facts and then to integer output-sample
+boundaries; browser code does not own an audio envelope.
+
+The spelling was admitted by the checked-in `audio-envelope-syntax`
+experiment. Flat `fade-in`/`fade-out` attributes and an `om-envelope` child both
+retained 20/20 semantic accuracy across two independent repetitions. The flat
+attributes used 4,914 authored bytes versus 5,868 and avoided mixing a
+treatment child into voice-over inscription, so the child spelling is not part
+of the language.
+
 ## IDs and references
 
 Explicit IDs, including cue IDs, are non-empty, case-sensitive, and globally
@@ -244,9 +267,10 @@ Structural binding is followed by attribute and reference resolution. `film`,
 `cues`, and `scene` admit no non-ID compiler attributes. `cue` requires `id`
 and `time`. `shot` admits optional `duration`; `transition` requires
 `duration`. `video` admits optional `src`, `delay`, `trim`, `speed`, `plays`,
-and `hold-last`; `vo` admits optional `src` and `delay`; `music` requires `src`
-and admits optional `gain`; `sfx` requires `src` and admits optional `delay`
-and `gain`; `title` and `cta` admit optional `cue` or `delay`. `cue` and
+and `hold-last`; `vo` admits optional `src`, `delay`, `fade-in`, and `fade-out`;
+`music` requires `src` and admits optional `gain`, `fade-in`, and `fade-out`;
+`sfx` requires `src` and admits optional `delay`, `gain`, `fade-in`, and
+`fade-out`; `title` and `cta` admit optional `cue` or `delay`. `cue` and
 `delay` cannot appear together on one overlay because they define competing
 start rules. Missing `src` on `video` or `vo` remains valid for static
 analysis; `music` and `sfx` require it during resolution. An authored empty
@@ -293,6 +317,8 @@ Initial binding, resolution, and timing diagnostics are:
 | `ONM-TIME-006`   | a film has no shot with a positive solved duration                    |
 | `ONM-TIME-007`   | a selected video source interval lies outside its frozen artifact     |
 | `ONM-TIME-008`   | a transition cannot fit inside both adjacent shot intervals           |
+| `ONM-AUDIO-001`  | a transition makes adjacent solved voice-over intervals overlap        |
+| `ONM-AUDIO-002`  | audio fades overlap or exceed their solved placement                    |
 | `ONM-ASSET-001`  | renderable media has no frozen artifact reference                     |
 | `ONM-ASSET-002`  | a media element references an artifact without its required track     |
 | `ONM-REF-001`    | a well-formed overlay cue reference does not name a resolved cue      |
