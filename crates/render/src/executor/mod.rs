@@ -11,16 +11,18 @@ mod output;
 
 use std::path::{Path, PathBuf};
 
-use onmark_core::model::FrameIndex;
+use onmark_core::model::{FrameIndex, PresentationVisualCapability};
 use onmark_core::protocol::{WireFrameRate, WireInterval};
 use onmark_core::render_graph::PartitionPlan;
 
 use self::capture::{FrameSink, RequestSequence, validate_plan};
 use self::output::StagedOutput;
 use crate::encoder::{
-    AudioInput, LayeredCompletion, LayeredJob, LayeredMediaInput, LayeredOutput, LayeredSession,
+    AudioInput, BackdropMediaInput, LayeredCompletion, LayeredInputs, LayeredJob,
+    LayeredMediaInput, LayeredOutput, LayeredSession,
 };
 use crate::unit::MAX_AUDIO_TRACKS;
+use crate::visual::BackdropLayoutPlan;
 use crate::{
     BrowserCaptureMode, BrowserGraphicsBackend, BrowserLaunchPolicy, BrowserLimits,
     CaptureEnvironmentId, EncodedVideo, ExecutableUnit, Ffmpeg, FfmpegSession, FrameArtifact,
@@ -245,6 +247,10 @@ impl RenderExecutor {
                 self.render_browser_sequence(&units, requests, audio, frame_rate, output)
                     .await
             }
+            SequenceVisualPath::Backdrop => {
+                self.render_backdrop_sequence(&units, requests, audio, frame_rate, output)
+                    .await
+            }
             SequenceVisualPath::Layered => {
                 self.render_layered_sequence(&units, requests, audio, frame_rate, output)
                     .await
@@ -327,11 +333,81 @@ impl RenderExecutor {
         staging.publish(video, output)
     }
 
+    async fn render_backdrop_sequence(
+        &self,
+        units: &[ExecutableUnit],
+        requests: Vec<RequestSequence>,
+        audio: Vec<AudioInput>,
+        frame_rate: WireFrameRate,
+        output: &Path,
+    ) -> Result<EncodedVideo, RenderError> {
+        let Some(first) = units.first() else {
+            return Err(invalid_plan(
+                output,
+                "backdrop render sequence contains no units",
+            ));
+        };
+        let staging = StagedOutput::new(output, self.ffmpeg.profile())?;
+        let mut session = self.capture.start_session(first.profile(), output).await?;
+        let layouts = match preflight_backdrops(&mut session, units, output).await {
+            Ok(layouts) => layouts,
+            Err(error) => return Err(session.fail(error, output).await),
+        };
+        let job = match backdrop_job(
+            units,
+            &layouts,
+            LayeredOutput::Video(staging.visual_path().to_owned()),
+            output,
+        ) {
+            Ok(job) => job,
+            Err(error) => return Err(session.fail(error, output).await),
+        };
+        let mut compositor = match self.ffmpeg.start_layered(job) {
+            Ok(compositor) => compositor,
+            Err(source) => {
+                let error = RenderError::encoder(output, source);
+                return Err(session.fail(error, output).await);
+            }
+        };
+        let capture = capture_units_in_session(
+            &mut session,
+            units,
+            requests,
+            CaptureDestination::Layered(&mut compositor),
+            output,
+        )
+        .await;
+        if let Err(capture) = capture {
+            let capture = abort_compositor(compositor, capture, output).await;
+            return Err(session.fail(capture, output).await);
+        }
+        let completion = match compositor.finish().await {
+            Ok(completion) => completion,
+            Err(source) => {
+                let error = RenderError::encoder(output, source);
+                return Err(session.fail(error, output).await);
+            }
+        };
+        session.finish(Ok(()), output).await?;
+        let LayeredCompletion::Video(visual) = completion else {
+            return Err(invalid_plan(
+                output,
+                "backdrop local composition did not produce encoded video",
+            ));
+        };
+        let video = self
+            .ffmpeg
+            .mix_audio(visual, audio, frame_rate, staging.mixed_path())
+            .await
+            .map_err(|source| RenderError::encoder(output, source))?;
+        staging.publish(video, output)
+    }
+
     async fn capture_units(
         &self,
         units: &[ExecutableUnit],
         requests: Vec<RequestSequence>,
-        mut destination: CaptureDestination<'_>,
+        destination: CaptureDestination<'_>,
         output: &Path,
     ) -> Result<(), RenderError> {
         let Some(first) = units.first() else {
@@ -341,14 +417,8 @@ impl RenderExecutor {
             ));
         };
         let mut session = self.capture.start_session(first.profile(), output).await?;
-        let capture = async {
-            for (unit, requests) in units.iter().zip(requests) {
-                let mut frames = destination.frames();
-                session.capture(unit, &mut frames, requests, output).await?;
-            }
-            Ok(())
-        }
-        .await;
+        let capture =
+            capture_units_in_session(&mut session, units, requests, destination, output).await;
 
         session.finish(capture, output).await.map(|_| ())
     }
@@ -435,9 +505,18 @@ impl RenderExecutor {
             return Err(invalid_plan(output, "render sequence contains no units"));
         };
         let frame_rate = first.browser_plan().frame_rate();
-        let visual_path = match first.visual_execution().layered_media() {
-            Some(_) => SequenceVisualPath::Layered,
-            None => SequenceVisualPath::Browser,
+        let visual_path = if units
+            .iter()
+            .any(|unit| unit.visual_execution().layered_media().is_some())
+        {
+            SequenceVisualPath::Layered
+        } else if units
+            .iter()
+            .any(|unit| unit.visual_execution().backdrop_media().is_some())
+        {
+            SequenceVisualPath::Backdrop
+        } else {
+            SequenceVisualPath::Browser
         };
         let mut expected_start = expected_output.start().get();
         let mut total_frames = 0_u64;
@@ -500,6 +579,37 @@ async fn abort_compositor(
     }
 }
 
+async fn preflight_backdrops(
+    session: &mut frame_capture::FrameCaptureSession,
+    units: &[ExecutableUnit],
+    output: &Path,
+) -> Result<Vec<BackdropLayoutPlan>, RenderError> {
+    let mut layouts = Vec::with_capacity(units.len());
+    for unit in units {
+        let layout = if unit.visual_execution().backdrop_media().is_some() {
+            session.preflight_backdrop(unit, output).await?
+        } else {
+            BackdropLayoutPlan::empty()
+        };
+        layouts.push(layout);
+    }
+    Ok(layouts)
+}
+
+async fn capture_units_in_session(
+    session: &mut frame_capture::FrameCaptureSession,
+    units: &[ExecutableUnit],
+    requests: Vec<RequestSequence>,
+    mut destination: CaptureDestination<'_>,
+    output: &Path,
+) -> Result<(), RenderError> {
+    for (unit, requests) in units.iter().zip(requests) {
+        let mut frames = destination.frames();
+        session.capture(unit, &mut frames, requests, output).await?;
+    }
+    Ok(())
+}
+
 fn collect_audio_inputs(
     units: &[ExecutableUnit],
     origin: FrameIndex,
@@ -541,6 +651,7 @@ struct ValidatedSequence {
 
 enum SequenceVisualPath {
     Browser,
+    Backdrop,
     Layered,
 }
 
@@ -606,13 +717,131 @@ fn layered_job(
         return Err(sequence_too_large(diagnostic_path));
     };
     Ok(LayeredJob {
-        media,
+        inputs: LayeredInputs::VideoBase(media),
         output_frame_rate: first.browser_plan().frame_rate(),
         frames,
         profile: first.profile(),
         destination,
         diagnostic_path: diagnostic_path.to_owned(),
     })
+}
+
+fn backdrop_job(
+    units: &[ExecutableUnit],
+    layouts: &[BackdropLayoutPlan],
+    destination: LayeredOutput,
+    diagnostic_path: &Path,
+) -> Result<LayeredJob, RenderError> {
+    let Some(first) = units.first() else {
+        return Err(invalid_plan(
+            diagnostic_path,
+            "backdrop render sequence contains no units",
+        ));
+    };
+    if units.len() != layouts.len() {
+        return Err(invalid_plan(
+            diagnostic_path,
+            "backdrop layouts do not match render units",
+        ));
+    }
+    let origin = first.browser_plan().output().start().get();
+    let end = units
+        .last()
+        .expect("the nonempty sequence has a final unit")
+        .browser_plan()
+        .output()
+        .end()
+        .get();
+    let frames = end
+        .checked_sub(origin)
+        .ok_or_else(|| invalid_plan(diagnostic_path, "backdrop render sequence is reversed"))?;
+    let mut media = Vec::new();
+    for (unit, layout) in units.iter().zip(layouts) {
+        append_backdrop_inputs(&mut media, unit, layout, origin, diagnostic_path)?;
+    }
+    if media.is_empty() {
+        return Err(invalid_plan(
+            diagnostic_path,
+            "backdrop render sequence contains no published media",
+        ));
+    }
+    Ok(LayeredJob {
+        inputs: LayeredInputs::BrowserBase(media),
+        output_frame_rate: first.browser_plan().frame_rate(),
+        frames,
+        profile: first.profile(),
+        destination,
+        diagnostic_path: diagnostic_path.to_owned(),
+    })
+}
+
+fn append_backdrop_inputs(
+    inputs: &mut Vec<BackdropMediaInput>,
+    unit: &ExecutableUnit,
+    layout: &BackdropLayoutPlan,
+    origin: u64,
+    output: &Path,
+) -> Result<(), RenderError> {
+    let Some(media_plan) = unit.visual_execution().backdrop_media() else {
+        if layout.placements().is_empty()
+            && unit.visual_execution().capability()
+                == PresentationVisualCapability::SeparableBackdrop
+        {
+            return Ok(());
+        }
+        return Err(invalid_plan(
+            output,
+            "render unit has no compatible backdrop media",
+        ));
+    };
+    let plan = unit.browser_plan();
+    if media_plan.media().len() != plan.videos().len()
+        || layout.placements().len() != plan.videos().len()
+    {
+        return Err(invalid_plan(
+            output,
+            "backdrop media, layout, and browser placements disagree",
+        ));
+    }
+
+    for ((media, video), geometry) in media_plan
+        .media()
+        .iter()
+        .zip(plan.videos())
+        .zip(layout.placements())
+    {
+        let start = video
+            .interval()
+            .start()
+            .get()
+            .max(plan.output().start().get());
+        let end = video.interval().end().get().min(plan.output().end().get());
+        if start >= end {
+            continue;
+        }
+        if media.node_id() != video.node().id() || geometry.node_id() != video.node().id() {
+            return Err(invalid_plan(
+                output,
+                "backdrop media identities changed after preflight",
+            ));
+        }
+        inputs.push(BackdropMediaInput {
+            path: unit.visual_asset_path(media.asset_identity()),
+            source_frame_rate: video.source_timing().constant_frame_rate().ok_or_else(|| {
+                invalid_plan(
+                    output,
+                    "backdrop render unit contains variable source timing",
+                )
+            })?,
+            source: video.source().media_source(),
+            source_skip: start - video.interval().start().get(),
+            output_start: start - origin,
+            frames: end - start,
+            source_region: geometry.source(),
+            destination_region: geometry.destination(),
+        });
+    }
+    Ok(())
 }
 
 fn layered_media_input(

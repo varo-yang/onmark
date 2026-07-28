@@ -12,6 +12,7 @@ export type BrowserEvent =
        * Frame at which preparation completed.
        */
       evaluationStart: number;
+      mediaLayout: BrowserMediaLayout;
       type: "prepared";
     }
   | {
@@ -57,13 +58,32 @@ export type BrowserEvent =
       type: "disposed";
     };
 /**
+ * Browser identity for one Timeline element or imported caption.
+ *
+ * IDs form dense renderable-semantic preorder within one Browser Plan.
+ *
+ * Authored IDs, rather than this unit-local key, retain cross-projection
+ * semantic identity.
+ */
+export type BrowserNodeId = number;
+/**
+ * Closed CSS object-fit subset admitted by native media.
+ */
+export type BrowserObjectFit = "fill" | "contain" | "cover";
+/**
+ * Exact static media layout observed by the browser.
+ *
+ * @maxItems 16
+ */
+export type BrowserMediaLayout = BrowserMediaPlacement[];
+/**
  * Correlation identity shared by one request and its response events.
  */
 export type RequestId = number;
 /**
  * Version of the native-to-browser message contract.
  */
-export type ProtocolVersion = 4;
+export type ProtocolVersion = 5;
 
 /**
  * One versioned event returned by the browser runtime.
@@ -72,4 +92,29 @@ export interface BrowserResponse {
   event: BrowserEvent;
   requestId: RequestId;
   version: ProtocolVersion;
+}
+/**
+ * One video element's static, axis-aligned browser layout.
+ */
+export interface BrowserMediaPlacement {
+  nodeId: BrowserNodeId;
+  objectFit: BrowserObjectFit;
+  objectPosition: BrowserObjectPosition;
+  rectangle: BrowserPixelRectangle;
+}
+/**
+ * Fixed-point CSS object-position, where one million represents 100%.
+ */
+export interface BrowserObjectPosition {
+  x: number;
+  y: number;
+}
+/**
+ * Positive pixel rectangle relative to the output viewport.
+ */
+export interface BrowserPixelRectangle {
+  height: number;
+  width: number;
+  x: number;
+  y: number;
 }

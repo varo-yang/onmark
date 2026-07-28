@@ -13,7 +13,9 @@ use tokio::process::{Child, Command};
 use tokio::sync::mpsc;
 
 use super::error::{EncodeError, EncodeErrorKind};
-use super::layered::{CanonicalFrame, LayeredJob, LayeredOutput};
+use super::layered::{
+    BackdropMediaInput, CanonicalFrame, LayeredInputs, LayeredJob, LayeredOutput,
+};
 use super::limits::EncodeLimits;
 use super::process::configure_video_output;
 use super::profile::EncodeProfile;
@@ -38,24 +40,14 @@ pub(super) fn validate_job(job: &LayeredJob, limits: EncodeLimits) -> Result<(),
             "layered composition exceeds the configured frame limit",
         ));
     }
-    if job.media.is_empty() || job.media.len() > MAX_MEDIA_INPUTS {
+    if job.inputs.media_count() == 0 || job.inputs.media_count() > MAX_MEDIA_INPUTS {
         return Err(job_error(
             job,
             EncodeErrorKind::FrameLimit,
             "layered composition media count is outside the supported process bound",
         ));
     }
-    let planned_frames = job
-        .media
-        .iter()
-        .try_fold(0_u64, |total, media| total.checked_add(media.frames));
-    if planned_frames != Some(frames) || job.media.iter().any(|media| media.frames == 0) {
-        return Err(job_error(
-            job,
-            EncodeErrorKind::FrameLimit,
-            "layered media segments do not match the planned output frame count",
-        ));
-    }
+    validate_inputs(job)?;
     if let Some(output) = job.destination.video_path()
         && output.exists()
     {
@@ -66,6 +58,33 @@ pub(super) fn validate_job(job: &LayeredJob, limits: EncodeLimits) -> Result<(),
         ));
     }
     Ok(())
+}
+
+fn validate_inputs(job: &LayeredJob) -> Result<(), EncodeError> {
+    let valid = match &job.inputs {
+        LayeredInputs::VideoBase(media) => {
+            let planned = media
+                .iter()
+                .try_fold(0_u64, |total, media| total.checked_add(media.frames));
+            planned == Some(job.frames) && media.iter().all(|media| media.frames != 0)
+        }
+        LayeredInputs::BrowserBase(media) => media.iter().all(|media| {
+            media.frames != 0
+                && media.source_skip.checked_add(media.frames).is_some()
+                && media
+                    .output_start
+                    .checked_add(media.frames)
+                    .is_some_and(|end| end <= job.frames)
+        }),
+    };
+    if valid {
+        return Ok(());
+    }
+    Err(job_error(
+        job,
+        EncodeErrorKind::FrameLimit,
+        "layered media placements do not fit the planned output",
+    ))
 }
 
 pub(super) fn spawn(
@@ -87,9 +106,7 @@ pub(super) fn spawn(
         "-threads",
         "1",
     ]);
-    for media in &job.media {
-        command.arg("-i").arg(&media.path);
-    }
+    append_media_inputs(&mut command, &job.inputs);
     let dimensions = format!("{}x{}", job.profile.width(), job.profile.height());
     command.args([
         "-f",
@@ -147,6 +164,21 @@ pub(super) fn spawn(
         })
 }
 
+fn append_media_inputs(command: &mut Command, inputs: &LayeredInputs) {
+    match inputs {
+        LayeredInputs::VideoBase(media) => {
+            for media in media {
+                command.arg("-i").arg(&media.path);
+            }
+        }
+        LayeredInputs::BrowserBase(media) => {
+            for media in media {
+                command.arg("-i").arg(&media.path);
+            }
+        }
+    }
+}
+
 fn configure_layered_video_output(
     command: &mut Command,
     output: &Path,
@@ -159,11 +191,21 @@ fn configure_layered_video_output(
 }
 
 fn composition_filter(job: &LayeredJob) -> String {
+    match &job.inputs {
+        LayeredInputs::VideoBase(media) => foreground_composition_filter(job, media),
+        LayeredInputs::BrowserBase(media) => backdrop_composition_filter(job, media),
+    }
+}
+
+fn foreground_composition_filter(
+    job: &LayeredJob,
+    media: &[super::layered::LayeredMediaInput],
+) -> String {
     let mut filter = String::new();
-    for (index, media) in job.media.iter().enumerate() {
+    for (index, media) in media.iter().enumerate() {
         append_media_filter(&mut filter, index, media, job.output_frame_rate);
     }
-    let base = append_concat_filter(&mut filter, job.media.len());
+    let base = append_concat_filter(&mut filter, media.len());
     let output = match job.destination {
         LayeredOutput::Video(_) => "format=rgba[encoded]",
         LayeredOutput::Frames => "format=rgba[canonical]",
@@ -171,10 +213,83 @@ fn composition_filter(job: &LayeredJob) -> String {
     write!(
         filter,
         "{base}[{}:v]overlay=shortest=1:format=rgb,{output}",
-        job.media.len(),
+        media.len(),
     )
     .expect("writing an FFmpeg filter into a String cannot fail");
     filter
+}
+
+fn backdrop_composition_filter(job: &LayeredJob, media: &[BackdropMediaInput]) -> String {
+    let mut filter = String::new();
+    let browser_input = media.len();
+    write!(filter, "[{browser_input}:v]format=rgba[canvas0];")
+        .expect("writing an FFmpeg filter into a String cannot fail");
+
+    for (index, media) in media.iter().enumerate() {
+        append_backdrop_media_filter(&mut filter, index, media, job.output_frame_rate);
+        let next = index + 1;
+        write!(
+            filter,
+            concat!(
+                "[canvas{index}][media{index}]overlay=",
+                "x={x}:y={y}:eof_action=pass:repeatlast=0:shortest=0:format=rgb",
+                "[canvas{next}];",
+            ),
+            index = index,
+            next = next,
+            x = media.destination_region.x(),
+            y = media.destination_region.y(),
+        )
+        .expect("writing an FFmpeg filter into a String cannot fail");
+    }
+
+    let output = match job.destination {
+        LayeredOutput::Video(_) => "format=rgba[encoded]",
+        LayeredOutput::Frames => "format=rgba[canonical]",
+    };
+    write!(filter, "[canvas{}]{output}", media.len())
+        .expect("writing an FFmpeg filter into a String cannot fail");
+    filter
+}
+
+fn append_backdrop_media_filter(
+    filter: &mut String,
+    index: usize,
+    media: &BackdropMediaInput,
+    output_rate: WireFrameRate,
+) {
+    let selection = source_selection_filter(media.source_frame_rate, output_rate, media.source);
+    let end = media
+        .source_skip
+        .checked_add(media.frames)
+        .expect("validated backdrop source frames fit their accounting domain");
+    write!(
+        filter,
+        concat!(
+            "[{index}:v]{selection},",
+            "trim=start_frame={skip}:end_frame={end},",
+            "setpts=PTS-STARTPTS+{start}*{rate_denominator}/",
+            "({rate_numerator}*TB),",
+            "crop={source_width}:{source_height}:{source_x}:{source_y},",
+            "scale={destination_width}:{destination_height}:flags=bicubic:",
+            "in_range=limited:in_color_matrix=bt709:",
+            "out_range=full:out_color_matrix=bt709,format=rgba[media{index}];",
+        ),
+        index = index,
+        selection = selection,
+        skip = media.source_skip,
+        end = end,
+        start = media.output_start,
+        rate_numerator = output_rate.numerator(),
+        rate_denominator = output_rate.denominator(),
+        source_x = media.source_region.x(),
+        source_y = media.source_region.y(),
+        source_width = media.source_region.width(),
+        source_height = media.source_region.height(),
+        destination_width = media.destination_region.width(),
+        destination_height = media.destination_region.height(),
+    )
+    .expect("writing an FFmpeg filter into a String cannot fail");
 }
 
 fn append_media_filter(
@@ -311,7 +426,10 @@ mod tests {
 
     use super::{composition_filter, source_selection_filter};
     use crate::RenderProfile;
-    use crate::encoder::{LayeredJob, LayeredMediaInput, LayeredOutput};
+    use crate::encoder::{
+        BackdropMediaInput, LayeredInputs, LayeredJob, LayeredMediaInput, LayeredOutput,
+    };
+    use crate::visual::PixelRegion;
 
     #[test]
     fn owns_the_exact_midpoint_frame_selection_formula() {
@@ -347,7 +465,10 @@ mod tests {
     fn concatenates_partition_media_before_one_foreground_composition() {
         let rate = FrameRate::new(30, 1).expect("the fixture rate is valid");
         let job = LayeredJob {
-            media: vec![media("first.mp4", 10, rate), media("second.mp4", 20, rate)],
+            inputs: LayeredInputs::VideoBase(vec![
+                media("first.mp4", 10, rate),
+                media("second.mp4", 20, rate),
+            ]),
             output_frame_rate: rate.into(),
             frames: 30,
             profile: RenderProfile::new(320, 180).expect("the fixture profile is valid"),
@@ -367,7 +488,7 @@ mod tests {
     fn video_output_does_not_duplicate_frames_onto_stdout() {
         let rate = FrameRate::new(30, 1).expect("the fixture rate is valid");
         let job = LayeredJob {
-            media: vec![media("film.mp4", 30, rate)],
+            inputs: LayeredInputs::VideoBase(vec![media("film.mp4", 30, rate)]),
             output_frame_rate: rate.into(),
             frames: 30,
             profile: RenderProfile::new(320, 180).expect("the fixture profile is valid"),
@@ -380,6 +501,37 @@ mod tests {
         assert!(filter.ends_with("[base0][1:v]overlay=shortest=1:format=rgb,format=rgba[encoded]"));
         assert!(!filter.contains("split="));
         assert!(!filter.contains("[canonical]"));
+    }
+
+    #[test]
+    fn places_native_media_above_the_browser_backdrop() {
+        let rate = FrameRate::new(30, 1).expect("the fixture rate is valid");
+        let job = LayeredJob {
+            inputs: LayeredInputs::BrowserBase(vec![BackdropMediaInput {
+                path: PathBuf::from("card.mp4"),
+                source_frame_rate: rate.into(),
+                source: identity_source(),
+                source_skip: 2,
+                output_start: 5,
+                frames: 10,
+                source_region: PixelRegion::new(420, 0, 1_080, 1_080),
+                destination_region: PixelRegion::new(100, 40, 320, 180),
+            }]),
+            output_frame_rate: rate.into(),
+            frames: 30,
+            profile: RenderProfile::new(640, 360).expect("the fixture profile is valid"),
+            destination: LayeredOutput::Frames,
+            diagnostic_path: PathBuf::from("artifact.onmark-frames"),
+        };
+
+        let filter = composition_filter(&job);
+
+        assert!(filter.contains("[1:v]format=rgba[canvas0]"));
+        assert!(filter.contains("trim=start_frame=2:end_frame=12"));
+        assert!(filter.contains("crop=1080:1080:420:0"));
+        assert!(filter.contains("scale=320:180"));
+        assert!(filter.contains("overlay=x=100:y=40"));
+        assert!(filter.ends_with("[canvas1]format=rgba[canonical]"));
     }
 
     fn media(path: &str, frames: u64, rate: FrameRate) -> LayeredMediaInput {

@@ -28,7 +28,7 @@ const USAGE = [
   "  --max-output-bytes <bytes>",
   "  --frame-behavior <perFrame|placementBounded>",
   "  --temporal-capability <sequential|randomAccess>",
-  "  --visual-capability <browserComposite|separableOverlay>",
+  "  [--visual-capability <browserComposite|separableBackdrop|separableOverlay>]",
   "",
 ].join("\n");
 
@@ -72,15 +72,15 @@ async function parseArguments(arguments_: readonly string[]): Promise<Command> {
   const temporalCapability = parseTemporalCapability(
     oneValue(values["temporal-capability"], "--temporal-capability"),
   );
-  const visualCapability = parseVisualCapability(
-    oneValue(values["visual-capability"], "--visual-capability"),
+  const visualCapability = optionalVisualCapability(
+    values["visual-capability"],
   );
 
   const controls = {
     frameBehavior,
     maxOutputBytes,
     outputDirectory,
-    visualCapability,
+    ...visualCapability,
   };
   const common = {
     ...controls,
@@ -148,17 +148,21 @@ function parseTemporalCapability(
   );
 }
 
-function parseVisualCapability(
-  value: string,
-): BundleOptions["visualCapability"] {
+function optionalVisualCapability(
+  values: readonly string[] | undefined,
+): Pick<BundleOptions, "visualCapability"> {
+  if (values === undefined) {
+    return {};
+  }
+  const value = oneValue(values, "--visual-capability");
   const capability = BUNDLE_VISUAL_CAPABILITIES.find(
     (candidate) => candidate === value,
   );
   if (capability !== undefined) {
-    return capability;
+    return { visualCapability: capability };
   }
   throw configuration(
-    "--visual-capability must be browserComposite or separableOverlay",
+    "--visual-capability must be browserComposite, separableBackdrop, or separableOverlay",
   );
 }
 

@@ -46,7 +46,9 @@
 
       installRuntimeHost({
         async load() {},
-        async prepare() {},
+        async prepare() {
+          return [];
+        },
         async seek(frame) {
           if (stagedFrame !== undefined) {
             throw new RuntimeAdapterError(

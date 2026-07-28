@@ -7,9 +7,13 @@ import type {
   BrowserPlan,
   BrowserRequest,
 } from "./generated/browser-request.js";
-import type { BrowserResponse } from "./generated/browser-response.js";
+import type {
+  BrowserMediaLayout,
+  BrowserResponse,
+} from "./generated/browser-response.js";
 import {
   BROWSER_PROTOCOL_VERSION,
+  MAX_BROWSER_MEDIA_LAYOUTS,
   MAX_FAILURE_MESSAGE_CHARACTERS,
   MAX_PENDING_RESOURCE_CHARACTERS,
   MAX_PENDING_RESOURCES,
@@ -34,9 +38,9 @@ export type RuntimePlan = Immutable<BrowserPlan>;
  */
 export interface RuntimeAdapter {
   /** Installs one owned snapshot of the immutable browser plan. */
-  load(plan: RuntimePlan): Promise<void>;
+  load(plan: RuntimePlan, mediaMode: RuntimeMediaMode): Promise<void>;
   /** Resolves only after resources at the evaluation start are stable. */
-  prepare(frame: RuntimeFrame): Promise<void>;
+  prepare(frame: RuntimeFrame): Promise<BrowserMediaLayout>;
   /** Stages one exact frame and registers media presentation observers. */
   seek(frame: RuntimeFrame): Promise<void>;
   /** Verifies media presentation after native compositor capture. */
@@ -44,6 +48,12 @@ export interface RuntimeAdapter {
   /** Releases all resources owned by this adapter. */
   dispose(): Promise<void>;
 }
+
+/** Browser responsibility selected before presentation loading begins. */
+export type RuntimeMediaMode = Extract<
+  BrowserRequest["command"],
+  { type: "load" }
+>["mediaMode"];
 
 export type RuntimeAdapterFailureKind = "operation" | "readinessTimeout";
 
@@ -108,7 +118,11 @@ export class RuntimeSession {
   #execute(request: BrowserRequest): Promise<BrowserResponse> {
     switch (request.command.type) {
       case "load":
-        return this.#load(request.requestId, request.command.plan);
+        return this.#load(
+          request.requestId,
+          request.command.plan,
+          request.command.mediaMode,
+        );
       case "prepare":
         return this.#prepare(
           request.requestId,
@@ -123,7 +137,11 @@ export class RuntimeSession {
     }
   }
 
-  async #load(requestId: number, plan: BrowserPlan): Promise<BrowserResponse> {
+  async #load(
+    requestId: number,
+    plan: BrowserPlan,
+    mediaMode: RuntimeMediaMode,
+  ): Promise<BrowserResponse> {
     if (this.#state.kind !== "empty") {
       return invalidRequest(
         requestId,
@@ -131,7 +149,7 @@ export class RuntimeSession {
       );
     }
 
-    const violation = planViolation(plan);
+    const violation = planViolation(plan, mediaMode);
     if (violation !== undefined) {
       return invalidRequest(requestId, violation);
     }
@@ -139,7 +157,7 @@ export class RuntimeSession {
     const ownedPlan = snapshotPlan(plan);
     const nextState = loadedState(ownedPlan);
     try {
-      await this.#adapter.load(ownedPlan);
+      await this.#adapter.load(ownedPlan, mediaMode);
     } catch (error) {
       // Loading may have entered author code and partially mutated its owned
       // browser state. Only terminal disposal is safe after that boundary.
@@ -169,9 +187,15 @@ export class RuntimeSession {
     }
 
     try {
-      await this.#adapter.prepare(
+      const mediaLayout = await this.#adapter.prepare(
         runtimeFrameAt(evaluationStart, this.#state.frameRate),
       );
+      this.#state = { ...this.#state, kind: "ready" };
+      return response(requestId, {
+        type: "prepared",
+        evaluationStart,
+        mediaLayout,
+      });
     } catch (error) {
       // Preparation may have started author-owned asynchronous work that the
       // generic adapter cannot cancel. Make the session terminal so a retry
@@ -179,9 +203,6 @@ export class RuntimeSession {
       this.#state = { kind: "failed" };
       return readinessFailure(requestId, "prepareFailed", error);
     }
-
-    this.#state = { ...this.#state, kind: "ready" };
-    return response(requestId, { type: "prepared", evaluationStart });
   }
 
   async #seek(requestId: number, frame: number): Promise<BrowserResponse> {
@@ -352,7 +373,16 @@ function readinessFailure(
   return operationFailure(requestId, operationCode, error);
 }
 
-function planViolation(plan: BrowserPlan): string | undefined {
+function planViolation(
+  plan: BrowserPlan,
+  mediaMode: RuntimeMediaMode,
+): string | undefined {
+  if (
+    mediaMode === "layoutOnly" &&
+    plan.videos.length > MAX_BROWSER_MEDIA_LAYOUTS
+  ) {
+    return "layout-only plan exceeds the browser media-layout limit";
+  }
   if (!exactRatioIsCanonical(plan.frameRate)) {
     return "plan frame rate is not canonical";
   }

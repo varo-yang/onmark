@@ -554,6 +554,7 @@ class FakeElement {
   removed = false;
   sourceRemoved = false;
   src = "";
+  readonly style = { visibility: "" };
   textContent: string | null = null;
 
   constructor(readonly localName: string) {}

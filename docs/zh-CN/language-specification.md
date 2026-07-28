@@ -73,6 +73,11 @@ Onmark 语言的目标不是用另一套标签重画时间轴，而是让创作�
 `cue="offer"` 将 overlay 对齐到命名 cue。自由
 `begin`、`end` 和 `until` 表达式不进入语言。
 
+HTML head 中形如
+`<meta name="onmark:visual-capability" content="separableBackdrop">` 的声明属于
+presentation build contract，不属于这里的 screenplay vocabulary。它只能选择已准入的
+pixel-ownership path，不能改变结构、时间、Timeline IR 或 render dependency。
+
 ### HTML 语法
 
 剧本是一份作者直接编写的 HTML 文档。普通 HTML 负责 layout 与 presentation，封闭的 Onmark

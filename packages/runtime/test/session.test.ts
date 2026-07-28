@@ -5,16 +5,20 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  BROWSER_PROTOCOL_VERSION,
+  MAX_BROWSER_MEDIA_LAYOUTS,
   MAX_FAILURE_MESSAGE_CHARACTERS,
   MAX_PENDING_RESOURCE_CHARACTERS,
   MAX_PENDING_RESOURCES,
   RuntimeAdapterError,
   RuntimeSession,
   type BrowserPlan,
+  type BrowserMediaLayout,
   type BrowserRequest,
   type BrowserResponse,
   type RuntimeAdapter,
   type RuntimeFrame,
+  type RuntimeMediaMode,
   type RuntimePlan,
 } from "../src/index.js";
 
@@ -78,7 +82,7 @@ test("executes the browser protocol in order", async () => {
   const session = new RuntimeSession(adapter);
 
   assert.deepEqual(await session.dispatch(request(1, { type: "load", plan })), {
-    version: 4,
+    version: BROWSER_PROTOCOL_VERSION,
     requestId: 1,
     event: { type: "loaded" },
   });
@@ -87,15 +91,15 @@ test("executes the browser protocol in order", async () => {
       request(2, { type: "prepare", evaluationStart: 10 }),
     ),
     {
-      version: 4,
+      version: BROWSER_PROTOCOL_VERSION,
       requestId: 2,
-      event: { type: "prepared", evaluationStart: 10 },
+      event: { type: "prepared", evaluationStart: 10, mediaLayout: [] },
     },
   );
   assert.deepEqual(
     await session.dispatch(request(3, { type: "seek", frame: 15 })),
     {
-      version: 4,
+      version: BROWSER_PROTOCOL_VERSION,
       requestId: 3,
       event: { type: "frameStaged", frame: 15 },
     },
@@ -103,13 +107,13 @@ test("executes the browser protocol in order", async () => {
   assert.deepEqual(
     await session.dispatch(request(4, { type: "confirm", frame: 15 })),
     {
-      version: 4,
+      version: BROWSER_PROTOCOL_VERSION,
       requestId: 4,
       event: { type: "frameReady", frame: 15 },
     },
   );
   assert.deepEqual(await session.dispatch(request(5, { type: "dispose" })), {
-    version: 4,
+    version: BROWSER_PROTOCOL_VERSION,
     requestId: 5,
     event: { type: "disposed" },
   });
@@ -594,13 +598,82 @@ test("keeps the owned plan immutable after passing it to the adapter", async () 
   assert.deepEqual(adapter.seekFrames, [{ index: 15, timeSeconds: 0.5 }]);
 });
 
+test("returns canonical layout evidence from a layout-only load", async () => {
+  const adapter = new RecordingAdapter();
+  adapter.mediaLayout = [
+    {
+      nodeId: 3,
+      objectFit: "cover",
+      objectPosition: { x: 500_000, y: 500_000 },
+      rectangle: { x: 80, y: 45, width: 640, height: 360 },
+    },
+  ];
+  const session = new RuntimeSession(adapter);
+
+  await session.dispatch(
+    request(1, { type: "load", plan, mediaMode: "layoutOnly" }),
+  );
+  const prepared = await session.dispatch(
+    request(2, { type: "prepare", evaluationStart: 10 }),
+  );
+
+  assert.equal(adapter.mediaMode, "layoutOnly");
+  assert.deepEqual(prepared.event, {
+    type: "prepared",
+    evaluationStart: 10,
+    mediaLayout: adapter.mediaLayout,
+  });
+});
+
+test("rejects layout-only work beyond the protocol media bound", async () => {
+  const adapter = new RecordingAdapter();
+  const session = new RuntimeSession(adapter);
+  const prototype = firstVideo(plan);
+  const oversized: BrowserPlan = {
+    ...plan,
+    overlays: [],
+    videos: Array.from(
+      { length: MAX_BROWSER_MEDIA_LAYOUTS + 1 },
+      (_, index) => ({
+        ...prototype,
+        node: { authoredId: `video-${index}`, nodeId: index + 3 },
+      }),
+    ),
+  };
+
+  const response = await session.dispatch(
+    request(1, {
+      type: "load",
+      plan: oversized,
+      mediaMode: "layoutOnly",
+    }),
+  );
+
+  assert.deepEqual(response.event, {
+    type: "failed",
+    code: "invalidRequest",
+    message: "layout-only plan exceeds the browser media-layout limit",
+    pendingResources: [],
+  });
+  assert.deepEqual(adapter.operations, []);
+});
+
 // ── Test support ──
 
 function request(
   requestId: number,
-  command: BrowserRequest["command"],
+  command:
+    | BrowserRequest["command"]
+    | {
+        readonly type: "load";
+        readonly plan: BrowserPlan;
+      },
 ): BrowserRequest {
-  return { version: 4, requestId, command };
+  const complete =
+    command.type === "load" && !("mediaMode" in command)
+      ? { ...command, mediaMode: "decoded" as const }
+      : command;
+  return { version: BROWSER_PROTOCOL_VERSION, requestId, command: complete };
 }
 
 function firstVideo<Video>(plan: { readonly videos: readonly Video[] }): Video {
@@ -632,6 +705,8 @@ type FailureCode = Extract<
 class RecordingAdapter implements RuntimeAdapter {
   readonly operations: string[] = [];
   loadedPlan: RuntimePlan | undefined;
+  mediaMode: RuntimeMediaMode | undefined;
+  mediaLayout: BrowserMediaLayout = [];
   loadBarrier: Promise<void> | undefined;
   loadError: Error | undefined;
   prepareError: Error | undefined;
@@ -642,9 +717,10 @@ class RecordingAdapter implements RuntimeAdapter {
   readonly seekFrames: RuntimeFrame[] = [];
   readonly confirmedFrames: RuntimeFrame[] = [];
 
-  async load(plan: RuntimePlan): Promise<void> {
+  async load(plan: RuntimePlan, mediaMode: RuntimeMediaMode): Promise<void> {
     this.operations.push("load");
     this.loadedPlan = plan;
+    this.mediaMode = mediaMode;
     if (this.loadError !== undefined) {
       throw this.loadError;
     }
@@ -653,12 +729,13 @@ class RecordingAdapter implements RuntimeAdapter {
     }
   }
 
-  async prepare(frame: RuntimeFrame): Promise<void> {
+  async prepare(frame: RuntimeFrame): Promise<BrowserMediaLayout> {
     this.operations.push(`prepare:${frame.index}`);
     this.preparedFrame = frame;
     if (this.prepareError !== undefined) {
       throw this.prepareError;
     }
+    return this.mediaLayout;
   }
 
   async seek(frame: RuntimeFrame): Promise<void> {

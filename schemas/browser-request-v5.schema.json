@@ -7,6 +7,10 @@
           "additionalProperties": false,
           "description": "Install one immutable browser plan.",
           "properties": {
+            "mediaMode": {
+              "$ref": "#/$defs/BrowserMediaMode",
+              "description": "Browser responsibility for primary-media elements."
+            },
             "plan": {
               "$ref": "#/$defs/BrowserPlan",
               "description": "Solved frame facts consumed by the runtime clock."
@@ -18,7 +22,8 @@
           },
           "required": [
             "type",
-            "plan"
+            "plan",
+            "mediaMode"
           ],
           "type": "object"
         },
@@ -92,6 +97,26 @@
             "type"
           ],
           "type": "object"
+        }
+      ]
+    },
+    "BrowserMediaMode": {
+      "description": "Browser responsibility for video elements in one loaded plan.",
+      "oneOf": [
+        {
+          "const": "decoded",
+          "description": "Chromium decodes and composites every active video placement.",
+          "type": "string"
+        },
+        {
+          "const": "omitted",
+          "description": "Chromium omits video elements from its captured pixels.",
+          "type": "string"
+        },
+        {
+          "const": "layoutOnly",
+          "description": "Chromium omits video pixels but returns static layout evidence.",
+          "type": "string"
         }
       ]
     },
@@ -452,7 +477,7 @@
       ]
     },
     "ProtocolVersion": {
-      "const": 4,
+      "const": 5,
       "description": "Version of the native-to-browser message contract.",
       "format": "uint16",
       "maximum": 65535,
@@ -560,7 +585,7 @@
       "type": "object"
     }
   },
-  "$id": "https://onmark.dev/schemas/browser-request-v4.schema.json",
+  "$id": "https://onmark.dev/schemas/browser-request-v5.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "One versioned command sent from the native executor to the browser.",

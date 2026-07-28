@@ -224,11 +224,13 @@ impl ExecutableUnit {
     }
 
     pub(crate) fn layered_media_path(&self) -> Option<PathBuf> {
-        self.visual_execution.layered_media().map(|media| {
-            self.root
-                .path()
-                .join(BundleManifest::asset_path(media.asset_identity()))
-        })
+        self.visual_execution
+            .layered_media()
+            .map(|media| self.visual_asset_path(media.asset_identity()))
+    }
+
+    pub(crate) fn visual_asset_path(&self, identity: FrozenAssetId) -> PathBuf {
+        self.root.path().join(BundleManifest::asset_path(identity))
     }
 
     pub(crate) fn bundle_id(&self) -> &str {

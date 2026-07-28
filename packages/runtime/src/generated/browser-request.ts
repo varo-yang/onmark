@@ -5,6 +5,10 @@
  */
 export type BrowserCommand =
   | {
+      /**
+       * Browser responsibility for primary-media elements.
+       */
+      mediaMode: "decoded" | "omitted" | "layoutOnly";
       plan: BrowserPlan;
       type: "load";
     }
@@ -75,7 +79,7 @@ export type RequestId = number;
 /**
  * Version of the native-to-browser message contract.
  */
-export type ProtocolVersion = 4;
+export type ProtocolVersion = 5;
 
 /**
  * One versioned command sent from the native executor to the browser.

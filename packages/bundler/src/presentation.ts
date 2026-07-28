@@ -115,7 +115,7 @@ interface BundleControls {
   readonly resolveDirectory?: string;
   readonly outputDirectory: string;
   readonly maxOutputBytes: number;
-  readonly visualCapability: PresentationVisualCapability;
+  readonly visualCapability?: PresentationVisualCapability;
   readonly frameBehavior: PresentationFrameBehavior;
 }
 
@@ -172,7 +172,7 @@ interface PendingRegion {
 interface PreparedBundleControls {
   readonly outputDirectory: string;
   readonly maxOutputBytes: number;
-  readonly visualCapability: PresentationVisualCapability;
+  readonly visualCapability: PresentationVisualCapability | undefined;
   readonly frameBehavior: PresentationFrameBehavior;
 }
 
@@ -188,9 +188,26 @@ type BundleControlsSnapshot = PreparedBundleControls &
       }
   );
 
-type BundleInput = BundleControlsSnapshot & {
-  readonly html: AuthoredHtml;
+type ResolvedBundleControls = Omit<
+  PreparedBundleControls,
+  "visualCapability"
+> & {
+  readonly visualCapability: PresentationVisualCapability;
 };
+
+type BundleInput = ResolvedBundleControls &
+  (
+    | {
+        readonly temporalCapability: "sequential";
+        readonly projection?: never;
+      }
+    | {
+        readonly temporalCapability: "randomAccess";
+        readonly projection: BundleProjection;
+      }
+  ) & {
+    readonly html: AuthoredHtml;
+  };
 
 type NonEmpty<T> = readonly [T, ...T[]];
 
@@ -222,6 +239,10 @@ export async function bundlePresentation(
     Object.freeze({
       ...controls,
       html: Object.freeze({ ...html }),
+      visualCapability: resolveVisualCapability(
+        controls.visualCapability,
+        html.visualCapability,
+      ),
     }),
   );
 }
@@ -309,7 +330,10 @@ function snapshotControls(options: BundleOptions): BundleControlsSnapshot {
   const temporalCapability = validateTemporalCapability(
     options.temporalCapability,
   );
-  const visualCapability = validateVisualCapability(options.visualCapability);
+  const visualCapability =
+    options.visualCapability === undefined
+      ? undefined
+      : validateVisualCapability(options.visualCapability);
   const frameBehavior = validateFrameBehavior(options.frameBehavior);
   if (
     frameBehavior === "placementBounded" &&
@@ -409,8 +433,25 @@ function validateVisualCapability(
   }
   throw new BundleError(
     "configuration",
-    "visual capability must be browserComposite or separableOverlay",
+    "visual capability must be browserComposite, separableBackdrop, or separableOverlay",
   );
+}
+
+function resolveVisualCapability(
+  configured: PresentationVisualCapability | undefined,
+  authored: PresentationVisualCapability | undefined,
+): PresentationVisualCapability {
+  if (
+    configured !== undefined &&
+    authored !== undefined &&
+    configured !== authored
+  ) {
+    throw new BundleError(
+      "configuration",
+      "configured and authored visual capabilities disagree",
+    );
+  }
+  return configured ?? authored ?? "browserComposite";
 }
 
 function validateFrameBehavior(

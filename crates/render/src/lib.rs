@@ -50,6 +50,7 @@ pub use unit_root::{
 };
 pub use video::{AdmittedVideo, UnsupportedVideo};
 pub use visual::{
-    BrowserCaptureCadence, LayeredMediaPlan, UnsupportedVisualComposition, VisualExecutionPlan,
+    BackdropMedia, BackdropMediaPlan, BrowserCaptureCadence, LayeredMediaPlan,
+    UnsupportedVisualComposition, VisualExecutionPlan,
 };
 pub use worker::{WorkerCaptureRequest, WorkerCaptureVersion};

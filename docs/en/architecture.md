@@ -1619,6 +1619,54 @@ end. Native crop, scale, picture-in-picture, and multi-video placement require
 explicit layout facts plus whole-film, partitioned, and distributed raw-pixel
 equivalence before they may bypass Chromium.
 
+The admitted browser-backdrop path is declared as `separableBackdrop`; absence
+of that authored presentation declaration remains `browserComposite`. Planning
+accepts from one through 16 CFR, BT.709 limited-range video placements whose
+source treatment is supported natively. A declared candidate that fails this
+admission is rejected rather than silently sent through Chromium.
+
+The browser owns CSS evaluation without becoming a second planner. Before
+capture, the executor loads the unit in `layoutOnly` mode and receives a
+protocol-versioned, node-ordered set of integer viewport rectangles plus the
+closed `object-fit` and fixed-point `object-position` facts. Rust validates that
+evidence against the Render Unit's expected media identities, source
+dimensions, output profile and solved intervals. Only exact, in-bounds
+crop/scale arithmetic is admitted, and spatially overlapping native rectangles
+are rejected when their solved intervals overlap. The checked placements form
+one immutable `BackdropLayoutPlan` for that capture transaction.
+Shot projection preserves the capability on browser-only regions with zero
+native media. Such a region captures normally on its own and remains compatible
+with native-media regions in the same sequence; an empty local media set does
+not relabel its visual contract.
+
+One continuous bounded `FFmpeg` process then treats Chromium's opaque or
+alpha-preserving output as the canvas and overlays each time-bounded native
+source with explicit trim, PTS offset, crop, scale and destination coordinates.
+It owns neither screenplay timing nor CSS interpretation. Local sequences,
+worker artifacts and distributed assembly all use this executor branch; there
+is no alternative worker compositor and no per-frame decoder launch.
+
+This branch freezes CSS geometry, not Chromium's media-rasterization algorithm.
+The locked native decoder, color conversion, and scaler define video pixels
+after admission. Conformance therefore requires canonical raw-RGBA equality
+among whole, partitioned, local, and worker executions of this branch; it does
+not claim byte-for-byte equality with the distinct `browserComposite` contract.
+
+Cache identity deliberately records the deterministic inputs to browser layout
+rather than duplicating its derived response: bundle identity, Browser Plan,
+render profile, expected native-media plan and capture environment. Recording
+the response itself would require launching Chromium before a cache lookup and
+would defeat warm incremental reuse. The capture environment locks the browser,
+native compositor policy and binaries; a cache miss freezes and validates the
+derived evidence before any output is published.
+
+The checked-in
+[`backdrop-layout-admission`](../../conformance/evidence/backdrop-layout-admission.md)
+record contains the whole/partition/worker raw-pixel proof and the first
+same-host browser-versus-native performance samples. The measured native
+candidate is currently close to, but not faster than, browser composition;
+future optimization claims require a new locked experiment.
+
 The admitted alternate output is the edit-friendly, alpha-preserving MOV
 profile: `ProRes` 4444 (`yuva444p10le`, decoded by the locked toolchain as
 `yuva444p12le`) with 48 kHz stereo 24-bit PCM. The delivery profile remains

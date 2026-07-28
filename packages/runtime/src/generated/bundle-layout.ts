@@ -7,6 +7,7 @@ export const PRESENTATION_TEMPORAL_CAPABILITIES = Object.freeze([
 export type PresentationTemporalCapability = (typeof PRESENTATION_TEMPORAL_CAPABILITIES)[number];
 export const PRESENTATION_VISUAL_CAPABILITIES = Object.freeze([
   "browserComposite",
+  "separableBackdrop",
   "separableOverlay",
 ] as const);
 export type PresentationVisualCapability = (typeof PRESENTATION_VISUAL_CAPABILITIES)[number];

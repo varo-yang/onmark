@@ -5,11 +5,13 @@ import { open } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
 import { parse, type DefaultTreeAdapterTypes, type ParserError } from "parse5";
+import type { PresentationVisualCapability } from "@onmark/runtime/types";
 
 import { freezeHtmlImages, type HtmlImageResource } from "./html_image.js";
 
 const MAX_HTML_BYTES = 8 * 1024 * 1024;
 const MOTION_ATTRIBUTE = "data-om-motion";
+const VISUAL_CAPABILITY_META = "onmark:visual-capability";
 const RUNTIME_SCRIPT =
   '<script type="module" src="./presentation.js"></script>';
 
@@ -19,6 +21,7 @@ const RUNTIME_SCRIPT =
 export interface AuthoredHtml {
   readonly document: string;
   readonly motion: string | undefined;
+  readonly visualCapability: PresentationVisualCapability | undefined;
   readonly resources: readonly HtmlImageResource[];
   readonly shots: readonly AuthoredHtmlShot[];
   readonly regionStructure: AuthoredHtmlRegionStructure;
@@ -76,6 +79,7 @@ export async function readAuthoredHtml(
 ): Promise<AuthoredHtml> {
   const absolute = resolve(path);
   const source = await readBoundedSource(absolute);
+  const visualCapability = declaredVisualCapability(parseDocument(source));
   const directory =
     resolveDirectory === undefined
       ? dirname(absolute)
@@ -91,6 +95,7 @@ export async function readAuthoredHtml(
     ...extracted,
     resources: frozen.resources,
     resolveDirectory: directory,
+    visualCapability,
   });
 }
 
@@ -409,6 +414,42 @@ function collectScripts(
     }
   });
   return scripts;
+}
+
+function declaredVisualCapability(
+  document: DefaultTreeAdapterTypes.Document,
+): PresentationVisualCapability | undefined {
+  const declarations: string[] = [];
+  visit(document, (element) => {
+    if (element.tagName !== "meta") {
+      return;
+    }
+    const attributes = new Map(
+      element.attrs.map(({ name, value }) => [name, value]),
+    );
+    if (attributes.get("name") === VISUAL_CAPABILITY_META) {
+      declarations.push(attributes.get("content") ?? "");
+    }
+  });
+  if (declarations.length > 1) {
+    throw new AuthoredHtmlError(
+      `authored HTML may contain at most one ${VISUAL_CAPABILITY_META} declaration`,
+    );
+  }
+  const [declaration] = declarations;
+  if (declaration === undefined) {
+    return undefined;
+  }
+  switch (declaration) {
+    case "browserComposite":
+    case "separableBackdrop":
+    case "separableOverlay":
+      return declaration;
+    default:
+      throw new AuthoredHtmlError(
+        `${VISUAL_CAPABILITY_META} must be browserComposite, separableBackdrop, or separableOverlay`,
+      );
+  }
 }
 
 function findElement(

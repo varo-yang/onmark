@@ -12,17 +12,17 @@ use std::sync::Arc;
 
 use onmark_core::model::{
     AudioChannelLayout, AudioGain, AudioSampleConversionOverflow, AudioSampleCount, FrameInterval,
-    FrameRate, FrozenAsset, FrozenAssetId, PresentationDocumentScope, Rounding, VideoColorProfile,
-    VideoDimensions, VideoTiming,
+    FrameRate, FrozenAsset, FrozenAssetId, PresentationDocumentScope, PresentationVisualCapability,
+    Rounding, VideoColorProfile, VideoDimensions, VideoTiming,
 };
 use onmark_core::protocol::{BrowserPlan, BundleManifest, InvalidBrowserPlan};
 use onmark_core::render_graph::{PartitionPlan, RenderPartition};
 use onmark_core::timeline::{TimelineAudio, TimelineIr, TimelineShotIndex};
 
-use crate::VisualExecutionPlan;
 use crate::{
     AdmittedVideo, CaptureEnvironmentId, RenderProfile, UnsupportedVideo, WorkerCaptureRequest,
 };
+use crate::{UnsupportedVisualComposition, VisualExecutionPlan};
 
 pub(crate) const MAX_AUDIO_TRACKS: usize = 32;
 
@@ -396,7 +396,8 @@ impl RenderUnit {
             &browser_plan,
             profile,
             videos.values(),
-        );
+        )
+        .map_err(InvalidRenderUnit::VisualComposition)?;
 
         Ok(Self {
             browser_plan,
@@ -485,10 +486,15 @@ impl RenderUnit {
 }
 
 fn normalize_visual_execution(units: &mut [RenderUnit]) {
-    let all_layered = units
-        .iter()
-        .all(|unit| unit.visual_execution.layered_media().is_some());
-    if all_layered {
+    let Some(first) = units.first() else {
+        return;
+    };
+    let capability = first.visual_execution.capability();
+    let shares_native_path = capability != PresentationVisualCapability::BrowserComposite
+        && units
+            .iter()
+            .all(|unit| unit.visual_execution.capability() == capability);
+    if shares_native_path {
         return;
     }
     for unit in units {
@@ -538,6 +544,8 @@ pub enum InvalidRenderUnit {
     },
     /// A timeline frame cannot cross the JavaScript wire boundary exactly.
     BrowserPlan(InvalidBrowserPlan),
+    /// A declared native visual capability lacks the required frozen proof.
+    VisualComposition(UnsupportedVisualComposition),
 }
 
 impl fmt::Display for InvalidRenderUnit {
@@ -582,6 +590,7 @@ impl fmt::Display for InvalidRenderUnit {
                 )
             }
             Self::BrowserPlan(source) => source.fmt(formatter),
+            Self::VisualComposition(source) => source.fmt(formatter),
         }
     }
 }
@@ -592,6 +601,7 @@ impl Error for InvalidRenderUnit {
             Self::UnsupportedVideo { source, .. } => Some(source),
             Self::AudioSampleConversion { source, .. } => Some(source),
             Self::BrowserPlan(source) => Some(source),
+            Self::VisualComposition(source) => Some(source),
             Self::BundleCount
             | Self::DocumentScope { .. }
             | Self::DuplicateAsset(_)
@@ -832,7 +842,7 @@ mod tests {
         let decoded: WorkerCaptureRequest =
             serde_json::from_str(&encoded).expect("the portable worker request parses once");
 
-        assert_eq!(wire["version"], 3);
+        assert_eq!(wire["version"], 4);
         assert_eq!(wire["profile"]["alpha"], "opaque");
         assert_eq!(wire["captureEnvironment"], environment.to_string());
         assert_eq!(encoded, repeated);
@@ -1107,6 +1117,56 @@ mod tests {
     }
 
     #[test]
+    fn admits_static_browser_backdrop_layout_to_native_media() {
+        let source_dimensions =
+            VideoDimensions::new(1_920, 1_080).expect("fixture dimensions are positive");
+        let frozen = layered_video_asset(source_dimensions, true);
+        let timeline = video_timeline(frozen.clone());
+        let materialized = MaterializedAsset::new(frozen, "/tmp/opening.mp4")
+            .expect("the fixture path is present");
+
+        let unit = RenderUnit::whole_film(
+            &timeline,
+            bundle_manifest_with(PresentationVisualCapability::SeparableBackdrop),
+            render_profile(),
+            [materialized],
+        )
+        .expect("the frozen facts admit browser-measured native layout");
+        let request = unit.worker_capture_request(capture_environment());
+        let wire = serde_json::to_value(&request).expect("the backdrop request serializes");
+        let decoded: WorkerCaptureRequest =
+            serde_json::from_value(wire.clone()).expect("the backdrop request validates");
+
+        assert_eq!(wire["visualExecution"]["mode"], "separableBackdrop");
+        assert_eq!(wire["visualExecution"]["media"][0]["width"], 1_920);
+        assert_eq!(decoded, request);
+        assert!(unit.visual_execution().backdrop_media().is_some());
+    }
+
+    #[test]
+    fn rejects_an_unproved_declared_backdrop_without_fallback() {
+        let frozen = layered_video_asset(video_dimensions(), false);
+        let timeline = video_timeline(frozen.clone());
+        let materialized = MaterializedAsset::new(frozen, "/tmp/opening.mp4")
+            .expect("the fixture path is present");
+
+        let error = RenderUnit::whole_film(
+            &timeline,
+            bundle_manifest_with(PresentationVisualCapability::SeparableBackdrop),
+            render_profile(),
+            [materialized],
+        )
+        .expect_err("a strong authored capability cannot fall back after admission");
+
+        assert_eq!(
+            error,
+            InvalidRenderUnit::VisualComposition(
+                crate::UnsupportedVisualComposition::UnsupportedColorProfile,
+            ),
+        );
+    }
+
+    #[test]
     fn admits_placement_bounded_capture_for_layered_foreground() {
         let frozen = layered_video_asset(video_dimensions(), true);
         let timeline = video_timeline(frozen.clone());
@@ -1337,6 +1397,53 @@ mod tests {
                 .iter()
                 .all(|unit| unit.visual_execution().layered_media().is_none())
         );
+    }
+
+    #[test]
+    fn keeps_native_backdrop_beside_a_browser_only_partition() {
+        let frozen = layered_video_asset(video_dimensions(), true);
+        let timeline = solve(
+            concat!(
+                "<om-film><om-scene>",
+                r#"<om-shot><video src="opening.mp4"></video></om-shot>"#,
+                r#"<om-shot duration="1s"><om-title>Static</om-title></om-shot>"#,
+                "</om-scene></om-film>",
+            ),
+            "opening.mp4",
+            frozen.clone(),
+        );
+        let partitions =
+            RenderGraph::from_timeline(&timeline, PresentationTemporalCapability::RandomAccess)
+                .expect("the fixture has complete render ownership")
+                .into_partition();
+        let materialized = MaterializedAsset::new(frozen, "/tmp/opening.mp4")
+            .expect("the fixture path is present");
+
+        let units = RenderUnit::from_partition_plan(
+            &timeline,
+            &partitions,
+            &bundle_manifest_with(PresentationVisualCapability::SeparableBackdrop),
+            render_profile(),
+            [materialized],
+        )
+        .expect("a browser-only partition does not invalidate native video elsewhere");
+
+        assert_eq!(units.len(), 2);
+        assert!(units[0].visual_execution().backdrop_media().is_some());
+        assert_eq!(
+            units[1].visual_execution().capability(),
+            PresentationVisualCapability::SeparableBackdrop,
+        );
+        let encoded =
+            serde_json::to_string(&units[1].worker_capture_request(capture_environment()))
+                .expect("the browser-only backdrop request serializes");
+        let decoded: WorkerCaptureRequest =
+            serde_json::from_str(&encoded).expect("the backdrop capability survives transport");
+        assert_eq!(
+            decoded.visual_execution().capability(),
+            PresentationVisualCapability::SeparableBackdrop,
+        );
+        assert_eq!(decoded.visual_execution().native_media_count(), 0);
     }
 
     #[test]

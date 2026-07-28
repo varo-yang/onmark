@@ -30,7 +30,8 @@ use onmark_core::model::{
     SourceId, Timebase, VideoColorProfile, VideoDimensions, VideoMetadata, VideoTiming,
 };
 use onmark_core::protocol::{
-    BrowserCommand, BrowserEvent, BrowserPlan, BrowserRequest, RequestId, WireFrame,
+    BrowserCommand, BrowserEvent, BrowserMediaMode, BrowserPlan, BrowserRequest, RequestId,
+    WireFrame,
 };
 use onmark_media::Ffprobe;
 use onmark_render::{
@@ -544,7 +545,7 @@ async fn load_and_prepare(
     let loaded = session
         .dispatch(&BrowserRequest::new(
             RequestId::new(1),
-            BrowserCommand::Load { plan: plan.clone() },
+            BrowserCommand::load(plan.clone(), BrowserMediaMode::Decoded),
         ))
         .await?;
     assert_eq!(loaded.event(), &BrowserEvent::Loaded);
@@ -558,7 +559,10 @@ async fn load_and_prepare(
         .await?;
     assert_eq!(
         prepared.event(),
-        &BrowserEvent::Prepared { evaluation_start },
+        &BrowserEvent::Prepared {
+            evaluation_start,
+            media_layout: onmark_core::protocol::BrowserMediaLayout::empty(),
+        },
     );
     session
         .initialize_capture_surface(plan.frame_rate())

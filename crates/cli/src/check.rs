@@ -54,6 +54,7 @@ pub(super) struct RegionInspection {
     pub(super) output_end: u64,
     pub(super) visual_mode: &'static str,
     pub(super) capture_cadence: &'static str,
+    pub(super) native_media: usize,
     pub(super) bundle_id: Box<str>,
 }
 
@@ -224,6 +225,7 @@ fn inspect_regions(partitions: &PartitionPlan, units: &[RenderUnit]) -> Vec<Regi
                 onmark_render::BrowserCaptureCadence::EveryFrame => "everyFrame",
                 onmark_render::BrowserCaptureCadence::PlacementBounded => "placementBounded",
             },
+            native_media: unit.visual_execution().native_media_count(),
             bundle_id: unit.bundle_id().into(),
         })
         .collect()

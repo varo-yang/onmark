@@ -77,7 +77,9 @@
           video.load();
           await loaded;
         },
-        async prepare() {},
+        async prepare() {
+          return [];
+        },
         async seek(frame) {
           if (pendingFrame !== undefined) {
             throw new RuntimeAdapterError(
