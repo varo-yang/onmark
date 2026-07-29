@@ -18,8 +18,8 @@ use onmark_core::render_graph::{PartitionPlan, RenderGraph};
 use onmark_core::timeline::TimelineIr;
 use onmark_media::Ffprobe;
 use onmark_render::{
-    BrowserCaptureMode, BrowserGraphicsBackend, CapturedFrame, EncodeProfile, ExecutableUnit,
-    Ffmpeg, FrameArtifactError, RawRgbaHash, RenderExecutor, RenderProfile, RenderUnit,
+    BrowserCaptureMode, BrowserGraphicsBackend, CapturedFrame, ExecutableUnit, FrameArtifactError,
+    RawRgbaHash, RenderProfile, RenderUnit,
 };
 use serde::Serialize;
 
@@ -258,7 +258,12 @@ async fn execute(
     let graphics_backend = args
         .graphics_backend()
         .unwrap_or_else(execution::local_graphics_backend);
-    let executor = render_executor(&executables, graphics_backend);
+    let executor = execution::visual_feedback_executor(
+        &executables.browser.path,
+        executables.browser.capture_mode,
+        &executables.ffmpeg,
+        graphics_backend,
+    );
     let capture_mode = executor.capture_mode();
     let cache_admission = if args.browser.is_some() {
         CacheAdmission::Ephemeral
@@ -383,25 +388,6 @@ fn materialize_frame(
         directory,
         execution::unit_root_limits(),
     )?)
-}
-
-fn render_executor(
-    executables: &Executables,
-    graphics_backend: BrowserGraphicsBackend,
-) -> RenderExecutor {
-    let ffmpeg = Ffmpeg::new(
-        &executables.ffmpeg,
-        execution::local_encode_limits(execution::LOCAL_VIDEO_ENCODER_THREADS),
-        EncodeProfile::H264Mp4,
-    )
-    .expect("environment discovery returns a non-empty FFmpeg path");
-    RenderExecutor::new(
-        &executables.browser.path,
-        executables.browser.capture_mode,
-        execution::browser_limits(),
-        ffmpeg,
-    )
-    .with_graphics_backend(graphics_backend)
 }
 
 fn read_screenplay(args: &SnapshotArgs) -> Result<String, CliError> {

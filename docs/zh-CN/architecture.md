@@ -856,10 +856,10 @@ S3 contract 不会变成桌面 installer 语义。
 当前 authored native surface 刻意保持很窄：`onmark check <film.html>` 不启动
 Chromium，验证到 Render Unit planning；`onmark inspect <film.html>` 解释已经求解和规划的
 fact，包括精确的 video source selection 与 rate；`onmark snapshot <film.html>
---frame <index>` 把一张生产帧捕获为 lossless PNG；`onmark render <film.html>` 执行完整
-output。`onmark doctor` 验证已准入的本地工具链，`onmark info` 报告已安装产品与 host
-identity。machine-readable command report 带显式版本，并保留稳定 diagnostic code 与
-byte span。
+--frame <index>` 把一张生产帧捕获为 lossless PNG；`onmark review <film.html>` 生成一份
+精确的静态视觉审阅；`onmark render <film.html>` 执行完整 output。`onmark doctor`
+验证已准入的本地工具链，`onmark info` 报告已安装产品与 host identity。machine-readable
+command report 带显式版本，并保留稳定 diagnostic code 与 byte span。
 
 authored HTML 同时包含 screenplay custom element 与 presentation DOM/CSS；至多一个带
 `type="module" data-om-motion` 的 inline module 导出 declarative `motion` value，
@@ -1644,6 +1644,31 @@ final video encoder、remote single-frame request、contact-sheet scheduler、vi
 approximate frame 或 black-frame fallback。它的 conformance claim 是：在同一个 locked
 capture environment 中，与完整 production artifact 的对应帧具有相同 canonical
 raw-RGBA。
+
+`review` 闭合更宽的精确反馈循环，但不会演变成 Player 或 preview server。一个纯 CLI
+策略选择每个 Render Graph region 的首帧、中间帧与最后一张已发布帧，再加入由已求解
+shot、transition、video、overlay 与 imported caption 产生的视觉边界；相同 frame identity
+会合并成一个 checkpoint。策略是确定性的；超过 512 个 checkpoint 时直接拒绝，而不是静默
+抽样；也不会读取 presentation source 来猜测视觉重要性。
+
+review capture 按原计划执行所有普通 production region，不把它们收窄成 review-only
+Render Unit。已经验证的桌面 `FrameArtifact` 会直接复用，只有 cache miss region 才进入
+Chromium。每个选中 frame 只从其所属 verified artifact 读取一次，并发布为 lossless PNG。
+一份静态 HTML contact sheet 和 versioned JSON manifest 会记录精确 frame、所属 region、
+evaluation/output bound、shot dependency、semantic checkpoint reason、source span、timing
+provenance、frame-artifact identity、PNG digest 与 canonical raw-RGBA digest。report 不含
+wall-clock measurement 或 mutable cache state。
+
+默认 review directory 由这份 canonical manifest byte 进行内容寻址。只有 manifest 与每个
+已命名 PNG 都通过有界完整性检查，既有 report 才能复用。可选的 prior manifest 只作为比较
+输入：它报告未变化、变化、新增和删除的 region artifact，但不会进入当前 report identity。
+artifact reuse 始终由已有 production cache key 决定，因此 comparison 不能授权复用；语义上
+已变化的 region 也不能仅凭某个 checkpoint 看起来相同而继承旧 pixels。
+
+这个 surface 刻意保持静态和本地。它不会增加 playback clock、scrubber、hot-reload server、
+source mutation、visual scorer、sparse distributed frame task、第二套 timing solver、
+approximate frame 或 hidden capture fallback。它的精确性来自 production artifact contract
+本身，而不是与另一套 preview implementation 做相似度比较。
 
 第二个切片只通过 typed fact 与锁定证据接纳更广的媒体输入、输出 profile 与 native placement。
 VFR 输入保留冻结的源字节，并要求完整的 frame timestamp map；Onmark 不会把它转码成隐式 CFR

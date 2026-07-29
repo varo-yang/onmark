@@ -65,6 +65,7 @@ pub(super) enum CliError {
     UnitRoot(UnitRootError),
     Render(RenderError),
     Snapshot(crate::snapshot::SnapshotError),
+    Review(crate::review::ReviewError),
 }
 
 impl CliError {
@@ -164,6 +165,7 @@ impl fmt::Display for CliError {
             Self::UnitRoot(source) => source.fmt(formatter),
             Self::Render(source) => source.fmt(formatter),
             Self::Snapshot(source) => source.fmt(formatter),
+            Self::Review(source) => source.fmt(formatter),
         }
     }
 }
@@ -197,6 +199,7 @@ impl Error for CliError {
             Self::UnitRoot(source) => Some(source),
             Self::Render(source) => Some(source),
             Self::Snapshot(source) => Some(source),
+            Self::Review(source) => Some(source),
         }
     }
 }
@@ -210,6 +213,12 @@ impl From<EnvironmentError> for CliError {
 impl From<crate::doctor::DoctorError> for CliError {
     fn from(source: crate::doctor::DoctorError) -> Self {
         Self::Doctor(source)
+    }
+}
+
+impl From<crate::review::ReviewError> for CliError {
+    fn from(source: crate::review::ReviewError) -> Self {
+        Self::Review(source)
     }
 }
 

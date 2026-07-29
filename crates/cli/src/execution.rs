@@ -3,9 +3,13 @@
 //! The renderer owns enforcement. The CLI selects concrete bounded values for
 //! its local composition root and its remote worker entry point.
 
+use std::path::Path;
 use std::time::Duration;
 
-use onmark_render::{BrowserLimits, EncodeLimits, FrameArtifactLimits, UnitRootLimits};
+use onmark_render::{
+    BrowserCaptureMode, BrowserGraphicsBackend, BrowserLimits, EncodeLimits, EncodeProfile, Ffmpeg,
+    FrameArtifactLimits, RenderExecutor, UnitRootLimits,
+};
 
 const PROCESS_DEADLINE: Duration = Duration::from_mins(2);
 const ENCODER_INACTIVITY_TIMEOUT: Duration = Duration::from_mins(1);
@@ -59,6 +63,22 @@ pub(super) fn frame_artifact_limits() -> FrameArtifactLimits {
 pub(super) fn snapshot_artifact_limits() -> FrameArtifactLimits {
     FrameArtifactLimits::new(1, MAX_SNAPSHOT_ARTIFACT_BYTES, MAX_CAPTURE_BYTES)
         .expect("the CLI snapshot policy stays within the render safety envelope")
+}
+
+pub(super) fn visual_feedback_executor(
+    browser: &Path,
+    capture_mode: BrowserCaptureMode,
+    ffmpeg: &Path,
+    graphics_backend: BrowserGraphicsBackend,
+) -> RenderExecutor {
+    let ffmpeg = Ffmpeg::new(
+        ffmpeg,
+        local_encode_limits(LOCAL_VIDEO_ENCODER_THREADS),
+        EncodeProfile::H264Mp4,
+    )
+    .expect("environment discovery returns a non-empty FFmpeg path");
+    RenderExecutor::new(browser, capture_mode, browser_limits(), ffmpeg)
+        .with_graphics_backend(graphics_backend)
 }
 
 pub(super) fn unit_root_limits() -> UnitRootLimits {

@@ -259,27 +259,55 @@ impl FrameArtifact {
     /// Returns [`FrameArtifactError`] when the position is absent or any
     /// artifact record fails validation.
     pub async fn frame(&self, position: u64) -> Result<CapturedFrame, FrameArtifactError> {
-        if position >= self.frames() {
+        let [frame] = self
+            .frames_at(&[position])
+            .await?
+            .try_into()
+            .map_err(|_: Vec<CapturedFrame>| self.missing_requested_frame())?;
+        Ok(frame)
+    }
+
+    /// Reads selected verified frames in one sequential artifact pass.
+    ///
+    /// Positions must be strictly increasing. The reader verifies the complete
+    /// artifact checksum while decoding only selected PNGs, so a contact sheet
+    /// does not rescan one region for every checkpoint.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FrameArtifactError`] when a position is repeated, unordered,
+    /// absent, or any artifact record fails validation.
+    pub async fn frames_at(
+        &self,
+        positions: &[u64],
+    ) -> Result<Vec<CapturedFrame>, FrameArtifactError> {
+        self.validate_positions(positions)?;
+        let mut selected = positions.iter().copied().peekable();
+        let mut frames = Vec::with_capacity(positions.len());
+        let mut reader = self.reader().await?;
+
+        for position in 0..self.frames() {
+            if selected.next_if_eq(&position).is_some() {
+                let frame = reader
+                    .next_frame()
+                    .await?
+                    .ok_or_else(|| self.missing_requested_frame())?;
+                frames.push(frame);
+            } else {
+                reader
+                    .next_recorded_fingerprint()
+                    .await?
+                    .ok_or_else(|| self.missing_requested_frame())?;
+            }
+        }
+        if reader.next_recorded_fingerprint().await?.is_some() {
             return Err(FrameArtifactError::invalid(
                 &self.path,
-                "requested frame position lies outside the artifact",
+                "frame artifact contains more records than declared",
             ));
         }
 
-        let mut reader = self.reader().await?;
-        for _ in 0..position {
-            reader
-                .next_recorded_fingerprint()
-                .await?
-                .ok_or_else(|| self.missing_requested_frame())?;
-        }
-        let frame = reader
-            .next_frame()
-            .await?
-            .ok_or_else(|| self.missing_requested_frame())?;
-        while reader.next_recorded_fingerprint().await?.is_some() {}
-
-        Ok(frame)
+        Ok(frames)
     }
 
     /// Reads the sole verified frame from a single-frame artifact.
@@ -303,6 +331,19 @@ impl FrameArtifact {
             &self.path,
             "frame artifact ended before the requested position",
         )
+    }
+
+    fn validate_positions(&self, positions: &[u64]) -> Result<(), FrameArtifactError> {
+        let all_in_range = positions.iter().all(|position| *position < self.frames());
+        let strictly_increasing = positions.windows(2).all(|pair| pair[0] < pair[1]);
+        if all_in_range && strictly_increasing {
+            return Ok(());
+        }
+
+        Err(FrameArtifactError::invalid(
+            &self.path,
+            "requested frame positions must be strictly increasing and inside the artifact",
+        ))
     }
 
     /// Verifies that two same-environment artifact sequences have equal
@@ -670,6 +711,47 @@ mod tests {
 
         assert_eq!(frame.raw_rgba_hash(), expected.raw_rgba_hash());
         assert_eq!(single_error.kind(), FrameArtifactErrorKind::InvalidArtifact);
+    }
+
+    #[tokio::test]
+    async fn reads_ordered_review_frames_in_one_artifact_pass() {
+        let directory = tempdir().expect("the fixture directory is available");
+        let artifact = artifact(&directory.path().join("frames.onmark-frames"), &[1, 2]).await;
+        let expected = [1, 2]
+            .map(|color| {
+                CapturedFrame::from_png(encoded_png(color), descriptor().profile)
+                    .expect("the fixture frame has canonical pixels")
+                    .raw_rgba_hash()
+            })
+            .to_vec();
+
+        let frames = artifact
+            .frames_at(&[0, 1])
+            .await
+            .expect("ordered selected frames verify");
+        let unordered = artifact
+            .frames_at(&[1, 0])
+            .await
+            .expect_err("unordered positions are ambiguous");
+        let repeated = artifact
+            .frames_at(&[0, 0])
+            .await
+            .expect_err("repeated positions are ambiguous");
+        let outside = artifact
+            .frames_at(&[2])
+            .await
+            .expect_err("positions outside the artifact are invalid");
+
+        assert_eq!(
+            frames
+                .iter()
+                .map(CapturedFrame::raw_rgba_hash)
+                .collect::<Vec<_>>(),
+            expected,
+        );
+        assert_eq!(unordered.kind(), FrameArtifactErrorKind::InvalidArtifact);
+        assert_eq!(repeated.kind(), FrameArtifactErrorKind::InvalidArtifact);
+        assert_eq!(outside.kind(), FrameArtifactErrorKind::InvalidArtifact);
     }
 
     #[tokio::test]

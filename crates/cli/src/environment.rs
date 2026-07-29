@@ -47,13 +47,16 @@ impl Executables {
     }
 
     pub(super) async fn discover_snapshot(args: &SnapshotArgs) -> Result<Self, EnvironmentError> {
-        Self::discover_with(
-            args.browser.as_deref(),
-            &args.validation.bundler,
-            &args.ffmpeg,
-            &args.validation.ffprobe,
-        )
-        .await
+        Self::discover_visual_feedback(&args.validation, args.browser.as_deref(), &args.ffmpeg)
+            .await
+    }
+
+    pub(super) async fn discover_visual_feedback(
+        validation: &ValidationArgs,
+        browser: Option<&Path>,
+        ffmpeg: &Path,
+    ) -> Result<Self, EnvironmentError> {
+        Self::discover_with(browser, &validation.bundler, ffmpeg, &validation.ffprobe).await
     }
 
     async fn discover_with(
