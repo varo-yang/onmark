@@ -85,6 +85,7 @@ Validate or inspect the same production plan without launching Chromium:
 onmark check film.html
 onmark inspect film.html --json
 onmark snapshot film.html --frame 42
+onmark review film.html
 onmark doctor
 onmark benchmark film.html --runs 3 --json
 ```
@@ -93,6 +94,11 @@ onmark benchmark film.html --runs 3 --json
 `renders/film-frame-42.png`. It uses the same render region, browser/native
 path, and verified pixel contract as the complete film; it is not a preview
 approximation.
+
+`review` reuses the production region cache and writes lossless checkpoints,
+`manifest.json`, and a static contact sheet under a content-addressed
+`reviews/film-*/` directory. Pass `--against <prior-manifest>` to compare exact
+region identities after an edit.
 
 Use the default opaque H.264/AAC MP4 for delivery, or select the
 alpha-preserving ProRes 4444/PCM MOV profile by filename:

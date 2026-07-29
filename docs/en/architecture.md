@@ -734,11 +734,12 @@ The authored native surface stays narrow: `onmark check <film.html>` validates
 through Render Unit planning without Chromium, `onmark inspect <film.html>`
 explains the solved and planned facts, including exact video source selection
 and rate, `onmark snapshot <film.html> --frame <index>` captures one exact
-production frame as lossless PNG, and `onmark render <film.html>` executes the
-complete output. `onmark doctor` validates the admitted local toolchain, while
-`onmark info` reports the installed product and host identity. Machine-readable
-command reports carry an explicit version and preserve stable diagnostic codes
-and byte spans.
+production frame as lossless PNG, `onmark review <film.html>` builds one exact
+static visual review, and `onmark render <film.html>` executes the complete
+output. `onmark doctor` validates the admitted local toolchain, while `onmark
+info` reports the installed product and host identity. Machine-readable command
+reports carry an explicit version and preserve stable diagnostic codes and byte
+spans.
 The authored HTML contains both screenplay custom elements and presentation
 DOM/CSS. At most one inline module marked `type="module" data-om-motion`
 exports the declarative `motion` value; the generated infrastructure entry owns
@@ -1635,6 +1636,39 @@ not create a second renderer, final video encoder, remote single-frame request,
 contact-sheet scheduler, visual scorer, approximate frame, or black-frame
 fallback. Its conformance claim is canonical raw-RGBA equality with the same
 frame in a complete production artifact under one locked capture environment.
+
+`review` closes the broader exact feedback loop without becoming a Player or a
+preview server. A pure CLI-owned policy selects the start, midpoint, and final
+published frame of every Render Graph region, then adds visual boundaries from
+solved shots, transitions, videos, overlays, and imported captions. Equal frame
+identities collapse into one checkpoint. The policy is deterministic, rejects
+more than 512 checkpoints instead of silently sampling them, and never reads
+presentation source to infer visual importance.
+
+Review capture executes every ordinary production region as planned. It does
+not narrow regions into review-only Render Units: verified desktop
+`FrameArtifact` hits are reused directly, and only cache-missing regions enter
+Chromium. Each selected frame is read once from its owning verified artifact
+and published as a lossless PNG. A static HTML contact sheet and a versioned
+JSON manifest describe the exact frame, owning region, evaluation and output
+bounds, shot dependencies, semantic checkpoint reasons, source spans, timing
+provenance, frame-artifact identity, PNG digest, and canonical raw-RGBA digest.
+The report contains no wall-clock measurements or mutable cache state.
+
+The default review directory is content-addressed from those canonical manifest
+bytes. Existing reports are reusable only after their manifest and every named
+PNG pass bounded integrity checks. An optional prior manifest is comparison
+input only: it reports unchanged, changed, added, and removed region artifacts
+without entering current report identity. Artifact reuse remains governed by
+the existing production cache key, so comparison cannot authorize reuse and a
+changed semantic region cannot inherit pixels merely because one checkpoint
+looks equal.
+
+This surface is deliberately static and local. It adds no playback clock,
+scrubber, hot-reload server, source mutation, visual scorer, sparse distributed
+frame task, second timing solver, approximate frame, or hidden capture fallback.
+Its exactness claim is the production artifact contract itself, not similarity
+to a separate preview implementation.
 
 The second slice admits broader media inputs, output profiles, and native
 placements only through typed facts and locked evidence. VFR input retains its

@@ -33,6 +33,8 @@ pub(super) enum Command {
     Info,
     /// Explain the solved timeline and render regions without rendering.
     Inspect(InspectArgs),
+    /// Build an exact static review from production frame artifacts.
+    Review(ReviewArgs),
     /// Compile and render one screenplay into an admitted video profile.
     Render(RenderArgs),
     /// Capture one exact production frame as a lossless PNG.
@@ -305,6 +307,38 @@ pub(super) struct SnapshotArgs {
     pub(super) ffmpeg: PathBuf,
 }
 
+#[derive(Debug, Args)]
+pub(super) struct ReviewArgs {
+    #[command(flatten)]
+    pub(super) validation: ValidationArgs,
+
+    /// Review directory. Defaults to a content-addressed directory under reviews/.
+    #[arg(short, long)]
+    pub(super) output: Option<PathBuf>,
+
+    /// Prior review manifest to compare after the current review is complete.
+    #[arg(long, value_name = "MANIFEST")]
+    pub(super) against: Option<PathBuf>,
+
+    /// Browser executable. Defaults to headless shell on Linux and Chrome elsewhere.
+    #[arg(long, help_heading = "Execution overrides")]
+    pub(super) browser: Option<PathBuf>,
+
+    /// Browser graphics implementation. Omit to use the admitted host default.
+    #[arg(long, value_enum, help_heading = "Execution overrides")]
+    graphics: Option<GraphicsBackend>,
+
+    /// `FFmpeg` executable used when the admitted visual path owns native media.
+    #[arg(
+        long,
+        env = "ONMARK_FFMPEG",
+        hide_env = true,
+        default_value = "ffmpeg",
+        help_heading = "Execution overrides"
+    )]
+    pub(super) ffmpeg: PathBuf,
+}
+
 impl RenderArgs {
     pub(super) fn output(&self) -> PathBuf {
         self.output.clone().unwrap_or_else(|| {
@@ -361,6 +395,12 @@ impl SnapshotArgs {
         Ok(output)
     }
 
+    pub(super) fn graphics_backend(&self) -> Option<BrowserGraphicsBackend> {
+        self.graphics.map(GraphicsBackend::into_render_backend)
+    }
+}
+
+impl ReviewArgs {
     pub(super) fn graphics_backend(&self) -> Option<BrowserGraphicsBackend> {
         self.graphics.map(GraphicsBackend::into_render_backend)
     }
@@ -505,6 +545,29 @@ mod tests {
         assert_eq!(args.frame_rate.denominator(), 1);
         assert_eq!(args.graphics_backend(), None);
         assert_eq!(args.video_encoder_threads(), LOCAL_VIDEO_ENCODER_THREADS);
+    }
+
+    #[test]
+    fn parses_the_exact_review_surface_without_a_preview_mode() {
+        let cli = Cli::try_parse_from([
+            "onmark",
+            "review",
+            "project/film.html",
+            "--against",
+            "reviews/previous/manifest.json",
+        ])
+        .expect("the review command is valid");
+        let Command::Review(args) = cli.command else {
+            panic!("the fixture must parse as a review command");
+        };
+
+        assert_eq!(args.validation.screenplay, Path::new("project/film.html"));
+        assert_eq!(
+            args.against.as_deref(),
+            Some(Path::new("reviews/previous/manifest.json")),
+        );
+        assert_eq!(args.output, None);
+        assert_eq!(args.graphics_backend(), None);
     }
 
     #[test]

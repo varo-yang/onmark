@@ -153,3 +153,9 @@ equivalence, isolates a local title edit, prevents `:has()` from observing an
 omitted sibling, and exercises persistent CLI reuse plus corruption repair
 through the shared assembler. The evidence and exact commands live in
 [`evidence/incremental-rendering.md`](evidence/incremental-rendering.md).
+
+The exact-review evidence extends that contract to the authoring feedback loop.
+It records cold, warm, and isolated-edit measurements; proves that review
+captures ordinary complete production regions; and documents the bounded
+manifest, contact-sheet, and PNG integrity contract. See
+[`evidence/exact-review-loop.md`](evidence/exact-review-loop.md).

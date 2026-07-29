@@ -23,6 +23,7 @@ mod inspect;
 mod output;
 mod progress;
 mod render;
+mod review;
 mod snapshot;
 mod subtitle;
 mod worker;
@@ -50,6 +51,9 @@ async fn main() -> ExitCode {
         Command::Inspect(args) => inspect::run(args, json)
             .await
             .map(inspect::InspectOutcome::write),
+        Command::Review(args) => review::run(args, json)
+            .await
+            .map(review::ReviewOutcome::write),
         Command::Render(args) => render::run(args, json)
             .await
             .map(render::RenderOutcome::write),

@@ -1,9 +1,10 @@
 # Competitive pipeline review
 
-> Audit snapshot: HyperFrames
-> `e2e61b0767b4b4dd282773eb50aa7ebaea98f0e5`, Remotion
-> `258a191cbaf897f141525b071914fc4c92245b2e`, and Onmark
-> `36d78c69c0c85594448a808258eb9142048ad3b9` on 2026-07-27.
+> External audit snapshot: HyperFrames
+> `e2e61b0767b4b4dd282773eb50aa7ebaea98f0e5` and Remotion
+> `258a191cbaf897f141525b071914fc4c92245b2e` on 2026-07-27.
+> Onmark dispositions were refreshed at
+> `ca8fe1827539090e55f304ce07830dd6d3ababed` on 2026-07-29.
 
 This review records the external evidence behind Onmark's current execution
 design. It is not a feature checklist or a claim that one product wins every
@@ -73,24 +74,24 @@ the architectural disposition needed to avoid breadth without coherence.
 | --- | --- | --- | --- |
 | 1 | Browser-free validation | HyperFrames exposes lint/check; Remotion validates compositions before render. | **Implemented:** `check` reaches the production Render Unit plan without Chromium or encoding and emits versioned diagnostics. |
 | 2 | Machine repair loop | Both competitors expose structured command results to tooling. | **Implemented:** global `--json` keeps authored diagnostics and infrastructure failures distinct with stable exit codes. |
-| 3 | Exact plan and pixel inspection | HyperFrames exposes inspect/snapshot tools; Remotion exposes still rendering and composition facts. | **Implemented:** `inspect` projects Timeline IR, timing provenance, media mappings, Render Units, capture cadence, and bundle identity without a second solver. `snapshot` then consumes the production region and pixel path for one absolute frame instead of creating an approximate preview path. |
+| 3 | Exact plan and pixel inspection | HyperFrames exposes inspect/snapshot tools; Remotion exposes still rendering and composition facts. | **Implemented:** `inspect` projects Timeline IR, timing provenance, media mappings, Render Units, capture cadence, and bundle identity without a second solver. `snapshot` consumes the production region and pixel path for one absolute frame. `review` extends the same contract to deterministic semantic checkpoints, a static contact sheet, and a versioned provenance manifest without creating an approximate preview path. |
 | 4 | Toolchain diagnosis | HyperFrames has `doctor`; Remotion reports browser and codec setup failures. | **Implemented:** `doctor` admits exact executable paths and capture mode, then runs bounded real browser/media/bundler handshakes. It deliberately does not mistake a partial version string for a capture-environment identity. |
 | 5 | Product identity | Both CLIs expose version and platform facts. | **Implemented:** `info --json` reports the released Onmark and target identity without tool discovery. |
 | 6 | Long-operation feedback | Both products report render phases and progress. | **Implemented:** TTY-only phase progress never contaminates redirected or JSON output. |
 | 7 | Reproducible performance measurement | HyperFrames exposes benchmark tooling; Remotion publishes renderer measurements. | **Implemented:** `benchmark` runs bounded odd samples through the complete uncached production pipeline and reports every phase plus medians. |
 | 8 | Edit-friendly output | Remotion supports production codecs and HyperFrames offers alternate containers. | **Implemented:** `.mov` selects one closed alpha-preserving ProRes 4444/PCM profile; `.mp4` retains opaque H.264/AAC. Release admission renders and probes both. |
-| 9 | Agent-native workflow | HyperFrames distributes a broad skill suite; Remotion publishes agent guidance. | **Implemented, intentionally small:** one installable `onmark-video` skill delegates all facts to `check`, `inspect`, `snapshot`, and `render` instead of duplicating policy in prompts. |
+| 9 | Agent-native workflow | HyperFrames distributes a broad skill suite; Remotion publishes agent guidance. | **Implemented, intentionally small:** one installable `onmark-video` skill delegates all facts to `check`, `inspect`, `snapshot`, `review`, and `render` instead of duplicating policy in prompts. |
 | 10 | Incremental edit turnaround | Both competitors cache work, but recent HyperFrames issues show boundary and invalidation failures. | **Onmark advantage already proved:** dependency regions, bundle identity, capture environment, and canonical raw pixels admit local and distributed reuse through the same artifact contract. |
 | 11 | Native media performance | Remotion uses a Rust compositor; HyperFrames extracts/injects native frames. | **Onmark advantage already measured:** the admitted separable-overlay path is 4.18× the Chromium-media control at 79.73% of its peak RSS while preserving the shared plan and executor. |
 | 12 | VFR and codec breadth | Both competitors accept broader media profiles. | **VFR implemented; codec breadth remains measured work:** VFR retains the frozen source bytes and carries a complete frame-timestamp map through browser selection. Onmark does not admit FFmpeg default frame selection, pretend stream-level averages prove CFR, or transcode into an implicit surrogate. Additional codecs still require their own decoder and color evidence. |
-| 13 | Crop, scale, picture-in-picture, and multiple videos | Both products expose rich media placement. | **Measured prerequisite:** add typed layout facts and prove whole, partitioned, and distributed raw-pixel equivalence before bypassing Chromium. |
+| 13 | Crop, scale, picture-in-picture, and multiple videos | Both products expose rich media placement. | **Implemented for one measured native layout contract:** `separableBackdrop` accepts up to 16 typed video placements, obtains integer rectangles plus closed `object-fit` and fixed-point `object-position` facts from Chromium, and freezes one validated native layout plan. Whole-film, partitioned, and worker execution retain equal raw pixels; overlapping or incomplete candidates are rejected instead of silently changing paths. |
 | 14 | Alpha and alternate delivery containers | Remotion and HyperFrames support transparent outputs. | **Implemented with one measured profile:** `.mov` keeps the Chromium root transparent, carries alpha through worker/cache identity, and encodes ProRes 4444. Whole-film, partitioned, and worker assembly retain equal raw RGBA sequences; `.mp4` remains deliberately opaque. |
 | 15 | Trim, hold, loop, and playback rate | Both products expose media treatments. | **Implemented with measured boundaries:** live-model comparisons admitted source-local `trim`, exact `speed`, total `plays`, and final-frame `hold-last`. Rust owns duration and source mapping. Chromium realizes every treatment; the native path admits trim and speed only after whole-film, partition, and worker-artifact pixel equivalence. |
-| 16 | Audio fades, ducking, panning, and loudness policy | Remotion has broad audio controls; HyperFrames has media-treatment workflows. | **Language-gated:** extend the existing exact sample-grid and rational-gain plan only after authored semantics and diagnostics are admitted. |
-| 17 | Cross-shot transitions | Both products offer transition primitives. | **Language-gated:** transition windows and neighbor dependencies must enter Timeline IR and Render Graph before TypeScript realizes pixels. |
+| 16 | Audio fades, ducking, panning, and loudness policy | Remotion has broad audio controls; HyperFrames has media-treatment workflows. | **Linear fades implemented; broader mixing remains language-gated:** `fade-in` and `fade-out` were admitted by a checked-in 20/20 generation comparison. Rust validates them against the solved placement, retains exact frame counts in Timeline IR, and projects both edges onto one 48 kHz sample grid before native mixing. Ducking, panning, loudness normalization, and nonlinear curves remain unsupported. |
+| 17 | Cross-shot transitions | Both products offer transition primitives. | **Explicit same-scene boundaries implemented:** `<om-transition duration="…">` was admitted by a checked-in 20/20 comparison. Rust owns adjacency, overlap, diagnostics, Timeline IR, and Render Graph dependencies; TypeScript only realizes pixels inside the solved interval. Inferred and cross-scene transitions remain unsupported. |
 | 18 | Dynamic data and typed props | Remotion's props are mature; HyperFrames supports variables and data-driven compositions. | **Language-gated:** define typed schema, defaults, canonical encoding, cache identity, spans, and diagnostics together. Globals and URL parameters remain forbidden side channels. |
 | 19 | Multiple caption tracks and authored caption style | Both competitors expose richer caption presentation. | **Language-gated:** retain current SRT/WebVTT/ASS import while evaluating track selection, overlap, style, and positioning as one coherent contract. |
-| 20 | Studio, Player, and marketplace | Remotion leads here; HyperFrames includes Studio and a registry. | **Deliberate non-goal for this gate:** do not create a second mutable timeline, preview server, or template ecosystem before the compiler and CLI authoring loop prove a real need. |
+| 20 | Studio, Player, and marketplace | Remotion leads here; HyperFrames includes Studio and a registry. | **Exact static review implemented; interactive surfaces remain a deliberate non-goal:** the local review loop now reuses production regions and pixels. It does not justify a second mutable timeline, preview server, Player, Studio, or template ecosystem. |
 | 21 | More cloud providers and orchestration | Both competitors ship broader cloud surfaces. | **Deliberate non-goal:** the portable Render Unit already admits provider adapters; no coordinator, database, queue, lease system, or speculative GCP package is added. |
 
 ### Onmark
@@ -191,16 +192,19 @@ codec, VFR input, or cloud workflow that the mature competitors support.
 
 The repository keeps four different kinds of evidence:
 
-1. `evals/html-authoring/` records a frozen 20/20 native-HTML authoring result
-   against 16/20 for the earlier split screenplay/presentation surface. It also
-   records 20 authored files and 13,618 bytes versus 46 files and 14,054 bytes.
+1. `evals/` records every admitted language decision. Native HTML scored 20/20
+   against 16/20 for the earlier split screenplay/presentation surface.
+   Semantic audio, explicit transition boundaries, trim ranges, repeat/hold
+   semantics, and flat audio-envelope attributes each retained 20/20 generation
+   reliability against their alternatives. The envelope comparison selected
+   attributes at 4,914 authored bytes versus 5,868 for a child element.
 2. `conformance/` proves compiler facts, browser protocol behavior, whole versus
    partitioned pixels and audio, native media layering, local incremental reuse,
    and portable worker artifacts.
 3. Gate-seven's locked experiment measures the native-media path at 4.18× the
    Chromium-media control and 79.73% of its peak RSS on the same machine and
    input.
-4. `showcases/` keeps twenty one-file compositions spanning HTML/CSS, media,
+4. `showcases/` keeps twenty-five one-file compositions spanning HTML/CSS, media,
    subtitles, audio, GSAP, Canvas, raw WebGL, and Three.js. Every checked output
    was rendered by the public CLI.
 

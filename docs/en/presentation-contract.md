@@ -31,6 +31,17 @@ film:
 onmark snapshot film.html --frame 42
 ```
 
+For a bounded film-wide review, reuse exact production regions and generate a
+static contact sheet:
+
+```bash
+onmark review film.html
+```
+
+The report is not a preview runtime. Its lossless frames, source spans, solved
+timing provenance, and region identities come from the same artifacts used by
+full and incremental rendering.
+
 CSS is ordinary inline HTML:
 
 ```html

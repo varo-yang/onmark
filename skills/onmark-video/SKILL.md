@@ -1,6 +1,6 @@
 ---
 name: onmark-video
-description: Create, edit, validate, inspect, snapshot, benchmark, or render deterministic Onmark videos from one HTML screenplay. Use for Onmark film.html files, screenplay timing, semantic video/audio/caption elements, CSS/Canvas/WebGL presentation, seekable frame motion, CLI diagnostics, exact visual feedback, incremental rendering, or delivery and ProRes exports.
+description: Create, edit, validate, inspect, snapshot, review, benchmark, or render deterministic Onmark videos from one HTML screenplay. Use for Onmark film.html files, screenplay timing, semantic video/audio/caption elements, CSS/Canvas/WebGL presentation, seekable frame motion, CLI diagnostics, exact visual feedback, incremental rendering, or delivery and ProRes exports.
 ---
 
 # Onmark video
@@ -73,10 +73,13 @@ Run the cheapest authoritative command that answers the current question:
 3. `onmark snapshot film.html --frame 42 --json` to inspect an exact production
    frame before paying for a complete encode. Choose the frame from `inspect`;
    do not convert guessed seconds in prompt text.
-4. `onmark render film.html --output draft.mp4` after selected frames are sound.
-5. Re-run the same command after edits; Onmark reuses only verified unchanged
+4. `onmark review film.html --json` for a static film-wide contact sheet backed
+   by exact production regions. Compare an edit with
+   `--against reviews/<prior>/manifest.json`.
+5. `onmark render film.html --output draft.mp4` after selected frames are sound.
+6. Re-run the same command after edits; Onmark reuses only verified unchanged
    regions.
-6. `onmark benchmark film.html --runs 3 --json` only for measured performance
+7. `onmark benchmark film.html --runs 3 --json` only for measured performance
    work.
 
 Treat exit code 1 as authored diagnostics to fix at their reported spans. Treat

@@ -418,7 +418,7 @@ fn read_screenplay(args: &RenderArgs) -> Result<String, CliError> {
         .map_err(|error| CliError::read_screenplay(&args.screenplay, error))
 }
 
-fn materialize_units(
+pub(super) fn materialize_units(
     timeline: &TimelineIr,
     profile: RenderProfile,
     partitions: &PartitionPlan,

@@ -19,10 +19,41 @@ fn exposes_local_feedback_rendering_and_the_remote_worker_adapter() {
     assert!(stdout.contains("doctor"));
     assert!(stdout.contains("info"));
     assert!(stdout.contains("inspect"));
+    assert!(stdout.contains("review"));
     assert!(stdout.contains("render"));
     assert!(stdout.contains("snapshot"));
     assert!(stdout.contains("worker"));
     assert!(!stdout.contains("coordinator"));
+}
+
+#[test]
+fn review_reports_authored_errors_before_environment_preflight() {
+    let directory = tempdir().expect("the fixture directory is available");
+    let screenplay = directory.path().join("invalid.html");
+    std::fs::write(
+        &screenplay,
+        "<om-film><om-scene><om-unknown></om-unknown></om-scene></om-film>",
+    )
+    .expect("the fixture screenplay is writable");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_onmark"))
+        .arg("review")
+        .arg(&screenplay)
+        .arg("--against")
+        .arg(directory.path().join("missing-manifest.json"))
+        .arg("--json")
+        .env("PATH", "")
+        .output()
+        .expect("the CLI can be started");
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stderr.is_empty());
+    let report: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("the review report is JSON");
+    assert_eq!(report["version"], 1);
+    assert_eq!(report["command"], "review");
+    assert_eq!(report["completed"], false);
+    assert_eq!(report["diagnostics"][0]["code"], "ONM-STRUCT-001");
 }
 
 #[test]

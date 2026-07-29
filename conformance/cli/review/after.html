@@ -1,0 +1,38 @@
+<om-film>
+  <style>
+    html,
+    body,
+    om-film,
+    om-scene,
+    om-shot {
+      display: block;
+      height: 100%;
+      margin: 0;
+      width: 100%;
+    }
+
+    om-shot {
+      align-items: center;
+      color: white;
+      display: flex;
+      font: 700 12vw/1 sans-serif;
+      justify-content: center;
+    }
+
+    .first {
+      background: #151515;
+    }
+
+    .second {
+      background: #3155ff;
+    }
+  </style>
+  <om-scene>
+    <om-shot class="first" duration="1s">
+      <om-title>Exact</om-title>
+    </om-shot>
+    <om-shot class="second" duration="1s">
+      <om-title>Changed</om-title>
+    </om-shot>
+  </om-scene>
+</om-film>

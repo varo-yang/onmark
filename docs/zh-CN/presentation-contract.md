@@ -29,6 +29,16 @@ onmark render film.html
 onmark snapshot film.html --frame 42
 ```
 
+需要做一轮有界的全片审阅时，可以复用精确 production region 并生成静态 contact
+sheet：
+
+```bash
+onmark review film.html
+```
+
+这份 report 不是 preview runtime。它的 lossless frame、source span、已求解 timing
+provenance 与 region identity 都来自完整和增量渲染使用的同一份 artifact。
+
 CSS 直接写在普通 HTML 中：
 
 ```html
