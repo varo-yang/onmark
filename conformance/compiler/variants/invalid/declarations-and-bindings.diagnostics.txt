@@ -1,0 +1,28 @@
+# onmark diagnostic test rendering; not a wire format
+ONM-VARIANT-001 error @0:23..28 attribute "class" is not allowed on <om-fields>
+  help: remove this attribute from <om-fields>
+ONM-VARIANT-009 warning @0:60..68 variant field "headline" has no presentation binding
+  help: bind this field through data-om-text, data-om-css, or data-om-show, or remove it
+ONM-VARIANT-002 error @0:132..140 variant field "headline" is declared more than once
+  help: keep one declaration for this field
+  related @0:60..68 the first declaration is here
+ONM-VARIANT-001 error @0:206..212 variant field name "Accent" is invalid: field name must begin with a lowercase ASCII letter
+  help: use a lower-camel ASCII name such as headline or accent2
+ONM-VARIANT-001 error @0:291..297 variant field type "number" is invalid: field type must be text, integer, boolean, or color
+  help: use text, integer, boolean, or color
+ONM-VARIANT-001 error @0:378..380 default for integer field is invalid: integer must use canonical base-ten spelling
+  help: use one canonical integer value
+ONM-VARIANT-009 warning @0:414..422 variant field "featured" has no presentation binding
+  help: bind this field through data-om-text, data-om-css, or data-om-show, or remove it
+ONM-VARIANT-009 warning @0:487..493 variant field "unused" has no presentation binding
+  help: bind this field through data-om-text, data-om-css, or data-om-show, or remove it
+ONM-VARIANT-003 error @0:617..624 presentation binding names undeclared field "missing"
+  help: declare "missing" in <om-fields> or remove this binding
+ONM-VARIANT-004 error @0:665..673 data-om-text cannot bind boolean field "featured"
+  help: bind text through data-om-text, boolean through data-om-show, and color or integer through data-om-css
+ONM-VARIANT-005 error @0:693..752 data-om-text fallback for field "headline" does not equal its canonical default
+  help: use direct text "Default" with no child elements
+ONM-VARIANT-004 error @0:777..785 data-om-css cannot bind text field "headline"
+  help: bind text through data-om-text, boolean through data-om-show, and color or integer through data-om-css
+ONM-VARIANT-005 error @0:827..870 data-om-show fallback for field "featured" does not equal its canonical default
+  help: add hidden because the default is false

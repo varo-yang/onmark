@@ -1,0 +1,10 @@
+# onmark diagnostic test rendering; not a wire format
+ONM-VARIANT-008 error @1:16..18 value for variant field "headline" is not valid text: JSON scalar does not match text
+  help: provide one canonical text value
+ONM-VARIANT-007 error @1:23..30 variant document names undeclared field "unknown"
+  help: remove this key or declare the field in <om-fields>
+ONM-VARIANT-008 error @1:53..56 value for variant field "progress" is not valid integer: integer must use canonical base-ten spelling
+  help: provide one canonical integer value
+ONM-VARIANT-006 error @1:61..69 variant field "headline" appears more than once
+  help: keep one value for this field
+  related @1:5..13 the first key is here

@@ -11,9 +11,9 @@ use crate::timeline::{
 use super::frame::WireInterval;
 use super::plan::{
     BrowserNode, BrowserNodeId, BrowserOverlay, BrowserOverlayKind, BrowserScene, BrowserShot,
-    BrowserTransition, BrowserVideo, BrowserVideoTiming, InvalidBrowserPlan,
-    MAX_BROWSER_OVERLAY_TEXT_BYTES, MAX_BROWSER_OVERLAYS, MAX_BROWSER_SCENES, MAX_BROWSER_SHOTS,
-    MAX_BROWSER_TRANSITIONS, MAX_BROWSER_VIDEOS, text_exceeds_limit,
+    BrowserTransition, BrowserVideo, BrowserVideoTiming, InvalidBrowserPlan, MAX_BROWSER_OVERLAYS,
+    MAX_BROWSER_SCENES, MAX_BROWSER_SHOTS, MAX_BROWSER_TEXT_BYTES, MAX_BROWSER_TRANSITIONS,
+    MAX_BROWSER_VIDEOS, text_exceeds_limit,
 };
 
 pub(super) struct BrowserProjection {
@@ -297,9 +297,9 @@ fn push_browser_overlay(
     }
     *overlay_text_bytes = overlay_text_bytes
         .checked_add(overlay.text().len())
-        .ok_or(InvalidBrowserPlan::OverlayTextBudget)?;
-    if *overlay_text_bytes > MAX_BROWSER_OVERLAY_TEXT_BYTES {
-        return Err(InvalidBrowserPlan::OverlayTextBudget);
+        .ok_or(InvalidBrowserPlan::BrowserTextBudget)?;
+    if *overlay_text_bytes > MAX_BROWSER_TEXT_BYTES {
+        return Err(InvalidBrowserPlan::BrowserTextBudget);
     }
     overlays.push(overlay);
     Ok(())

@@ -24,6 +24,7 @@ use super::resolved_film::{
     ResolvedFilm, ResolvedNode, ResolvedOverlay, ResolvedScene, ResolvedShot, ResolvedShotContent,
     ResolvedStart, ResolvedText, ResolvedTransition, ResolvedVideo, ResolvedVoiceOver,
 };
+use super::variant_resolution::resolve_variant_schema;
 
 /// Optional typed attribute/reference output and its authored diagnostics.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -79,6 +80,8 @@ impl Resolver {
     fn resolve(film: LinkedFilm) -> ResolveReport {
         let LinkedFilmParts {
             element,
+            variants,
+            variant_bindings,
             cues,
             music,
             scenes,
@@ -86,6 +89,8 @@ impl Resolver {
         } = film.into_parts();
         let mut resolver = Self::new(ids);
         let element = resolver.resolve_id_only_element(element);
+        let variants =
+            resolve_variant_schema(variants, variant_bindings, &mut resolver.diagnostics);
         let cues = cues.map(|cues| resolver.resolve_cues(cues));
         let music = music
             .into_iter()
@@ -105,7 +110,7 @@ impl Resolver {
             .into_iter()
             .map(|(id, node)| (id, resolved_node(node)))
             .collect();
-        let candidate = ResolvedFilm::new(element, cues, music, resolved_scenes, ids);
+        let candidate = ResolvedFilm::new(element, variants, cues, music, resolved_scenes, ids);
         let film = (!diagnostics.has_errors()).then_some(candidate);
 
         ResolveReport { film, diagnostics }

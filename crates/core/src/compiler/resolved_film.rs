@@ -10,6 +10,8 @@ use crate::model::{
     NodeId, PlayCount, PlaybackRate, SourceSpan,
 };
 
+use super::variant::{ResolvedVariantSchema, ResolvedVariantValues};
+
 /// One typed value together with the authored bytes that produced it.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Authored<T> {
@@ -104,6 +106,8 @@ impl ResolvedNode {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ResolvedFilm {
     element: ResolvedElement,
+    variants: ResolvedVariantSchema,
+    variant_values: ResolvedVariantValues,
     cues: Option<ResolvedCues>,
     music: Vec<ResolvedAudio>,
     scenes: Vec<ResolvedScene>,
@@ -113,13 +117,17 @@ pub struct ResolvedFilm {
 impl ResolvedFilm {
     pub(super) fn new(
         element: ResolvedElement,
+        variants: ResolvedVariantSchema,
         cues: Option<ResolvedCues>,
         music: Vec<ResolvedAudio>,
         scenes: Vec<ResolvedScene>,
         ids: BTreeMap<NodeId, ResolvedNode>,
     ) -> Self {
+        let variant_values = variants.default_values();
         Self {
             element,
+            variants,
+            variant_values,
             cues,
             music,
             scenes,
@@ -131,6 +139,23 @@ impl ResolvedFilm {
     #[must_use]
     pub const fn element(&self) -> &ResolvedElement {
         &self.element
+    }
+
+    /// Returns the closed typed-variant schema and presentation dependencies.
+    #[must_use]
+    pub const fn variants(&self) -> &ResolvedVariantSchema {
+        &self.variants
+    }
+
+    /// Returns effective canonical values for this immutable render.
+    #[must_use]
+    pub const fn variant_values(&self) -> &ResolvedVariantValues {
+        &self.variant_values
+    }
+
+    pub(super) fn with_variant_values(mut self, values: ResolvedVariantValues) -> Self {
+        self.variant_values = values;
+        self
     }
 
     /// Returns the optional singleton cue container.
@@ -160,6 +185,8 @@ impl ResolvedFilm {
     pub(super) fn into_parts(self) -> ResolvedFilmParts {
         ResolvedFilmParts {
             element: self.element,
+            variants: self.variants,
+            variant_values: self.variant_values,
             cues: self.cues,
             music: self.music,
             scenes: self.scenes,
@@ -170,6 +197,8 @@ impl ResolvedFilm {
 /// Consuming handoff from attribute resolution into timeline solving.
 pub(super) struct ResolvedFilmParts {
     pub(super) element: ResolvedElement,
+    pub(super) variants: ResolvedVariantSchema,
+    pub(super) variant_values: ResolvedVariantValues,
     pub(super) cues: Option<ResolvedCues>,
     pub(super) music: Vec<ResolvedAudio>,
     pub(super) scenes: Vec<ResolvedScene>,

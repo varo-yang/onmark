@@ -27,18 +27,19 @@ contract: Timeline IR.
 
 ## Core model
 
-The current vocabulary is `film`, `cues`, `cue`, `scene`, `shot`,
-`transition`, `video`, `vo`, `music`, `sfx`, `title`, and `cta`. A film may
-contain at most one direct `cues` child; that container owns only `cue`
-declarations and does not participate in scene sequencing. A film may also own
-`music` that does not participate in scene sequencing. Scenes own sequential
-shots and explicit transition boundaries. A renderable film must contain at
-least one shot with a positive solved duration. A shot owns its `video`, `vo`,
-`sfx`, `title`, and `cta` content. Titles and CTAs are overlays and do not
-participate in sibling sequencing. `video` is the only current visual media
-element. General audio uses the semantic `music` and `sfx` elements; a generic
-`audio` element is not part of the vocabulary. Image and other media elements
-remain deferred.
+The current vocabulary is `film`, `fields`, `field`, `cues`, `cue`, `scene`,
+`shot`, `transition`, `video`, `vo`, `music`, `sfx`, `title`, and `cta`. A film
+may contain at most one direct `fields` child and one direct `cues` child.
+`fields` declares presentation-only typed input; `cues` declares absolute time
+events. Neither participates in scene sequencing. A film may also own `music`
+that does not participate in scene sequencing. Scenes own sequential shots and
+explicit transition boundaries. A renderable film must contain at least one
+shot with a positive solved duration. A shot owns its `video`, `vo`, `sfx`,
+`title`, and `cta` content. Titles and CTAs are overlays and do not participate
+in sibling sequencing. `video` is the only current visual media element.
+General audio uses the semantic `music` and `sfx` elements; a generic `audio`
+element is not part of the vocabulary. Image and other media elements remain
+deferred.
 Structural binding retains `src` and other unparsed authored attributes for the
 attribute/reference resolution phase rather than discarding them.
 
@@ -330,9 +331,18 @@ Initial binding, resolution, and timing diagnostics are:
 | `ONM-CAPTION-001` | an imported subtitle file violates its selected format grammar       |
 | `ONM-CAPTION-002` | an imported subtitle file uses unsupported presentation semantics    |
 | `ONM-CAPTION-003` | an imported subtitle file exceeds a bounded ingestion limit          |
+| `ONM-VARIANT-001` | a field declaration has an invalid name, kind, default, or shape      |
+| `ONM-VARIANT-002` | a film declares the same field name more than once                    |
+| `ONM-VARIANT-003` | a presentation binding names a field that is not declared             |
+| `ONM-VARIANT-004` | a presentation sink is incompatible with the bound field kind         |
+| `ONM-VARIANT-005` | authored fallback markup does not equal the field default             |
+| `ONM-VARIANT-006` | an external variant document is malformed, nested, or too large       |
+| `ONM-VARIANT-007` | an external variant document contains an undeclared field             |
+| `ONM-VARIANT-008` | an external value has the wrong kind, spelling, or bounded value      |
+| `ONM-VARIANT-009` | a declared field has no presentation binding                          |
 
-`ONM-REF-002` is a warning; the other initial binding, resolution, and timing
-diagnostics are errors.
+`ONM-REF-002` and `ONM-VARIANT-009` are warnings; the other initial binding,
+resolution, timing, and variant diagnostics are errors.
 
 The tokenizer stops after a fatal lexical error, so lexical recovery may produce
 one diagnostic. Onmark continues to aggregate independent nesting, binding, and
@@ -365,9 +375,10 @@ import admitted browser adapters such as `onmark/motion/gsap`. No other script
 element is admitted by the bundling boundary.
 
 There is no same-stem CSS or motion convention, `--presentation` escape hatch,
-`presents` attribute, `definePresentation` declaration, or separate typed props
-channel. Solved facts reach the document only as the Rust-owned `BrowserPlan`
-delivered through `Load(plan)`.
+`presents` attribute, `definePresentation` declaration, arbitrary props object,
+source placeholder substitution, or module-owned input schema. Solved facts and
+the closed typed values defined below reach the document only as the Rust-owned
+`BrowserPlan` delivered through `Load(plan)`.
 
 The Browser Plan also retains film, scene, shot, and content ownership. The
 compiler assigns every projected node a dense unit-local identity and carries
@@ -400,19 +411,94 @@ communication channel. A style inside one shot belongs to that region; a style
 inside a scene but outside its shots belongs to every region in that scene; a
 film- or document-level style outside all scenes belongs to every region.
 
-This is a language boundary, not an undocumented implementation detail. A future
-screenplay-selected presentation or props feature must define its spelling,
-typed schema and defaults, canonical encoding, source-located diagnostics,
-bundle/cache identity, and temporal-capability effect together; it must also
-meet the admission rule below. Until then, stylesheet rules and static
-TypeScript imports are presentation code, not screenplay props. The browser
-authoring contract is specified separately in
+### Canonical typed variants
+
+A film may declare one closed presentation-input schema:
+
+```html
+<om-fields>
+  <om-field name="headline" type="text" default="Summer edit"></om-field>
+  <om-field name="accent" type="color" default="#ff4d36"></om-field>
+  <om-field name="progress" type="integer" default="72"></om-field>
+  <om-field name="featured" type="boolean" default="false"></om-field>
+</om-fields>
+```
+
+`om-fields` is an optional direct child of `om-film`, appears at most once,
+contains only `om-field`, and is removed from the browser projection.
+`om-field` is empty and accepts exactly `name`, `type`, and `default`. A film
+declares at most 256 fields. A field name is a lower-camel ASCII identifier
+matching `[a-z][A-Za-z0-9]{0,63}` and is unique within the film.
+
+The four admitted kinds are deliberately closed:
+
+- `text` is decoded Unicode text, preserved byte-for-byte after HTML character
+  reference decoding and limited to 16 KiB of UTF-8;
+- `integer` is a canonical base-ten integer in JavaScript's exact signed integer
+  range, with no leading plus or redundant leading zero;
+- `boolean` is exactly `true` or `false`;
+- `color` is exactly lowercase `#rrggbb` or `#rrggbbaa`.
+
+Defaults use those canonical spellings. The compiler parses them once into
+typed values; presentation code never reparses a JSON string or an authored
+attribute.
+
+Presentation markup binds fields only through these literal sinks:
+
+```html
+<om-shot
+  data-om-css="accent progress"
+  style="--accent:#ff4d36;--progress:72">
+  <om-title data-om-text="headline">Summer edit</om-title>
+  <span data-om-show="featured" hidden>Featured</span>
+</om-shot>
+```
+
+- `data-om-text` names one `text` field. Its element contains direct text only,
+  and that text equals the declared default.
+- `data-om-css` names one or more `color` or `integer` fields separated by ASCII
+  whitespace. The same element initializes each `--<field>` inline custom
+  property to the canonical default.
+- `data-om-show` names one `boolean` field. The element has `hidden` exactly when
+  the default is `false`.
+
+Bindings must be descendants of the semantic film. They are forbidden inside
+`om-fields`, cue declarations, native audio declarations, `style`, and
+`script`. A field with no binding is a warning. Unknown fields, duplicate
+bindings on one sink, incompatible field kinds, and fallback markup that does
+not equal the declared default are errors. These rules keep the authored
+document truthful and directly viewable before Onmark runs.
+
+One optional external variant document is a flat JSON object whose keys are
+declared field names and whose JSON scalar types match the schema. Missing keys
+use declared defaults. Duplicate or unknown keys, nested values, non-canonical
+numbers, and values outside the bounds above are errors. The document is limited
+to 1 MiB. Resolution produces one immutable, name-sorted canonical value vector;
+source JSON spelling does not enter rendering identity.
+
+Typed variants may change only the literal presentation sinks above. They cannot
+change element structure, timing, cues, media sources, treatment, frame rate,
+dimensions, output profile, capabilities, motion modules, or resource imports.
+They are immutable for one render. They do not create a mutable global, URL
+parameter, source rewrite, template language, or second scheduler.
+
+Field bindings follow presentation ownership. A binding in a shot affects that
+shot's Render Graph region; a binding in a scene shell affects every retained
+region in that scene; a binding in the film shell affects every region. A
+transition binding affects only a region that retains both adjacent shots.
+Timeline IR records these scopes. Each Browser Plan carries only the canonical
+values required by its region, so changing a field invalidates exactly the
+regions that depend on it. The immutable bundle remains reusable.
+
+This is the only admitted screenplay-to-presentation value channel. Stylesheet
+rules and static TypeScript imports remain presentation code, not variant
+values. The browser authoring contract is specified separately in
 [the presentation contract](presentation-contract.md).
 
 ## Deferred capabilities
 
-Free `begin/end/until` expressions, shots ending at cues, screenplay-selected
-presentations or props, generated cues from media analysis or typed semantic
+Free `begin/end/until` expressions, shots ending at cues, arbitrary or
+module-owned props, generated cues from media analysis or typed semantic
 boundaries, negative offsets, general flex constraints, runtime branches, speed
 ramps, reverse playback, audio-reactive behavior, cross-scene persistence,
 inferred or cross-scene transition windows, and online media generation remain

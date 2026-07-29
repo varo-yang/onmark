@@ -1,0 +1,48 @@
+{
+  "declarativeBindings": {
+    "passed": 12,
+    "total": 12,
+    "authoredBytes": 5708,
+    "failedCases": []
+  },
+  "moduleBindings": {
+    "passed": 12,
+    "total": 12,
+    "authoredBytes": 8723,
+    "failedCases": []
+  },
+  "placeholders": {
+    "passed": 12,
+    "total": 12,
+    "authoredBytes": 5443,
+    "failedCases": []
+  },
+  "architecture": {
+    "declarative-bindings": {
+      "parsesAuthoredHtmlOnce": true,
+      "readableWithoutRuntime": true,
+      "staticallyLocatableDependencies": true,
+      "reusableBundleAcrossVariants": true,
+      "safeLiteralTextByConstruction": true,
+      "requiresArbitraryBindingCode": false
+    },
+    "module-bindings": {
+      "parsesAuthoredHtmlOnce": true,
+      "readableWithoutRuntime": true,
+      "staticallyLocatableDependencies": false,
+      "reusableBundleAcrossVariants": true,
+      "safeLiteralTextByConstruction": false,
+      "requiresArbitraryBindingCode": true
+    },
+    "placeholders": {
+      "parsesAuthoredHtmlOnce": false,
+      "readableWithoutRuntime": false,
+      "staticallyLocatableDependencies": true,
+      "reusableBundleAcrossVariants": false,
+      "safeLiteralTextByConstruction": true,
+      "requiresArbitraryBindingCode": false
+    }
+  },
+  "admitted": "declarative-bindings",
+  "reason": "All three arms scored 12/12. Declarative bindings cost 265 more authored bytes than placeholders across twelve projects, but preserve single-parse HTML, readable defaults, static region dependencies, reusable bundles, and literal-text safety without arbitrary binding code."
+}

@@ -7,6 +7,10 @@ use std::fmt;
 pub enum ElementKind {
     /// Root time domain of one screenplay.
     Film,
+    /// Optional container for typed presentation-input declarations.
+    Fields,
+    /// One typed presentation-input declaration.
+    Field,
     /// Optional container for absolute cue declarations.
     Cues,
     /// Named absolute time event.
@@ -57,6 +61,8 @@ impl ElementKind {
     pub fn from_local_name(name: &str) -> Option<Self> {
         match name {
             "om-film" => Some(Self::Film),
+            "om-fields" => Some(Self::Fields),
+            "om-field" => Some(Self::Field),
             "om-cues" => Some(Self::Cues),
             "om-cue" => Some(Self::Cue),
             "om-scene" => Some(Self::Scene),
@@ -77,6 +83,8 @@ impl ElementKind {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Film => "om-film",
+            Self::Fields => "om-fields",
+            Self::Field => "om-field",
             Self::Cues => "om-cues",
             Self::Cue => "om-cue",
             Self::Scene => "om-scene",
@@ -106,6 +114,8 @@ mod tests {
     fn recognizes_the_closed_screenplay_vocabulary() {
         let names = [
             "om-film",
+            "om-fields",
+            "om-field",
             "om-cues",
             "om-cue",
             "om-scene",

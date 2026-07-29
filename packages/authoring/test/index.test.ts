@@ -73,6 +73,51 @@ test("binds solved structure without replacing authored HTML", () => {
   );
 });
 
+test("applies projected typed fields before motion observes the DOM", async () => {
+  const browser = new FakeDocument();
+  const featured = new FakeElement("span");
+  const untouched = new FakeElement("span");
+  browser.authored.accent.setAttribute("data-om-text", "headline");
+  browser.authored.shot.setAttribute("data-om-css", "accent progress");
+  featured.setAttribute("data-om-show", "featured");
+  featured.hidden = true;
+  untouched.setAttribute("data-om-text", "otherRegion");
+  untouched.textContent = "Fallback";
+  browser.authored.shot.append(featured, untouched);
+
+  let motionObservedVariant = false;
+  const plan: RuntimePlan = {
+    ...PLAN,
+    variantFields: [
+      { name: "accent", value: { kind: "color", value: "#1a2b3c" } },
+      { name: "featured", value: { kind: "boolean", value: true } },
+      { name: "headline", value: { kind: "text", value: "Canonical" } },
+      { name: "progress", value: { kind: "integer", value: 72 } },
+    ],
+  };
+  const bindings = createDomPresentationBindings({
+    document: asBrowserDocument(browser),
+    motion: {
+      bind() {
+        motionObservedVariant =
+          browser.authored.accent.textContent === "Canonical" &&
+          browser.authored.shot.style.getPropertyValue("--accent") ===
+            "#1a2b3c" &&
+          browser.authored.shot.style.getPropertyValue("--progress") === "72" &&
+          !featured.hidden;
+        return { effects: [], resources: [] };
+      },
+    },
+    videoSource: () => "./video.mp4",
+  });
+
+  bindings.bindFilm(plan);
+  await bindings.bindExtensions(plan);
+
+  assert.equal(motionObservedVariant, true);
+  assert.equal(untouched.textContent, "Fallback");
+});
+
 test("binds a transition to both adjacent shot elements", async () => {
   const browser = new FakeDocument();
   const transition = new FakeElement("om-transition");
@@ -443,7 +488,7 @@ test("releases prior extensions when later motion binding fails", async () => {
 // ── Fixture ──
 
 const PLAN: RuntimePlan = {
-  timelineVersion: 4,
+  timelineVersion: 5,
   frameRate: { numerator: 30, denominator: 1 },
   timeline: { start: 0, end: 90 },
   evaluation: { start: 0, end: 60 },
@@ -463,6 +508,7 @@ const PLAN: RuntimePlan = {
     },
   ],
   transitions: [],
+  variantFields: [],
   videos: [
     {
       node: { nodeId: 3, authoredId: null },
@@ -539,9 +585,19 @@ class FakeDocument {
     this.created.push(element);
     return element;
   }
+
+  querySelectorAll<T extends Element>(_selector: string): NodeListOf<T> {
+    return descendants(this.body).filter(
+      (element) =>
+        element.getAttribute("data-om-text") !== null ||
+        element.getAttribute("data-om-css") !== null ||
+        element.getAttribute("data-om-show") !== null,
+    ) as unknown as NodeListOf<T>;
+  }
 }
 
 class FakeElement {
+  readonly #attributes = new Map<string, string>();
   readonly children: FakeElement[] = [];
   readonly dataset: Record<string, string> = {};
   className = "";
@@ -554,7 +610,7 @@ class FakeElement {
   removed = false;
   sourceRemoved = false;
   src = "";
-  readonly style = { visibility: "" };
+  readonly style = new FakeStyle();
   textContent: string | null = null;
 
   constructor(readonly localName: string) {}
@@ -564,8 +620,15 @@ class FakeElement {
   }
 
   hasAttribute(name: string): boolean {
-    assert.equal(name, "src");
-    return this.src.length > 0;
+    return name === "src" ? this.src.length > 0 : this.#attributes.has(name);
+  }
+
+  getAttribute(name: string): string | null {
+    return this.#attributes.get(name) ?? null;
+  }
+
+  setAttribute(name: string, value: string): void {
+    this.#attributes.set(name, value);
   }
 
   append(...elements: FakeElement[]): void {
@@ -602,6 +665,19 @@ class FakeElement {
   }
 }
 
+class FakeStyle {
+  readonly #properties = new Map<string, string>();
+  visibility = "";
+
+  getPropertyValue(name: string): string {
+    return this.#properties.get(name) ?? "";
+  }
+
+  setProperty(name: string, value: string): void {
+    this.#properties.set(name, value);
+  }
+}
+
 function authoredTree() {
   const film = new FakeElement("om-film");
   film.id = "film";
@@ -631,4 +707,8 @@ function tags(root: FakeElement): string[] {
     result.push(child.localName, ...tags(child));
   }
   return result;
+}
+
+function descendants(root: FakeElement): FakeElement[] {
+  return root.children.flatMap((child) => [child, ...descendants(child)]);
 }

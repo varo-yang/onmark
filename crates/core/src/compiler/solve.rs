@@ -16,9 +16,10 @@ use crate::model::{
     VideoMetadata,
 };
 use crate::timeline::{
-    TimelineAudio, TimelineAudioKind, TimelineContent, TimelineElement, TimelineEvent, TimelineIr,
-    TimelineOverlay, TimelineScene, TimelineShot, TimelineText, TimelineTiming, TimelineTransition,
-    TimelineVideo, TimelineVoiceOver, TimingReason,
+    TimelineAudio, TimelineAudioKind, TimelineContent, TimelineElement, TimelineEvent,
+    TimelineFacts, TimelineIr, TimelineOverlay, TimelineScene, TimelineShot, TimelineText,
+    TimelineTiming, TimelineTransition, TimelineVariantField, TimelineVariantScope, TimelineVideo,
+    TimelineVoiceOver, TimingReason,
 };
 
 use super::diagnostic::author_diagnostic;
@@ -28,6 +29,7 @@ use super::resolved_film::{
     ResolvedScene, ResolvedShot, ResolvedShotContent, ResolvedShotParts, ResolvedStart,
     ResolvedText, ResolvedTransition, ResolvedVideo, ResolvedVideoTreatment, ResolvedVoiceOver,
 };
+use super::variant::{LinkedVariantScope, ResolvedVariantSchema, ResolvedVariantValues};
 
 /// Optional Timeline IR and the authored diagnostics produced while solving it.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -117,6 +119,8 @@ impl<'a> Solver<'a> {
     fn solve(mut self, film: ResolvedFilm) -> Result<SolveReport, SolveError> {
         let ResolvedFilmParts {
             element,
+            variants,
+            variant_values,
             cues,
             music,
             scenes,
@@ -138,15 +142,17 @@ impl<'a> Solver<'a> {
         let interval = interval(FrameIndex::ZERO, self.cursor.position());
         let mut general_audio = self.solve_music(music, interval)?;
         general_audio.append(&mut self.sound_effects);
-        let candidate = TimelineIr::new(
-            self.timebase,
-            timeline_element(element),
+        let variants = timeline_variants(variants, variant_values, &timeline_scenes);
+        let candidate = TimelineIr::new(TimelineFacts {
+            timebase: self.timebase,
+            element: timeline_element(element),
             interval,
-            self.events,
-            timeline_scenes,
+            variants,
+            events: self.events,
+            scenes: timeline_scenes,
             general_audio,
-            Vec::new(),
-        );
+            captions: Vec::new(),
+        });
         let timeline = (!self.diagnostics.has_errors()).then_some(candidate);
 
         Ok(SolveReport {
@@ -844,6 +850,121 @@ impl<'a> Solver<'a> {
             self.diagnostics.push(missing_duration_source(source));
         }
         None
+    }
+}
+
+fn timeline_variants(
+    schema: ResolvedVariantSchema,
+    values: ResolvedVariantValues,
+    scenes: &[TimelineScene],
+) -> Vec<TimelineVariantField> {
+    let index = VariantScopeIndex::new(scenes);
+    let (fields, bindings) = schema.into_parts();
+    let mut values = values.into_values();
+    let mut scopes = BTreeMap::new();
+
+    for binding in bindings {
+        let Some(scope) = index.resolve(binding.scope()) else {
+            continue;
+        };
+        scopes
+            .entry(binding.field().clone())
+            .or_insert_with(Vec::new)
+            .push(scope);
+    }
+
+    fields
+        .into_values()
+        .map(|field| {
+            let mut field_scopes = scopes.remove(field.name()).unwrap_or_default();
+            field_scopes.sort_unstable();
+            field_scopes.dedup();
+            TimelineVariantField::new(
+                field.name().clone(),
+                field.kind(),
+                values
+                    .remove(field.name())
+                    .expect("resolved variant values cover every schema field"),
+                field.declared_at(),
+                field_scopes,
+            )
+        })
+        .collect()
+}
+
+struct VariantScopeIndex {
+    scenes: BTreeMap<SourceSpan, (crate::timeline::TimelineShotIndex, usize)>,
+    shots: BTreeMap<SourceSpan, crate::timeline::TimelineShotIndex>,
+    transitions: BTreeMap<
+        SourceSpan,
+        (
+            crate::timeline::TimelineShotIndex,
+            crate::timeline::TimelineShotIndex,
+        ),
+    >,
+}
+
+impl VariantScopeIndex {
+    fn new(scenes: &[TimelineScene]) -> Self {
+        let mut index = Self {
+            scenes: BTreeMap::new(),
+            shots: BTreeMap::new(),
+            transitions: BTreeMap::new(),
+        };
+        let mut next_shot = 0_usize;
+
+        for scene in scenes {
+            let first = crate::timeline::TimelineShotIndex::new(next_shot);
+            index
+                .scenes
+                .insert(scene.element().span(), (first, scene.shots().len()));
+            for shot in scene.shots() {
+                let incoming = crate::timeline::TimelineShotIndex::new(next_shot);
+                index.shots.insert(shot.element().span(), incoming);
+                if let Some(transition) = shot.incoming_transition() {
+                    let outgoing = crate::timeline::TimelineShotIndex::new(
+                        next_shot
+                            .checked_sub(1)
+                            .expect("a solved incoming transition has an outgoing shot"),
+                    );
+                    index
+                        .transitions
+                        .insert(transition.element().span(), (outgoing, incoming));
+                }
+                next_shot = next_shot
+                    .checked_add(1)
+                    .expect("owned shot collections fit the process index domain");
+            }
+        }
+
+        index
+    }
+
+    fn resolve(&self, scope: LinkedVariantScope) -> Option<TimelineVariantScope> {
+        match scope {
+            LinkedVariantScope::Film => Some(TimelineVariantScope::Film),
+            LinkedVariantScope::Scene(span) => {
+                self.scenes
+                    .get(&span)
+                    .map(|(first_shot, shot_count)| TimelineVariantScope::Scene {
+                        first_shot: *first_shot,
+                        shot_count: *shot_count,
+                    })
+            }
+            LinkedVariantScope::Shot(span) => self
+                .shots
+                .get(&span)
+                .copied()
+                .map(TimelineVariantScope::Shot),
+            LinkedVariantScope::Transition(span) => {
+                self.transitions.get(&span).map(|(outgoing, incoming)| {
+                    TimelineVariantScope::Transition {
+                        outgoing: *outgoing,
+                        incoming: *incoming,
+                    }
+                })
+            }
+        }
     }
 }
 

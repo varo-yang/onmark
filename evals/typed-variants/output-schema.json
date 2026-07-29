@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["cases"],
+  "properties": {
+    "cases": {
+      "type": "array",
+      "minItems": 6,
+      "maxItems": 6,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "filmHtml", "variantJson"],
+        "properties": {
+          "id": {
+            "enum": [
+              "product-offer",
+              "regional-copy",
+              "boolean-badge",
+              "rename-field",
+              "add-local-field",
+              "literal-untrusted-text"
+            ]
+          },
+          "filmHtml": {
+            "type": "string"
+          },
+          "variantJson": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

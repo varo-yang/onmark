@@ -23,6 +23,8 @@ pub(super) struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub(super) enum Command {
+    /// Render one bounded manifest of typed presentation variants.
+    Batch(BatchArgs),
     /// Measure complete uncached renders with phase-level timings.
     Benchmark(BenchmarkArgs),
     /// Validate one screenplay without launching Chromium or encoding video.
@@ -41,6 +43,71 @@ pub(super) enum Command {
     Snapshot(SnapshotArgs),
     /// Execute one already-planned worker task without recompiling source.
     Worker(WorkerArgs),
+}
+
+#[derive(Debug, Args)]
+pub(super) struct BatchArgs {
+    /// Versioned JSON manifest naming one screenplay and its variant outputs.
+    pub(super) manifest: PathBuf,
+
+    /// Exact output frame rate, such as 30 or 30000/1001.
+    #[arg(long = "fps", default_value = "30", value_parser = parse_frame_rate)]
+    pub(super) frame_rate: FrameRate,
+
+    /// Output width in CSS pixels.
+    #[arg(long, default_value_t = 1_920)]
+    pub(super) width: u32,
+
+    /// Output height in CSS pixels.
+    #[arg(long, default_value_t = 1_080)]
+    pub(super) height: u32,
+
+    /// Browser executable. Defaults to headless shell on Linux and Chrome elsewhere.
+    #[arg(long, help_heading = "Execution overrides")]
+    pub(super) browser: Option<PathBuf>,
+
+    /// Browser graphics implementation. Omit to use the admitted host default.
+    #[arg(long, value_enum, help_heading = "Execution overrides")]
+    graphics: Option<GraphicsBackend>,
+
+    /// Threads assigned to each final visual encoder.
+    #[arg(
+        long,
+        default_value_t = LOCAL_VIDEO_ENCODER_THREADS,
+        value_parser = parse_video_encoder_threads,
+        help_heading = "Execution overrides"
+    )]
+    video_encoder_threads: usize,
+
+    /// Presentation bundler executable.
+    #[arg(
+        long,
+        env = "ONMARK_BUNDLER",
+        hide_env = true,
+        default_value = "onmark-bundle",
+        help_heading = "Execution overrides"
+    )]
+    pub(super) bundler: PathBuf,
+
+    /// `FFmpeg` executable.
+    #[arg(
+        long,
+        env = "ONMARK_FFMPEG",
+        hide_env = true,
+        default_value = "ffmpeg",
+        help_heading = "Execution overrides"
+    )]
+    pub(super) ffmpeg: PathBuf,
+
+    /// ffprobe executable.
+    #[arg(
+        long,
+        env = "ONMARK_FFPROBE",
+        hide_env = true,
+        default_value = "ffprobe",
+        help_heading = "Execution overrides"
+    )]
+    pub(super) ffprobe: PathBuf,
 }
 
 #[derive(Debug, Args)]
@@ -134,6 +201,10 @@ pub(super) struct ValidationArgs {
     /// Authored HTML document to validate.
     pub(super) screenplay: PathBuf,
 
+    /// Flat JSON values for the screenplay's declared typed fields.
+    #[arg(long, value_name = "FILE")]
+    pub(super) variant: Option<PathBuf>,
+
     /// Exact output frame rate, such as 30 or 30000/1001.
     #[arg(long = "fps", default_value = "30", value_parser = parse_frame_rate)]
     pub(super) frame_rate: FrameRate,
@@ -206,6 +277,10 @@ pub(super) struct WorkerCaptureArgs {
 pub(super) struct RenderArgs {
     /// Authored HTML document to compile and render.
     pub(super) screenplay: PathBuf,
+
+    /// Flat JSON values for the screenplay's declared typed fields.
+    #[arg(long, value_name = "FILE")]
+    pub(super) variant: Option<PathBuf>,
 
     /// MP4 or MOV destination. The extension selects the delivery profile.
     #[arg(short, long)]
@@ -373,6 +448,31 @@ impl RenderArgs {
     }
 }
 
+impl BatchArgs {
+    pub(super) fn render_args(
+        &self,
+        screenplay: PathBuf,
+        variant: Option<PathBuf>,
+        output: PathBuf,
+    ) -> RenderArgs {
+        RenderArgs {
+            screenplay,
+            variant,
+            output: Some(output),
+            frame_rate: self.frame_rate,
+            width: self.width,
+            height: self.height,
+            browser: self.browser.clone(),
+            graphics: self.graphics,
+            video_encoder_threads: self.video_encoder_threads,
+            bundler: self.bundler.clone(),
+            ffmpeg: self.ffmpeg.clone(),
+            ffprobe: self.ffprobe.clone(),
+            subtitle: None,
+        }
+    }
+}
+
 impl SnapshotArgs {
     pub(super) fn output(&self) -> Result<PathBuf, InvalidSnapshotOutputExtension> {
         let output = self.output.clone().unwrap_or_else(|| {
@@ -410,6 +510,7 @@ impl BenchmarkArgs {
     pub(super) fn render_args(&self, output: PathBuf) -> RenderArgs {
         RenderArgs {
             screenplay: self.validation.screenplay.clone(),
+            variant: self.validation.variant.clone(),
             output: Some(output),
             frame_rate: self.validation.frame_rate,
             width: self.validation.width,
@@ -545,6 +646,31 @@ mod tests {
         assert_eq!(args.frame_rate.denominator(), 1);
         assert_eq!(args.graphics_backend(), None);
         assert_eq!(args.video_encoder_threads(), LOCAL_VIDEO_ENCODER_THREADS);
+    }
+
+    #[test]
+    fn accepts_one_versioned_variant_batch_manifest() {
+        let cli = Cli::try_parse_from([
+            "onmark",
+            "batch",
+            "campaign/batch.json",
+            "--fps",
+            "30000/1001",
+            "--width",
+            "1080",
+            "--height",
+            "1920",
+        ])
+        .expect("the bounded batch command is valid");
+        let Command::Batch(args) = cli.command else {
+            panic!("the fixture must parse as a batch command");
+        };
+
+        assert_eq!(args.manifest, Path::new("campaign/batch.json"));
+        assert_eq!(args.frame_rate.numerator(), 30_000);
+        assert_eq!(args.frame_rate.denominator(), 1_001);
+        assert_eq!(args.width, 1_080);
+        assert_eq!(args.height, 1_920);
     }
 
     #[test]

@@ -1,0 +1,8 @@
+{
+  "model": "gpt-5.6-sol",
+  "reasoningEffort": "low",
+  "runsPerArm": 2,
+  "toolUse": false,
+  "codexVersion": "0.145.0",
+  "date": "2026-07-29"
+}

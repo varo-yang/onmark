@@ -1,0 +1,46 @@
+{
+  "date": "2026-07-29",
+  "host": {
+    "model": "MacBook Air Mac17,3",
+    "chip": "Apple M5",
+    "memoryBytes": 34359738368,
+    "chrome": "150.0.7871.187",
+    "ffmpeg": "8.1.2"
+  },
+  "fixture": {
+    "width": 320,
+    "height": 180,
+    "framesPerSecond": 30,
+    "frames": 52,
+    "regions": 3
+  },
+  "renders": {
+    "cold": {
+      "totalMilliseconds": 3552,
+      "captureMilliseconds": 3179,
+      "reusedRegions": 0,
+      "reusedFrames": 0,
+      "maximumResidentBytes": 237256704
+    },
+    "warm": {
+      "totalMilliseconds": 378,
+      "captureMilliseconds": 3,
+      "reusedRegions": 3,
+      "reusedFrames": 52,
+      "maximumResidentBytes": 75120640
+    },
+    "openingFieldChanged": {
+      "totalMilliseconds": 2692,
+      "captureMilliseconds": 2320,
+      "reusedRegions": 1,
+      "reusedFrames": 22,
+      "maximumResidentBytes": 236814336
+    }
+  },
+  "batch": {
+    "variants": 2,
+    "wallMilliseconds": 6890,
+    "secondVariantReusedRegions": 1,
+    "secondVariantReusedFrames": 22
+  }
+}

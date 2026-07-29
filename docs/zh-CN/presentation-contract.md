@@ -276,28 +276,55 @@ video readiness timeout 以 `video:<nodeId>:loadeddata`、
 `video:<nodeId>:seeked` 或 `video:<nodeId>:frame` 指出 unit-local node 与 phase。
 binding 拥有效果，不拥有 interval arithmetic。
 
-## Plan facts、组件选择与 props
+## Plan facts 与 canonical typed variants
 
-当前语言**没有** `presents`、`definePresentation`，也没有独立的 screenplay 到
-presentation props 通道。authored HTML 收到的动态事实只有 `Load(plan)` 传入的
-Rust-owned `BrowserPlan`：帧率、完整 solved film interval、evaluation/output interval、
-semantic structure 与 ownership、video placement、transition relation，以及 title、CTA 或导入 caption 的
-overlay placement。与 unit 相交的 structure 与 overlay 会保留完整 solved interval；
-`evaluation` 只选择该 unit 执行的 frame，`output` 只选择其发布的 frame。
-stylesheet rule 与 inline module 静态 import 的值都是 presentation code，不是
-screenplay props。
+authored HTML 收到的 dynamic fact 是 `Load(plan)` 传入的 Rust-owned
+`BrowserPlan`：帧率、完整 solved film interval、evaluation/output interval、semantic
+structure 与 ownership、video placement、transition relation、title/CTA/imported caption
+overlay placement，以及当前 Render Graph region 所需的 canonical typed variant value。
+与 unit 相交的 structure 与 overlay 保留完整 solved interval；`evaluation` 只选择该 unit
+执行的 frame，`output` 只选择其发布的 frame。
 
-这些既有 fact 构成封闭的内建 component contract：`nodeId` 是 unit-local binding key，可选
-`authoredId` 用于跨 projection 的 semantic selection，`kind` 只选择 title、CTA 或 caption，`text` 是该 component
-唯一的 authored property。这不会创建通用 props 通道，也不允许 presentation
-重新解释 screenplay 结构。
+这些 dynamic fact 还包含当前 Render Graph region 所需的 canonical typed variant
+value。语言仍然没有 `presents`、`definePresentation`、任意 props object、source
+placeholder substitution、module-owned input schema、global 或 URL parameter。唯一的
+author-input surface 是语言规格书定义的封闭 `om-fields` schema，以及
+`data-om-text`、`data-om-css` 与 `data-om-show` 三种 literal sink。Rust 用 schema
+校验 external JSON 并产出按 name 排序的 value vector；runtime 不接收 untyped input
+object，也不解释 source JSON spelling。
 
-这项缺失是有意边界，不是未写下来的约定。未来的 presentation selection 或 props
-feature 必须一起定义：screenplay spelling、带类型的 schema/default、canonical
-wire encoding、source span 与 diagnostic、bundle/cache identity，以及与 temporal
-capability declaration 的关系；它还必须具备受控 language
-evaluation 证据。在这些工作完成前，presentation 不得从 global、URL
-parameter、可变 side channel 或自造的 `presents` attribute 读取作者意图。
+production adapter 在 `load` 中、motion prepare 之前应用全部已验证 binding：
+
+- `data-om-text` 通过 `textContent` 写入一个 `text` value；
+- `data-om-css` 通过 `style.setProperty("--<field>", canonicalValue)` 写入 `color`
+  或 `integer` value；
+- `data-om-show` 通过 `hidden` property 写入一个 `boolean` value。
+
+bundler 会从 projected document 移除 `om-fields`/`om-field` declaration，但保留三种
+binding attribute；它不会替换 source byte，也不会从 value 生成 executable code。
+runtime binding 受已验证 plan 与 document schema 双重约束。target 缺失、同一 target
+拼写重复、value kind 不兼容或 plan 携带当前 region 不需要的 field 都属于 protocol
+failure，不能 best-effort 忽略。
+
+binding 是 presentation state，不是 timing input。它们在 extension resource discovery
+和 motion prepare 之前完成，因此后续 phase 只观察一份稳定 DOM。`seek` 不会重复应用
+binding；一份 Render Unit 只拥有一个 immutable variant。variant 改变会产生不同 Browser
+Plan，并只在 field 实际被消费的 region 形成不同 frame-artifact identity。
+
+field dependency 沿用 document projection：shot-owned binding 只进入包含该 shot 的
+region；scene-shell binding 进入保留该 scene 的每个 region；film-shell binding 进入全部
+region；transition binding 只进入同时保留两个相邻 shot 的 region。Timeline IR 拥有这些
+scope，Render Graph 负责解析，Browser Plan 只携带 selected region 的 value。TypeScript
+不得从 projected DOM 反推 dependency。
+
+既有内建 component fact 仍保持封闭：`nodeId` 是 dense unit-local binding key，可选
+`authoredId` 用于跨 projection 的 semantic selection，`kind` 只选择 title、CTA 或
+caption，`text` 是 component 携带的 authored fallback。typed binding 可以替换
+presentation 的 literal DOM text，但不能重新解释 screenplay structure 或 solved
+interval。
+
+stylesheet rule 与 inline module 静态 import 的值仍是 presentation code，不是 variant
+value。presentation code 不得从可变 side channel 读取作者意图。
 
 ## Temporal capability
 

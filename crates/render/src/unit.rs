@@ -13,8 +13,8 @@ use std::sync::Arc;
 use onmark_core::model::{
     AudioChannelLayout, AudioEnvelope, AudioGain, AudioSampleConversionOverflow, AudioSampleCount,
     FrameCount, FrameIndex, FrameInterval, FrameRate, FrozenAsset, FrozenAssetId,
-    PresentationDocumentScope, PresentationVisualCapability, Rounding, VideoColorProfile,
-    VideoDimensions, VideoTiming,
+    PresentationDocumentScope, PresentationVisualCapability, Rounding, VariantFieldName,
+    VideoColorProfile, VideoDimensions, VideoTiming,
 };
 use onmark_core::protocol::{BrowserPlan, BundleManifest, InvalidBrowserPlan};
 use onmark_core::render_graph::{PartitionPlan, RenderPartition};
@@ -261,12 +261,12 @@ impl RenderUnit {
         profile: RenderProfile,
         assets: impl IntoIterator<Item = MaterializedAsset>,
     ) -> Result<Self, InvalidRenderUnit> {
-        let shots = partition.shots().copied().collect();
+        let selection = RegionSelection::from_partition(partition);
         Self::compose(
             timeline,
             partition.evaluation(),
             partition.output(),
-            Some(&shots),
+            Some(&selection),
             bundle_manifest,
             profile,
             assets,
@@ -296,12 +296,12 @@ impl RenderUnit {
         let mut units = Vec::with_capacity(partitions.units().len());
 
         for partition in partitions.units() {
-            let shots = partition.shots().copied().collect();
+            let selection = RegionSelection::from_partition(partition);
             units.push(Self::compose_from_catalog(
                 timeline,
                 partition.evaluation(),
                 partition.output(),
-                Some(&shots),
+                Some(&selection),
                 Arc::clone(&bundle_manifest),
                 profile,
                 &available,
@@ -334,12 +334,12 @@ impl RenderUnit {
         let mut units = Vec::with_capacity(partitions.units().len());
 
         for (partition, manifest) in partitions.units().iter().zip(bundle_manifests) {
-            let shots = partition.shots().copied().collect();
+            let selection = RegionSelection::from_partition(partition);
             units.push(Self::compose_from_catalog(
                 timeline,
                 partition.evaluation(),
                 partition.output(),
-                Some(&shots),
+                Some(&selection),
                 Arc::new(manifest),
                 profile,
                 &available,
@@ -353,7 +353,7 @@ impl RenderUnit {
         timeline: &TimelineIr,
         evaluation: FrameInterval,
         output: FrameInterval,
-        shots: Option<&BTreeSet<TimelineShotIndex>>,
+        selection: Option<&RegionSelection>,
         bundle_manifest: BundleManifest,
         profile: RenderProfile,
         assets: impl IntoIterator<Item = MaterializedAsset>,
@@ -363,7 +363,7 @@ impl RenderUnit {
             timeline,
             evaluation,
             output,
-            shots,
+            selection,
             Arc::new(bundle_manifest),
             profile,
             &available,
@@ -374,23 +374,25 @@ impl RenderUnit {
         timeline: &TimelineIr,
         evaluation: FrameInterval,
         output: FrameInterval,
-        shots: Option<&BTreeSet<TimelineShotIndex>>,
+        selection: Option<&RegionSelection>,
         bundle_manifest: Arc<BundleManifest>,
         profile: RenderProfile,
         available: &BTreeMap<FrozenAssetId, MaterializedAsset>,
     ) -> Result<Self, InvalidRenderUnit> {
+        let shots = selection.map(|selection| &selection.shots);
         let videos = render_videos(timeline, evaluation, shots, available)?;
         let source_timings = videos
             .iter()
             .map(|(id, video)| (*id, video.source_timing().clone()))
             .collect();
-        let browser_plan = match shots {
-            Some(shots) => BrowserPlan::from_timeline_for_region(
+        let browser_plan = match selection {
+            Some(selection) => BrowserPlan::from_timeline_for_region(
                 timeline,
                 &source_timings,
                 evaluation,
                 output,
-                shots,
+                &selection.shots,
+                &selection.variant_fields,
             ),
             None => {
                 BrowserPlan::from_timeline_for_unit(timeline, &source_timings, evaluation, output)
@@ -520,6 +522,20 @@ impl RenderUnit {
             .map_err(InvalidRenderUnit::BrowserPlan)?;
         self.audio = AudioPlan::empty();
         Ok(self)
+    }
+}
+
+struct RegionSelection {
+    shots: BTreeSet<TimelineShotIndex>,
+    variant_fields: BTreeSet<VariantFieldName>,
+}
+
+impl RegionSelection {
+    fn from_partition(partition: &RenderPartition) -> Self {
+        Self {
+            shots: partition.shots().copied().collect(),
+            variant_fields: partition.variant_fields().cloned().collect(),
+        }
     }
 }
 
@@ -963,6 +979,26 @@ mod tests {
 
         assert_eq!(before[0], after[0]);
         assert_ne!(before[1], after[1]);
+    }
+
+    #[test]
+    fn scopes_variant_values_to_their_distributed_partition() {
+        let source = concat!(
+            "<om-film><om-fields>",
+            r#"<om-field name="opening" type="text" default="First"></om-field>"#,
+            r#"<om-field name="closing" type="text" default="Last"></om-field>"#,
+            "</om-fields><om-scene>",
+            r#"<om-shot duration="1s"><om-title data-om-text="opening">First</om-title></om-shot>"#,
+            r#"<om-shot duration="1s"><om-title data-om-text="closing">Last</om-title></om-shot>"#,
+            "</om-scene></om-film>",
+        );
+        let before =
+            partition_variant_artifact_ids(source, r#"{"opening":"Before","closing":"Stable"}"#);
+        let after =
+            partition_variant_artifact_ids(source, r#"{"opening":"After","closing":"Stable"}"#);
+
+        assert_ne!(before[0], after[0]);
+        assert_eq!(before[1], after[1]);
     }
 
     #[test]
@@ -1817,18 +1853,25 @@ mod tests {
     }
 
     fn solve_with_assets(source: &str, assets: &BTreeMap<AssetRef, FrozenAsset>) -> TimelineIr {
+        solve_resolved(resolve_film(source), assets)
+    }
+
+    fn resolve_film(source: &str) -> compiler::ResolvedFilm {
         let (document, diagnostics) = compiler::parse(SourceId::new(0), source).into_parts();
         assert!(diagnostics.is_empty());
         let (film, diagnostics) = compiler::bind(document).into_parts();
         assert!(diagnostics.is_empty());
         let (film, diagnostics) = compiler::resolve(film.expect("the fixture binds")).into_parts();
         assert!(diagnostics.is_empty());
-        let report = compiler::solve(
-            film.expect("the fixture resolves"),
-            assets,
-            Timebase::new(frame_rate()),
-        )
-        .expect("the fixture has frozen metadata");
+        film.expect("the fixture resolves")
+    }
+
+    fn solve_resolved(
+        film: compiler::ResolvedFilm,
+        assets: &BTreeMap<AssetRef, FrozenAsset>,
+    ) -> TimelineIr {
+        let report = compiler::solve(film, assets, Timebase::new(frame_rate()))
+            .expect("the fixture has frozen metadata");
         let (timeline, diagnostics) = report.into_parts();
         assert!(diagnostics.is_empty());
         timeline.expect("the fixture produces Timeline IR")
@@ -1890,6 +1933,15 @@ mod tests {
 
     fn partition_artifact_ids(source: &str) -> Vec<crate::FrameArtifactId> {
         let timeline = solve_with_assets(source, &BTreeMap::new());
+        random_access_artifact_ids(&timeline, [])
+    }
+
+    fn partition_variant_artifact_ids(source: &str, variant: &str) -> Vec<crate::FrameArtifactId> {
+        let report = compiler::resolve_variant(resolve_film(source), SourceId::new(1), variant);
+        let (film, diagnostics) = report.into_parts();
+        assert!(diagnostics.is_empty());
+        let film = film.expect("the variant fixture resolves");
+        let timeline = solve_resolved(film, &BTreeMap::new());
         random_access_artifact_ids(&timeline, [])
     }
 

@@ -54,6 +54,38 @@ export type BrowserNodeId = number;
  */
 export type BrowserOverlayKind = "title" | "callToAction" | "caption";
 /**
+ * Closed wire values accepted by the browser's literal binding layer.
+ */
+export type BrowserVariantValue =
+  | {
+      kind: "text";
+      /**
+       * Exact UTF-8 value.
+       */
+      value: string;
+    }
+  | {
+      kind: "integer";
+      /**
+       * Exact integer value.
+       */
+      value: number;
+    }
+  | {
+      kind: "boolean";
+      /**
+       * Exact boolean value.
+       */
+      value: boolean;
+    }
+  | {
+      kind: "color";
+      /**
+       * Canonical color value.
+       */
+      value: string;
+    };
+/**
  * Exact source-frame timing projected into the browser runtime.
  */
 export type BrowserVideoTiming =
@@ -110,11 +142,15 @@ export interface BrowserPlan {
    */
   shots: BrowserShot[];
   timeline: WireInterval;
-  timelineVersion: 4;
+  timelineVersion: 5;
   /**
    * @maxItems 10000
    */
   transitions: BrowserTransition[];
+  /**
+   * @maxItems 256
+   */
+  variantFields: BrowserVariantField[];
   /**
    * @maxItems 10000
    */
@@ -174,6 +210,13 @@ export interface BrowserTransition {
   interval: WireInterval;
   node: BrowserNode;
   outgoingShotId: BrowserNodeId;
+}
+/**
+ * One canonical typed presentation input carried by this render region.
+ */
+export interface BrowserVariantField {
+  name: string;
+  value: BrowserVariantValue;
 }
 /**
  * One primary video placement consumed by the browser presentation adapter.

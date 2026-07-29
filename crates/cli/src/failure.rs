@@ -20,10 +20,12 @@ use tokio::task::JoinError;
 use crate::arguments::{InvalidOutputExtension, InvalidSnapshotOutputExtension};
 use crate::artifact_cache::ArtifactCacheError;
 use crate::assets::AssetError;
+use crate::batch::BatchError;
 use crate::bundler::BundleError;
 use crate::environment::EnvironmentError;
 use crate::input::BoundedReadError;
 use crate::subtitle::SubtitleLoadError;
+use crate::variant::VariantLoadError;
 
 #[derive(Debug)]
 pub(super) enum CliError {
@@ -44,6 +46,7 @@ pub(super) enum CliError {
     WriteProgress(io::Error),
     BenchmarkWorkspace(io::Error),
     BenchmarkDrift(&'static str),
+    Batch(BatchError),
     Doctor(crate::doctor::DoctorError),
     CreateOutputDirectory {
         path: PathBuf,
@@ -58,6 +61,7 @@ pub(super) enum CliError {
     Assets(AssetError),
     Solve(SolveError),
     Subtitle(SubtitleLoadError),
+    Variant(VariantLoadError),
     CaptionProjection(CaptionProjectionError),
     Bundle(BundleError),
     RenderGraph(InvalidRenderGraph),
@@ -139,6 +143,7 @@ impl fmt::Display for CliError {
             Self::BenchmarkDrift(fact) => {
                 write!(formatter, "benchmark samples disagree on {fact}")
             }
+            Self::Batch(source) => source.fmt(formatter),
             Self::Doctor(source) => source.fmt(formatter),
             Self::CreateOutputDirectory { path, .. } => {
                 write!(
@@ -158,6 +163,7 @@ impl fmt::Display for CliError {
             Self::Assets(source) => source.fmt(formatter),
             Self::Solve(source) => source.fmt(formatter),
             Self::Subtitle(source) => source.fmt(formatter),
+            Self::Variant(source) => source.fmt(formatter),
             Self::CaptionProjection(source) => source.fmt(formatter),
             Self::Bundle(source) => source.fmt(formatter),
             Self::RenderGraph(source) => source.fmt(formatter),
@@ -184,6 +190,7 @@ impl Error for CliError {
             Self::ParseWorkerRequest { source, .. } => Some(source),
             Self::WorkerTask(source) => Some(source),
             Self::OutputExists(_) | Self::BenchmarkDrift(_) => None,
+            Self::Batch(source) => Some(source),
             Self::InvalidOutputExtension(source) => Some(source),
             Self::InvalidSnapshotOutputExtension(source) => Some(source),
             Self::InvalidProfile(source) => Some(source),
@@ -192,6 +199,7 @@ impl Error for CliError {
             Self::Assets(source) => Some(source),
             Self::Solve(source) => Some(source),
             Self::Subtitle(source) => Some(source),
+            Self::Variant(source) => Some(source),
             Self::CaptionProjection(source) => Some(source),
             Self::Bundle(source) => Some(source),
             Self::RenderGraph(source) => Some(source),
@@ -252,6 +260,12 @@ impl From<ArtifactCacheError> for CliError {
     }
 }
 
+impl From<BatchError> for CliError {
+    fn from(source: BatchError) -> Self {
+        Self::Batch(source)
+    }
+}
+
 impl From<AssetError> for CliError {
     fn from(source: AssetError) -> Self {
         Self::Assets(source)
@@ -267,6 +281,12 @@ impl From<SolveError> for CliError {
 impl From<SubtitleLoadError> for CliError {
     fn from(source: SubtitleLoadError) -> Self {
         Self::Subtitle(source)
+    }
+}
+
+impl From<VariantLoadError> for CliError {
+    fn from(source: VariantLoadError) -> Self {
+        Self::Variant(source)
     }
 }
 

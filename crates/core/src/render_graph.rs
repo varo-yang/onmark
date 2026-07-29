@@ -8,7 +8,9 @@ use std::collections::BTreeSet;
 use std::error::Error;
 use std::fmt;
 
-use crate::model::{FrameIndex, FrameInterval, FrozenAssetId, PresentationTemporalCapability};
+use crate::model::{
+    FrameIndex, FrameInterval, FrozenAssetId, PresentationTemporalCapability, VariantFieldName,
+};
 use crate::timeline::{
     TimelineContent, TimelineIr, TimelineScene, TimelineShot, TimelineShotIndex,
 };
@@ -42,6 +44,7 @@ impl RenderGraph {
             PresentationTemporalCapability::RandomAccess => random_access_regions(timeline),
         };
         assign_audio_assets(timeline, &mut regions)?;
+        assign_variant_fields(timeline, &mut regions);
 
         Ok(Self {
             interval: timeline.interval(),
@@ -87,6 +90,7 @@ pub struct RenderRegion {
     output: FrameInterval,
     shots: BTreeSet<TimelineShotIndex>,
     media_assets: BTreeSet<FrozenAssetId>,
+    variant_fields: BTreeSet<VariantFieldName>,
 }
 
 impl RenderRegion {
@@ -105,6 +109,7 @@ impl RenderRegion {
             output,
             shots: BTreeSet::from([index]),
             media_assets: Self::shot_assets(shot),
+            variant_fields: BTreeSet::new(),
         }
     }
 
@@ -128,6 +133,7 @@ impl RenderRegion {
             output,
             shots: BTreeSet::from([outgoing_index, incoming_index]),
             media_assets,
+            variant_fields: BTreeSet::new(),
         }
     }
 
@@ -147,6 +153,7 @@ impl RenderRegion {
             output: interval,
             shots: BTreeSet::new(),
             media_assets: BTreeSet::new(),
+            variant_fields: BTreeSet::new(),
         }
     }
 
@@ -176,6 +183,12 @@ impl RenderRegion {
     #[must_use]
     pub fn media_assets(&self) -> impl ExactSizeIterator<Item = &FrozenAssetId> {
         self.media_assets.iter()
+    }
+
+    /// Returns canonical fields whose bindings affect this region.
+    #[must_use]
+    pub fn variant_fields(&self) -> impl ExactSizeIterator<Item = &VariantFieldName> {
+        self.variant_fields.iter()
     }
 }
 
@@ -262,6 +275,20 @@ fn assign_audio_assets(
     Ok(())
 }
 
+fn assign_variant_fields(timeline: &TimelineIr, regions: &mut [RenderRegion]) {
+    for field in timeline.variants() {
+        for region in &mut *regions {
+            if field
+                .scopes()
+                .iter()
+                .any(|scope| scope.affects(&region.shots))
+            {
+                region.variant_fields.insert(field.name().clone());
+            }
+        }
+    }
+}
+
 /// Timeline inconsistency that prevents render-dependency construction.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct InvalidRenderGraph {
@@ -328,6 +355,7 @@ pub struct RenderPartition {
     output: FrameInterval,
     shots: BTreeSet<TimelineShotIndex>,
     media_assets: BTreeSet<FrozenAssetId>,
+    variant_fields: BTreeSet<VariantFieldName>,
 }
 
 impl RenderPartition {
@@ -337,6 +365,7 @@ impl RenderPartition {
             output: region.output,
             shots: region.shots,
             media_assets: region.media_assets,
+            variant_fields: region.variant_fields,
         }
     }
 
@@ -364,6 +393,12 @@ impl RenderPartition {
         self.media_assets.iter()
     }
 
+    /// Returns canonical fields whose values affect this partition.
+    #[must_use]
+    pub fn variant_fields(&self) -> impl ExactSizeIterator<Item = &VariantFieldName> {
+        self.variant_fields.iter()
+    }
+
     /// Returns whether this partition directly depends on one frozen asset.
     #[must_use]
     pub fn requires_media_asset(&self, asset: FrozenAssetId) -> bool {
@@ -380,8 +415,8 @@ mod tests {
         FrozenAssetId, PresentationTemporalCapability, SourceId, SourceSpan, Timebase,
     };
     use crate::timeline::{
-        TimelineAudio, TimelineAudioKind, TimelineElement, TimelineIr, TimelineScene, TimelineShot,
-        TimelineTiming, TimingReason,
+        TimelineAudio, TimelineAudioKind, TimelineElement, TimelineFacts, TimelineIr,
+        TimelineScene, TimelineShot, TimelineTiming, TimingReason,
     };
 
     #[test]
@@ -469,15 +504,16 @@ mod tests {
         );
         let rate = FrameRate::new(30, 1).expect("30 fps is valid");
 
-        TimelineIr::new(
-            Timebase::new(rate),
-            TimelineElement::new(ElementKind::Film, None, span),
-            interval(0, 20),
-            BTreeMap::new(),
-            vec![scene],
-            vec![audio],
-            Vec::new(),
-        )
+        TimelineIr::new(TimelineFacts {
+            timebase: Timebase::new(rate),
+            element: TimelineElement::new(ElementKind::Film, None, span),
+            interval: interval(0, 20),
+            variants: Vec::new(),
+            events: BTreeMap::new(),
+            scenes: vec![scene],
+            general_audio: vec![audio],
+            captions: Vec::new(),
+        })
     }
 
     fn shot(span: SourceSpan, interval: FrameInterval) -> TimelineShot {

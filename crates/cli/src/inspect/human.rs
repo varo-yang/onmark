@@ -6,7 +6,7 @@ use std::io::{self, Write};
 use onmark_core::model::{AudioEnvelope, FrameInterval};
 use onmark_core::timeline::{
     TimelineContent, TimelineElement, TimelineIr, TimelineScene, TimelineShot, TimelineText,
-    TimelineTiming, TimelineVideo,
+    TimelineTiming, TimelineVariantScope, TimelineVideo,
 };
 
 use crate::check::{RegionInspection, Validation};
@@ -44,6 +44,19 @@ fn write_timeline(output: &mut impl Write, timeline: &TimelineIr) -> io::Result<
         frame_rate.numerator(),
         frame_rate.denominator(),
     )?;
+    for field in timeline.variants() {
+        write!(
+            output,
+            "Variant {} {} = {:?}, scopes",
+            field.name(),
+            field.kind(),
+            field.value().to_string(),
+        )?;
+        for scope in field.scopes() {
+            write!(output, " {}", Scope(*scope))?;
+        }
+        writeln!(output)?;
+    }
     for (id, event) in timeline.events() {
         writeln!(output, "Event #{id} at {}", event.at().get())?;
     }
@@ -150,7 +163,7 @@ fn write_region(
 ) -> io::Result<()> {
     writeln!(
         output,
-        "Region {index}: evaluate {}..{}, output {}..{}, {}, {}, {} native media, bundle {}",
+        "Region {index}: evaluate {}..{}, output {}..{}, {}, {}, {} native media, fields {:?}, bundle {}",
         region.evaluation_start,
         region.evaluation_end,
         region.output_start,
@@ -158,8 +171,37 @@ fn write_region(
         region.visual_mode,
         region.capture_cadence,
         region.native_media,
+        region.variant_fields,
         region.bundle_id,
     )
+}
+
+struct Scope(TimelineVariantScope);
+
+impl fmt::Display for Scope {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.0 {
+            TimelineVariantScope::Film => formatter.write_str("film"),
+            TimelineVariantScope::Scene {
+                first_shot,
+                shot_count,
+            } => write!(
+                formatter,
+                "scene({}..{})",
+                first_shot.get(),
+                first_shot.get() + shot_count,
+            ),
+            TimelineVariantScope::Shot(shot) => write!(formatter, "shot({})", shot.get()),
+            TimelineVariantScope::Transition { outgoing, incoming } => {
+                write!(
+                    formatter,
+                    "transition({}->{})",
+                    outgoing.get(),
+                    incoming.get(),
+                )
+            }
+        }
+    }
 }
 
 struct Element<'a>(&'a TimelineElement);
@@ -233,6 +275,7 @@ mod tests {
             visual_mode: "separableBackdrop",
             capture_cadence: "placementBounded",
             native_media: 2,
+            variant_fields: vec!["accent".to_owned()],
             bundle_id: "sha256:fixture".into(),
         };
         let mut output = Vec::new();
@@ -243,7 +286,8 @@ mod tests {
             String::from_utf8(output).expect("inspection text is UTF-8"),
             concat!(
                 "Region 0: evaluate 0..60, output 0..60, separableBackdrop, ",
-                "placementBounded, 2 native media, bundle sha256:fixture\n",
+                "placementBounded, 2 native media, fields [\"accent\"], ",
+                "bundle sha256:fixture\n",
             ),
         );
     }

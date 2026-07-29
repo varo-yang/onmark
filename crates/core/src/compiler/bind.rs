@@ -16,6 +16,8 @@ use super::linked_film::{
     LinkedOverlay, LinkedScene, LinkedShot, LinkedShotContent, LinkedTransition, LinkedVideo,
     LinkedVoiceOver,
 };
+use super::variant::{LinkedVariantField, LinkedVariantSchema};
+use super::variant_binding::collect_variant_bindings;
 
 /// Optional structurally linked output and every recoverable binding diagnostic.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -128,8 +130,10 @@ impl Binder {
     }
 
     fn bind_film(mut self, element: Element) -> (LinkedFilm, Diagnostics) {
+        let variant_bindings = collect_variant_bindings(&element, &mut self.diagnostics);
         let (_, attributes, children, span) = element.into_parts();
         let linked = self.bind_element(attributes, ElementKind::Film, span);
+        let mut variants = None;
         let mut cues = None;
         let mut music = Vec::new();
         let mut scenes = Vec::new();
@@ -140,6 +144,9 @@ impl Binder {
             };
 
             match self.recognize_or_report(&child) {
+                Some(ElementKind::Fields) => {
+                    self.bind_variant_schema_container(child, &mut variants);
+                }
                 Some(ElementKind::Cues) => self.bind_cues_container(child, &mut cues),
                 Some(ElementKind::Music) => {
                     music.push(self.bind_audio(child, GeneralAudioKind::Music));
@@ -150,9 +157,57 @@ impl Binder {
             }
         }
 
+        let variants = variants.map(|(_, schema)| schema);
         let cues = cues.map(|(_, cues)| cues);
-        let film = LinkedFilm::new(linked, cues, music, scenes, self.ids);
+        let film = LinkedFilm::new(
+            linked,
+            variants,
+            variant_bindings,
+            cues,
+            music,
+            scenes,
+            self.ids,
+        );
         (film, self.diagnostics)
+    }
+
+    fn bind_variant_schema_container(
+        &mut self,
+        child: Element,
+        variants: &mut Option<(SourceSpan, LinkedVariantSchema)>,
+    ) {
+        let Some((first, _)) = variants else {
+            *variants = Some((child.name().span(), self.bind_variant_schema(child)));
+            return;
+        };
+
+        self.diagnostics
+            .push(duplicate_variant_schema(&child, *first));
+    }
+
+    fn bind_variant_schema(&mut self, element: Element) -> LinkedVariantSchema {
+        let (_, attributes, children, span) = element.into_parts();
+        let mut fields = Vec::new();
+
+        for node in children {
+            let Some(child) = self.structural_child(node, ElementKind::Fields) else {
+                continue;
+            };
+
+            match self.recognize_or_report(&child) {
+                Some(ElementKind::Field) => fields.push(self.bind_variant_field(child)),
+                Some(kind) => self.reject_misplaced(&child, kind, ElementKind::Fields),
+                None => {}
+            }
+        }
+
+        LinkedVariantSchema::new(attributes, span, fields)
+    }
+
+    fn bind_variant_field(&mut self, element: Element) -> LinkedVariantField {
+        let (_, attributes, children, span) = element.into_parts();
+        self.reject_child_elements_and_text(children, ElementKind::Field);
+        LinkedVariantField::new(attributes, span)
     }
 
     fn bind_cues_container(&mut self, child: Element, cues: &mut Option<(SourceSpan, LinkedCues)>) {
@@ -484,6 +539,17 @@ fn duplicate_cues(element: &Element, first: SourceSpan) -> Diagnostic {
         "merge all cue declarations into one <om-cues> container",
     )
     .with_related(first, "the first <om-cues> container is here")
+    .expect("the static related message is non-blank")
+}
+
+fn duplicate_variant_schema(element: &Element, first: SourceSpan) -> Diagnostic {
+    author_diagnostic(
+        DiagnosticCode::InvalidVariantDeclaration,
+        element.name().span(),
+        "film contains more than one <om-fields> container",
+        "merge all field declarations into one <om-fields> container",
+    )
+    .with_related(first, "the first <om-fields> container is here")
     .expect("the static related message is non-blank")
 }
 

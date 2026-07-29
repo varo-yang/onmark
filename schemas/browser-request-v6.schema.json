@@ -243,7 +243,7 @@
           "$ref": "#/$defs/WireInterval"
         },
         "timelineVersion": {
-          "const": 4,
+          "const": 5,
           "format": "uint16",
           "maximum": 65535,
           "minimum": 0,
@@ -254,6 +254,13 @@
             "$ref": "#/$defs/BrowserTransition"
           },
           "maxItems": 10000,
+          "type": "array"
+        },
+        "variantFields": {
+          "items": {
+            "$ref": "#/$defs/BrowserVariantField"
+          },
+          "maxItems": 256,
           "type": "array"
         },
         "videos": {
@@ -270,6 +277,7 @@
         "timeline",
         "evaluation",
         "output",
+        "variantFields",
         "film",
         "scenes",
         "shots",
@@ -341,6 +349,108 @@
         "interval"
       ],
       "type": "object"
+    },
+    "BrowserVariantField": {
+      "additionalProperties": false,
+      "description": "One canonical typed presentation input carried by this render region.",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "value": {
+          "$ref": "#/$defs/BrowserVariantValue"
+        }
+      },
+      "required": [
+        "name",
+        "value"
+      ],
+      "type": "object"
+    },
+    "BrowserVariantValue": {
+      "description": "Closed wire values accepted by the browser's literal binding layer.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Decoded Unicode text.",
+          "properties": {
+            "kind": {
+              "const": "text",
+              "type": "string"
+            },
+            "value": {
+              "description": "Exact UTF-8 value.",
+              "maxLength": 16384,
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Exact JavaScript-safe signed integer.",
+          "properties": {
+            "kind": {
+              "const": "integer",
+              "type": "string"
+            },
+            "value": {
+              "description": "Exact integer value.",
+              "format": "int64",
+              "maximum": 9007199254740991,
+              "minimum": -9007199254740991,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Binary presentation choice.",
+          "properties": {
+            "kind": {
+              "const": "boolean",
+              "type": "string"
+            },
+            "value": {
+              "description": "Exact boolean value.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Lowercase six- or eight-digit sRGB hexadecimal.",
+          "properties": {
+            "kind": {
+              "const": "color",
+              "type": "string"
+            },
+            "value": {
+              "description": "Canonical color value.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "BrowserVideo": {
       "additionalProperties": false,
@@ -607,5 +717,7 @@
   ],
   "title": "BrowserRequest",
   "type": "object",
+  "x-onmark-max-browser-text-bytes": 1048576,
+  "x-onmark-max-variant-text-bytes": 16384,
   "x-onmark-runtime-host": "__ONMARK_RUNTIME__"
 }

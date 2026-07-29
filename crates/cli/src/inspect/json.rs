@@ -4,17 +4,19 @@ use std::io::{self, Write};
 
 use onmark_core::model::{
     AudioEnvelope, EventRef, FrameInterval, MediaSource, NodeId, PlaybackRate, SourceSpan,
+    VariantValue,
 };
 use onmark_core::timeline::{
     TimelineAudio, TimelineCaption, TimelineContent, TimelineElement, TimelineEvent, TimelineIr,
-    TimelineScene, TimelineShot, TimelineText, TimelineTiming, TimingReason,
+    TimelineScene, TimelineShot, TimelineText, TimelineTiming, TimelineVariantField,
+    TimelineVariantScope, TimingReason,
 };
 use serde::Serialize;
 
 use crate::check::{Inspection, RegionInspection, Validation};
 use crate::diagnostic::JsonDiagnostic;
 
-const REPORT_VERSION: u16 = 4;
+const REPORT_VERSION: u16 = 5;
 
 pub(super) fn write(validation: &Validation) -> io::Result<()> {
     let report = &validation.report;
@@ -72,6 +74,7 @@ struct JsonTimeline<'a> {
     frame_rate: JsonFrameRate,
     interval: JsonInterval,
     film: JsonElement<'a>,
+    variants: Vec<JsonVariantField<'a>>,
     events: Vec<JsonEvent<'a>>,
     scenes: Vec<JsonScene<'a>>,
     audio: Vec<JsonAudio<'a>>,
@@ -85,6 +88,11 @@ impl<'a> From<&'a TimelineIr> for JsonTimeline<'a> {
             frame_rate: timeline.timebase().frame_rate().into(),
             interval: timeline.interval().into(),
             film: timeline.element().into(),
+            variants: timeline
+                .variants()
+                .iter()
+                .map(JsonVariantField::from)
+                .collect(),
             events: timeline
                 .events()
                 .map(|(id, event)| JsonEvent::new(id.as_str(), event))
@@ -92,6 +100,86 @@ impl<'a> From<&'a TimelineIr> for JsonTimeline<'a> {
             scenes: timeline.scenes().iter().map(JsonScene::from).collect(),
             audio: timeline.audio().map(JsonAudio::from).collect(),
             captions: timeline.captions().iter().map(JsonCaption::from).collect(),
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct JsonVariantField<'a> {
+    name: &'a str,
+    kind: &'static str,
+    value: JsonVariantValue<'a>,
+    scopes: Vec<JsonVariantScope>,
+}
+
+impl<'a> From<&'a TimelineVariantField> for JsonVariantField<'a> {
+    fn from(field: &'a TimelineVariantField) -> Self {
+        Self {
+            name: field.name().as_str(),
+            kind: field.kind().as_str(),
+            value: field.value().into(),
+            scopes: field
+                .scopes()
+                .iter()
+                .copied()
+                .map(JsonVariantScope::from)
+                .collect(),
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(untagged)]
+enum JsonVariantValue<'a> {
+    Text(&'a str),
+    Integer(i64),
+    Boolean(bool),
+}
+
+impl<'a> From<&'a VariantValue> for JsonVariantValue<'a> {
+    fn from(value: &'a VariantValue) -> Self {
+        match value {
+            VariantValue::Text(value) | VariantValue::Color(value) => Self::Text(value),
+            VariantValue::Integer(value) => Self::Integer(*value),
+            VariantValue::Boolean(value) => Self::Boolean(*value),
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase", tag = "kind")]
+enum JsonVariantScope {
+    Film,
+    Scene {
+        first_shot: usize,
+        shot_count: usize,
+    },
+    Shot {
+        shot: usize,
+    },
+    Transition {
+        outgoing: usize,
+        incoming: usize,
+    },
+}
+
+impl From<TimelineVariantScope> for JsonVariantScope {
+    fn from(scope: TimelineVariantScope) -> Self {
+        match scope {
+            TimelineVariantScope::Film => Self::Film,
+            TimelineVariantScope::Scene {
+                first_shot,
+                shot_count,
+            } => Self::Scene {
+                first_shot: first_shot.get(),
+                shot_count,
+            },
+            TimelineVariantScope::Shot(shot) => Self::Shot { shot: shot.get() },
+            TimelineVariantScope::Transition { outgoing, incoming } => Self::Transition {
+                outgoing: outgoing.get(),
+                incoming: incoming.get(),
+            },
         }
     }
 }
@@ -420,6 +508,7 @@ struct JsonRegion<'a> {
     visual_mode: &'a str,
     capture_cadence: &'a str,
     native_media: usize,
+    variant_fields: &'a [String],
     bundle_id: &'a str,
 }
 
@@ -437,6 +526,7 @@ impl<'a> From<&'a RegionInspection> for JsonRegion<'a> {
             visual_mode: region.visual_mode,
             capture_cadence: region.capture_cadence,
             native_media: region.native_media,
+            variant_fields: &region.variant_fields,
             bundle_id: &region.bundle_id,
         }
     }
@@ -465,6 +555,7 @@ mod tests {
             visual_mode: "separableBackdrop",
             capture_cadence: "placementBounded",
             native_media: 2,
+            variant_fields: vec!["accent".to_owned()],
             bundle_id: "sha256:fixture".into(),
         };
 
@@ -472,6 +563,7 @@ mod tests {
             .expect("the region projection serializes");
 
         assert_eq!(document["nativeMedia"], 2);
+        assert_eq!(document["variantFields"], serde_json::json!(["accent"]));
         assert_eq!(document["visualMode"], "separableBackdrop");
     }
 

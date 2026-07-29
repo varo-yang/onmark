@@ -35,6 +35,6 @@ pub use message::{
 };
 pub use plan::{
     BrowserNode, BrowserNodeId, BrowserOverlay, BrowserOverlayKind, BrowserPlan, BrowserScene,
-    BrowserShot, BrowserTransition, BrowserVideo, BrowserVideoSource, BrowserVideoTiming,
-    InvalidBrowserPlan,
+    BrowserShot, BrowserTransition, BrowserVariantField, BrowserVariantValue, BrowserVideo,
+    BrowserVideoSource, BrowserVideoTiming, InvalidBrowserPlan,
 };

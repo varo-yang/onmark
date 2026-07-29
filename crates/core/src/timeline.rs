@@ -7,7 +7,8 @@ use std::collections::BTreeMap;
 
 use crate::model::{
     AudioEnvelope, AudioGain, CueId, ElementKind, EventRef, FrameIndex, FrameInterval,
-    FrozenAssetId, GeneralAudioKind, MediaSource, NodeId, SourceSpan, Timebase,
+    FrozenAssetId, GeneralAudioKind, MediaSource, NodeId, SourceSpan, Timebase, VariantFieldKind,
+    VariantFieldName, VariantValue,
 };
 
 /// Version of the Timeline IR contract.
@@ -16,7 +17,7 @@ pub struct TimelineVersion(u16);
 
 impl TimelineVersion {
     /// Only Timeline IR version accepted by this build.
-    pub const CURRENT: Self = Self(4);
+    pub const CURRENT: Self = Self(5);
 
     /// Returns the stable integer representation.
     #[must_use]
@@ -48,27 +49,43 @@ pub struct TimelineIr {
     timebase: Timebase,
     element: TimelineElement,
     interval: FrameInterval,
+    variants: Vec<TimelineVariantField>,
     events: BTreeMap<CueId, TimelineEvent>,
     scenes: Vec<TimelineScene>,
     general_audio: Vec<TimelineAudio>,
     captions: Vec<TimelineCaption>,
 }
 
+/// Complete fact set required before a Timeline IR can exist.
+pub(crate) struct TimelineFacts {
+    pub(crate) timebase: Timebase,
+    pub(crate) element: TimelineElement,
+    pub(crate) interval: FrameInterval,
+    pub(crate) variants: Vec<TimelineVariantField>,
+    pub(crate) events: BTreeMap<CueId, TimelineEvent>,
+    pub(crate) scenes: Vec<TimelineScene>,
+    pub(crate) general_audio: Vec<TimelineAudio>,
+    pub(crate) captions: Vec<TimelineCaption>,
+}
+
 impl TimelineIr {
-    pub(crate) const fn new(
-        timebase: Timebase,
-        element: TimelineElement,
-        interval: FrameInterval,
-        events: BTreeMap<CueId, TimelineEvent>,
-        scenes: Vec<TimelineScene>,
-        general_audio: Vec<TimelineAudio>,
-        captions: Vec<TimelineCaption>,
-    ) -> Self {
+    pub(crate) fn new(facts: TimelineFacts) -> Self {
+        let TimelineFacts {
+            timebase,
+            element,
+            interval,
+            variants,
+            events,
+            scenes,
+            general_audio,
+            captions,
+        } = facts;
         Self {
             version: TimelineVersion::CURRENT,
             timebase,
             element,
             interval,
+            variants,
             events,
             scenes,
             general_audio,
@@ -98,6 +115,12 @@ impl TimelineIr {
     #[must_use]
     pub const fn interval(&self) -> FrameInterval {
         self.interval
+    }
+
+    /// Returns canonical presentation inputs in field-name order.
+    #[must_use]
+    pub fn variants(&self) -> &[TimelineVariantField] {
+        &self.variants
     }
 
     /// Returns named events in deterministic cue-ID order.
@@ -172,6 +195,111 @@ impl TimelineIr {
 
     fn contents(&self) -> impl Iterator<Item = &TimelineContent> {
         self.shots().flat_map(|shot| &shot.content)
+    }
+}
+
+/// One canonical presentation value and its exact render-dependency scopes.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TimelineVariantField {
+    name: VariantFieldName,
+    kind: VariantFieldKind,
+    value: VariantValue,
+    declared_at: SourceSpan,
+    scopes: Vec<TimelineVariantScope>,
+}
+
+impl TimelineVariantField {
+    pub(crate) const fn new(
+        name: VariantFieldName,
+        kind: VariantFieldKind,
+        value: VariantValue,
+        declared_at: SourceSpan,
+        scopes: Vec<TimelineVariantScope>,
+    ) -> Self {
+        Self {
+            name,
+            kind,
+            value,
+            declared_at,
+            scopes,
+        }
+    }
+
+    /// Returns the canonical field identity.
+    #[must_use]
+    pub const fn name(&self) -> &VariantFieldName {
+        &self.name
+    }
+
+    /// Returns the closed value kind.
+    #[must_use]
+    pub const fn kind(&self) -> VariantFieldKind {
+        self.kind
+    }
+
+    /// Returns the effective canonical value for this render.
+    #[must_use]
+    pub const fn value(&self) -> &VariantValue {
+        &self.value
+    }
+
+    /// Returns the source declaration span.
+    #[must_use]
+    pub const fn declared_at(&self) -> SourceSpan {
+        self.declared_at
+    }
+
+    /// Returns exact semantic scopes in canonical order.
+    #[must_use]
+    pub fn scopes(&self) -> &[TimelineVariantScope] {
+        &self.scopes
+    }
+}
+
+/// Semantic document ownership used for exact region invalidation.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum TimelineVariantScope {
+    /// Field affects the complete film shell.
+    Film,
+    /// Field affects every retained shot region in one scene.
+    Scene {
+        /// First dense shot identity owned by the scene.
+        first_shot: TimelineShotIndex,
+        /// Number of dense shot identities owned by the scene.
+        shot_count: usize,
+    },
+    /// Field affects one shot-owned region.
+    Shot(TimelineShotIndex),
+    /// Field affects only the overlap region retaining both adjacent shots.
+    Transition {
+        /// Outgoing dense shot identity.
+        outgoing: TimelineShotIndex,
+        /// Incoming dense shot identity.
+        incoming: TimelineShotIndex,
+    },
+}
+
+impl TimelineVariantScope {
+    /// Returns whether this scope affects a region with the supplied shot set.
+    #[must_use]
+    pub fn affects(self, shots: &std::collections::BTreeSet<TimelineShotIndex>) -> bool {
+        match self {
+            Self::Film => true,
+            Self::Scene {
+                first_shot,
+                shot_count,
+            } => {
+                let start = first_shot.get();
+                let end = start.saturating_add(shot_count);
+                shots
+                    .iter()
+                    .any(|shot| start <= shot.get() && shot.get() < end)
+            }
+            Self::Shot(shot) => shots.contains(&shot),
+            Self::Transition { outgoing, incoming } => {
+                shots.contains(&outgoing) && shots.contains(&incoming)
+            }
+        }
     }
 }
 

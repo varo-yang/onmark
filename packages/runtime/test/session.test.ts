@@ -23,7 +23,7 @@ import {
 } from "../src/index.js";
 
 const plan: BrowserPlan = {
-  timelineVersion: 4,
+  timelineVersion: 5,
   frameRate: { numerator: 30, denominator: 1 },
   timeline: { start: 0, end: 30 },
   evaluation: { start: 10, end: 20 },
@@ -43,6 +43,7 @@ const plan: BrowserPlan = {
     },
   ],
   transitions: [],
+  variantFields: [],
   videos: [
     {
       node: { nodeId: 3, authoredId: "video" },
@@ -582,16 +583,84 @@ test("rejects invalid browser overlay facts before adapter loading", async () =>
   }
 });
 
+test("rejects noncanonical typed variant facts before adapter loading", async () => {
+  const unordered = structuredClone(plan);
+  unordered.variantFields = [
+    { name: "headline", value: { kind: "text", value: "Opening" } },
+    { name: "accent", value: { kind: "color", value: "#ff4d36" } },
+  ];
+  const invalidName = structuredClone(plan);
+  invalidName.variantFields = [
+    { name: "Headline", value: { kind: "text", value: "Opening" } },
+  ];
+  const invalidColor = structuredClone(plan);
+  invalidColor.variantFields = [
+    { name: "accent", value: { kind: "color", value: "#FF4D36" } },
+  ];
+  const unsafeInteger = structuredClone(plan);
+  unsafeInteger.variantFields = [
+    {
+      name: "progress",
+      value: { kind: "integer", value: Number.MAX_SAFE_INTEGER + 1 },
+    },
+  ];
+  const oversizedText = structuredClone(plan);
+  oversizedText.variantFields = [
+    { name: "headline", value: { kind: "text", value: "x".repeat(16_385) } },
+  ];
+  const oversizedUtf8Text = structuredClone(plan);
+  oversizedUtf8Text.variantFields = [
+    { name: "headline", value: { kind: "text", value: "界".repeat(5_462) } },
+  ];
+  const oversizedTextBudget = structuredClone(plan);
+  oversizedTextBudget.variantFields = Array.from(
+    { length: 64 },
+    (_, index) => ({
+      name: `field${String(index).padStart(3, "0")}`,
+      value: { kind: "text" as const, value: "x".repeat(16_384) },
+    }),
+  );
+
+  for (const invalidPlan of [
+    unordered,
+    invalidName,
+    invalidColor,
+    unsafeInteger,
+    oversizedText,
+    oversizedUtf8Text,
+    oversizedTextBudget,
+  ]) {
+    const adapter = new RecordingAdapter();
+    const session = new RuntimeSession(adapter);
+    const rejected = await session.dispatch(
+      request(1, { type: "load", plan: invalidPlan }),
+    );
+
+    assertFailure(rejected, "invalidRequest");
+    assert.deepEqual(adapter.operations, []);
+  }
+});
+
 test("keeps the owned plan immutable after passing it to the adapter", async () => {
   const adapter = new RecordingAdapter();
   const session = new RuntimeSession(adapter);
+  const variantPlan: BrowserPlan = {
+    ...plan,
+    variantFields: [
+      { name: "headline", value: { kind: "text", value: "Opening" } },
+    ],
+  };
 
-  await session.dispatch(request(1, { type: "load", plan }));
+  await session.dispatch(request(1, { type: "load", plan: variantPlan }));
   const loadedPlan = adapter.loadedPlan;
   assert.ok(loadedPlan);
   assert.equal(Reflect.set(loadedPlan.frameRate, "numerator", 60), false);
   assert.equal(Reflect.set(firstVideo(loadedPlan).interval, "start", 0), false);
   assert.equal(Reflect.set(firstOverlay(loadedPlan), "text", "Changed"), false);
+  assert.equal(
+    Reflect.set(loadedPlan.variantFields[0]!.value, "value", "Changed"),
+    false,
+  );
 
   await session.dispatch(request(2, { type: "prepare", evaluationStart: 10 }));
   await session.dispatch(request(3, { type: "seek", frame: 15 }));

@@ -100,6 +100,52 @@ approximation.
 `reviews/film-*/` directory. Pass `--against <prior-manifest>` to compare exact
 region identities after an edit.
 
+Declare typed presentation fields when one film needs many data variants:
+
+```html
+<om-film>
+  <om-fields>
+    <om-field name="headline" type="text" default="Summer edit"></om-field>
+    <om-field name="accent" type="color" default="#ff4d36"></om-field>
+  </om-fields>
+  <om-scene>
+    <om-shot duration="3s">
+      <om-title data-om-text="headline">Summer edit</om-title>
+      <div data-om-css="accent" style="--accent:#ff4d36"></div>
+    </om-shot>
+  </om-scene>
+</om-film>
+```
+
+Override only the values you need:
+
+```json
+{"headline":"Autumn edit","accent":"#c56cff"}
+```
+
+```bash
+onmark check film.html --variant autumn.json
+onmark render film.html --variant autumn.json --output autumn.mp4
+```
+
+For a bounded campaign, `onmark batch batch.json` resolves the screenplay,
+freezes its assets, and bundles its presentation once. Paths are relative to
+the manifest:
+
+```json
+{
+  "version": 1,
+  "screenplay": "film.html",
+  "renders": [
+    {"variant": "variants/summer.json", "output": "renders/summer.mp4"},
+    {"variant": "variants/autumn.json", "output": "renders/autumn.mp4"}
+  ]
+}
+```
+
+Unchanged render regions are reused across items; variant values cannot change
+timing, media sources, dimensions, or output profiles.
+
 Use the default opaque H.264/AAC MP4 for delivery, or select the
 alpha-preserving ProRes 4444/PCM MOV profile by filename:
 

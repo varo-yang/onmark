@@ -36,6 +36,7 @@ use crate::input;
 use crate::output;
 use crate::progress::Progress;
 use crate::subtitle::SubtitleImport;
+use crate::variant::VariantImport;
 
 struct PreparedSnapshot {
     args: SnapshotArgs,
@@ -161,6 +162,18 @@ async fn prepare(
             diagnostics,
             json,
         ))));
+    };
+    let film = match VariantImport::apply(args.validation.variant.as_deref(), film)? {
+        VariantImport::Film(film) => film,
+        VariantImport::Rejected(rejected) => {
+            let (path, source, diagnostics) = rejected.into_parts();
+            return Ok(Preparation::Rejected(Box::new(SnapshotOutcome::rejected(
+                path,
+                source,
+                diagnostics,
+                json,
+            ))));
+        }
     };
     let caption_track = match args
         .validation

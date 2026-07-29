@@ -13,9 +13,11 @@ use serde::{Deserialize, Deserializer, Serialize};
 use crate::model::{
     Duration, ElementKind, FrameInterval, FrameRate, FrozenAssetId, MediaSource,
     MediaSourceInterval, MediaTimebase, NodeId, PlayCount, PlaybackRate, Rounding, Timebase,
-    VideoFrameMap, VideoTiming,
+    VariantFieldKind, VariantFieldName, VariantValue, VideoFrameMap, VideoTiming,
 };
-use crate::timeline::{TimelineIr, TimelineShotIndex, TimelineVersion};
+#[cfg(feature = "schema")]
+use crate::model::{MAX_EXACT_VARIANT_INTEGER, MAX_VARIANT_TEXT_BYTES};
+use crate::timeline::{TimelineIr, TimelineShotIndex, TimelineVariantField, TimelineVersion};
 
 use super::frame::{
     InvalidWireFrame, WireFrame, WireFrameRate, WireInterval, WireMediaTimebase, WirePlaybackRate,
@@ -28,8 +30,9 @@ pub(super) const MAX_BROWSER_OVERLAYS: usize = 10_000;
 pub(super) const MAX_BROWSER_SCENES: usize = 10_000;
 pub(super) const MAX_BROWSER_SHOTS: usize = 10_000;
 pub(super) const MAX_BROWSER_TRANSITIONS: usize = 10_000;
+pub(super) const MAX_BROWSER_VARIANT_FIELDS: usize = 256;
 const MAX_BROWSER_OVERLAY_TEXT_CHARACTERS: usize = 65_536;
-pub(super) const MAX_BROWSER_OVERLAY_TEXT_BYTES: usize = 1 << 20;
+pub(super) const MAX_BROWSER_TEXT_BYTES: usize = 1 << 20;
 
 /// Timeline facts consumed by the browser clock and presentation.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -45,6 +48,11 @@ pub struct BrowserPlan {
     timeline: WireInterval,
     evaluation: WireInterval,
     output: WireInterval,
+    #[cfg_attr(
+        feature = "schema",
+        schemars(length(max = MAX_BROWSER_VARIANT_FIELDS))
+    )]
+    variant_fields: Vec<BrowserVariantField>,
     film: BrowserNode,
     #[cfg_attr(feature = "schema", schemars(length(max = MAX_BROWSER_SCENES)))]
     scenes: Vec<BrowserScene>,
@@ -80,7 +88,7 @@ impl BrowserPlan {
         source_timings: &BTreeMap<FrozenAssetId, VideoTiming>,
     ) -> Result<Self, InvalidBrowserPlan> {
         let interval = timeline.interval();
-        Self::project_unit(timeline, source_timings, interval, interval, None)
+        Self::project_unit(timeline, source_timings, interval, interval, None, None)
     }
 
     /// Projects one evaluated and published unit from solved Timeline IR.
@@ -102,7 +110,7 @@ impl BrowserPlan {
         evaluation: FrameInterval,
         output: FrameInterval,
     ) -> Result<Self, InvalidBrowserPlan> {
-        Self::project_unit(timeline, source_timings, evaluation, output, None)
+        Self::project_unit(timeline, source_timings, evaluation, output, None, None)
     }
 
     /// Projects one render-graph region with its exact shot dependencies.
@@ -118,8 +126,16 @@ impl BrowserPlan {
         evaluation: FrameInterval,
         output: FrameInterval,
         shots: &BTreeSet<TimelineShotIndex>,
+        variant_fields: &BTreeSet<VariantFieldName>,
     ) -> Result<Self, InvalidBrowserPlan> {
-        Self::project_unit(timeline, source_timings, evaluation, output, Some(shots))
+        Self::project_unit(
+            timeline,
+            source_timings,
+            evaluation,
+            output,
+            Some(shots),
+            Some(variant_fields),
+        )
     }
 
     fn project_unit(
@@ -128,6 +144,7 @@ impl BrowserPlan {
         evaluation: FrameInterval,
         output: FrameInterval,
         shots: Option<&BTreeSet<TimelineShotIndex>>,
+        selected_variant_fields: Option<&BTreeSet<VariantFieldName>>,
     ) -> Result<Self, InvalidBrowserPlan> {
         if !timeline.interval().contains_interval(evaluation) {
             return Err(InvalidBrowserPlan::EvaluationOutsideTimeline);
@@ -146,6 +163,7 @@ impl BrowserPlan {
             timeline: WireInterval::try_from(timeline.interval())?,
             evaluation: evaluation_wire,
             output: output_wire,
+            variant_fields: browser_variant_fields(timeline, selected_variant_fields)?,
             film: projection.film,
             scenes: projection.scenes,
             shots: projection.shots,
@@ -183,6 +201,12 @@ impl BrowserPlan {
     #[must_use]
     pub const fn output(&self) -> WireInterval {
         self.output
+    }
+
+    /// Returns canonical typed values required by this render region.
+    #[must_use]
+    pub fn variant_fields(&self) -> &[BrowserVariantField] {
+        &self.variant_fields
     }
 
     /// Narrows this already-projected unit to a nonempty published interval.
@@ -310,12 +334,16 @@ impl BrowserPlan {
         if wire.transitions.len() > MAX_BROWSER_TRANSITIONS {
             return Err(InvalidBrowserPlan::TooManyTransitions);
         }
+        let variant_text_bytes = validate_variant_fields(&wire.variant_fields)?;
         if !wire.timeline.contains_interval(wire.evaluation) {
             return Err(InvalidBrowserPlan::EvaluationOutsideTimeline);
         }
         validate_structure(&wire)?;
-        if overlay_text_bytes(&wire.overlays) > MAX_BROWSER_OVERLAY_TEXT_BYTES {
-            return Err(InvalidBrowserPlan::OverlayTextBudget);
+        let text_bytes = overlay_text_bytes(&wire.overlays)
+            .checked_add(variant_text_bytes)
+            .ok_or(InvalidBrowserPlan::BrowserTextBudget)?;
+        if text_bytes > MAX_BROWSER_TEXT_BYTES {
+            return Err(InvalidBrowserPlan::BrowserTextBudget);
         }
         if !wire.evaluation.contains_interval(wire.output) {
             return Err(InvalidBrowserPlan::OutputOutsideEvaluation);
@@ -341,6 +369,7 @@ impl BrowserPlan {
             timeline: wire.timeline,
             evaluation: wire.evaluation,
             output: wire.output,
+            variant_fields: wire.variant_fields,
             film: wire.film,
             scenes: wire.scenes,
             shots: wire.shots,
@@ -638,6 +667,51 @@ fn interval_boundaries(interval: WireInterval) -> [WireFrame; 2] {
     [interval.start(), interval.end()]
 }
 
+fn browser_variant_fields(
+    timeline: &TimelineIr,
+    selected: Option<&BTreeSet<VariantFieldName>>,
+) -> Result<Vec<BrowserVariantField>, InvalidBrowserPlan> {
+    let fields = timeline
+        .variants()
+        .iter()
+        .filter(|field| !field.scopes().is_empty())
+        .map(|field| (field.name(), field))
+        .collect::<BTreeMap<_, _>>();
+    let selected = selected.map_or_else(
+        || fields.keys().copied().collect::<Vec<_>>(),
+        |selected| selected.iter().collect(),
+    );
+    let mut projected = Vec::with_capacity(selected.len());
+
+    for name in selected {
+        let Some(field) = fields.get(name) else {
+            return Err(InvalidBrowserPlan::InvalidVariantSelection);
+        };
+        projected.push(BrowserVariantField::from_timeline(field));
+    }
+    Ok(projected)
+}
+
+fn validate_variant_fields(fields: &[BrowserVariantField]) -> Result<usize, InvalidBrowserPlan> {
+    if fields.len() > MAX_BROWSER_VARIANT_FIELDS {
+        return Err(InvalidBrowserPlan::TooManyVariantFields);
+    }
+    let mut previous = None;
+    let mut text_bytes = 0_usize;
+
+    for field in fields {
+        field.validate()?;
+        if previous.is_some_and(|previous| previous >= field.name()) {
+            return Err(InvalidBrowserPlan::NonCanonicalVariantFields);
+        }
+        previous = Some(field.name());
+        text_bytes = text_bytes
+            .checked_add(field.text_bytes())
+            .ok_or(InvalidBrowserPlan::BrowserTextBudget)?;
+    }
+    Ok(text_bytes)
+}
+
 impl<'de> Deserialize<'de> for BrowserPlan {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -655,12 +729,171 @@ struct BrowserPlanWire {
     timeline: WireInterval,
     evaluation: WireInterval,
     output: WireInterval,
+    variant_fields: Vec<BrowserVariantField>,
     film: BrowserNode,
     scenes: Vec<BrowserScene>,
     shots: Vec<BrowserShot>,
     transitions: Vec<BrowserTransition>,
     videos: Vec<BrowserVideo>,
     overlays: Vec<BrowserOverlay>,
+}
+
+/// One canonical typed presentation input carried by this render region.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct BrowserVariantField {
+    name: Box<str>,
+    value: BrowserVariantValue,
+}
+
+impl BrowserVariantField {
+    fn from_timeline(field: &TimelineVariantField) -> Self {
+        Self {
+            name: field.name().as_str().into(),
+            value: BrowserVariantValue::from_model(field.value()),
+        }
+    }
+
+    /// Returns the canonical field name.
+    #[must_use]
+    pub const fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Returns the canonical typed value.
+    #[must_use]
+    pub const fn value(&self) -> &BrowserVariantValue {
+        &self.value
+    }
+
+    fn validate(&self) -> Result<(), InvalidBrowserPlan> {
+        VariantFieldName::parse(&self.name).map_err(|_| InvalidBrowserPlan::InvalidVariantField)?;
+        self.value.validate()
+    }
+
+    const fn text_bytes(&self) -> usize {
+        self.value.text_bytes()
+    }
+}
+
+/// Closed wire values accepted by the browser's literal binding layer.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase", tag = "kind")]
+pub enum BrowserVariantValue {
+    /// Decoded Unicode text.
+    Text {
+        /// Exact UTF-8 value.
+        #[cfg_attr(
+            feature = "schema",
+            schemars(length(max = MAX_VARIANT_TEXT_BYTES))
+        )]
+        value: Box<str>,
+    },
+    /// Exact JavaScript-safe signed integer.
+    Integer {
+        /// Exact integer value.
+        #[cfg_attr(
+            feature = "schema",
+            schemars(range(
+                min = -MAX_EXACT_VARIANT_INTEGER,
+                max = MAX_EXACT_VARIANT_INTEGER
+            ))
+        )]
+        value: i64,
+    },
+    /// Binary presentation choice.
+    Boolean {
+        /// Exact boolean value.
+        value: bool,
+    },
+    /// Lowercase six- or eight-digit sRGB hexadecimal.
+    Color {
+        /// Canonical color value.
+        value: Box<str>,
+    },
+}
+
+impl BrowserVariantValue {
+    fn from_model(value: &VariantValue) -> Self {
+        match value {
+            VariantValue::Text(value) => Self::Text {
+                value: value.clone(),
+            },
+            VariantValue::Integer(value) => Self::Integer { value: *value },
+            VariantValue::Boolean(value) => Self::Boolean { value: *value },
+            VariantValue::Color(value) => Self::Color {
+                value: value.clone(),
+            },
+        }
+    }
+
+    /// Returns the closed value kind.
+    #[must_use]
+    pub const fn kind(&self) -> VariantFieldKind {
+        match self {
+            Self::Text { .. } => VariantFieldKind::Text,
+            Self::Integer { .. } => VariantFieldKind::Integer,
+            Self::Boolean { .. } => VariantFieldKind::Boolean,
+            Self::Color { .. } => VariantFieldKind::Color,
+        }
+    }
+
+    /// Returns text when this is a text value.
+    #[must_use]
+    pub const fn as_text(&self) -> Option<&str> {
+        match self {
+            Self::Text { value } => Some(value),
+            Self::Integer { .. } | Self::Boolean { .. } | Self::Color { .. } => None,
+        }
+    }
+
+    /// Returns an integer when this is an integer value.
+    #[must_use]
+    pub const fn as_integer(&self) -> Option<i64> {
+        match self {
+            Self::Integer { value } => Some(*value),
+            Self::Text { .. } | Self::Boolean { .. } | Self::Color { .. } => None,
+        }
+    }
+
+    /// Returns a boolean when this is a boolean value.
+    #[must_use]
+    pub const fn as_boolean(&self) -> Option<bool> {
+        match self {
+            Self::Boolean { value } => Some(*value),
+            Self::Text { .. } | Self::Integer { .. } | Self::Color { .. } => None,
+        }
+    }
+
+    /// Returns a color when this is a color value.
+    #[must_use]
+    pub const fn as_color(&self) -> Option<&str> {
+        match self {
+            Self::Color { value } => Some(value),
+            Self::Text { .. } | Self::Integer { .. } | Self::Boolean { .. } => None,
+        }
+    }
+
+    fn validate(&self) -> Result<(), InvalidBrowserPlan> {
+        let valid = match self {
+            Self::Text { value } => VariantValue::text(value).is_ok(),
+            Self::Integer { value } => VariantValue::from_integer(*value).is_ok(),
+            Self::Boolean { .. } => true,
+            Self::Color { value } => VariantValue::parse(VariantFieldKind::Color, value).is_ok(),
+        };
+        valid
+            .then_some(())
+            .ok_or(InvalidBrowserPlan::InvalidVariantField)
+    }
+
+    const fn text_bytes(&self) -> usize {
+        match self {
+            Self::Text { value } => value.len(),
+            Self::Integer { .. } | Self::Boolean { .. } | Self::Color { .. } => 0,
+        }
+    }
 }
 
 /// Browser identity for one Timeline element or imported caption.
@@ -1439,6 +1672,14 @@ pub enum InvalidBrowserPlan {
     TooManyVideos,
     /// The plan contains more overlay placements than the current contract can carry.
     TooManyOverlays,
+    /// The plan contains more typed fields than the current contract can carry.
+    TooManyVariantFields,
+    /// The selected region names a field absent from Timeline IR.
+    InvalidVariantSelection,
+    /// A field name or value is not canonical.
+    InvalidVariantField,
+    /// Typed fields are not in strictly increasing name order.
+    NonCanonicalVariantFields,
     /// Browser node identity overflowed the current wire domain.
     TooManyNodes,
     /// Two projected nodes claim the same unit-local identity.
@@ -1463,8 +1704,8 @@ pub enum InvalidBrowserPlan {
     OverlayTextTooLong(ElementKind),
     /// One imported caption exceeds the per-placement text budget.
     CaptionTextTooLong,
-    /// Combined browser text would exceed the bounded CDP request budget.
-    OverlayTextBudget,
+    /// Combined overlay and typed-field text exceeds the bounded CDP request budget.
+    BrowserTextBudget,
     /// One video lacks the source timing proved during render admission.
     MissingSourceTiming(FrozenAssetId),
     /// The admitted source timing shape cannot be presented as video.
@@ -1507,6 +1748,10 @@ impl fmt::Display for InvalidBrowserPlan {
             Self::TooManyTransitions => "browser plan exceeds the transition limit",
             Self::TooManyVideos => "browser plan exceeds the video-placement limit",
             Self::TooManyOverlays => "browser plan exceeds the overlay-placement limit",
+            Self::TooManyVariantFields => "browser plan exceeds the typed-field limit",
+            Self::InvalidVariantSelection => "browser region selects an unknown typed field",
+            Self::InvalidVariantField => "browser typed field is not canonical",
+            Self::NonCanonicalVariantFields => "browser typed fields are not in canonical order",
             Self::TooManyNodes => "browser plan exceeds the node-identity domain",
             Self::DuplicateNodeId => "browser node identity is duplicated",
             Self::InvalidAuthoredId => "browser node carries an invalid authored identity",
@@ -1517,7 +1762,7 @@ impl fmt::Display for InvalidBrowserPlan {
             Self::ChildCrossesParent => "browser node crosses its structural parent",
             Self::InvalidTransitionRelation => "browser transition does not connect adjacent shots",
             Self::CaptionTextTooLong => "browser caption text exceeds the character limit",
-            Self::OverlayTextBudget => "browser overlay text exceeds the request byte budget",
+            Self::BrowserTextBudget => "browser text exceeds the request byte budget",
             Self::UnsupportedSourceTiming => "source frame timing cannot be presented as video",
             Self::SourceTimingBudget => "browser source timing exceeds the request budget",
             Self::InvalidOverlayKind(kind) => {
@@ -1563,6 +1808,10 @@ impl Error for InvalidBrowserPlan {
             | Self::TooManyTransitions
             | Self::TooManyVideos
             | Self::TooManyOverlays
+            | Self::TooManyVariantFields
+            | Self::InvalidVariantSelection
+            | Self::InvalidVariantField
+            | Self::NonCanonicalVariantFields
             | Self::TooManyNodes
             | Self::DuplicateNodeId
             | Self::InvalidAuthoredId
@@ -1575,7 +1824,7 @@ impl Error for InvalidBrowserPlan {
             | Self::InvalidOverlayKind(_)
             | Self::OverlayTextTooLong(_)
             | Self::CaptionTextTooLong
-            | Self::OverlayTextBudget
+            | Self::BrowserTextBudget
             | Self::MissingSourceTiming(_)
             | Self::UnsupportedSourceTiming
             | Self::SourceTimingBudget => None,
@@ -1595,25 +1844,27 @@ mod tests {
 
     use crate::model::{
         ByteOffset, Duration, ElementKind, FrameIndex, FrameInterval, FrameRate, FrozenAssetId,
-        MediaSource, MediaSourceInterval, PlayCount, PlaybackRate, SourceId, SourceSpan, Timebase,
+        MAX_VARIANT_TEXT_BYTES, MediaSource, MediaSourceInterval, PlayCount, PlaybackRate,
+        SourceId, SourceSpan, Timebase, VariantFieldKind, VariantFieldName, VariantValue,
         VideoTiming,
     };
     use crate::timeline::{
         TimelineCaption, TimelineContent, TimelineElement, TimelineIr, TimelineOverlay,
         TimelineScene, TimelineShot, TimelineShotIndex, TimelineText, TimelineTiming,
-        TimelineTransition, TimelineVideo, TimingReason,
+        TimelineTransition, TimelineVariantField, TimelineVariantScope, TimelineVideo,
+        TimingReason,
     };
 
     use super::{
         BrowserNodeId, BrowserOverlayKind, BrowserPlan, InvalidBrowserPlan,
-        MAX_BROWSER_OVERLAY_TEXT_BYTES, MAX_BROWSER_OVERLAY_TEXT_CHARACTERS, MAX_BROWSER_OVERLAYS,
+        MAX_BROWSER_OVERLAY_TEXT_CHARACTERS, MAX_BROWSER_OVERLAYS, MAX_BROWSER_TEXT_BYTES,
         MAX_BROWSER_VIDEOS, WireFrame,
     };
 
     #[test]
     fn parses_only_validated_browser_plan_facts() {
         let plan = r#"{
-            "timelineVersion":4,
+            "timelineVersion":5,
             "frameRate":{"numerator":30,"denominator":1},
             "timeline":{"start":0,"end":1},
             "evaluation":{"start":0,"end":1},
@@ -1622,6 +1873,7 @@ mod tests {
             "scenes":[],
             "shots":[],
             "transitions":[],
+            "variantFields":[],
             "videos":[],
             "overlays":[]
         }"#;
@@ -1696,7 +1948,7 @@ mod tests {
     #[test]
     fn rejects_duplicate_node_identity_at_the_wire_boundary() {
         let plan = r#"{
-            "timelineVersion":4,
+            "timelineVersion":5,
             "frameRate":{"numerator":30,"denominator":1},
             "timeline":{"start":0,"end":1},
             "evaluation":{"start":0,"end":1},
@@ -1705,6 +1957,7 @@ mod tests {
             "scenes":[{"node":{"nodeId":1,"authoredId":null},"interval":{"start":0,"end":1}}],
             "shots":[{"node":{"nodeId":2,"authoredId":null},"sceneId":1,"interval":{"start":0,"end":1}}],
             "transitions":[],
+            "variantFields":[],
             "videos":[],
             "overlays":[
                 {"node":{"nodeId":7,"authoredId":null},"shotId":2,"kind":"title","text":"A","interval":{"start":0,"end":1}},
@@ -1718,7 +1971,7 @@ mod tests {
     #[test]
     fn rejects_non_dense_node_identity_at_the_wire_boundary() {
         let plan = r#"{
-            "timelineVersion":4,
+            "timelineVersion":5,
             "frameRate":{"numerator":30,"denominator":1},
             "timeline":{"start":0,"end":1},
             "evaluation":{"start":0,"end":1},
@@ -1727,6 +1980,7 @@ mod tests {
             "scenes":[{"node":{"nodeId":1,"authoredId":null},"interval":{"start":0,"end":1}}],
             "shots":[{"node":{"nodeId":2,"authoredId":null},"sceneId":1,"interval":{"start":0,"end":1}}],
             "transitions":[],
+            "variantFields":[],
             "videos":[],
             "overlays":[
                 {"node":{"nodeId":4,"authoredId":null},"shotId":2,"kind":"title","text":"A","interval":{"start":0,"end":1}}
@@ -1742,7 +1996,7 @@ mod tests {
     #[test]
     fn rejects_a_child_interval_outside_its_structural_parent() {
         let plan = r#"{
-            "timelineVersion":4,
+            "timelineVersion":5,
             "frameRate":{"numerator":30,"denominator":1},
             "timeline":{"start":0,"end":4},
             "evaluation":{"start":0,"end":4},
@@ -1751,6 +2005,7 @@ mod tests {
             "scenes":[{"node":{"nodeId":1,"authoredId":null},"interval":{"start":1,"end":3}}],
             "shots":[{"node":{"nodeId":2,"authoredId":null},"sceneId":1,"interval":{"start":0,"end":4}}],
             "transitions":[],
+            "variantFields":[],
             "videos":[],
             "overlays":[]
         }"#;
@@ -1761,7 +2016,7 @@ mod tests {
     #[test]
     fn rejects_noncanonical_browser_node_order() {
         let plan = r#"{
-            "timelineVersion":4,
+            "timelineVersion":5,
             "frameRate":{"numerator":30,"denominator":1},
             "timeline":{"start":0,"end":4},
             "evaluation":{"start":0,"end":4},
@@ -1773,6 +2028,7 @@ mod tests {
                 {"node":{"nodeId":2,"authoredId":null},"sceneId":1,"interval":{"start":0,"end":2}}
             ],
             "transitions":[],
+            "variantFields":[],
             "videos":[],
             "overlays":[]
         }"#;
@@ -1786,7 +2042,7 @@ mod tests {
     #[test]
     fn rejects_a_transition_across_scene_ownership() {
         let plan = r#"{
-            "timelineVersion":4,
+            "timelineVersion":5,
             "frameRate":{"numerator":30,"denominator":1},
             "timeline":{"start":0,"end":4},
             "evaluation":{"start":0,"end":4},
@@ -1806,6 +2062,7 @@ mod tests {
                 "incomingShotId":4,
                 "interval":{"start":1,"end":2}
             }],
+            "variantFields":[],
             "videos":[],
             "overlays":[]
         }"#;
@@ -1819,7 +2076,7 @@ mod tests {
     #[test]
     fn rejects_a_transition_that_does_not_match_the_shot_boundary() {
         let plan = r#"{
-            "timelineVersion":4,
+            "timelineVersion":5,
             "frameRate":{"numerator":30,"denominator":1},
             "timeline":{"start":0,"end":6},
             "evaluation":{"start":0,"end":6},
@@ -1836,6 +2093,7 @@ mod tests {
                 "incomingShotId":4,
                 "interval":{"start":3,"end":4}
             }],
+            "variantFields":[],
             "videos":[],
             "overlays":[]
         }"#;
@@ -1888,7 +2146,7 @@ mod tests {
     #[test]
     fn enumerates_structural_placement_boundaries_without_content() {
         let plan = r#"{
-            "timelineVersion":4,
+            "timelineVersion":5,
             "frameRate":{"numerator":30,"denominator":1},
             "timeline":{"start":0,"end":4},
             "evaluation":{"start":0,"end":4},
@@ -1900,6 +2158,7 @@ mod tests {
                 {"node":{"nodeId":3,"authoredId":null},"sceneId":1,"interval":{"start":2,"end":4}}
             ],
             "transitions":[],
+            "variantFields":[],
             "videos":[],
             "overlays":[]
         }"#;
@@ -2018,14 +2277,29 @@ mod tests {
     }
 
     #[test]
-    fn rejects_combined_overlay_text_outside_the_cdp_budget() {
-        let text = "a".repeat(MAX_BROWSER_OVERLAY_TEXT_BYTES / 17 + 1);
+    fn rejects_combined_overlay_text_outside_the_browser_plan_budget() {
+        let text = "a".repeat(MAX_BROWSER_TEXT_BYTES / 17 + 1);
         let mut timeline = timeline_with_content_in(Vec::new(), interval(0, 1));
         timeline.replace_captions((0..17).map(|_| caption(interval(0, 1), &text)).collect());
 
         assert_eq!(
             BrowserPlan::from_timeline(&timeline, &BTreeMap::new()),
-            Err(InvalidBrowserPlan::OverlayTextBudget),
+            Err(InvalidBrowserPlan::BrowserTextBudget),
+        );
+    }
+
+    #[test]
+    fn shares_one_text_budget_between_overlays_and_typed_fields() {
+        let text = "a".repeat((MAX_BROWSER_TEXT_BYTES - MAX_VARIANT_TEXT_BYTES) / 17 + 1);
+        let mut timeline = timeline_with_content_and_variants(
+            Vec::new(),
+            vec![variant_text("headline", MAX_VARIANT_TEXT_BYTES)],
+        );
+        timeline.replace_captions((0..17).map(|_| caption(interval(0, 1), &text)).collect());
+
+        assert_eq!(
+            BrowserPlan::from_timeline(&timeline, &BTreeMap::new()),
+            Err(InvalidBrowserPlan::BrowserTextBudget),
         );
     }
 
@@ -2120,6 +2394,7 @@ mod tests {
                     unit,
                     unit,
                     &selected,
+                    &BTreeSet::new(),
                 ),
                 Err(InvalidBrowserPlan::InvalidShotSelection),
             );
@@ -2195,8 +2470,26 @@ mod tests {
         TimelineCaption::new(interval, text, span, span)
     }
 
+    fn variant_text(name: &str, bytes: usize) -> TimelineVariantField {
+        let span = source_span();
+        TimelineVariantField::new(
+            VariantFieldName::parse(name).expect("the fixture field name is canonical"),
+            VariantFieldKind::Text,
+            VariantValue::text(&"x".repeat(bytes)).expect("the fixture fits the field bound"),
+            span,
+            vec![TimelineVariantScope::Film],
+        )
+    }
+
     fn timeline_with_content(content: Vec<TimelineContent>) -> TimelineIr {
         timeline_with_content_in(content, interval(0, 1))
+    }
+
+    fn timeline_with_content_and_variants(
+        content: Vec<TimelineContent>,
+        variants: Vec<TimelineVariantField>,
+    ) -> TimelineIr {
+        timeline_with_shots_and_variants(vec![shot_with_content(content, interval(0, 1))], variants)
     }
 
     fn timeline_with_content_in(
@@ -2218,6 +2511,13 @@ mod tests {
     }
 
     fn timeline_with_shots(shots: Vec<TimelineShot>) -> TimelineIr {
+        timeline_with_shots_and_variants(shots, Vec::new())
+    }
+
+    fn timeline_with_shots_and_variants(
+        shots: Vec<TimelineShot>,
+        variants: Vec<TimelineVariantField>,
+    ) -> TimelineIr {
         let span = source_span();
         let start = shots
             .first()
@@ -2240,15 +2540,16 @@ mod tests {
         );
         let frame_rate = FrameRate::new(30, 1).expect("the fixture frame rate is valid");
 
-        TimelineIr::new(
-            Timebase::new(frame_rate),
-            TimelineElement::new(ElementKind::Film, None, span),
+        TimelineIr::new(crate::timeline::TimelineFacts {
+            timebase: Timebase::new(frame_rate),
+            element: TimelineElement::new(ElementKind::Film, None, span),
             interval,
-            BTreeMap::new(),
-            vec![scene],
-            Vec::new(),
-            Vec::new(),
-        )
+            variants,
+            events: BTreeMap::new(),
+            scenes: vec![scene],
+            general_audio: Vec::new(),
+            captions: Vec::new(),
+        })
     }
 
     fn video(asset_id: FrozenAssetId, interval: FrameInterval) -> TimelineContent {

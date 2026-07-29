@@ -9,6 +9,11 @@ use std::fmt;
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize};
 
+#[cfg(feature = "schema")]
+use crate::model::MAX_VARIANT_TEXT_BYTES;
+
+#[cfg(feature = "schema")]
+use super::plan::MAX_BROWSER_TEXT_BYTES;
 use super::{BrowserMediaLayout, BrowserPlan, WireFrame};
 
 /// Browser-global capability installed by every compatible runtime bundle.
@@ -77,7 +82,11 @@ impl RequestId {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(
     feature = "schema",
-    schemars(extend("x-onmark-runtime-host" = RUNTIME_HOST_NAME))
+    schemars(
+        extend("x-onmark-runtime-host" = RUNTIME_HOST_NAME),
+        extend("x-onmark-max-browser-text-bytes" = MAX_BROWSER_TEXT_BYTES),
+        extend("x-onmark-max-variant-text-bytes" = MAX_VARIANT_TEXT_BYTES)
+    )
 )]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]

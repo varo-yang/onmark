@@ -615,6 +615,7 @@ function isCompilerOnlyElement(tagName: string): boolean {
   // New spellings require the Rust compiler, specification, and identity
   // conformance to change together before they may disappear from the browser.
   return (
+    tagName === "om-fields" ||
     tagName === "om-cues" ||
     tagName === "om-music" ||
     tagName === "om-sfx" ||

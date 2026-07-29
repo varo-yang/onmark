@@ -87,6 +87,24 @@ pub enum DiagnosticCode {
     UnsupportedSubtitleFeature,
     /// A standalone subtitle file exceeds a bounded ingestion limit.
     SubtitleResourceLimit,
+    /// A typed-variant schema declaration has an invalid shape or value.
+    InvalidVariantDeclaration,
+    /// A film declares the same variant field more than once.
+    DuplicateVariantField,
+    /// A presentation binding names a field absent from the film schema.
+    UnknownVariantFieldBinding,
+    /// A presentation sink cannot accept the bound field kind.
+    IncompatibleVariantBinding,
+    /// Authored fallback markup disagrees with a field's canonical default.
+    InvalidVariantFallback,
+    /// An external variant document is malformed, nested, or too large.
+    InvalidVariantDocument,
+    /// An external variant document names a field absent from the film schema.
+    UnknownVariantField,
+    /// An external variant value violates its declared kind or bound.
+    InvalidVariantValue,
+    /// A declared variant field has no presentation binding.
+    UnusedVariantField,
 }
 
 impl DiagnosticCode {
@@ -132,6 +150,15 @@ impl DiagnosticCode {
             Self::InvalidSubtitleFile => "ONM-CAPTION-001",
             Self::UnsupportedSubtitleFeature => "ONM-CAPTION-002",
             Self::SubtitleResourceLimit => "ONM-CAPTION-003",
+            Self::InvalidVariantDeclaration => "ONM-VARIANT-001",
+            Self::DuplicateVariantField => "ONM-VARIANT-002",
+            Self::UnknownVariantFieldBinding => "ONM-VARIANT-003",
+            Self::IncompatibleVariantBinding => "ONM-VARIANT-004",
+            Self::InvalidVariantFallback => "ONM-VARIANT-005",
+            Self::InvalidVariantDocument => "ONM-VARIANT-006",
+            Self::UnknownVariantField => "ONM-VARIANT-007",
+            Self::InvalidVariantValue => "ONM-VARIANT-008",
+            Self::UnusedVariantField => "ONM-VARIANT-009",
         }
     }
 
@@ -175,8 +202,16 @@ impl DiagnosticCode {
             | Self::ScreenplayResourceLimit
             | Self::InvalidSubtitleFile
             | Self::UnsupportedSubtitleFeature
-            | Self::SubtitleResourceLimit => Severity::Error,
-            Self::UnusedCue => Severity::Warning,
+            | Self::SubtitleResourceLimit
+            | Self::InvalidVariantDeclaration
+            | Self::DuplicateVariantField
+            | Self::UnknownVariantFieldBinding
+            | Self::IncompatibleVariantBinding
+            | Self::InvalidVariantFallback
+            | Self::InvalidVariantDocument
+            | Self::UnknownVariantField
+            | Self::InvalidVariantValue => Severity::Error,
+            Self::UnusedCue | Self::UnusedVariantField => Severity::Warning,
         }
     }
 }
@@ -257,6 +292,20 @@ mod tests {
                 "ONM-CAPTION-002",
             ),
             (DiagnosticCode::SubtitleResourceLimit, "ONM-CAPTION-003"),
+            (DiagnosticCode::InvalidVariantDeclaration, "ONM-VARIANT-001"),
+            (DiagnosticCode::DuplicateVariantField, "ONM-VARIANT-002"),
+            (
+                DiagnosticCode::UnknownVariantFieldBinding,
+                "ONM-VARIANT-003",
+            ),
+            (
+                DiagnosticCode::IncompatibleVariantBinding,
+                "ONM-VARIANT-004",
+            ),
+            (DiagnosticCode::InvalidVariantFallback, "ONM-VARIANT-005"),
+            (DiagnosticCode::InvalidVariantDocument, "ONM-VARIANT-006"),
+            (DiagnosticCode::UnknownVariantField, "ONM-VARIANT-007"),
+            (DiagnosticCode::InvalidVariantValue, "ONM-VARIANT-008"),
         ];
 
         for (code, stable) in errors {
@@ -266,5 +315,13 @@ mod tests {
 
         assert_eq!(DiagnosticCode::UnusedCue.as_str(), "ONM-REF-002");
         assert_eq!(DiagnosticCode::UnusedCue.severity(), Severity::Warning);
+        assert_eq!(
+            DiagnosticCode::UnusedVariantField.as_str(),
+            "ONM-VARIANT-009",
+        );
+        assert_eq!(
+            DiagnosticCode::UnusedVariantField.severity(),
+            Severity::Warning,
+        );
     }
 }
