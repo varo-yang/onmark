@@ -15,6 +15,7 @@ fn exposes_local_feedback_rendering_and_the_remote_worker_adapter() {
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).expect("help output is UTF-8");
     assert!(stdout.contains("benchmark"));
+    assert!(stdout.contains("batch"));
     assert!(stdout.contains("check"));
     assert!(stdout.contains("doctor"));
     assert!(stdout.contains("info"));
@@ -24,6 +25,49 @@ fn exposes_local_feedback_rendering_and_the_remote_worker_adapter() {
     assert!(stdout.contains("snapshot"));
     assert!(stdout.contains("worker"));
     assert!(!stdout.contains("coordinator"));
+}
+
+#[test]
+fn batch_reports_variant_diagnostics_before_environment_preflight() {
+    let directory = tempdir().expect("the fixture directory is available");
+    std::fs::write(
+        directory.path().join("film.html"),
+        concat!(
+            "<om-film><om-fields>",
+            r#"<om-field name="headline" type="text" default="Hello"></om-field>"#,
+            "</om-fields><om-scene><om-shot duration=\"1s\">",
+            r#"<om-title data-om-text="headline">Hello</om-title>"#,
+            "</om-shot></om-scene></om-film>",
+        ),
+    )
+    .expect("the fixture screenplay is writable");
+    std::fs::write(directory.path().join("invalid.json"), r#"{"headline": 42}"#)
+        .expect("the fixture variant is writable");
+    std::fs::write(
+        directory.path().join("batch.json"),
+        concat!(
+            r#"{"version":1,"screenplay":"film.html","renders":["#,
+            r#"{"variant":"invalid.json","output":"renders/invalid.mp4"}]}"#,
+        ),
+    )
+    .expect("the fixture manifest is writable");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_onmark"))
+        .arg("batch")
+        .arg(directory.path().join("batch.json"))
+        .arg("--json")
+        .env("PATH", "")
+        .output()
+        .expect("the CLI can be started");
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stderr.is_empty());
+    let report: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("the batch report is JSON");
+    assert_eq!(report["version"], 1);
+    assert_eq!(report["command"], "batch");
+    assert_eq!(report["rendered"], false);
+    assert_eq!(report["diagnostics"][0]["code"], "ONM-VARIANT-008");
 }
 
 #[test]
@@ -129,7 +173,7 @@ fn inspect_reuses_structured_diagnostics_without_tool_preflight() {
     assert!(output.stderr.is_empty());
     let report: serde_json::Value =
         serde_json::from_slice(&output.stdout).expect("the inspection is JSON");
-    assert_eq!(report["version"], 4);
+    assert_eq!(report["version"], 5);
     assert_eq!(report["command"], "inspect");
     assert_eq!(report["valid"], false);
     assert!(report.get("inspection").is_none());

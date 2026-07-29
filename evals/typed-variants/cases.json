@@ -1,0 +1,28 @@
+{
+  "cases": [
+    {
+      "id": "product-offer",
+      "kind": "generation"
+    },
+    {
+      "id": "regional-copy",
+      "kind": "generation"
+    },
+    {
+      "id": "boolean-badge",
+      "kind": "generation"
+    },
+    {
+      "id": "rename-field",
+      "kind": "local-edit"
+    },
+    {
+      "id": "add-local-field",
+      "kind": "local-edit"
+    },
+    {
+      "id": "literal-untrusted-text",
+      "kind": "repair"
+    }
+  ]
+}

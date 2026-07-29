@@ -1233,7 +1233,7 @@ consumed in the browser; output paths, cache keys, `FFmpeg` arguments, source
 spans, and materialization policy remain outside it. Further component facts
 are added only when the production adapter consumes them.
 
-Protocol V3 carries at most 10,000 scene containers, shot containers, video
+One Browser Plan carries at most 10,000 scene containers, shot containers, video
 placements, and overlays of each kind; one overlay inscription carries at most
 65,536 Unicode characters.
 Native projection and Rust wire decoding additionally cap their combined UTF-8
@@ -1757,6 +1757,69 @@ outputs, and baseline required by the language admission rule. Rust then owns
 the resulting trim, rate, gain, fade, dependency, or transition interval;
 TypeScript may only realize the already-solved visual effect. No JavaScript
 timeline, CLI flag, or `FFmpeg` filter string may become an alternate scheduler.
+
+Gate eight admits canonical typed variants after a three-arm generation
+comparison of declarative HTML bindings, module-owned bindings, and source
+placeholders. All arms completed the twelve locked cases. Declarative bindings
+required 5,708 authored bytes, compared with 8,723 for module bindings and 5,443
+for placeholders. The admitted arm preserves readable defaults, static
+dependencies, parse-once values, a reusable bundle, and literal sinks without
+introducing executable input code or source rewriting. The checked-in
+`evals/typed-variants` assets own that claim.
+
+The implementation is one linear Rust-owned path:
+
+1. compiler binding recognizes one film-local `om-fields` declaration and
+   source-located `data-om-*` bindings;
+2. resolution parses the closed text, integer, boolean, and color domains once;
+3. a bounded flat-JSON reader validates one optional override document and
+   produces immutable canonical values;
+4. Timeline IR records the schema and the exact semantic scope of every field
+   binding;
+5. Render Graph selects the fields required by each dependency region;
+6. Browser Plan carries one name-sorted value vector for that region;
+7. runtime applies only `textContent`, CSS custom properties, and `hidden`
+   before motion preparation.
+
+No new crate, package, or production parser dependency is introduced. The
+variant values are foundational domain values in `onmark-core::model`; source
+declaration, external JSON diagnostics, and binding resolution remain compiler
+modules. The small bounded JSON reader exists to retain duplicate keys and exact
+source spans that a generic deserialize-to-map boundary would discard. Protocol
+owns its wire projection as usual. TypeScript does not validate author JSON,
+infer field scope from DOM, or create an alternate value model.
+
+Field dependency mirrors document projection but remains a typed compiler fact.
+A film-shell scope selects every region. A scene-shell scope selects each region
+retaining a shot from that scene. A shot scope selects regions retaining that
+shot. A transition scope selects only a region retaining both adjacent shots.
+One field may have several scopes, combined as a union. This exact matcher lives
+with Render Graph planning; an approximate “field touches any shot” set would
+over-invalidate transition variants and is not admitted.
+
+The immutable browser bundle contains fallback markup and binding declarations,
+not variant values. Browser Plan identity already enters Render Unit and
+`FrameArtifactId`, so a field change invalidates every and only the regions that
+carry that field. Local execution, worker execution, distributed reuse, review,
+snapshot, and final assembly consume the same plan and need no provider-specific
+variant path. A declared but unused field is a warning and never enters artifact
+identity.
+
+The CLI accepts one bounded external variant document on every authoring surface
+that compiles presentation output: `check`, `inspect`, `snapshot`, `review`, and
+`render`. One versioned batch manifest names screenplay, profile-independent
+variant documents, and outputs; the CLI resolves the screenplay and freezes
+assets once, executes a bounded number of variants serially, and reuses
+unchanged region artifacts through the existing cache. Serial execution keeps
+the browser and encoder resource envelope equal to one ordinary render. The
+manifest is orchestration input, not screenplay syntax, and cannot override
+timing, assets, capabilities, render profile, or output dimensions.
+
+This addition does not add a template engine, string substitution, a global or
+URL input object, a source mutation API, remote authoring, a coordinator, or a
+mutable runtime update channel. Values are immutable for one Render Unit.
+Dynamic per-frame inputs and branches remain deferred because they would alter
+temporal capability and cache identity.
 
 Gate eight's admitted video treatments remain source-local. The first
 live-model comparison admitted `trim="start..end"` and exact `speed`; both arms

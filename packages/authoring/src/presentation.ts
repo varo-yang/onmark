@@ -27,6 +27,7 @@ import {
   type PresentationTarget,
 } from "./motion.js";
 import { authoredImageResources } from "./resource.js";
+import { applyVariantFields } from "./variant.js";
 
 const ELEMENTS = Object.freeze({
   callToAction: "om-cta",
@@ -81,6 +82,7 @@ export function createDomPresentationBindings(
     bindVideo: document.bindVideo.bind(document),
     bindOverlay: document.bindOverlay.bind(document),
     async bindExtensions(plan) {
+      document.applyVariantFields(plan);
       // Static authored images exist before extensions may add their own
       // explicitly owned resources. Snapshot them once to avoid two owners for
       // a motion-created image.
@@ -246,6 +248,10 @@ class AuthoredDocument {
     return Array.from(this.#document.images).filter((element) =>
       element.hasAttribute("src"),
     );
+  }
+
+  applyVariantFields(plan: RuntimePlan): void {
+    applyVariantFields(this.#document, plan.variantFields);
   }
 
   #bindCaption(placement: RuntimeOverlay): OverlayPresentation {

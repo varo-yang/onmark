@@ -27,6 +27,7 @@ use crate::execution;
 use crate::failure::CliError;
 use crate::input;
 use crate::subtitle::SubtitleImport;
+use crate::variant::VariantImport;
 
 const REPORT_VERSION: u16 = 1;
 
@@ -49,6 +50,7 @@ pub(super) struct RegionInspection {
     pub(super) visual_mode: &'static str,
     pub(super) capture_cadence: &'static str,
     pub(super) native_media: usize,
+    pub(super) variant_fields: Vec<String>,
     pub(super) bundle_id: Box<str>,
 }
 
@@ -111,6 +113,16 @@ fn resolve_input(args: crate::arguments::ValidationArgs) -> Result<InitialValida
             report: authored_report(args.screenplay, source, diagnostics),
             inspection: None,
         }));
+    };
+    let film = match VariantImport::apply(args.variant.as_deref(), film)? {
+        VariantImport::Film(film) => film,
+        VariantImport::Rejected(rejected) => {
+            let (path, source, diagnostics) = rejected.into_parts();
+            return Ok(InitialValidation::Rejected(Validation {
+                report: authored_report(path, source, diagnostics),
+                inspection: None,
+            }));
+        }
     };
     let caption_track = match args
         .subtitle
@@ -220,6 +232,10 @@ fn inspect_regions(partitions: &PartitionPlan, units: &[RenderUnit]) -> Vec<Regi
                 onmark_render::BrowserCaptureCadence::PlacementBounded => "placementBounded",
             },
             native_media: unit.visual_execution().native_media_count(),
+            variant_fields: partition
+                .variant_fields()
+                .map(ToString::to_string)
+                .collect(),
             bundle_id: unit.bundle_id().into(),
         })
         .collect()

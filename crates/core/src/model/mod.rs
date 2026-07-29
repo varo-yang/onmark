@@ -13,6 +13,7 @@ mod reference;
 mod source;
 mod temporal;
 mod time;
+mod variant;
 mod visual;
 
 pub use asset::{
@@ -42,6 +43,11 @@ pub use temporal::{InvalidPresentationTemporalCapability, PresentationTemporalCa
 pub use time::{
     FrameConversionOverflow, FrameCount, FrameIndex, FrameInterval, FrameRate,
     InvalidFrameInterval, InvalidFrameRate, Rounding, Timebase,
+};
+pub use variant::{
+    InvalidVariantFieldKind, InvalidVariantFieldName, InvalidVariantValue,
+    MAX_EXACT_VARIANT_INTEGER, MAX_VARIANT_FIELD_NAME_BYTES, MAX_VARIANT_TEXT_BYTES,
+    VariantFieldKind, VariantFieldName, VariantValue,
 };
 pub use visual::{
     InvalidPresentationDocumentScope, InvalidPresentationFrameBehavior,

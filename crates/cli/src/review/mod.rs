@@ -36,6 +36,7 @@ use crate::input;
 use crate::output;
 use crate::progress::Progress;
 use crate::subtitle::SubtitleImport;
+use crate::variant::VariantImport;
 
 use self::plan::{ReviewPlan, ReviewPlanError};
 use self::report::{
@@ -159,6 +160,18 @@ async fn prepare(args: ReviewArgs, json: bool, started: Instant) -> Result<Prepa
             diagnostics,
             json,
         ))));
+    };
+    let film = match VariantImport::apply(args.validation.variant.as_deref(), film)? {
+        VariantImport::Film(film) => film,
+        VariantImport::Rejected(rejected) => {
+            let (path, source, diagnostics) = rejected.into_parts();
+            return Ok(Preparation::Rejected(Box::new(ReviewOutcome::rejected(
+                path,
+                source,
+                diagnostics,
+                json,
+            ))));
+        }
     };
     let caption_track = match args
         .validation
@@ -350,7 +363,14 @@ async fn bundle_units(
             partitions,
         )
         .await?;
-    crate::render::materialize_units(timeline, profile, partitions, &bundle, frozen)
+    let materialized = frozen.into_materialized()?;
+    crate::render::materialize_units(
+        timeline,
+        profile,
+        partitions,
+        &bundle,
+        materialized.assets(),
+    )
 }
 
 async fn capture_review(

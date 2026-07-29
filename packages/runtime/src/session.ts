@@ -13,13 +13,17 @@ import type {
 } from "./generated/browser-response.js";
 import {
   BROWSER_PROTOCOL_VERSION,
+  MAX_BROWSER_TEXT_BYTES,
   MAX_BROWSER_MEDIA_LAYOUTS,
   MAX_FAILURE_MESSAGE_CHARACTERS,
   MAX_PENDING_RESOURCE_CHARACTERS,
   MAX_PENDING_RESOURCES,
+  MAX_VARIANT_TEXT_BYTES,
 } from "./generated/runtime-contract.js";
 import { runtimeFrameAt, type RuntimeFrame } from "./clock.js";
 import { exactRatioIsCanonical, videoSourceMappingIsValid } from "./media.js";
+
+const UTF8 = new TextEncoder();
 
 // ── Browser adapter boundary ──
 
@@ -413,6 +417,13 @@ function planViolation(
   ) {
     return "plan node collection is not in canonical order";
   }
+  const variantTextBytes = canonicalVariantFieldsTextBytes(plan.variantFields);
+  if (variantTextBytes === undefined) {
+    return "plan variant fields are not canonical";
+  }
+  if (!browserTextFitsBudget(plan.overlays, variantTextBytes)) {
+    return "plan text exceeds the browser request budget";
+  }
 
   const nodeIds = new Set<number>();
   const authoredIds = new Set<string>();
@@ -567,6 +578,60 @@ function hasCanonicalNodeOrder(
   return true;
 }
 
+function canonicalVariantFieldsTextBytes(
+  fields: BrowserPlan["variantFields"],
+): number | undefined {
+  let previous: string | undefined;
+  let textBytes = 0;
+
+  for (const field of fields) {
+    const valueBytes = canonicalVariantTextBytes(field.value);
+    if (
+      !/^[a-z][A-Za-z0-9]{0,63}$/u.test(field.name) ||
+      (previous !== undefined && field.name <= previous) ||
+      valueBytes === undefined
+    ) {
+      return undefined;
+    }
+    textBytes += valueBytes;
+    previous = field.name;
+  }
+  return textBytes;
+}
+
+function canonicalVariantTextBytes(
+  value: BrowserPlan["variantFields"][number]["value"],
+): number | undefined {
+  switch (value.kind) {
+    case "text": {
+      const bytes = UTF8.encode(value.value).byteLength;
+      return bytes <= MAX_VARIANT_TEXT_BYTES ? bytes : undefined;
+    }
+    case "integer":
+      return Number.isSafeInteger(value.value) ? 0 : undefined;
+    case "boolean":
+      return 0;
+    case "color":
+      return /^#[0-9a-f]{6}(?:[0-9a-f]{2})?$/u.test(value.value)
+        ? 0
+        : undefined;
+  }
+}
+
+function browserTextFitsBudget(
+  overlays: BrowserPlan["overlays"],
+  variantTextBytes: number,
+): boolean {
+  let textBytes = variantTextBytes;
+  for (const overlay of overlays) {
+    textBytes += UTF8.encode(overlay.text).byteLength;
+    if (textBytes > MAX_BROWSER_TEXT_BYTES) {
+      return false;
+    }
+  }
+  return true;
+}
+
 function overlayParentViolation(
   overlay: BrowserPlan["overlays"][number],
   shots: ReadonlyMap<number, PlanShot>,
@@ -659,6 +724,9 @@ function snapshotPlan(plan: BrowserPlan): RuntimePlan {
   const scenes = Object.freeze(plan.scenes.map(snapshotScene));
   const shots = Object.freeze(plan.shots.map(snapshotShot));
   const transitions = Object.freeze(plan.transitions.map(snapshotTransition));
+  const variantFields = Object.freeze(
+    plan.variantFields.map(snapshotVariantField),
+  );
   const videos = Object.freeze(plan.videos.map(snapshotVideo));
   const overlays = Object.freeze(plan.overlays.map(snapshotOverlay));
 
@@ -672,8 +740,18 @@ function snapshotPlan(plan: BrowserPlan): RuntimePlan {
     scenes,
     shots,
     transitions,
+    variantFields,
     videos,
     overlays,
+  });
+}
+
+function snapshotVariantField(
+  field: BrowserPlan["variantFields"][number],
+): RuntimePlan["variantFields"][number] {
+  return Object.freeze({
+    name: field.name,
+    value: Object.freeze({ ...field.value }),
   });
 }
 

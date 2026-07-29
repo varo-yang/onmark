@@ -77,13 +77,14 @@ test("excludes compiler-only facts from presentation identity", async () => {
       workspace,
       [
         '<om-film id="demo">',
+        '  <om-fields><om-field name="accent" type="color" default="#ff4d36"></om-field></om-fields>',
         '  <om-cues><om-cue id="reveal" time="1s"></om-cue></om-cues>',
         '  <om-music src="first.mp3" gain="50%"></om-music>',
         '  <om-scene><om-shot duration="2s">',
         '    <om-sfx src="first.wav" delay="250ms"></om-sfx>',
         '    <om-vo src="first-voice.mp3">Narration <img src="ignored.png"></om-vo>',
         '    <video id="hero" class="media" src="first.mp4" delay="100ms" trim="1s..2s" speed="2x"></video>',
-        '    <om-title id="headline" data-delay="authored" cue="reveal">',
+        '    <om-title id="headline" data-delay="authored" data-om-css="accent" style="--accent:#ff4d36" cue="reveal">',
         '      Keep <img src="texture.png" alt="texture"> me',
         "    </om-title>",
         '    <om-cta id="action" delay="500ms">Act now</om-cta>',
@@ -99,13 +100,14 @@ test("excludes compiler-only facts from presentation identity", async () => {
       workspace,
       [
         '<om-film id="demo">',
+        '  <om-fields><om-field name="accent" type="color" default="#ff4d36"></om-field></om-fields>',
         '  <om-cues><om-cue id="later" time="1500ms"></om-cue></om-cues>',
         '  <om-music src="second.mp3" gain="25%"></om-music>',
         '  <om-scene><om-shot duration="3s">',
         '    <om-sfx src="second.wav" delay="750ms"></om-sfx>',
         '    <om-vo src="second-voice.mp3">Narration <img src="ignored.png"></om-vo>',
         '    <video id="hero" class="media" src="second.mp4" delay="200ms" trim="3s..5s" speed="0.5x"></video>',
-        '    <om-title id="headline" data-delay="authored" delay="1s">',
+        '    <om-title id="headline" data-delay="authored" data-om-css="accent" style="--accent:#ff4d36" delay="1s">',
         '      Keep <img src="texture.png" alt="texture"> me',
         "    </om-title>",
         '    <om-cta id="action" cue="later">Act now</om-cta>',
@@ -122,13 +124,19 @@ test("excludes compiler-only facts from presentation identity", async () => {
       join(first.directory, BUNDLE_ENTRY_POINT),
       "utf8",
     );
-    assert.doesNotMatch(html, /om-cues|om-cue|om-music|om-sfx|om-vo/u);
+    assert.doesNotMatch(
+      html,
+      /om-fields|om-field|om-cues|om-cue|om-music|om-sfx|om-vo/u,
+    );
     assert.doesNotMatch(
       html,
       /first\.mp3|first\.mp4|\s(?:cue|delay|duration|gain|speed|trim)="[^"]*"/u,
     );
     assert.match(html, /<video id="hero" class="media"\s*><\/video>/u);
-    assert.match(html, /<om-title id="headline" data-delay="authored"\s*>/u);
+    assert.match(
+      html,
+      /<om-title id="headline" data-delay="authored" data-om-css="accent" style="--accent:#ff4d36"\s*>/u,
+    );
     assert.match(
       html,
       /<img src="\.\/resources\/[a-f0-9]{64}\.png" alt="texture">/u,

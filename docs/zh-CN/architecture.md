@@ -1373,7 +1373,7 @@ plan 本身。它只能包含浏览器真实消费的事实；output path、cach
 key、FFmpeg 参数、source span 和 materialization policy 都不得进入。更多 component
 事实等 production adapter 真正消费时再加入，不提前把后续 gate 塞进协议。
 
-Protocol V3 最多分别携带 10,000 个 scene container、shot container、video placement
+一份 Browser Plan 最多分别携带 10,000 个 scene container、shot container、video placement
 与 overlay placement；每条 overlay
 inscription 最多包含 65,536 个 Unicode 字符。native projection 与 Rust wire decode
 还会在 CDP serialization 前，把每份 browser plan 的合计 UTF-8 text 限制为一 MiB；该 aggregate
@@ -1739,6 +1739,58 @@ track 一旦改变作者语义，就属于语言工作。每项新增能力都�
 prompts、grader、raw model outputs 与 baseline。之后 trim、rate、gain、fade、dependency 或
 transition interval 由 Rust 独占；TypeScript 只能实现已经求解的视觉 effect。JavaScript
 timeline、CLI flag 或 `FFmpeg` filter string 都不能成为另一套 scheduler。
+
+Gate 八在比较 declarative HTML binding、module-owned binding 与 source placeholder
+三条生成路径后，接纳 canonical typed variant。三条 arm 都完成了锁定的十二个 case；
+declarative binding 使用 5,708 authored bytes，module binding 使用 8,723，placeholder
+使用 5,443。获准方案以 265 bytes 的极小代价保留 readable default、static dependency、
+parse-once value、可复用 bundle 与 literal sink，同时不引入 executable input code 或
+source rewrite。该结论由 checked-in `evals/typed-variants` 资产拥有。
+
+实现保持一条由 Rust 独占的 linear path：
+
+1. compiler bind 识别一份 film-local `om-fields` declaration 与带 source 的
+   `data-om-*` binding；
+2. resolve 只解析一次封闭的 text、integer、boolean 与 color domain；
+3. 有界 flat-JSON reader 校验一份可选 override document，并产出 immutable canonical
+   value；
+4. Timeline IR 记录 schema 及每个 field binding 的精确 semantic scope；
+5. Render Graph 为每个 dependency region 选择真实需要的 field；
+6. Browser Plan 只携带该 region 的一份 name-sorted value vector；
+7. runtime 在 motion prepare 之前只应用 `textContent`、CSS custom property 与
+   `hidden`。
+
+该能力不新增 crate、package 或 production parser dependency。variant value 是
+`onmark-core::model` 的 foundational domain value；source declaration、external JSON
+diagnostic 与 binding resolution 留在 compiler module。小型有界 JSON reader 用于保留
+generic deserialize-to-map 会丢失的 duplicate key 与精确 source span。protocol 仍独占
+wire projection。TypeScript 不校验 author JSON、不从 DOM 反推 field scope，也不创建第二套
+value model。
+
+field dependency 与 document projection 对齐，但始终是 typed compiler fact。film-shell
+scope 选择全部 region；scene-shell scope 选择保留该 scene 任一 shot 的 region；shot scope
+选择保留该 shot 的 region；transition scope 只选择同时保留两个相邻 shot 的 region。同一
+field 的多个 scope 按 union 合并。精确 matcher 属于 Render Graph planning；会让
+transition variant 过度失效的近似“field touches any shot”集合不予准入。
+
+immutable browser bundle 只包含 fallback markup 与 binding declaration，不包含 variant
+value。Browser Plan identity 已进入 Render Unit 与 `FrameArtifactId`，因此 field 改变只会
+使真实携带它的 region 失效。本地 execution、worker execution、distributed reuse、review、
+snapshot 与 final assembly 共用同一 plan，不存在 provider-specific variant path。已声明但
+未使用的 field 是 warning，也不会进入 artifact identity。
+
+所有会编译 presentation output 的 authoring surface——`check`、`inspect`、`snapshot`、
+`review` 与 `render`——都接受一份有界 external variant document。一份 versioned batch
+manifest 命名 screenplay、与 profile 无关的 variant document 及 output；CLI 只 resolve
+一次 screenplay、只 freeze 一次 asset，串行执行有界数量的 variant，并通过现有 cache 复用
+未变化 region artifact。串行执行使 browser 与 encoder 的资源上界等于一次普通 render。
+manifest 属于 orchestration input，不是 screenplay syntax，也不能覆盖 timing、asset、
+capability、render profile 或 output dimension。
+
+该能力不增加 template engine、string substitution、global/URL input object、source
+mutation API、remote authoring、coordinator 或 mutable runtime update channel。一份 Render
+Unit 内的 value immutable。会改变 temporal capability 与 cache identity 的逐帧动态 input
+和 branch 仍然延后。
 
 Gate 八已准入的视频处理能力始终只描述素材局部。第一组 live-model 实验在全部二十个
 编辑 case 中准入 `trim="起点..终点"` 与精确 `speed`，没有引入 film 坐标；range

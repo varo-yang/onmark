@@ -742,7 +742,7 @@ class PresentationRecorder {
 
 function presentationPlan(): BrowserPlan {
   return {
-    timelineVersion: 4,
+    timelineVersion: 5,
     frameRate: { numerator: 30, denominator: 1 },
     timeline: { start: 0, end: 40 },
     evaluation: { start: 10, end: 30 },
@@ -762,6 +762,7 @@ function presentationPlan(): BrowserPlan {
       },
     ],
     transitions: [],
+    variantFields: [],
     videos: [video(1, 3, 10, 20), video(2, 8, 20, 30)],
     overlays: [
       {

@@ -1,0 +1,24 @@
+<!doctype html>
+<om-film>
+  <om-fields>
+    <om-field name="headline" type="text" default="Summer edit"></om-field>
+    <om-field name="accent" type="color" default="#ff4d36"></om-field>
+    <om-field name="progress" type="integer" default="72"></om-field>
+    <om-field name="featured" type="boolean" default="false"></om-field>
+    <om-field name="transitionGlow" type="color" default="#00ccff"></om-field>
+  </om-fields>
+  <div data-om-css="accent" style="--accent:#ff4d36"></div>
+  <om-scene>
+    <span data-om-show="featured" hidden>Featured</span>
+    <om-shot id="opening" duration="1s">
+      <om-title data-om-text="headline">Summer edit</om-title>
+    </om-shot>
+    <om-transition
+      duration="250ms"
+      data-om-css="transitionGlow"
+      style="--transitionGlow:#00ccff"></om-transition>
+    <om-shot id="closing" duration="1s">
+      <div data-om-css="progress" style="--progress:72"></div>
+    </om-shot>
+  </om-scene>
+</om-film>

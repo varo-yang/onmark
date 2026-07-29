@@ -134,6 +134,18 @@ impl ArtifactCache {
         }
     }
 
+    /// Creates one private cache shared only by jobs in the current batch.
+    pub(super) fn for_batch(
+        directory: &Path,
+        capture_mode: BrowserCaptureMode,
+        graphics_backend: BrowserGraphicsBackend,
+    ) -> Self {
+        Self {
+            directory: Some(directory.to_owned()),
+            environment: ephemeral_environment(capture_mode, graphics_backend),
+        }
+    }
+
     pub(super) const fn environment(&self) -> CaptureEnvironmentId {
         self.environment
     }

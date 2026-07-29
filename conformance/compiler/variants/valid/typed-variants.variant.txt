@@ -1,0 +1,29 @@
+# onmark variant test rendering; not a wire format
+schema
+  accent kind=color default=#ff4d36 @0:136..142
+  featured kind=boolean default=false @0:277..285
+  headline kind=text default=Summer edit @0:60..68
+  progress kind=integer default=72 @0:207..215
+  transitionGlow kind=color default=#00ccff @0:350..364
+bindings
+  accent sink=css scope=film @0:444..450
+  featured sink=show scope=scene@0:486..938 @0:521..529
+  headline sink=text scope=shot@0:558..672 @0:625..633
+  transitionGlow sink=css scope=transition@0:677..805 @0:734..748
+  progress sink=css scope=shot@0:810..924 @0:871..879
+values
+  accent kind=color value=#3366ff
+  featured kind=boolean value=true
+  headline kind=text value="Winter release"
+  progress kind=integer value=91
+  transitionGlow kind=color value=#ffcc00
+timeline
+  accent=#3366ff scopes=film
+  featured=true scopes=scene:0+2
+  headline="Winter release" scopes=shot:0
+  progress=91 scopes=shot:1
+  transitionGlow=#ffcc00 scopes=transition:0+1
+regions
+  0 fields=accent,featured,headline
+  1 fields=accent,featured,headline,progress,transitionGlow
+  2 fields=accent,featured,progress

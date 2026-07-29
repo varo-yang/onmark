@@ -1,0 +1,20 @@
+<om-film>
+  <om-fields class="invalid">
+    <om-field name="headline" type="text" default="Default"></om-field>
+    <om-field name="headline" type="text" default="Duplicate"></om-field>
+    <om-field name="Accent" type="color" default="#ff4d36"></om-field>
+    <om-field name="amount" type="number" default="12"></om-field>
+    <om-field name="progress" type="integer" default="01"></om-field>
+    <om-field name="featured" type="boolean" default="false"></om-field>
+    <om-field name="unused" type="text" default="Unused"></om-field>
+  </om-fields>
+  <om-scene>
+    <om-shot duration="1s">
+      <div data-om-text="missing">Missing</div>
+      <div data-om-text="featured">false</div>
+      <div data-om-text="headline"><strong>Default</strong></div>
+      <div data-om-css="headline" style="--headline:Default"></div>
+      <div data-om-show="featured">Featured</div>
+    </om-shot>
+  </om-scene>
+</om-film>

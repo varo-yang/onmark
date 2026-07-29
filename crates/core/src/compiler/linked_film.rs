@@ -8,6 +8,8 @@ use std::collections::BTreeMap;
 use crate::model::{ElementKind, GeneralAudioKind, NodeId, SourceSpan};
 use crate::syntax::{Attribute, TextNode};
 
+use super::variant::{LinkedVariantBinding, LinkedVariantSchema};
+
 /// Shared authored facts retained by every structurally bound element.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LinkedElement {
@@ -86,6 +88,8 @@ impl LinkedId {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LinkedFilm {
     element: LinkedElement,
+    variants: Option<LinkedVariantSchema>,
+    variant_bindings: Vec<LinkedVariantBinding>,
     cues: Option<LinkedCues>,
     music: Vec<LinkedAudio>,
     scenes: Vec<LinkedScene>,
@@ -95,6 +99,8 @@ pub struct LinkedFilm {
 impl LinkedFilm {
     pub(super) fn new(
         element: LinkedElement,
+        variants: Option<LinkedVariantSchema>,
+        variant_bindings: Vec<LinkedVariantBinding>,
         cues: Option<LinkedCues>,
         music: Vec<LinkedAudio>,
         scenes: Vec<LinkedScene>,
@@ -102,6 +108,8 @@ impl LinkedFilm {
     ) -> Self {
         Self {
             element,
+            variants,
+            variant_bindings,
             cues,
             music,
             scenes,
@@ -113,6 +121,18 @@ impl LinkedFilm {
     #[must_use]
     pub const fn element(&self) -> &LinkedElement {
         &self.element
+    }
+
+    /// Returns the optional typed-variant schema declaration.
+    #[must_use]
+    pub const fn variants(&self) -> Option<&LinkedVariantSchema> {
+        self.variants.as_ref()
+    }
+
+    /// Returns presentation bindings in authored order.
+    #[must_use]
+    pub fn variant_bindings(&self) -> &[LinkedVariantBinding] {
+        &self.variant_bindings
     }
 
     /// Returns the optional singleton cue container.
@@ -142,6 +162,8 @@ impl LinkedFilm {
     pub(super) fn into_parts(self) -> LinkedFilmParts {
         LinkedFilmParts {
             element: self.element,
+            variants: self.variants,
+            variant_bindings: self.variant_bindings,
             cues: self.cues,
             music: self.music,
             scenes: self.scenes,
@@ -153,6 +175,8 @@ impl LinkedFilm {
 /// Consuming handoff from structural binding into attribute resolution.
 pub(super) struct LinkedFilmParts {
     pub(super) element: LinkedElement,
+    pub(super) variants: Option<LinkedVariantSchema>,
+    pub(super) variant_bindings: Vec<LinkedVariantBinding>,
     pub(super) cues: Option<LinkedCues>,
     pub(super) music: Vec<LinkedAudio>,
     pub(super) scenes: Vec<LinkedScene>,

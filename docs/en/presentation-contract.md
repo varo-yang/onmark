@@ -318,35 +318,63 @@ overlay visibility. A video readiness timeout names its unit-local node and
 phase as `video:<nodeId>:loadeddata`, `video:<nodeId>:seeked`, or
 `video:<nodeId>:frame`. Bindings own those effects, not interval arithmetic.
 
-## Plan facts, component selection, and props
+## Plan facts and canonical typed variants
 
-The current language does **not** have `presents`, `definePresentation`, or a
-separate screenplay-to-presentation props channel. The dynamic facts delivered
-to authored HTML are the Rust-owned `BrowserPlan` facts
-sent by `Load(plan)`: frame rate, the complete solved film interval, evaluation
-and output intervals, semantic structure and ownership, video placements,
-transition relations, and title, CTA, or imported-caption overlay placements.
-Structural and overlay
-placements retain their complete solved intervals when they intersect a unit;
-`evaluation` selects frames executed by that unit and `output` selects frames
-it publishes. Stylesheet
-rules and static values imported by the inline module are presentation code,
-not screenplay props.
+The dynamic facts delivered to authored HTML are the Rust-owned `BrowserPlan`
+facts sent by `Load(plan)`: frame rate, the complete solved film interval,
+evaluation and output intervals, semantic structure and ownership, video
+placements, transition relations, title, CTA, or imported-caption overlay
+placements, and the canonical typed variant values required by this Render
+Graph region. Structural and overlay placements retain their complete solved
+intervals when they intersect a unit; `evaluation` selects frames executed by
+that unit and `output` selects frames it publishes.
 
-Those existing facts are the closed built-in component contract: `nodeId` is a
-dense unit-local binding key, optional `authoredId` supports semantic selection
-across projections, `kind` selects title, CTA, or caption, and `text` is that
-component's only authored property. This does not create a
-generic props channel or allow presentation code to reinterpret screenplay
-structure.
+The language still has no `presents`, `definePresentation`, arbitrary props
+object, source placeholder substitution, module-owned input schema, global, or
+URL parameter. The only author-input surface is the closed `om-fields` schema
+and its `data-om-text`, `data-om-css`, and `data-om-show` literal sinks defined
+by the language specification. Rust validates external JSON against that schema
+and emits a name-sorted value vector. The runtime never accepts an untyped input
+object and never interprets source JSON spelling.
 
-This absence is intentional rather than an undocumented convention. A future
-presentation-selection or props feature must define, together, its screenplay
-spelling, typed schema and defaults, canonical wire encoding, source spans and
-diagnostics, bundle/cache identity, and interaction with temporal capability
-declarations. It also needs controlled language-evaluation evidence. Until that
-work exists, a presentation must not read author intent from globals, URL
-parameters, a mutable side channel, or an invented `presents` attribute.
+During `load`, the production adapter applies each approved binding before it
+prepares motion:
+
+- `data-om-text` assigns one `text` value through `textContent`;
+- `data-om-css` assigns `color` and `integer` values through
+  `style.setProperty("--<field>", canonicalValue)`;
+- `data-om-show` assigns one `boolean` value through the `hidden` property.
+
+The bundler removes `om-fields` and `om-field` declarations from the projected
+document but retains the three binding attributes. It neither substitutes
+source bytes nor generates executable code from values. Runtime binding is
+bounded by the validated plan and document schema. A missing target, duplicate
+target spelling, incompatible value kind, or plan field not required by the
+current region is a protocol failure rather than a best-effort omission.
+
+Bindings are presentation state, not a timing input. They are applied before
+extension resource discovery and motion preparation so those phases observe one
+stable DOM. They do not run again on `seek`; one Render Unit has one immutable
+variant. A different variant is a different Browser Plan and, where the field is
+actually used, a different frame-artifact identity.
+
+Field dependency follows document projection. Shot-owned bindings enter only
+regions containing that shot. Scene-shell bindings enter every region retaining
+that scene. Film-shell bindings enter every region. A transition binding enters
+only a region retaining both adjacent shots. Timeline IR owns these scopes,
+Render Graph resolves them, and Browser Plan contains only the selected region's
+values. TypeScript does not infer dependency from the projected DOM.
+
+The existing built-in component facts remain closed: `nodeId` is a dense
+unit-local binding key, optional `authoredId` supports semantic selection across
+projections, `kind` selects title, CTA, or caption, and `text` is the authored
+fallback carried by that component. A typed binding may replace the literal DOM
+text for presentation, but it cannot reinterpret screenplay structure or solved
+intervals.
+
+Stylesheet rules and static values imported by the inline module remain
+presentation code, not variant values. Presentation code must not read author
+intent from a mutable side channel.
 
 ## Temporal capabilities
 

@@ -15,7 +15,7 @@ import {
 } from "../src/index.js";
 
 const PLAN: BrowserPlan = {
-  timelineVersion: 4,
+  timelineVersion: 5,
   frameRate: { numerator: 30, denominator: 1 },
   timeline: { start: 0, end: 1 },
   evaluation: { start: 0, end: 1 },
@@ -24,6 +24,7 @@ const PLAN: BrowserPlan = {
   scenes: [],
   shots: [],
   transitions: [],
+  variantFields: [],
   videos: [],
   overlays: [],
 };

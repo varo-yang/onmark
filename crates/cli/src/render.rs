@@ -17,7 +17,7 @@ use onmark_core::timeline::TimelineIr;
 use onmark_media::Ffprobe;
 use onmark_render::{
     BrowserCaptureMode, BrowserGraphicsBackend, EncodeProfile, EncodedVideo, ExecutableUnit,
-    Ffmpeg, RenderExecutor, RenderProfile, RenderUnit,
+    Ffmpeg, MaterializedAsset, RenderExecutor, RenderProfile, RenderUnit,
 };
 use serde::Serialize;
 
@@ -34,6 +34,7 @@ use crate::input;
 use crate::output;
 use crate::progress::Progress;
 use crate::subtitle::SubtitleImport;
+use crate::variant::VariantImport;
 
 struct LocalExecutorOptions {
     browser: PathBuf,
@@ -44,7 +45,7 @@ struct LocalExecutorOptions {
     encode_profile: EncodeProfile,
 }
 
-struct ExecutedRender {
+pub(super) struct ExecutedRender {
     capture_mode: BrowserCaptureMode,
     graphics_backend: BrowserGraphicsBackend,
     reuse: ArtifactReuse,
@@ -52,6 +53,16 @@ struct ExecutedRender {
     assemble: Duration,
     video: EncodedVideo,
     encode_profile: EncodeProfile,
+}
+
+impl ExecutedRender {
+    pub(super) const fn reuse(&self) -> ArtifactReuse {
+        self.reuse
+    }
+
+    pub(super) const fn video(&self) -> &EncodedVideo {
+        &self.video
+    }
 }
 
 struct PreparedRender {
@@ -66,6 +77,12 @@ struct PreparedRender {
     cache_admission: CacheAdmission,
     executables: Executables,
     elapsed: Duration,
+}
+
+pub(super) struct LocalRenderEngine {
+    cache: ArtifactCache,
+    encode_profile: EncodeProfile,
+    executor: RenderExecutor,
 }
 
 enum Preparation {
@@ -282,6 +299,18 @@ async fn prepare_render(
             json,
         ))));
     };
+    let film = match VariantImport::apply(args.variant.as_deref(), film)? {
+        VariantImport::Film(film) => film,
+        VariantImport::Rejected(rejected) => {
+            let (path, source, diagnostics) = rejected.into_parts();
+            return Ok(Preparation::Rejected(Box::new(RenderOutcome::rejected(
+                path,
+                source,
+                diagnostics,
+                json,
+            ))));
+        }
+    };
     let caption_track = match args
         .subtitle
         .as_deref()
@@ -353,6 +382,7 @@ async fn execute_render(
         executables,
         elapsed: prepare,
     } = prepared;
+    let engine = LocalRenderEngine::new(&args, &executables, encode_profile, cache_admission)?;
     progress.started("plan")?;
     let plan_started = Instant::now();
     let bundler = PresentationBundler::new(executables.bundler);
@@ -370,21 +400,18 @@ async fn execute_render(
     let bundle = bundle_started.elapsed();
     progress.completed("bundle", bundle)?;
 
-    let units = materialize_units(&timeline, profile, &partitions, &bundle_artifact, frozen)?;
+    let materialized = frozen.into_materialized()?;
+    let units = materialize_units(
+        &timeline,
+        profile,
+        &partitions,
+        &bundle_artifact,
+        materialized.assets(),
+    )?;
 
-    let graphics_backend = args
-        .graphics_backend()
-        .unwrap_or_else(execution::local_graphics_backend);
-    let executed = LocalExecutorOptions {
-        browser: executables.browser.path,
-        capture_mode: executables.browser.capture_mode,
-        ffmpeg: executables.ffmpeg,
-        graphics_backend,
-        video_encoder_threads: args.video_encoder_threads(),
-        encode_profile,
-    }
-    .execute(&partitions, &units, cache_admission, &output, progress)
-    .await?;
+    let executed = engine
+        .execute(&partitions, &units, &output, progress)
+        .await?;
     let summary = LocalRenderSummary {
         reuse: executed.reuse,
         encode_profile: executed.encode_profile,
@@ -423,9 +450,8 @@ pub(super) fn materialize_units(
     profile: RenderProfile,
     partitions: &PartitionPlan,
     bundle: &BundleArtifact,
-    frozen: FrozenCatalog,
+    assets: &[MaterializedAsset],
 ) -> Result<Vec<ExecutableUnit>, CliError> {
-    let materialized = frozen.into_materialized()?;
     let regions = (0..partitions.units().len())
         .map(|index| bundle.region(index))
         .collect::<Result<Vec<_>, _>>()?;
@@ -436,7 +462,7 @@ pub(super) fn materialize_units(
         partitions,
         manifests,
         profile,
-        materialized.assets().iter().cloned(),
+        assets.iter().cloned(),
     )?;
     let units = planned
         .into_iter()
@@ -449,7 +475,7 @@ pub(super) fn materialize_units(
     Ok(units)
 }
 
-fn ffprobe(executable: PathBuf) -> Ffprobe {
+pub(super) fn ffprobe(executable: PathBuf) -> Ffprobe {
     Ffprobe::new(
         executable,
         execution::process_deadline(),
@@ -478,26 +504,84 @@ impl LocalExecutorOptions {
         RenderExecutor::new(browser, capture_mode, execution::browser_limits(), ffmpeg)
             .with_graphics_backend(graphics_backend)
     }
+}
 
-    async fn execute(
-        self,
+impl LocalRenderEngine {
+    pub(super) fn new(
+        args: &RenderArgs,
+        executables: &Executables,
+        encode_profile: EncodeProfile,
+        cache_admission: CacheAdmission,
+    ) -> Result<Self, CliError> {
+        let graphics_backend = args
+            .graphics_backend()
+            .unwrap_or_else(execution::local_graphics_backend);
+        let executor = LocalExecutorOptions {
+            browser: executables.browser.path.clone(),
+            capture_mode: executables.browser.capture_mode,
+            ffmpeg: executables.ffmpeg.clone(),
+            graphics_backend,
+            video_encoder_threads: args.video_encoder_threads(),
+            encode_profile,
+        }
+        .into_executor();
+        let cache = ArtifactCache::from_environment(
+            cache_admission,
+            executor.capture_mode(),
+            executor.graphics_backend(),
+        )?;
+        Ok(Self {
+            cache,
+            encode_profile,
+            executor,
+        })
+    }
+
+    pub(super) fn for_batch(
+        args: &RenderArgs,
+        executables: &Executables,
+        encode_profile: EncodeProfile,
+        cache_directory: &Path,
+    ) -> Self {
+        let graphics_backend = args
+            .graphics_backend()
+            .unwrap_or_else(execution::local_graphics_backend);
+        let executor = LocalExecutorOptions {
+            browser: executables.browser.path.clone(),
+            capture_mode: executables.browser.capture_mode,
+            ffmpeg: executables.ffmpeg.clone(),
+            graphics_backend,
+            video_encoder_threads: args.video_encoder_threads(),
+            encode_profile,
+        }
+        .into_executor();
+        let cache = ArtifactCache::for_batch(
+            cache_directory,
+            executor.capture_mode(),
+            executor.graphics_backend(),
+        );
+        Self {
+            cache,
+            encode_profile,
+            executor,
+        }
+    }
+
+    pub(super) async fn execute(
+        &self,
         partitions: &PartitionPlan,
         units: &[ExecutableUnit],
-        cache_admission: CacheAdmission,
         output: &Path,
         progress: Progress,
     ) -> Result<ExecutedRender, CliError> {
-        let encode_profile = self.encode_profile;
-        let executor = self.into_executor();
-        let capture_mode = executor.capture_mode();
-        let graphics_backend = executor.graphics_backend();
-        let cache =
-            ArtifactCache::from_environment(cache_admission, capture_mode, graphics_backend)?;
+        let capture_mode = self.executor.capture_mode();
+        let graphics_backend = self.executor.graphics_backend();
 
         progress.started("capture")?;
         let capture_started = Instant::now();
-        let artifacts = cache
-            .capture(&executor, units, execution::frame_artifact_limits())
+        let artifacts = self
+            .cache
+            .capture(&self.executor, units, execution::frame_artifact_limits())
             .await?;
         let capture = capture_started.elapsed();
         progress.completed("capture", capture)?;
@@ -505,12 +589,13 @@ impl LocalExecutorOptions {
 
         progress.started("assemble")?;
         let assemble_started = Instant::now();
-        let video = executor
+        let video = self
+            .executor
             .assemble_frame_artifacts(
                 partitions,
                 units,
                 artifacts.as_slice(),
-                cache.environment(),
+                self.cache.environment(),
                 output,
             )
             .await?;
@@ -524,7 +609,7 @@ impl LocalExecutorOptions {
             capture,
             assemble,
             video,
-            encode_profile,
+            encode_profile: self.encode_profile,
         })
     }
 }

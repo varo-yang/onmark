@@ -7,6 +7,7 @@
 mod arguments;
 mod artifact_cache;
 mod assets;
+mod batch;
 mod benchmark;
 mod browser_install;
 mod bundler;
@@ -26,6 +27,7 @@ mod render;
 mod review;
 mod snapshot;
 mod subtitle;
+mod variant;
 mod worker;
 
 use std::io;
@@ -40,6 +42,7 @@ async fn main() -> ExitCode {
     let cli = Cli::parse();
     let json = cli.json;
     let result = match cli.command {
+        Command::Batch(args) => batch::run(args, json).await.map(batch::BatchOutcome::write),
         Command::Benchmark(args) => benchmark::run(args, json)
             .await
             .map(benchmark::BenchmarkOutcome::write),

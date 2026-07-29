@@ -134,7 +134,7 @@ test("rejects protocol payloads outside generated resource budgets", () => {
       type: "load",
       mediaMode: "decoded",
       plan: {
-        timelineVersion: 4,
+        timelineVersion: 5,
         frameRate: { numerator: 30, denominator: 1 },
         timeline: { start: 0, end: 1 },
         evaluation: { start: 0, end: 1 },

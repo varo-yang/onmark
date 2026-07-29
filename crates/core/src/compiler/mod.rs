@@ -37,6 +37,10 @@ mod parse;
 mod resolve;
 mod resolved_film;
 mod solve;
+mod variant;
+mod variant_binding;
+mod variant_input;
+mod variant_resolution;
 
 pub use bind::{BindReport, bind};
 pub use captions::{CaptionProjectionError, import_captions};
@@ -52,3 +56,9 @@ pub use resolved_film::{
     ResolvedStart, ResolvedText, ResolvedTransition, ResolvedVideo, ResolvedVoiceOver,
 };
 pub use solve::{SolveError, SolveReport, solve};
+pub use variant::{
+    LinkedVariantBinding, LinkedVariantField, LinkedVariantSchema, LinkedVariantScope,
+    ResolvedVariantBinding, ResolvedVariantField, ResolvedVariantSchema, ResolvedVariantValues,
+    VariantBindingSink,
+};
+pub use variant_input::{MAX_VARIANT_DOCUMENT_BYTES, VariantReport, resolve_variant};

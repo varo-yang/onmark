@@ -29,11 +29,13 @@ Onmark 语言的目标不是用另一套标签重画时间轴，而是让创作�
 
 ## 3. 文档模型
 
-最小词汇：
+当前词汇：
 
 | 元素    | 含义                               | 时间角色          |
 | ------- | ---------------------------------- | ----------------- |
 | `film`  | 一部影片及其全局配置               | 根时间域          |
+| `fields` | film 直属的 typed variant schema，至多一个 | 不参与 scene 顺序 |
+| `field` | 一个有名字、有类型且带默认值的 presentation input | 不参与 timing |
 | `cues`  | film 直属的 cue 声明容器，至多一个 | 不参与 scene 顺序 |
 | `cue`   | 有名字的时间事件                   | 显式对齐来源      |
 | `scene` | 叙事段落                           | 顺序容器          |
@@ -45,6 +47,11 @@ Onmark 语言的目标不是用另一套标签重画时间轴，而是让创作�
 | `sfx`   | shot 局部音效                      | shot 局部音频     |
 | `title` | 屏幕标题                           | shot 内 overlay   |
 | `cta`   | 行动号召                           | shot 内 overlay   |
+
+film 可以有至多一个直属 `fields` 和一个直属 `cues`。`fields` 声明
+presentation-only typed input，`cues` 声明 film absolute time event；二者都不参与
+scene sequencing。film 也可直属拥有不参与 scene sequencing 的 `music`。scene 拥有顺序
+shot 与显式 transition boundary；shot 拥有 `video`、`vo`、`sfx`、`title` 与 `cta`。
 
 示意语法：
 
@@ -378,9 +385,18 @@ ONM-TIME-004 标题“立即购买”从第 13 秒开始，但所属 shot 在第
 | `ONM-CAPTION-001` | 导入的字幕文件违反所选格式的语法             |
 | `ONM-CAPTION-002` | 导入的字幕文件使用了尚未支持的呈现语义       |
 | `ONM-CAPTION-003` | 导入的字幕文件超过了有界摄取限制             |
+| `ONM-VARIANT-001` | field declaration 的 name、kind、default 或 shape 非法 |
+| `ONM-VARIANT-002` | film 重复声明同一 field name                 |
+| `ONM-VARIANT-003` | presentation binding 引用了未声明 field      |
+| `ONM-VARIANT-004` | presentation sink 与 field kind 不兼容       |
+| `ONM-VARIANT-005` | authored fallback markup 与 field default 不一致 |
+| `ONM-VARIANT-006` | external variant document malformed、nested 或越界 |
+| `ONM-VARIANT-007` | external variant document 包含未声明 field   |
+| `ONM-VARIANT-008` | external value 的 kind、spelling 或有界值非法 |
+| `ONM-VARIANT-009` | 已声明 field 没有 presentation binding       |
 
-`ONM-REF-002`
-的 severity 是 warning；其余首批 bind、resolve 与 timing 诊断均为 error。
+`ONM-REF-002` 与 `ONM-VARIANT-009` 的 severity 是 warning；其余首批 bind、
+resolve、timing 与 variant 诊断均为 error。
 
 tokenizer 遇到致命词法错误后停止，因此词法恢复可能只能产生一条诊断；只要剩余结构可信，Onmark 仍继续聚合彼此独立的嵌套、绑定和语义诊断。输入结束时，每个仍处于打开状态的元素各产生一条诊断：primary
 span 指向元素的打开名称，related span 指向剧本末尾。即使 tokenizer 将 document
@@ -395,9 +411,10 @@ type 的内部子集拆成多个 token，整段声明也只产生一条诊断。
 `<script type="module" data-om-motion>` 只导出一个 `motion` value，并可导入
 `onmark/motion/gsap` 等已准入 adapter；bundler 不允许其他 script element。
 
-当前没有同名 CSS/motion 文件约定、`--presentation` escape hatch、`presents` attribute、
-`definePresentation` declaration 或独立 typed props channel。已求解事实只作为
-Rust-owned `BrowserPlan`，通过 runtime 的 `Load(plan)` 到达浏览器。
+当前没有同名 CSS/motion 文件约定、`--presentation` escape hatch、`presents`
+attribute、`definePresentation` declaration、任意 props object、source placeholder
+substitution 或 module-owned input schema。已求解事实和下方定义的封闭 typed value
+只作为 Rust-owned `BrowserPlan`，通过 runtime 的 `Load(plan)` 到达浏览器。
 
 Browser Plan 还会保留 film、scene、shot 与 content ownership。compiler 为每个投影 node
 分配 dense unit-local identity，并且只携带已准入的 authored ID、语义角色、text、ownership
@@ -425,13 +442,79 @@ presentation code 不得把 semantic sibling 的存在当作隐式 cross-region 
 shot 内的 style 只属于该 region；scene 内、shot 外的 style 属于该 scene 的每个 region；
 位于所有 scene 之外的 film/document style 属于全部 region。
 
-这是语言边界，不是未写下来的实现细节。未来的 screenplay-selected
-presentation 或 props feature 必须一起定义其 spelling、typed
-schema/default、canonical encoding、带 source 的 diagnostic、bundle/cache
-identity 和 temporal capability
-effect，并满足下方语言实验门槛。在那之前，stylesheet rule 与静态 TypeScript import
-都是 presentation code，不是 screenplay props。浏览器 authoring contract 另见
-[presentation contract](presentation-contract.md)。
+### Canonical typed variants
+
+film 可声明一份封闭的 presentation input schema：
+
+```html
+<om-fields>
+  <om-field name="headline" type="text" default="Summer edit"></om-field>
+  <om-field name="accent" type="color" default="#ff4d36"></om-field>
+  <om-field name="progress" type="integer" default="72"></om-field>
+  <om-field name="featured" type="boolean" default="false"></om-field>
+</om-fields>
+```
+
+`om-fields` 是可选的 `om-film` 直属子元素，至多出现一次，只包含 `om-field`，并会从
+browser projection 中移除。`om-field` 为空，只接受 `name`、`type` 与 `default`。每部
+film 最多声明 256 个 field。field name 是匹配
+`[a-z][A-Za-z0-9]{0,63}` 的 lower-camel ASCII identifier，并在 film 内唯一。
+
+当前只准入四种类型：
+
+- `text` 是 HTML character reference 解码后的 Unicode text，随后保持 UTF-8 bytes
+  不变，最大 16 KiB；
+- `integer` 是 JavaScript 精确有符号整数范围内的 canonical 十进制整数，不允许正号或
+  多余前导零；
+- `boolean` 只能是 `true` 或 `false`；
+- `color` 只能是小写 `#rrggbb` 或 `#rrggbbaa`。
+
+default 使用上述 canonical spelling。compiler 只解析一次并产出 typed value；
+presentation code 不会重新解析 JSON string 或 authored attribute。
+
+presentation markup 只通过三种 literal sink 绑定 field：
+
+```html
+<om-shot
+  data-om-css="accent progress"
+  style="--accent:#ff4d36;--progress:72">
+  <om-title data-om-text="headline">Summer edit</om-title>
+  <span data-om-show="featured" hidden>Featured</span>
+</om-shot>
+```
+
+- `data-om-text` 只命名一个 `text` field；元素只含 direct text，且该文本等于声明的
+  default；
+- `data-om-css` 用 ASCII whitespace 分隔一个或多个 `color` 或 `integer` field；同一
+  element 必须在 inline style 中把每个 `--<field>` custom property 初始化为 canonical
+  default；
+- `data-om-show` 只命名一个 `boolean` field；default 为 `false` 时元素必须有
+  `hidden`，default 为 `true` 时不得有。
+
+binding 必须位于 semantic film 内，并禁止出现在 `om-fields`、cue declaration、native
+audio declaration、`style` 与 `script` 内。没有任何 binding 的 field 产生 warning。
+未知 field、同一 sink 重复 binding、类型不兼容以及 fallback markup 与 default 不一致都产生
+error。作者文档因此在 Onmark 运行前仍然真实且可直接查看。
+
+可选 external variant document 是 flat JSON object：key 必须是已声明 field name，JSON
+scalar type 必须与 schema 匹配。缺失 key 使用 default；duplicate/unknown key、nested
+value、non-canonical number 或越界值都是 error。文档上限为 1 MiB。resolve 产出 immutable、
+按 name 排序的 canonical value vector；source JSON spelling 不进入 render identity。
+
+typed variant 只能改变上述 literal presentation sink，不能改变 element structure、timing、
+cue、media source、treatment、frame rate、dimension、output profile、capability、motion
+module 或 resource import。它在一次 render 内 immutable，也不会创建 mutable global、URL
+parameter、source rewrite、template language 或第二套 scheduler。
+
+field binding 沿用 presentation ownership：shot 内 binding 只影响该 shot 的 Render Graph
+region；scene shell binding 影响该 scene 保留的所有 region；film shell binding 影响全部
+region。transition binding 只影响同时保留两个相邻 shot 的 region。Timeline IR 记录这些
+scope；每份 Browser Plan 只携带其 region 需要的 canonical value，因此修改 field 只会使真实
+依赖它的 region 失效，immutable bundle 仍可复用。
+
+这是唯一获准的 screenplay-to-presentation value channel。stylesheet rule 与静态
+TypeScript import 仍是 presentation code，不是 variant value。浏览器 authoring contract
+另见 [presentation contract](presentation-contract.md)。
 
 ## 11. 当前不支持的能力
 
@@ -443,7 +526,7 @@ effect，并满足下方语言实验门槛。在那之前，stylesheet rule 与�
 - 条件分支和运行时未知数量循环；
 - speed ramp、倒放和音频响应式动画；
 - 跨 scene persist，以及推断 window 或跨 scene 的转场；
-- screenplay 选择的 presentation 或 props；
+- 任意或 module-owned props；
 - 自动 TTS 或联网素材生成。
 
 这些不是永远拒绝，而是必须通过真实用例、语义设计和生成实验进入语言。未来的类型化语义边界仍然只能产生命名事件，不会恢复自由时间属性；不能用任意属性逃逸口提前吞掉它们。
