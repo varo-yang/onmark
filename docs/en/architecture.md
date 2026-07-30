@@ -1992,6 +1992,12 @@ matching 33 ms terminal interval. Two independent pinned-Chromium sessions
 produced byte-identical captures. This evidence admits VP9 to
 `browserComposite`; it does not admit VP9 to native composition.
 
+An independent 8-bit `yuv420p` AV1/MP4 fixture passed the same non-monotonic
+seek, frame-readiness, and two-session byte-identity checks with the locked
+v149 headless shell. Unlike the WebM fixture, its MP4 timing is proved as CFR
+without the terminal-packet exception. AV1 therefore enters only
+`browserComposite`; native AV1 decode and composition remain unproved.
+
 The two decode paths are not pixel-interchangeable. Across four 320×180 RGBA
 frames, Chromium canvas output differed from `FFmpeg` raw extraction in roughly
 229,000–232,000 of 921,600 channels, with mean absolute channel error 2.13–2.18
@@ -2042,8 +2048,8 @@ and the bundle explicitly declared `separableOverlay`. Planning now selects
 that native path before launch when all facts prove it; otherwise it selects
 `browserComposite`. The executor never switches paths as a fallback.
 
-The current browser visual profile admits 8-bit `yuv420p` H.264 and VP9 with
-either one proved CFR rate or a complete VFR timestamp map.
+The current browser visual profile admits 8-bit `yuv420p` AV1, H.264, and VP9
+with either one proved CFR rate or a complete VFR timestamp map.
 `browserComposite` uses the locked Chromium decoder as its authoritative
 decode/color path and does not report readiness until
 `requestVideoFrameCallback.mediaTime` identifies the Rust-selected source

@@ -1916,6 +1916,12 @@ final decoded-frame duration；上面的条件 packet query 补齐了匹配的 3
 interval。两个独立 pinned-Chromium session 得到 byte-identical capture。这份证据只让
 VP9 进入 `browserComposite`，并不让它进入 native composition。
 
+另一份独立的 8-bit `yuv420p` AV1/MP4 fixture 也通过了相同的乱序 seek、
+frame-readiness 与双 session 字节一致性检查，执行环境是锁定的 v149 headless
+shell。与 WebM fixture 不同，它的 MP4 timing 无需 terminal-packet 例外即可证明为
+CFR。因此 AV1 只进入 `browserComposite`；native AV1 decode 与 composition
+仍未获得证据。
+
 两条 decode path 并非 pixel-interchangeable。四张 320×180
 RGBA 帧共 921,600 个 channel，Chromium canvas 与 FFmpeg raw
 extraction 约有 229k–232k 个 channel 不同，mean absolute
@@ -1959,7 +1965,7 @@ frozen asset metadata 拥有完整 BT.709 limited color tuple、且 bundle 显�
 native path；否则选择 `browserComposite`。executor 绝不在运行中切换成隐藏 fallback。
 
 当前 browser 视觉 profile 接纳具备一个精确 CFR rate 或完整 VFR timestamp map 的
-8-bit `yuv420p` H.264 与 VP9 素材。`browserComposite` 使用锁定 Chromium decoder
+8-bit `yuv420p` AV1、H.264 与 VP9 素材。`browserComposite` 使用锁定 Chromium decoder
 作为权威 decode/color path，且只有 `requestVideoFrameCallback.mediaTime` 指向 Rust
 选中的 source frame 时才返回 ready。native composition 仍然只接纳 H.264，并且仅在
 Gate 七的 color、layout、source-treatment proof 成立且素材为 CFR 时，才使用已准入的
