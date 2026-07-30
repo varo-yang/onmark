@@ -117,6 +117,45 @@ pub(crate) struct ProbedVideoTiming {
     duration: Duration,
 }
 
+/// Whether decoded-frame facts contain their own terminal boundary.
+pub(crate) enum FrameTimingProbe {
+    Complete(ProbedVideoTiming),
+    NeedsPacketDuration(PendingVideoTiming),
+}
+
+/// Decoded-frame facts waiting for the selected terminal packet duration.
+///
+/// Some containers omit both stream duration and the final decoded frame's
+/// packet duration. The frame timestamps remain authoritative; a separate
+/// bounded packet probe supplies only the missing terminal interval.
+pub(crate) struct PendingVideoTiming {
+    timebase: MediaTimebase,
+    boundaries: Vec<u64>,
+    last_timestamp: i64,
+}
+
+impl PendingVideoTiming {
+    pub(crate) const fn last_timestamp(&self) -> i64 {
+        self.last_timestamp
+    }
+
+    pub(crate) fn finish(
+        self,
+        path: &Path,
+        packet_duration: u64,
+    ) -> Result<ProbedVideoTiming, ProbeError> {
+        let last_start = *self
+            .boundaries
+            .last()
+            .expect("a pending timing probe retains at least one decoded frame");
+        let terminal = last_start
+            .checked_add(packet_duration)
+            .ok_or_else(|| ProbeError::invalid_video(path, "video timestamp exceeds its domain"))?;
+
+        finish_frame_timing(path, self.timebase, self.boundaries, terminal)
+    }
+}
+
 pub(crate) fn parse_metadata(path: &Path, bytes: &[u8]) -> Result<PendingMetadata, ProbeError> {
     let response = serde_json::from_slice::<ProbeResponse>(bytes)
         .map_err(|source| ProbeError::invalid_response(path, source))?;
@@ -348,7 +387,7 @@ enum ProbeInteger {
 pub(crate) fn parse_frame_timing(
     path: &Path,
     bytes: &[u8],
-) -> Result<ProbedVideoTiming, ProbeError> {
+) -> Result<FrameTimingProbe, ProbeError> {
     let response = serde_json::from_slice::<FrameProbeResponse>(bytes)
         .map_err(|source| ProbeError::invalid_response(path, source))?;
     let [stream] = response.streams.as_slice() else {
@@ -379,9 +418,36 @@ pub(crate) fn parse_frame_timing(
             })?;
         boundaries.push(relative);
     }
-    let terminal = terminal_timestamp(path, stream, &timestamps, origin)?;
-    boundaries.push(terminal);
+    let Some(terminal) = terminal_timestamp(path, stream, &timestamps, origin)? else {
+        return Ok(FrameTimingProbe::NeedsPacketDuration(PendingVideoTiming {
+            timebase,
+            boundaries,
+            last_timestamp: timestamps
+                .last()
+                .expect("the caller rejects an empty frame sequence")
+                .timestamp,
+        }));
+    };
 
+    finish_frame_timing(path, timebase, boundaries, terminal).map(FrameTimingProbe::Complete)
+}
+
+fn finish_frame_timing(
+    path: &Path,
+    timebase: MediaTimebase,
+    mut boundaries: Vec<u64>,
+    terminal: u64,
+) -> Result<ProbedVideoTiming, ProbeError> {
+    let last_start = *boundaries
+        .last()
+        .expect("frame timing retains at least one decoded frame");
+    if terminal <= last_start {
+        return Err(ProbeError::invalid_video(
+            path,
+            "video stream ends before its final frame",
+        ));
+    }
+    boundaries.push(terminal);
     let duration = timebase
         .duration_at(terminal)
         .map_err(|source| ProbeError::invalid_video(path, source))?;
@@ -421,7 +487,7 @@ fn terminal_timestamp(
     stream: &FrameProbeStream,
     frames: &[ParsedFrame],
     origin: i64,
-) -> Result<u64, ProbeError> {
+) -> Result<Option<u64>, ProbeError> {
     let last = frames
         .last()
         .expect("the caller rejects an empty frame sequence");
@@ -431,24 +497,61 @@ fn terminal_timestamp(
     let last_start = u64::try_from(last_start)
         .map_err(|_| ProbeError::invalid_video(path, "video timestamp exceeds its domain"))?;
 
-    let terminal =
-        match optional_video_integer(path, "stream duration", stream.duration_ts.as_ref())? {
-            Some(duration) => duration,
-            None => last_start
-                .checked_add(last.duration.ok_or_else(|| {
-                    ProbeError::invalid_video(path, "final video frame duration is missing")
-                })?)
-                .ok_or_else(|| {
-                    ProbeError::invalid_video(path, "video timestamp exceeds its domain")
-                })?,
-        };
-    if terminal <= last_start {
-        return Err(ProbeError::invalid_video(
-            path,
-            "video stream ends before its final frame",
-        ));
+    if let Some(duration) =
+        optional_video_integer(path, "stream duration", stream.duration_ts.as_ref())?
+    {
+        return Ok(Some(duration));
     }
-    Ok(terminal)
+    last.duration
+        .map(|duration| {
+            last_start.checked_add(duration).ok_or_else(|| {
+                ProbeError::invalid_video(path, "video timestamp exceeds its domain")
+            })
+        })
+        .transpose()
+}
+
+#[derive(Deserialize)]
+struct PacketProbeResponse {
+    #[serde(default)]
+    packets: Vec<ProbePacket>,
+}
+
+#[derive(Deserialize)]
+struct ProbePacket {
+    pts: Option<ProbeInteger>,
+    duration: Option<ProbeInteger>,
+}
+
+pub(crate) fn parse_terminal_packet_duration(
+    path: &Path,
+    bytes: &[u8],
+    last_timestamp: i64,
+) -> Result<u64, ProbeError> {
+    let response = serde_json::from_slice::<PacketProbeResponse>(bytes)
+        .map_err(|source| ProbeError::invalid_response(path, source))?;
+    let mut duration = None;
+    let mut found = false;
+
+    for packet in response.packets {
+        let Some(timestamp) = packet.pts.as_ref() else {
+            continue;
+        };
+        let timestamp = required_video_integer(path, "packet timestamp", Some(timestamp))?;
+        if timestamp != last_timestamp {
+            continue;
+        }
+        if found {
+            return Err(ProbeError::invalid_video(
+                path,
+                "final video timestamp belongs to more than one packet",
+            ));
+        }
+        found = true;
+        duration = optional_video_integer(path, "final packet duration", packet.duration.as_ref())?;
+    }
+
+    duration.ok_or_else(|| ProbeError::invalid_video(path, "final video frame duration is missing"))
 }
 
 fn classify_frame_timing(

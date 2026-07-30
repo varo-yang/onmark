@@ -235,6 +235,34 @@ fn distinguishes_variable_and_still_video_timing() {
 }
 
 #[test]
+fn recovers_a_missing_terminal_frame_duration_from_packets() {
+    let ffprobe = responsive_fixture_probe(4_096);
+    let metadata = ffprobe
+        .probe(Path::new("packet-duration-only.webm"))
+        .expect("the selected packet completes the decoded frame map");
+    let video = metadata
+        .video_metadata()
+        .expect("the fixture contains a video stream");
+
+    assert_eq!(video.codec(), "vp9");
+    assert_eq!(video.duration(), MediaDuration::from_nanos(100_000_000));
+    assert_eq!(
+        video.timing(),
+        &VideoTiming::Constant(FrameRate::new(30, 1).expect("30 fps is valid")),
+    );
+}
+
+#[test]
+fn rejects_an_ambiguous_terminal_packet() {
+    let ffprobe = responsive_fixture_probe(4_096);
+
+    assert!(matches!(
+        probe_error(&ffprobe, "ambiguous-packet-duration.webm"),
+        ProbeError::InvalidVideo(_),
+    ));
+}
+
+#[test]
 fn frozen_identity_and_probed_metadata_drive_timeline_solving() {
     let ffprobe = responsive_fixture_probe(4_096);
     let metadata = ffprobe

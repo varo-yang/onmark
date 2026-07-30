@@ -109,6 +109,7 @@ pub struct RenderUnit {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RenderVideo {
     asset: MaterializedAsset,
+    codec: Box<str>,
     source_timing: VideoTiming,
     dimensions: VideoDimensions,
     color_profile: Option<VideoColorProfile>,
@@ -119,6 +120,12 @@ impl RenderVideo {
     #[must_use]
     pub const fn asset(&self) -> &MaterializedAsset {
         &self.asset
+    }
+
+    /// Returns the admitted source codec.
+    #[must_use]
+    pub fn codec(&self) -> &str {
+        &self.codec
     }
 
     /// Returns the complete source-frame timing proved during composition.
@@ -746,6 +753,7 @@ fn insert_render_video(
     videos.insert(
         id,
         RenderVideo {
+            codec: admitted.metadata().codec().into(),
             source_timing: admitted.timing().clone(),
             dimensions: admitted.metadata().dimensions(),
             color_profile: admitted.metadata().color_profile(),
@@ -1269,26 +1277,32 @@ mod tests {
     }
 
     #[test]
-    fn rejects_an_unproved_declared_backdrop_without_fallback() {
-        let frozen = layered_video_asset(video_dimensions(), false);
-        let timeline = video_timeline(frozen.clone());
-        let materialized = MaterializedAsset::new(frozen, "/tmp/opening.mp4")
-            .expect("the fixture path is present");
-
-        let error = RenderUnit::whole_film(
-            &timeline,
-            bundle_manifest_with(PresentationVisualCapability::SeparableBackdrop),
-            render_profile(),
-            [materialized],
-        )
-        .expect_err("a strong authored capability cannot fall back after admission");
-
-        assert_eq!(
-            error,
-            InvalidRenderUnit::VisualComposition(
+    fn rejects_unproved_declared_backdrops_without_fallback() {
+        let cases = [
+            (
+                layered_video_asset(video_dimensions(), false),
                 crate::UnsupportedVisualComposition::UnsupportedColorProfile,
             ),
-        );
+            (
+                layered_video_asset_with_codec("vp9"),
+                crate::UnsupportedVisualComposition::UnsupportedCodec,
+            ),
+        ];
+
+        for (frozen, reason) in cases {
+            let timeline = video_timeline(frozen.clone());
+            let materialized = MaterializedAsset::new(frozen, "/tmp/opening.mp4")
+                .expect("the fixture path is present");
+            let error = RenderUnit::whole_film(
+                &timeline,
+                bundle_manifest_with(PresentationVisualCapability::SeparableBackdrop),
+                render_profile(),
+                [materialized],
+            )
+            .expect_err("a strong authored capability cannot fall back after admission");
+
+            assert_eq!(error, InvalidRenderUnit::VisualComposition(reason));
+        }
     }
 
     #[test]
@@ -1507,9 +1521,11 @@ mod tests {
             true,
         );
         let missing_color = layered_video_asset(video_dimensions(), false);
+        let unproved_codec = layered_video_asset_with_codec("vp9");
 
         assert_browser_composition(mismatched);
         assert_browser_composition(missing_color);
+        assert_browser_composition(unproved_codec);
     }
 
     #[test]
@@ -1896,14 +1912,34 @@ mod tests {
         )
     }
 
+    fn layered_video_asset_with_codec(codec: &str) -> FrozenAsset {
+        video_asset_with_codec(
+            1,
+            VideoTiming::Constant(frame_rate()),
+            video_dimensions(),
+            Some(VideoColorProfile::Bt709Limited),
+            codec,
+        )
+    }
+
     fn video_asset_with(
         identity: u8,
         timing: VideoTiming,
         dimensions: VideoDimensions,
         color_profile: Option<VideoColorProfile>,
     ) -> FrozenAsset {
+        video_asset_with_codec(identity, timing, dimensions, color_profile, "h264")
+    }
+
+    fn video_asset_with_codec(
+        identity: u8,
+        timing: VideoTiming,
+        dimensions: VideoDimensions,
+        color_profile: Option<VideoColorProfile>,
+        codec: &str,
+    ) -> FrozenAsset {
         let duration = Duration::from_nanos(1_000_000_000);
-        let metadata = VideoMetadata::new(duration, dimensions, "h264", "yuv420p", timing)
+        let metadata = VideoMetadata::new(duration, dimensions, codec, "yuv420p", timing)
             .expect("the fixture metadata is normalized");
         let metadata = match color_profile {
             Some(profile) => metadata.with_color_profile(profile),

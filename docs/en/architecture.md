@@ -201,6 +201,14 @@ diagnostic. A media element with no authored source remains valid through static
 resolution but cannot produce renderable Timeline IR and receives an authored
 asset diagnostic during solving.
 
+Video probing obtains every decoded-frame timestamp through one bounded
+selected-stream query. When neither the stream nor its final frame reports the
+terminal duration, `onmark-media` performs one additional bounded packet query
+and accepts only the duration belonging to that exact final presentation
+timestamp. It never substitutes container duration, because an audio stream may
+outlive video. Complete frame responses retain the two-query path; the packet
+query is an evidence-preserving exception rather than the default cost.
+
 `FrozenAssetId` uses SHA-256 and the canonical `sha256:<lowercase-hex>`
 spelling. The hashing operation belongs at the IO freezing boundary; core owns
 only the validated identity and deterministic mapping.
@@ -1975,6 +1983,15 @@ timestamps was also byte-stable across repeated runs. Seeking to an exact CFR
 frame-boundary second selected the preceding frame; sampling inside the
 Rust-selected frame produced the intended decoded frame.
 
+Gate-eight admission adds an 8-bit `yuv420p` VP9/WebM fixture to the same
+non-monotonic browser experiment. WebM's millisecond timebase represents 30 fps
+as alternating 33/34 ms intervals, so Onmark preserves the probed boundaries as
+VFR instead of inventing a rational CFR rate. The container omits its final
+decoded-frame duration; the conditional packet query above supplies the
+matching 33 ms terminal interval. Two independent pinned-Chromium sessions
+produced byte-identical captures. This evidence admits VP9 to
+`browserComposite`; it does not admit VP9 to native composition.
+
 The two decode paths are not pixel-interchangeable. Across four 320×180 RGBA
 frames, Chromium canvas output differed from `FFmpeg` raw extraction in roughly
 229,000–232,000 of 921,600 channels, with mean absolute channel error 2.13–2.18
@@ -2025,20 +2042,23 @@ and the bundle explicitly declared `separableOverlay`. Planning now selects
 that native path before launch when all facts prove it; otherwise it selects
 `browserComposite`. The executor never switches paths as a fallback.
 
-The current visual profile admits H.264 with either one proved CFR rate or a
-complete VFR timestamp map. `browserComposite` uses the locked Chromium decoder
-as its authoritative decode/color path and does not report readiness until
+The current browser visual profile admits 8-bit `yuv420p` H.264 and VP9 with
+either one proved CFR rate or a complete VFR timestamp map.
+`browserComposite` uses the locked Chromium decoder as its authoritative
+decode/color path and does not report readiness until
 `requestVideoFrameCallback.mediaTime` identifies the Rust-selected source
-frame. `separableOverlay` uses the admitted persistent native decoder and
-compositor only for CFR media under the Gate-seven color, layout, and source-
-treatment proofs. Unsupported codecs and incomplete native-path facts are
-rejected or kept on the proved browser path rather than silently approximated.
+frame. Native composition remains H.264-only and uses the admitted persistent
+decoder and compositor only for CFR media under the Gate-seven color, layout,
+and source-treatment proofs. Unsupported browser codecs and pixel formats are
+rejected; a browser-admitted codec or incomplete native-path fact selects the
+proved browser path rather than silently widening native admission.
 
 This policy is represented by render-owned `AdmittedVideo` proof over core-owned
 metadata. It borrows normalized facts instead of introducing a second media
-model and proves H.264 plus complete source timing. The Render Unit retains that
-timing and lowers it into each browser placement exactly once; native admission
-then independently requires its constant-rate subset. Decoded-media conformance
-obtains CFR and VFR evidence through the production bounded ffprobe boundary,
-and the whole-film executor consumes the same admitted video through the
-production adapter.
+model and proves an admitted browser codec plus complete source timing. The
+Render Unit retains codec and timing and lowers timing into each browser
+placement exactly once; native admission independently requires H.264 and its
+constant-rate subset. Decoded-media conformance obtains CFR, VFR, and
+missing-terminal-duration evidence through the production bounded ffprobe
+boundary, and the whole-film executor consumes the same admitted video through
+the production adapter.

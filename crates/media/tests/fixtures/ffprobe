@@ -2,6 +2,7 @@
 
 metadata_entries='format=duration:stream=index,codec_type,codec_name,pix_fmt,width,height,color_range,color_space,color_transfer,color_primaries,duration,sample_rate,channels:stream_disposition=default,attached_pic'
 frame_entries='frame=best_effort_timestamp,pkt_duration:stream=time_base,duration_ts'
+packet_entries='packet=pts,duration'
 
 mode=
 if [ "$#" -eq 8 ] && \
@@ -16,6 +17,13 @@ elif [ "$#" -eq 11 ] && \
      [ "$6" = "-show_entries" ] && [ "$7" = "$frame_entries" ] && \
      [ "$8" = "-of" ] && [ "$9" = "json" ] && [ "${10}" = "--" ]; then
   mode=frames
+elif [ "$#" -eq 11 ] && \
+     [ "$1" = "-v" ] && [ "$2" = "error" ] && \
+     [ "$3" = "-select_streams" ] && \
+     [ "$5" = "-show_packets" ] && \
+     [ "$6" = "-show_entries" ] && [ "$7" = "$packet_entries" ] && \
+     [ "$8" = "-of" ] && [ "$9" = "json" ] && [ "${10}" = "--" ]; then
+  mode=packets
 else
   printf 'unexpected ffprobe arguments\n' >&2
   exit 2
@@ -24,6 +32,22 @@ fi
 for argument do
   input=$argument
 done
+
+if [ "$mode" = packets ]; then
+  case "${input##*/}" in
+    packet-duration-only.webm)
+      printf '{"packets":[{"pts":"0","duration":"1"},{"pts":"1","duration":"1"},{"pts":"2","duration":"1"}]}'
+      ;;
+    ambiguous-packet-duration.webm)
+      printf '{"packets":[{"pts":"2"},{"pts":"2","duration":"1"}]}'
+      ;;
+    *)
+      printf 'unexpected packet fixture input: %s\n' "$input" >&2
+      exit 2
+      ;;
+  esac
+  exit 0
+fi
 
 constant_frames() {
   timebase=$1
@@ -59,6 +83,9 @@ if [ "$mode" = frames ]; then
       ;;
     invalid-video-duration.mp4)
       printf '{"frames":[{"best_effort_timestamp":"0","pkt_duration":"1"},{"best_effort_timestamp":"1","pkt_duration":"1"}],"streams":[{"time_base":"1/30","duration_ts":"invalid"}]}'
+      ;;
+    packet-duration-only.webm|ambiguous-packet-duration.webm)
+      printf '{"frames":[{"best_effort_timestamp":"0"},{"best_effort_timestamp":"1"},{"best_effort_timestamp":"2"}],"streams":[{"time_base":"1/30"}]}'
       ;;
     *)
       printf 'unexpected frame fixture input: %s\n' "$input" >&2
@@ -104,6 +131,9 @@ case "${input##*/}" in
     ;;
   invalid-video-duration.mp4)
     printf '{"streams":[{"index":0,"codec_type":"video","codec_name":"h264","pix_fmt":"yuv420p","width":1920,"height":1080,"duration":"invalid"}],"format":{"duration":"2.500000"}}'
+    ;;
+  packet-duration-only.webm|ambiguous-packet-duration.webm)
+    printf '{"streams":[{"index":0,"codec_type":"video","codec_name":"vp9","pix_fmt":"yuv420p","width":1920,"height":1080}],"format":{"duration":"0.100000"}}'
     ;;
   missing-video-width.mp4)
     printf '{"streams":[{"codec_type":"video","codec_name":"h264","pix_fmt":"yuv420p","height":1080,"duration":"2.000000"}],"format":{"duration":"2.500000"}}'

@@ -104,6 +104,19 @@ async fn validates_admission_and_cfr_decode_paths() {
 }
 
 #[tokio::test]
+#[ignore = "requires pinned Chromium, FFmpeg, ffprobe, and built runtime"]
+async fn validates_vp9_browser_admission() {
+    run_case_with_codec(
+        "vp9-cfr-30",
+        FrameRate::new(30, 1).expect("the VP9 fixture rate is valid"),
+        FrameRate::new(30, 1).expect("the output rate is valid"),
+        FixtureTiming::Constant,
+        FixtureCodec::Vp9,
+    )
+    .await;
+}
+
+#[tokio::test]
 #[ignore = "requires Linux ONMARK_HEADLESS_SHELL, ONMARK_FFMPEG, and built runtime"]
 async fn compares_native_seek_with_alternative_media_paths() {
     let fixture = StrategyFixture::build().await;
@@ -347,13 +360,33 @@ async fn run_case(
     output_frame_rate: FrameRate,
     timing: FixtureTiming,
 ) {
+    run_case_with_codec(
+        name,
+        source_frame_rate,
+        output_frame_rate,
+        timing,
+        FixtureCodec::H264,
+    )
+    .await;
+}
+
+async fn run_case_with_codec(
+    name: &str,
+    source_frame_rate: FrameRate,
+    output_frame_rate: FrameRate,
+    timing: FixtureTiming,
+    codec: FixtureCodec,
+) {
     let directory = experiment_directory(name);
-    let media = directory.path().join(format!("{name}.mp4"));
-    generate_video(&media, source_frame_rate, timing).await;
-    let Some(source_video) = admitted_source_video(&media).await else {
-        return;
-    };
-    if timing == FixtureTiming::Constant {
+    let media = directory
+        .path()
+        .join(format!("{name}.{}", codec.container_extension()));
+    generate_video_as(&media, source_frame_rate, timing, codec).await;
+    let source_video = observe_admitted_video(&media).await;
+    if matches!(
+        (timing, codec),
+        (FixtureTiming::Constant, FixtureCodec::H264)
+    ) {
         assert_eq!(
             source_video.timing,
             VideoTiming::Constant(source_frame_rate),
@@ -363,10 +396,11 @@ async fn run_case(
     let source_frames = probe_source_frames(&media).await;
     let expected = expected_frames(output_frame_rate, &source_frames, &SEEK_SEQUENCE);
     let fixture = decoded_video_fixture(&media, &expected);
-    let plan = browser_plan_with_timing(
+    let plan = browser_plan_with_codec_timing(
         output_frame_rate,
         source_video.timing,
         source_video.duration,
+        codec.name(),
     );
 
     let first_browser = capture_seek_sequence(&fixture, &plan).await;
@@ -620,9 +654,73 @@ enum FixtureTiming {
     AlternatingVfr,
 }
 
+#[derive(Clone, Copy)]
+enum FixtureCodec {
+    H264,
+    Vp9,
+}
+
+impl FixtureCodec {
+    const fn name(self) -> &'static str {
+        match self {
+            Self::H264 => "h264",
+            Self::Vp9 => "vp9",
+        }
+    }
+
+    const fn container_extension(self) -> &'static str {
+        match self {
+            Self::H264 => "mp4",
+            Self::Vp9 => "webm",
+        }
+    }
+
+    const fn encoder_arguments(self) -> &'static [&'static str] {
+        match self {
+            Self::H264 => &[
+                "-c:v",
+                "libx264",
+                "-x264-params",
+                "colorprim=bt709:transfer=bt709:colormatrix=bt709:range=limited",
+                "-g",
+                "30",
+                "-bf",
+                "3",
+                "-movflags",
+                "+faststart",
+            ],
+            Self::Vp9 => &[
+                "-c:v",
+                "libvpx-vp9",
+                "-deadline",
+                "good",
+                "-cpu-used",
+                "2",
+                "-crf",
+                "24",
+                "-b:v",
+                "0",
+                "-row-mt",
+                "1",
+                "-g",
+                "30",
+            ],
+        }
+    }
+}
+
 // ── Media fixtures and native reference ──
 
 async fn generate_video(output: &Path, frame_rate: FrameRate, timing: FixtureTiming) {
+    generate_video_as(output, frame_rate, timing, FixtureCodec::H264).await;
+}
+
+async fn generate_video_as(
+    output: &Path,
+    frame_rate: FrameRate,
+    timing: FixtureTiming,
+    codec: FixtureCodec,
+) {
     let (width, height) = experiment_dimensions();
     let source = match timing {
         FixtureTiming::Constant => format!(
@@ -639,15 +737,10 @@ async fn generate_video(output: &Path, frame_rate: FrameRate, timing: FixtureTim
     if matches!(timing, FixtureTiming::AlternatingVfr) {
         command.args(["-vf", "setpts=(N+floor(N/2))/(30*TB)", "-fps_mode", "vfr"]);
     }
+    command.args(["-an", "-pix_fmt", "yuv420p"]);
+    command.args(codec.encoder_arguments());
     let generated = command
         .args([
-            "-an",
-            "-c:v",
-            "libx264",
-            "-pix_fmt",
-            "yuv420p",
-            "-x264-params",
-            "colorprim=bt709:transfer=bt709:colormatrix=bt709:range=limited",
             "-colorspace",
             "bt709",
             "-color_primaries",
@@ -656,12 +749,6 @@ async fn generate_video(output: &Path, frame_rate: FrameRate, timing: FixtureTim
             "bt709",
             "-color_range",
             "tv",
-            "-g",
-            "30",
-            "-bf",
-            "3",
-            "-movflags",
-            "+faststart",
             "-y",
         ])
         .arg(output)
@@ -676,11 +763,24 @@ async fn generate_video(output: &Path, frame_rate: FrameRate, timing: FixtureTim
 
 struct AdmittedFixtureVideo {
     timing: VideoTiming,
-    duration: MediaDuration,
     color_profile: VideoColorProfile,
 }
 
 async fn admitted_source_video(media: &Path) -> Option<AdmittedFixtureVideo> {
+    let admitted = observe_admitted_video(media).await;
+    Some(AdmittedFixtureVideo {
+        timing: admitted.timing,
+        color_profile: admitted.color_profile?,
+    })
+}
+
+struct ObservedVideo {
+    timing: VideoTiming,
+    duration: MediaDuration,
+    color_profile: Option<VideoColorProfile>,
+}
+
+async fn observe_admitted_video(media: &Path) -> ObservedVideo {
     let probe = Ffprobe::new(
         required_path("ONMARK_FFPROBE"),
         PROCESS_DEADLINE,
@@ -694,16 +794,12 @@ async fn admitted_source_video(media: &Path) -> Option<AdmittedFixtureVideo> {
         .expect("ffprobe must normalize the experiment media");
 
     let admitted =
-        AdmittedVideo::admit(&metadata).expect("the timed H.264 fixture must be admitted");
-    let color_profile = admitted
-        .metadata()
-        .color_profile()
-        .expect("the layered experiment requires complete source-color facts");
-    Some(AdmittedFixtureVideo {
+        AdmittedVideo::admit(&metadata).expect("the timed browser fixture must be admitted");
+    ObservedVideo {
         timing: admitted.timing().clone(),
         duration: admitted.metadata().duration(),
-        color_profile,
-    })
+        color_profile: admitted.metadata().color_profile(),
+    }
 }
 
 async fn probe_source_frames(media: &Path) -> Vec<f64> {
@@ -1124,11 +1220,20 @@ fn browser_plan_with_timing(
     source_timing: VideoTiming,
     duration: MediaDuration,
 ) -> BrowserPlan {
+    browser_plan_with_codec_timing(output_frame_rate, source_timing, duration, "h264")
+}
+
+fn browser_plan_with_codec_timing(
+    output_frame_rate: FrameRate,
+    source_timing: VideoTiming,
+    duration: MediaDuration,
+    codec: &str,
+) -> BrowserPlan {
     let (width, height) = experiment_dimensions();
     let video = VideoMetadata::new(
         duration,
         VideoDimensions::new(width, height).expect("fixture dimensions are positive"),
-        "h264",
+        codec,
         "yuv420p",
         source_timing.clone(),
     )

@@ -236,6 +236,9 @@ fn select_backdrop_media_plan<'a>(
         let video = available
             .get(&placement.asset_identity())
             .ok_or(UnsupportedVisualComposition::BackdropMediaMismatch)?;
+        if video.codec() != "h264" {
+            return Err(UnsupportedVisualComposition::UnsupportedCodec);
+        }
         if video.color_profile() != Some(VideoColorProfile::Bt709Limited) {
             return Err(UnsupportedVisualComposition::UnsupportedColorProfile);
         }
@@ -288,7 +291,7 @@ fn select_layered_media_plan<'a>(
     if validate_layered_placement(plan, profile, video.asset().id(), video.dimensions()).is_err() {
         return None;
     }
-    if video.color_profile() != Some(VideoColorProfile::Bt709Limited) {
+    if !supports_native_video(video) {
         return None;
     }
 
@@ -297,6 +300,10 @@ fn select_layered_media_plan<'a>(
         asset_identity: placement.asset_identity(),
         dimensions: video.dimensions(),
     })
+}
+
+fn supports_native_video(video: &RenderVideo) -> bool {
+    video.codec() == "h264" && video.color_profile() == Some(VideoColorProfile::Bt709Limited)
 }
 
 impl Serialize for VisualExecutionPlan {
@@ -1048,6 +1055,8 @@ pub enum UnsupportedVisualComposition {
     DimensionMismatch,
     /// Native decoding requires one complete supported source-color tuple.
     UnsupportedColorProfile,
+    /// Native decoding has not admitted the selected source codec.
+    UnsupportedCodec,
 }
 
 impl fmt::Display for UnsupportedVisualComposition {
@@ -1098,6 +1107,9 @@ impl fmt::Display for UnsupportedVisualComposition {
             }
             Self::UnsupportedColorProfile => {
                 "native visual composition requires a complete supported source-color profile"
+            }
+            Self::UnsupportedCodec => {
+                "native visual composition does not support the selected video codec"
             }
         })
     }
