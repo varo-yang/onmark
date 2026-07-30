@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::Output;
 use std::time::Duration;
 
+use onmark_render::{FrameArtifact, FrameArtifactLimits};
 use serde::Deserialize;
 use sha2::{Digest as _, Sha256};
 use tempfile::tempdir;
@@ -22,6 +23,9 @@ const AUDIBLE_SAMPLE_THRESHOLD: u16 = 256;
 const AUDIO_START_TOLERANCE_MICROS: u64 = 25_000;
 const DESKTOP_FRAME_COUNT: usize = 45;
 const PARTITIONED_FRAME_COUNT: usize = 60;
+const EXACT_RASTER_FRAME_COUNT: u64 = 75;
+const EXACT_RASTER_WIDTH: u32 = 1_920;
+const EXACT_RASTER_HEIGHT: u32 = 1_080;
 const PROCESS_DEADLINE: Duration = Duration::from_mins(3);
 const CACHE_ENVIRONMENT: &str =
     "sha256:1111111111111111111111111111111111111111111111111111111111111111";
@@ -105,6 +109,56 @@ async fn reuses_only_unchanged_regions_across_cli_processes() {
             .len()
             > b"corrupt".len() as u64,
     );
+}
+
+#[tokio::test]
+#[ignore = "requires ONMARK_CLI, ONMARK_BUNDLER, ONMARK_FFMPEG, and a discoverable browser"]
+async fn reuses_exact_regions_across_batch_processes() {
+    let directory = tempdir().expect("the conformance workspace is available");
+    let fixture = Fixture::write(directory.path(), &incremental_film("Closing"));
+    let cache = directory.path().join("frame-cache");
+
+    let first = fixture
+        .batch_cached("first-batch.json", "first.mp4", &cache)
+        .await;
+    assert_process_success("first batch rendering", &first.output);
+    assert_incremental_summary(
+        &first.output,
+        "Reused 0/2 regions and 0/60 frames across the campaign",
+    );
+
+    let warm = fixture
+        .batch_cached("warm-batch.json", "warm.mp4", &cache)
+        .await;
+    assert_process_success("warm batch rendering", &warm.output);
+    assert_incremental_summary(
+        &warm.output,
+        "Reused 2/2 regions and 60/60 frames across the campaign",
+    );
+    assert_eq!(
+        decode_video_hashes(&first.path).await,
+        decode_video_hashes(&warm.path).await,
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires ONMARK_CLI, ONMARK_BUNDLER, and a discoverable browser"]
+async fn captures_exact_raster_across_cold_cli_processes() {
+    let directory = tempdir().expect("the conformance workspace is available");
+    let fixture = Fixture::materialize(directory.path(), "cli/exact-raster.html");
+    let first_cache = directory.path().join("first-cache");
+    let second_cache = directory.path().join("second-cache");
+
+    let first = fixture.review_cached("first-review", &first_cache).await;
+    let second = fixture.review_cached("second-review", &second_cache).await;
+    assert_process_success("first exact-raster review", &first);
+    assert_process_success("second exact-raster review", &second);
+
+    let first = open_cache_artifacts(&first_cache).await;
+    let second = open_cache_artifacts(&second_cache).await;
+    FrameArtifact::verify_raw_rgba_equivalence(&first, &second)
+        .await
+        .expect("independent exact-raster sessions must reproduce every canonical pixel");
 }
 
 async fn render_fixture_twice(
@@ -289,6 +343,63 @@ impl Fixture {
         }
         let output = run_process(&mut command).await;
         RenderAttempt { path, output }
+    }
+
+    async fn batch_cached(&self, manifest: &str, output: &str, cache: &Path) -> RenderAttempt {
+        let manifest = self.root.join(manifest);
+        let path = self.root.join(output);
+        let source = serde_json::json!({
+            "version": 1,
+            "screenplay": "film.html",
+            "renders": [{ "variant": null, "output": output }],
+        });
+        fs::write(
+            &manifest,
+            serde_json::to_vec_pretty(&source).expect("the batch fixture serializes"),
+        )
+        .expect("the batch manifest is writable");
+
+        let mut command = Command::new(required_path("ONMARK_CLI"));
+        command
+            .arg("batch")
+            .arg(&manifest)
+            .arg("--width")
+            .arg(WIDTH.to_string())
+            .arg("--height")
+            .arg(HEIGHT.to_string())
+            .env("ONMARK_FRAME_CACHE", cache)
+            .env("ONMARK_CAPTURE_ENVIRONMENT_SEED", CACHE_ENVIRONMENT);
+        for (flag, variable) in [
+            ("--bundler", "ONMARK_BUNDLER"),
+            ("--ffmpeg", "ONMARK_FFMPEG"),
+            ("--ffprobe", "ONMARK_FFPROBE"),
+        ] {
+            if let Some(tool) = env::var_os(variable) {
+                command.arg(flag).arg(tool);
+            }
+        }
+
+        let output = run_process(&mut command).await;
+        RenderAttempt { path, output }
+    }
+
+    async fn review_cached(&self, output: &str, cache: &Path) -> Output {
+        let mut command = Command::new(required_path("ONMARK_CLI"));
+        command
+            .arg("review")
+            .arg(&self.screenplay)
+            .arg("--output")
+            .arg(self.root.join(output))
+            .arg("--width")
+            .arg(EXACT_RASTER_WIDTH.to_string())
+            .arg("--height")
+            .arg(EXACT_RASTER_HEIGHT.to_string())
+            .env("ONMARK_FRAME_CACHE", cache)
+            .env("ONMARK_CAPTURE_ENVIRONMENT_SEED", CACHE_ENVIRONMENT);
+        if let Some(bundler) = env::var_os("ONMARK_BUNDLER") {
+            command.arg("--bundler").arg(bundler);
+        }
+        run_process(&mut command).await
     }
 
     fn render_command(&self, output: &Path) -> Command {
@@ -524,12 +635,7 @@ fn assert_success(output: &Output, expected_frames: usize, capture_mode: &str) {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains(&format!("Rendered {expected_frames} frames")));
     assert!(stdout.contains(&format!("with {capture_mode} capture")));
-    let graphics_backend = if cfg!(target_os = "macos") {
-        "Metal"
-    } else {
-        "SwiftShader"
-    };
-    assert!(stdout.contains(&format!("on {graphics_backend}")));
+    assert!(stdout.contains("on SwiftShader"));
     assert!(stdout.contains("Timing: prepare "));
     assert!(stdout.contains(", bundle "));
     assert!(stdout.contains(", plan "));
@@ -584,6 +690,31 @@ fn cache_artifacts(directory: &Path) -> Vec<PathBuf> {
         })
         .collect::<Vec<_>>();
     artifacts.sort();
+    artifacts
+}
+
+async fn open_cache_artifacts(directory: &Path) -> Vec<FrameArtifact> {
+    let limits = FrameArtifactLimits::new(
+        EXACT_RASTER_FRAME_COUNT,
+        512 * 1024 * 1024,
+        16 * 1024 * 1024,
+    )
+    .expect("the exact-raster artifact limits are bounded");
+    let mut artifacts = Vec::new();
+    for path in cache_artifacts(directory) {
+        artifacts.push(
+            FrameArtifact::open(path, limits)
+                .await
+                .expect("the exact-raster artifact opens"),
+        );
+    }
+    artifacts.sort_by_key(|artifact| {
+        (
+            artifact.output().start().get(),
+            artifact.output().end().get(),
+            artifact.id(),
+        )
+    });
     artifacts
 }
 

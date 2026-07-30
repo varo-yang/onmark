@@ -22,7 +22,7 @@ use tokio::task::JoinError;
 
 const CACHE_DIRECTORY: &str = "ONMARK_FRAME_CACHE";
 const ENVIRONMENT_SEED: &str = "ONMARK_CAPTURE_ENVIRONMENT_SEED";
-const IDENTITY_DOMAIN: &[u8] = b"onmark-local-capture-environment-v1\0";
+const IDENTITY_DOMAIN: &[u8] = b"onmark-local-capture-environment-v2\0";
 const CACHE_LOCK: &str = ".cache.lock";
 const ARTIFACT_EXTENSION: &str = "onmark-frames";
 const MAX_CACHE_ARTIFACTS: usize = 10_000;
@@ -104,7 +104,7 @@ impl ArtifactCache {
         capture_mode: BrowserCaptureMode,
         graphics_backend: BrowserGraphicsBackend,
     ) -> Result<Self, ArtifactCacheError> {
-        if admission == CacheAdmission::Ephemeral {
+        if admission == CacheAdmission::Ephemeral || !admits_persistent_reuse(graphics_backend) {
             return Ok(Self {
                 directory: None,
                 environment: ephemeral_environment(capture_mode, graphics_backend),
@@ -134,16 +134,23 @@ impl ArtifactCache {
         }
     }
 
-    /// Creates one private cache shared only by jobs in the current batch.
+    /// Selects the persistent cache when its environment is exact, otherwise
+    /// retaining a private cache shared only by jobs in the current batch.
     pub(super) fn for_batch(
         directory: &Path,
+        admission: CacheAdmission,
         capture_mode: BrowserCaptureMode,
         graphics_backend: BrowserGraphicsBackend,
-    ) -> Self {
-        Self {
-            directory: Some(directory.to_owned()),
-            environment: ephemeral_environment(capture_mode, graphics_backend),
+    ) -> Result<Self, ArtifactCacheError> {
+        let cache = Self::from_environment(admission, capture_mode, graphics_backend)?;
+        if cache.directory.is_some() {
+            return Ok(cache);
         }
+
+        Ok(Self {
+            directory: Some(directory.to_owned()),
+            environment: cache.environment,
+        })
     }
 
     pub(super) const fn environment(&self) -> CaptureEnvironmentId {
@@ -561,6 +568,10 @@ const fn graphics_backend_name(graphics_backend: BrowserGraphicsBackend) -> &'st
     }
 }
 
+const fn admits_persistent_reuse(graphics_backend: BrowserGraphicsBackend) -> bool {
+    matches!(graphics_backend, BrowserGraphicsBackend::SwiftShader)
+}
+
 /// Typed local-cache failure at the CLI composition boundary.
 #[derive(Debug)]
 pub(super) enum ArtifactCacheError {
@@ -679,8 +690,8 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{
-        CacheEntry, artifact_path, cache_usage, capture_environment, inspect_cache_entry,
-        remove_corrupt, validate_capture_count,
+        CacheEntry, admits_persistent_reuse, artifact_path, cache_usage, capture_environment,
+        inspect_cache_entry, remove_corrupt, validate_capture_count,
     };
 
     #[test]
@@ -719,6 +730,13 @@ mod tests {
                 BrowserGraphicsBackend::SwiftShader,
             ),
         );
+    }
+
+    #[test]
+    fn persistent_reuse_requires_the_exact_software_graphics_contract() {
+        assert!(admits_persistent_reuse(BrowserGraphicsBackend::SwiftShader));
+        #[cfg(target_os = "macos")]
+        assert!(!admits_persistent_reuse(BrowserGraphicsBackend::Metal));
     }
 
     #[test]

@@ -15,10 +15,11 @@ use onmark_core::diagnostics::Diagnostic;
 use onmark_core::model::{CaptionTrack, Timebase};
 use onmark_core::render_graph::{PartitionPlan, RenderGraph};
 use onmark_core::timeline::TimelineIr;
-use onmark_render::{EncodeProfile, RenderProfile};
+use onmark_render::{EncodeProfile, ExecutableUnit, RenderProfile};
 use serde::{Deserialize, Serialize};
 
 use crate::arguments::{BatchArgs, RenderArgs, source_directory};
+use crate::artifact_cache::CacheAdmission;
 use crate::assets::FrozenCatalog;
 use crate::bundler::PresentationBundler;
 use crate::compilation;
@@ -44,6 +45,7 @@ pub(super) enum BatchOutcome {
     Completed {
         report: AuthoredReport,
         renders: Vec<CompletedRender>,
+        summary: BatchSummary,
         json: bool,
     },
 }
@@ -55,8 +57,9 @@ impl BatchOutcome {
             Self::Completed {
                 report,
                 renders,
+                summary,
                 json,
-            } => write_completed(&report, &renders, json),
+            } => write_completed(&report, &renders, summary, json),
         };
         result.unwrap_or(ExitCode::FAILURE)
     }
@@ -140,11 +143,7 @@ pub(super) async fn run(args: BatchArgs, json: bool) -> Result<BatchOutcome, Cli
         .bundle(&source, source_directory(screenplay), &partitions)
         .await?;
     let materialized = frozen.into_materialized()?;
-    let cache = tempfile::Builder::new()
-        .prefix("onmark-batch-cache-")
-        .tempdir()
-        .map_err(BatchError::TemporaryCache)?;
-    let engine = LocalRenderEngine::for_batch(first, &executables, encode_profile, cache.path());
+    let engine = BatchRenderEngine::new(first, &executables, encode_profile)?;
     let progress = Progress::for_command(json);
     let mut completed = Vec::with_capacity(jobs.len());
 
@@ -164,6 +163,7 @@ pub(super) async fn run(args: BatchArgs, json: bool) -> Result<BatchOutcome, Cli
         completed.push(CompletedRender::new(&executed));
     }
 
+    let summary = BatchSummary::from_renders(&completed)?;
     Ok(BatchOutcome::Completed {
         report: AuthoredReport {
             path: screenplay.clone(),
@@ -171,8 +171,57 @@ pub(super) async fn run(args: BatchArgs, json: bool) -> Result<BatchOutcome, Cli
             diagnostics,
         },
         renders: completed,
+        summary,
         json,
     })
+}
+
+struct BatchRenderEngine {
+    engine: LocalRenderEngine,
+    // The directory owner must outlive every artifact reused within the batch.
+    _private_cache: tempfile::TempDir,
+}
+
+impl BatchRenderEngine {
+    fn new(
+        args: &RenderArgs,
+        executables: &Executables,
+        encode_profile: EncodeProfile,
+    ) -> Result<Self, CliError> {
+        let private_cache = tempfile::Builder::new()
+            .prefix("onmark-batch-cache-")
+            .tempdir()
+            .map_err(BatchError::TemporaryCache)?;
+        let admission = if args.browser.is_some() {
+            CacheAdmission::Ephemeral
+        } else {
+            CacheAdmission::Persistent
+        };
+        let engine = LocalRenderEngine::for_batch(
+            args,
+            executables,
+            encode_profile,
+            private_cache.path(),
+            admission,
+        )?;
+
+        Ok(Self {
+            engine,
+            _private_cache: private_cache,
+        })
+    }
+
+    async fn execute(
+        &self,
+        partitions: &PartitionPlan,
+        units: &[ExecutableUnit],
+        output: &Path,
+        progress: Progress,
+    ) -> Result<ExecutedRender, CliError> {
+        self.engine
+            .execute(partitions, units, output, progress)
+            .await
+    }
 }
 
 #[derive(Deserialize)]
@@ -378,9 +427,47 @@ impl CompletedRender {
     }
 }
 
+#[derive(Clone, Copy)]
+pub(super) struct BatchSummary {
+    frames: u64,
+    reused_frames: u64,
+    regions: usize,
+    reused_regions: usize,
+}
+
+impl BatchSummary {
+    fn from_renders(renders: &[CompletedRender]) -> Result<Self, BatchError> {
+        let mut summary = Self {
+            frames: 0,
+            reused_frames: 0,
+            regions: 0,
+            reused_regions: 0,
+        };
+        for render in renders {
+            summary.frames = summary
+                .frames
+                .checked_add(render.frames)
+                .ok_or(BatchError::ReuseAccounting)?;
+            summary.reused_frames = summary
+                .reused_frames
+                .checked_add(render.reused_frames)
+                .ok_or(BatchError::ReuseAccounting)?;
+            summary.regions = summary
+                .regions
+                .checked_add(render.regions)
+                .ok_or(BatchError::ReuseAccounting)?;
+            summary.reused_regions = summary
+                .reused_regions
+                .checked_add(render.reused_regions)
+                .ok_or(BatchError::ReuseAccounting)?;
+        }
+        Ok(summary)
+    }
+}
+
 fn write_rejected(report: &AuthoredReport, json: bool) -> io::Result<ExitCode> {
     if json {
-        write_json(report, None)?;
+        write_json(report, None, None)?;
     } else {
         diagnostic::write_all(
             &mut io::stderr().lock(),
@@ -395,10 +482,11 @@ fn write_rejected(report: &AuthoredReport, json: bool) -> io::Result<ExitCode> {
 fn write_completed(
     report: &AuthoredReport,
     renders: &[CompletedRender],
+    summary: BatchSummary,
     json: bool,
 ) -> io::Result<ExitCode> {
     if json {
-        write_json(report, Some(renders))?;
+        write_json(report, Some(renders), Some(summary))?;
         return Ok(ExitCode::SUCCESS);
     }
 
@@ -410,6 +498,11 @@ fn write_completed(
     )?;
     let mut stdout = io::stdout().lock();
     writeln!(stdout, "Rendered {} variants", renders.len())?;
+    writeln!(
+        stdout,
+        "Reused {}/{} regions and {}/{} frames across the campaign",
+        summary.reused_regions, summary.regions, summary.reused_frames, summary.frames,
+    )?;
     for render in renders {
         writeln!(
             stdout,
@@ -425,7 +518,11 @@ fn write_completed(
     Ok(ExitCode::SUCCESS)
 }
 
-fn write_json(report: &AuthoredReport, renders: Option<&[CompletedRender]>) -> io::Result<()> {
+fn write_json(
+    report: &AuthoredReport,
+    renders: Option<&[CompletedRender]>,
+    summary: Option<BatchSummary>,
+) -> io::Result<()> {
     let document = JsonBatchReport {
         version: 1,
         command: "batch",
@@ -436,6 +533,7 @@ fn write_json(report: &AuthoredReport, renders: Option<&[CompletedRender]>) -> i
             .iter()
             .map(JsonDiagnostic::from)
             .collect(),
+        summary: summary.map(JsonBatchSummary::from),
         renders: renders.map(|renders| renders.iter().map(JsonRender::from).collect()),
     };
     let mut stdout = io::stdout().lock();
@@ -452,7 +550,29 @@ struct JsonBatchReport<'a> {
     source: String,
     diagnostics: Vec<JsonDiagnostic<'a>>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    summary: Option<JsonBatchSummary>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     renders: Option<Vec<JsonRender>>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct JsonBatchSummary {
+    frames: u64,
+    reused_frames: u64,
+    regions: usize,
+    reused_regions: usize,
+}
+
+impl From<BatchSummary> for JsonBatchSummary {
+    fn from(summary: BatchSummary) -> Self {
+        Self {
+            frames: summary.frames,
+            reused_frames: summary.reused_frames,
+            regions: summary.regions,
+            reused_regions: summary.reused_regions,
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -493,6 +613,7 @@ pub(super) enum BatchError {
     DuplicateOutput(String),
     MixedOutputProfiles,
     RenderDependencyChanged,
+    ReuseAccounting,
     RenderGraph(onmark_core::render_graph::InvalidRenderGraph),
     TemporaryCache(io::Error),
 }
@@ -544,6 +665,9 @@ impl fmt::Display for BatchError {
             Self::RenderDependencyChanged => {
                 formatter.write_str("variant values changed render dependencies")
             }
+            Self::ReuseAccounting => {
+                formatter.write_str("batch reuse totals exceed their accounting domain")
+            }
             Self::RenderGraph(source) => source.fmt(formatter),
             Self::TemporaryCache(_) => {
                 formatter.write_str("failed to create the private batch cache")
@@ -564,7 +688,8 @@ impl Error for BatchError {
             | Self::InvalidPath(_)
             | Self::DuplicateOutput(_)
             | Self::MixedOutputProfiles
-            | Self::RenderDependencyChanged => None,
+            | Self::RenderDependencyChanged
+            | Self::ReuseAccounting => None,
         }
     }
 }
@@ -572,6 +697,7 @@ impl Error for BatchError {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
+    use std::path::PathBuf;
 
     use onmark_core::compiler;
     use onmark_core::model::{
@@ -580,8 +706,8 @@ mod tests {
     };
 
     use super::{
-        BATCH_MANIFEST_VERSION, BatchError, BatchManifest, BatchManifestRender, MAX_BATCH_RENDERS,
-        SolvedVariants, require_relative_path, solve_variants,
+        BATCH_MANIFEST_VERSION, BatchError, BatchManifest, BatchManifestRender, BatchSummary,
+        CompletedRender, MAX_BATCH_RENDERS, SolvedVariants, require_relative_path, solve_variants,
     };
 
     #[test]
@@ -635,6 +761,22 @@ mod tests {
     }
 
     #[test]
+    fn summarizes_campaign_reuse_without_losing_frame_or_region_totals() {
+        let renders = vec![
+            completed_render("first.mp4", 60, 30, 2, 1),
+            completed_render("second.mp4", 60, 60, 2, 2),
+        ];
+
+        let summary =
+            BatchSummary::from_renders(&renders).expect("the fixture totals remain bounded");
+
+        assert_eq!(summary.frames, 120);
+        assert_eq!(summary.reused_frames, 90);
+        assert_eq!(summary.regions, 4);
+        assert_eq!(summary.reused_regions, 3);
+    }
+
+    #[test]
     fn imports_one_shared_caption_track_into_every_variant() {
         let film = resolved_film();
         let cue = CaptionCue::new(
@@ -677,6 +819,22 @@ mod tests {
             version: BATCH_MANIFEST_VERSION,
             screenplay: "film.html".into(),
             renders,
+        }
+    }
+
+    fn completed_render(
+        output: &str,
+        frames: u64,
+        reused_frames: u64,
+        regions: usize,
+        reused_regions: usize,
+    ) -> CompletedRender {
+        CompletedRender {
+            output: PathBuf::from(output),
+            frames,
+            reused_frames,
+            regions,
+            reused_regions,
         }
     }
 

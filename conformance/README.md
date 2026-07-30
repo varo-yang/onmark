@@ -163,6 +163,7 @@ manifest, contact-sheet, and PNG integrity contract. See
 The production-campaign workload exercises twenty typed variants over one
 screenplay, subtitle track, frozen asset set, and partition plan. It records
 field-scope cache isolation separately from independent cold pixel
-repeatability; the latter remains unadmitted for the complete mixed
-browser-composited presentation. See
+repeatability. The `cli/exact-raster.html` boundary fixture and the complete
+mixed campaign both require equal raw-RGBA artifacts from separate cold browser
+processes before persistent reuse is admitted. See
 [`evidence/variant-campaign.md`](evidence/variant-campaign.md).

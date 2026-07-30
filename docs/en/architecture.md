@@ -504,9 +504,12 @@ The desktop launcher names a conservative host seed from the pinned browser
 artifact, OS and architecture, and bounded system-font inventory. Native code
 adds its capture mode, graphics backend, and composition version. An explicit
 custom browser disables persistent reuse because it is not covered by the
-launcher-owned browser identity. Cache publication is keyed by the deterministic
-capture-contract identity and is atomic. Immutable valid entries are read
-without a global lease; one
+launcher-owned browser identity. A native graphics override also remains
+ephemeral until it has full-workload cold-process evidence. Batch execution
+uses the same persistent store when the exact contract is admitted and one
+private batch-lifetime store otherwise. Cache publication is keyed by the
+deterministic capture-contract identity and is atomic. Immutable valid entries
+are read without a global lease; one
 cross-process lock owns only corruption repair and publication. Corrupt or
 mismatched artifacts are removed and recaptured. The store is bounded by
 artifact count and bytes. Once full, it keeps existing valid entries and leaves
@@ -1019,18 +1022,21 @@ neither exception changes product launch policy. Product and local browser
 launches keep Chromium's sandbox enabled by default. The canonical default and
 every worker policy explicitly use ANGLE's `SwiftShader` backend: host GPU
 availability must not silently change pixels or make whole-film and partition
-captures disagree. Desktop execution on macOS may instead select the explicit
-`Metal` graphics backend. It reads the active GL renderer back through CDP
-before page execution, and rejects software fallback. This is a distinct capture
-environment, not a faster implementation of the `SwiftShader` identity:
-backend-sensitive WebGL pixels are expected to differ. An opt-in macOS
-conformance test proves exact raw-RGBA repetition across independent Metal
-sessions, repeated and
-out-of-order seeks, and WAAPI, GSAP, and Three.js effects. It also retains the
-software sequence so an accidental collapse of the two environment identities
-is visible. The macOS CLI selects this verified backend and reports it beside
-the capture mode. Linux and Windows retain `SwiftShader`; another native
-backend requires its own admission evidence and explicit variant.
+captures disagree. The browser process also disables GPU rasterization, partial
+raster reuse, and runtime-selected Skia optimizations, locks sRGB, and drains
+every compositor stage before readback. These switches form one exact raster
+contract rather than independent performance toggles. They remain part of the
+code-owned capture-environment composition version.
+
+Desktop execution on macOS may explicitly select the `Metal` graphics backend.
+It reads the active GL renderer back through CDP before page execution and
+rejects software fallback. This is a distinct capture environment, not a faster
+implementation of the `SwiftShader` identity: backend-sensitive WebGL pixels
+are expected to differ. An opt-in macOS conformance test covers independent
+Metal sessions, repeated and out-of-order seeks, and WAAPI, GSAP, and Three.js
+effects. Metal remains an explicit, ephemeral-cache override until the complete
+mixed workload earns the same cold-process evidence as the canonical software
+contract. Another native backend likewise requires independent admission.
 
 The initial locked macOS performance run used Chrome for Testing
 149.0.7827.55 on an Apple M5 and the release CLI to render the checked-in
@@ -1039,7 +1045,19 @@ CSS/GSAP presentation at 1,920×1,080 for 45 frames. Three independent
 7.28, 4.66, and 4.73 seconds. The warm pair is about 29% faster. These are
 end-to-end CLI samples, including compilation, bundling, browser launch,
 capture, and encoding; they do not justify a wider cross-platform claim.
-`--graphics software` retains the reproducible control path.
+They predate the exact raster contract and remain historical native-backend
+evidence rather than the current default policy.
+
+The exact-raster follow-up used Chrome for Testing 149.0.7827.55 on the same
+host. Before the raster contract, two cold captures of the 435-frame,
+seven-region mixed-media campaign differed in 430 raw-RGBA frames. With the
+contract, two isolated cache directories and browser processes reproduced all
+435 frames exactly. Capture took 256.70 and 306.37 seconds, within the
+previously observed software range. A smaller 75-frame, five-region CSS/GSAP
+fixture also reproduced every frame; its captures took 32.63 and 33.16 seconds,
+slightly less than the 34.68-second partial-raster controls. These measurements
+admit persistent reuse for the pinned `SwiftShader` contract; they do not claim
+that CPU raster is universally faster.
 
 The local CLI assigns four threads to the final H.264 encoder by default.
 `--video-encoder-threads` admits an explicit value from 1 through 64 for hosts
@@ -1825,10 +1843,11 @@ shared batch-subtitle import, boolean visibility ownership, fractional-frame
 GSAP boundaries, and transition-trimmed video coverage.
 
 That experiment deliberately separates cache identity from independent cold
-pixel identity. Its arbitrary mixed browser-composited presentation was not
-raw-RGBA identical across cold Chromium sessions, even under the software
-control. No new visual path is admitted from similarity metrics, and the
-existing exact conformance remains authoritative. The full result is recorded
+pixel identity. Its first run exposed cold-process drift in Chromium's tiled
+GPU raster path. The exact raster follow-up disabled GPU and partial raster,
+locked baseline Skia code paths, and then reproduced all 435 canonical
+raw-RGBA frames across independent cold sessions. Persistent cross-batch reuse
+is admitted only for that locked software contract. The full result is recorded
 in `conformance/evidence/variant-campaign.md`.
 
 This addition does not add a template engine, string substitution, a global or

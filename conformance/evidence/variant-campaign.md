@@ -70,7 +70,7 @@ regression test:
 No hidden fallback or campaign-specific executor was added. The fixes remain in
 the ordinary subtitle, authoring, motion, and visual-admission boundaries.
 
-## Pixel decision
+## Initial pixel result
 
 The stronger cold-repeatability criterion did not pass for this arbitrary mixed
 browser-composited workload. Independent Metal snapshots differed at frames
@@ -83,9 +83,42 @@ comparison measured 52.50 dB average PSNR and 0.996505 aggregate SSIM; audio
 frame hashes were equal. Those similarity metrics are useful diagnosis, not an
 identity oracle.
 
-The batch and dependency-isolation behavior is accepted. This experiment does
-not admit arbitrary mixed browser composition as cold pixel-repeatable, does
-not widen the native-media path, and does not weaken the existing raw-RGBA
-requirements. A later experiment must isolate the remaining browser-owned
-pixel instability or define a mixed visual path with independent exact
-evidence.
+This result admitted batch dependency isolation, but not persistent reuse for
+arbitrary mixed browser composition. Similarity metrics did not weaken the
+raw-RGBA requirement.
+
+## Exact-raster follow-up
+
+> Measured on 2026-07-30 from the working tree based on `db9d9af`.
+
+The follow-up used an Apple M5, Chrome for Testing 149.0.7827.55, the portable
+screenshot backend, and the canonical `SwiftShader` graphics contract at
+1,920 × 1,080. It used the repository's functional substitute media:
+
+- video: 10 seconds,
+  `sha256:29855dd6e6e2a6847814be5b421d2d0fc10f644353c6200ff07fe5ada293f651`;
+- music: 10 seconds,
+  `sha256:851919421ed3790ed5c586fa9e3fa4ce3fdc0a1b95405d1749f5974948feffbe`.
+
+Full artifact comparison localized the cold drift to Chromium's tiled raster
+path. Differences clustered at 256-pixel tile boundaries. Disabling partial
+raster alone still left three of five regions with differing frames. The
+admitted contract additionally disables GPU rasterization and
+runtime-selected Skia optimizations, locks sRGB, and drains all compositor
+stages before readback.
+
+Two independent browser processes with separate cache directories then
+captured the complete seven-region campaign in 256.70 and 306.37 seconds.
+Every one of the 435 canonical raw-RGBA frame fingerprints was equal. A
+separate 75-frame, five-region CSS/GSAP boundary fixture also reproduced every
+frame; its two captures took 32.63 and 33.16 seconds.
+
+## Decision
+
+The locked `SwiftShader` exact-raster contract admits persistent reuse across
+ordinary CLI and batch processes. Its code-owned composition version changes
+whenever the launch contract changes. An explicit browser path and a native
+graphics override remain ephemeral because neither belongs to this evidence.
+Local and distributed execution continue to consume the same Render Unit and
+artifact contracts; no hidden pixel fallback or campaign-specific executor was
+added.

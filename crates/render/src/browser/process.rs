@@ -41,7 +41,6 @@ const STANDARD_ARGUMENTS: &[&str] = &[
     "--disable-renderer-backgrounding",
     "--disable-sync",
     "--enable-automation",
-    "--force-color-profile=srgb",
     "--hide-scrollbars",
     "--lang=en_US",
     "--metrics-recording-only",
@@ -49,8 +48,17 @@ const STANDARD_ARGUMENTS: &[&str] = &[
     "--no-first-run",
     "--password-store=basic",
     "--remote-debugging-port=0",
-    "--run-all-compositor-stages-before-draw",
     "--use-mock-keychain",
+];
+// Chromium's default tiled GPU raster path can drift at tile boundaries across
+// cold processes. The exact contract uses CPU raster without partial reuse,
+// baseline Skia code paths, and a complete compositor drain before readback.
+const EXACT_CAPTURE_ARGUMENTS: &[&str] = &[
+    "--disable-gpu-rasterization",
+    "--disable-partial-raster",
+    "--disable-skia-runtime-opts",
+    "--force-color-profile=srgb",
+    "--run-all-compositor-stages-before-draw",
 ];
 const DISABLED_SANDBOX_ARGUMENTS: &[&str] = &["--no-sandbox", "--disable-setuid-sandbox"];
 const SWIFTSHADER_ARGUMENTS: &[&str] = &[
@@ -442,6 +450,7 @@ fn browser_arguments(
     render_profile: RenderProfile,
 ) -> Vec<OsString> {
     let mut arguments: Vec<OsString> = STANDARD_ARGUMENTS.iter().map(OsString::from).collect();
+    arguments.extend(EXACT_CAPTURE_ARGUMENTS.iter().map(OsString::from));
     arguments.extend(graphics_backend.arguments().iter().map(OsString::from));
     if capture_mode == BrowserCaptureMode::Screenshot {
         arguments.extend(PORTABLE_SCREENSHOT_ARGUMENTS.iter().map(OsString::from));
@@ -562,10 +571,7 @@ mod tests {
         );
 
         assert!(has_argument(&arguments, "--remote-debugging-port=0"));
-        assert!(has_argument(
-            &arguments,
-            "--run-all-compositor-stages-before-draw"
-        ));
+        assert_exact_capture_arguments(&arguments);
         assert!(has_argument(&arguments, "--no-sandbox"));
         assert!(has_argument(&arguments, "--single-process"));
         assert!(has_argument(&arguments, "--in-process-gpu"));
@@ -586,6 +592,7 @@ mod tests {
 
         assert!(has_argument(&arguments, "--use-angle=swiftshader"));
         assert!(has_argument(&arguments, "--enable-unsafe-swiftshader"));
+        assert_exact_capture_arguments(&arguments);
         assert!(!has_argument(&arguments, "--no-sandbox"));
         assert!(!has_argument(&arguments, "--single-process"));
         assert!(!has_argument(&arguments, "--in-process-gpu"));
@@ -605,10 +612,7 @@ mod tests {
 
         assert!(has_argument(&arguments, "--headless=new"));
         assert!(has_argument(&arguments, "--use-angle=swiftshader"));
-        assert!(has_argument(
-            &arguments,
-            "--run-all-compositor-stages-before-draw"
-        ));
+        assert_exact_capture_arguments(&arguments);
         assert!(!has_argument(&arguments, "--no-sandbox"));
     }
 
@@ -700,5 +704,11 @@ mod tests {
 
     fn has_argument(arguments: &[OsString], expected: &str) -> bool {
         arguments.iter().any(|argument| argument == expected)
+    }
+
+    fn assert_exact_capture_arguments(arguments: &[OsString]) {
+        for expected in super::EXACT_CAPTURE_ARGUMENTS {
+            assert!(has_argument(arguments, expected), "missing {expected}");
+        }
     }
 }
