@@ -3,15 +3,17 @@ film id=-
   cues id=-
     cue id=offer id@0:38..43 time=3s time@0:51..53
     cue id=cta id@0:81..84 time=7s time@0:92..94
+  captions id=en id@0:138..140 src=captions/en.vtt src@0:147..162 lang=en lang@0:170..172
   scene id=sale
     shot id=hero duration=-
       video id=- src=product.mp4 delay=- trim=- speed=1/1 plays=1 hold-last=0s
       om-title id=- start=cue:offer
-        text "30% OFF" @0:234..241
+        text "30% OFF" @0:304..311
       om-cta id=- start=cue:cta
-        text "Buy now" @0:277..284
+        text "Buy now" @0:347..354
 index
   cta -> om-cue @0:81..84
-  hero -> om-shot @0:159..163
+  en -> om-captions @0:138..140
+  hero -> om-shot @0:229..233
   offer -> om-cue @0:38..43
-  sale -> om-scene @0:135..139
+  sale -> om-scene @0:205..209

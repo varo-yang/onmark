@@ -48,6 +48,7 @@ ONMARK_UPDATE_GOLDENS=1 cargo test -p onmark-core --test resolution_conformance
 ONMARK_UPDATE_GOLDENS=1 cargo test -p onmark-core --test timeline_conformance
 ONMARK_UPDATE_GOLDENS=1 cargo test -p onmark-core --test render_graph_conformance
 ONMARK_UPDATE_GOLDENS=1 cargo test -p onmark-core --test protocol_conformance
+ONMARK_UPDATE_GOLDENS=1 pnpm --filter @onmark/bundler test
 ```
 
 Review the resulting diff before committing it. Normal test runs compare

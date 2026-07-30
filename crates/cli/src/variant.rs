@@ -13,17 +13,19 @@ use onmark_core::model::SourceId;
 
 use crate::input::{self, BoundedReadError};
 
-const VARIANT_SOURCE_ID: SourceId = SourceId::new(2);
+// Caption imports occupy the dense IDs above the screenplay's zero ID.
+// The single optional variant document owns the opposite end of the domain.
+const VARIANT_SOURCE_ID: SourceId = SourceId::new(u32::MAX);
 
 pub(super) enum VariantImport {
-    Film(ResolvedFilm),
+    Film(Box<ResolvedFilm>),
     Rejected(RejectedVariant),
 }
 
 impl VariantImport {
     pub(super) fn apply(path: Option<&Path>, film: ResolvedFilm) -> Result<Self, VariantLoadError> {
         let Some(path) = path else {
-            return Ok(Self::Film(film));
+            return Ok(Self::Film(Box::new(film)));
         };
         let source = input::read_utf8(
             path,
@@ -41,7 +43,7 @@ impl VariantImport {
                 diagnostics.is_empty(),
                 "accepted variant input currently has no warning diagnostics",
             );
-            return Ok(Self::Film(film));
+            return Ok(Self::Film(Box::new(film)));
         }
 
         Ok(Self::Rejected(RejectedVariant {

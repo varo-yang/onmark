@@ -1,5 +1,24 @@
 {
   "$defs": {
+    "BrowserCaptionTrack": {
+      "additionalProperties": false,
+      "description": "Stable caption-track metadata projected into browser presentation.",
+      "properties": {
+        "id": {
+          "pattern": "^[^\\t\\n\\f\\r ]+$",
+          "type": "string"
+        },
+        "language": {
+          "pattern": "^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "language"
+      ],
+      "type": "object"
+    },
     "BrowserCommand": {
       "description": "Closed commands understood by the browser runtime.",
       "oneOf": [
@@ -150,6 +169,16 @@
       "additionalProperties": false,
       "description": "One solved overlay placement consumed by the browser presentation.",
       "properties": {
+        "captionTrack": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BrowserCaptionTrack"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "interval": {
           "$ref": "#/$defs/WireInterval"
         },
@@ -243,7 +272,7 @@
           "$ref": "#/$defs/WireInterval"
         },
         "timelineVersion": {
-          "const": 5,
+          "const": 6,
           "format": "uint16",
           "maximum": 65535,
           "minimum": 0,
@@ -587,7 +616,7 @@
       ]
     },
     "ProtocolVersion": {
-      "const": 6,
+      "const": 7,
       "description": "Version of the native-to-browser message contract.",
       "format": "uint16",
       "maximum": 65535,
@@ -695,7 +724,7 @@
       "type": "object"
     }
   },
-  "$id": "https://onmark.dev/schemas/browser-request-v6.schema.json",
+  "$id": "https://onmark.dev/schemas/browser-request-v7.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "One versioned command sent from the native executor to the browser.",

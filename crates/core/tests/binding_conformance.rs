@@ -6,8 +6,8 @@ use std::fmt::Write as _;
 use std::fs;
 
 use onmark_core::compiler::{
-    self, LinkedAudio, LinkedCues, LinkedElement, LinkedFilm, LinkedScene, LinkedShot,
-    LinkedShotContent,
+    self, LinkedAudio, LinkedCaptionTrack, LinkedCues, LinkedElement, LinkedFilm, LinkedScene,
+    LinkedShot, LinkedShotContent,
 };
 use onmark_core::model::SourceId;
 
@@ -107,6 +107,10 @@ impl LinkedFilmRenderer {
             self.render_cues(cues)?;
         }
 
+        for captions in film.captions() {
+            self.render_captions(captions)?;
+        }
+
         for music in film.music() {
             self.render_audio(music, "  ")?;
         }
@@ -116,6 +120,10 @@ impl LinkedFilmRenderer {
         }
 
         self.render_index(film)
+    }
+
+    fn render_captions(&mut self, captions: &LinkedCaptionTrack) -> std::fmt::Result {
+        writeln!(self.output, "  captions id={}", id(captions.element()),)
     }
 
     fn render_cues(&mut self, cues: &LinkedCues) -> std::fmt::Result {

@@ -10,10 +10,10 @@ use crate::timeline::{
 
 use super::frame::WireInterval;
 use super::plan::{
-    BrowserNode, BrowserNodeId, BrowserOverlay, BrowserOverlayKind, BrowserScene, BrowserShot,
-    BrowserTransition, BrowserVideo, BrowserVideoTiming, InvalidBrowserPlan, MAX_BROWSER_OVERLAYS,
-    MAX_BROWSER_SCENES, MAX_BROWSER_SHOTS, MAX_BROWSER_TEXT_BYTES, MAX_BROWSER_TRANSITIONS,
-    MAX_BROWSER_VIDEOS, text_exceeds_limit,
+    BrowserCaptionTrack, BrowserNode, BrowserNodeId, BrowserOverlay, BrowserOverlayKind,
+    BrowserScene, BrowserShot, BrowserTransition, BrowserVideo, BrowserVideoTiming,
+    InvalidBrowserPlan, MAX_BROWSER_OVERLAYS, MAX_BROWSER_SCENES, MAX_BROWSER_SHOTS,
+    MAX_BROWSER_TEXT_BYTES, MAX_BROWSER_TRANSITIONS, MAX_BROWSER_VIDEOS, text_exceeds_limit,
 };
 
 pub(super) struct BrowserProjection {
@@ -296,7 +296,7 @@ fn push_browser_overlay(
         return Err(InvalidBrowserPlan::TooManyOverlays);
     }
     *overlay_text_bytes = overlay_text_bytes
-        .checked_add(overlay.text().len())
+        .checked_add(overlay.text_bytes())
         .ok_or(InvalidBrowserPlan::BrowserTextBudget)?;
     if *overlay_text_bytes > MAX_BROWSER_TEXT_BYTES {
         return Err(InvalidBrowserPlan::BrowserTextBudget);
@@ -348,6 +348,7 @@ fn browser_overlay(
         node,
         Some(shot_id),
         kind,
+        None,
         text.into_boxed_str(),
         WireInterval::try_from(overlay.timing().interval())?,
     ))
@@ -365,6 +366,10 @@ fn browser_caption(
         node,
         None,
         BrowserOverlayKind::Caption,
+        Some(BrowserCaptionTrack::new(
+            caption.track_id(),
+            caption.language(),
+        )),
         caption.text().into(),
         WireInterval::try_from(interval)?,
     ))

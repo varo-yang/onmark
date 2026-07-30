@@ -38,6 +38,7 @@ Onmark 语言的目标不是用另一套标签重画时间轴，而是让创作�
 | `field` | 一个有名字、有类型且带默认值的 presentation input | 不参与 timing |
 | `cues`  | film 直属的 cue 声明容器，至多一个 | 不参与 scene 顺序 |
 | `cue`   | 有名字的时间事件                   | 显式对齐来源      |
+| `captions` | film 直属、可重复的外部字幕轨声明 | 不参与 scene 顺序 |
 | `scene` | 叙事段落                           | 顺序容器          |
 | `shot`  | 一次连续画面表达                   | 基本顺序单元      |
 | `transition` | 相邻 shot 之间的显式过渡关系 | shot 重叠边界     |
@@ -50,8 +51,9 @@ Onmark 语言的目标不是用另一套标签重画时间轴，而是让创作�
 
 film 可以有至多一个直属 `fields` 和一个直属 `cues`。`fields` 声明
 presentation-only typed input，`cues` 声明 film absolute time event；二者都不参与
-scene sequencing。film 也可直属拥有不参与 scene sequencing 的 `music`。scene 拥有顺序
-shot 与显式 transition boundary；shot 拥有 `video`、`vo`、`sfx`、`title` 与 `cta`。
+scene sequencing。film 还可直属拥有可重复的 `captions` track declaration 与不参与
+scene sequencing 的 `music`。scene 拥有顺序 shot 与显式 transition boundary；shot
+拥有 `video`、`vo`、`sfx`、`title` 与 `cta`。
 
 示意语法：
 
@@ -62,6 +64,11 @@ shot 与显式 transition boundary；shot 拥有 `video`、`vo`、`sfx`、`title
     <om-cue id="offer" time="3s"></om-cue>
     <om-cue id="cta" time="7s"></om-cue>
   </om-cues>
+  <om-captions
+    id="zh"
+    src="captions/zh.srt"
+    lang="zh-CN"
+  ></om-captions>
 
   <om-scene id="sale">
     <om-shot id="hero">
@@ -253,6 +260,33 @@ voice-over 可以使用下文定义的精确 `fade-in`/`fade-out` envelope。
 没有 `src`
 时，是否允许只做静态检查而禁止渲染，需要由命令模式决定，不能静默假设一个朗读速度。
 
+### 字幕轨
+
+每个 film 直属的 `<om-captions>` 声明一条外部字幕轨。元素可重复，且必须提供
+`id`、`src` 与 `lang`：
+
+```html
+<om-captions id="en" src="captions/en.vtt" lang="en"></om-captions>
+<om-captions id="zh" src="captions/zh.srt" lang="zh-CN"></om-captions>
+```
+
+`id` 进入 film-wide ID namespace；`src` 使用与媒体相同的
+screenplay-relative portable path；`lang` 原样保留为 HTML language metadata，当前只
+接纳由连字符分隔的非空 ASCII alphanumeric subtag。SRT、WebVTT 与已准入的 ASS
+子集都在固定 input、cue count、text 与 diagnostic bounds 下解析。文件语法错误与不支持的
+presentation semantics 产生 source-located caption diagnostic；文件缺失或不可读仍是 typed
+infrastructure error。
+
+默认按 authored order 选择全部声明。作者命令可用 `--captions en,zh` 选择一个有序子集；
+未知或重复的 selection 会被拒绝。多条已选择字幕轨会同时 burn in。compiler 把每个 cue
+投影到精确 film frame grid，裁到 film interval，并把 track identity 与 language 保留进
+Timeline IR 和 Browser Plan。
+
+browser 为每个 active cue 创建一个 film-level `om-caption`，把 `data-track` 设为声明
+ID、把 `lang` 设为 language，布局与样式继续由 authored CSS 拥有。字幕文件不会引入第二个
+clock 或隐藏布局引擎。soft-subtitle mux、自动翻译、word-level karaoke 与不受约束的 ASS
+styling 不属于当前语言。
+
 ### 通用音频
 
 `music` 与 `sfx` 是两种不同的作者语义，不是带自由 `kind`
@@ -284,7 +318,7 @@ boundary；browser code 不拥有另一条 audio envelope。
 
 ## 8. ID、作用域与引用
 
-- 所有显式 ID（包括 cue ID）在 film 内共享一个全局唯一的声明空间；
+- 所有显式 ID（包括 cue ID 与 caption track ID）在 film 内共享一个全局唯一的声明空间；
 - ID 不得为空，且遵循 HTML `id` 的基础约束，不得包含 ASCII whitespace；
 - ID 区分大小写；非 ASCII 字符按原文保留，编译器不得静默规范化；
 - cue 引用通过 `CueId`/`EventRef`
@@ -297,7 +331,8 @@ boundary；browser code 不拥有另一条 audio envelope。
 
 结构 bind 之后执行属性与引用 resolve。`film`、`cues`、`scene`
 不接受 ID 以外的 compiler attribute；`cue` 必须有 `id` 与 `time`；`shot` 可有
-`duration`，`transition` 必须有 `duration`；`video` 可有 `src`、`delay`、`trim`、`speed`、`plays` 与
+`duration`，`captions` 必须有 `id`、`src` 与 `lang`；`transition` 必须有 `duration`；
+`video` 可有 `src`、`delay`、`trim`、`speed`、`plays` 与
 `hold-last`，`vo` 可有 `src`、`delay`、`fade-in` 与
 `fade-out`；`title`、`cta` 可有 `cue` 或
 `delay`；`music` 必须有 `src`，可有 `gain`、`fade-in` 与 `fade-out`；`sfx`

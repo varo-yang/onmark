@@ -625,6 +625,11 @@ function browserTextFitsBudget(
   let textBytes = variantTextBytes;
   for (const overlay of overlays) {
     textBytes += UTF8.encode(overlay.text).byteLength;
+    const track = overlay.captionTrack;
+    if (track !== undefined && track !== null) {
+      textBytes += UTF8.encode(track.id).byteLength;
+      textBytes += UTF8.encode(track.language).byteLength;
+    }
     if (textBytes > MAX_BROWSER_TEXT_BYTES) {
       return false;
     }
@@ -637,9 +642,23 @@ function overlayParentViolation(
   shots: ReadonlyMap<number, PlanShot>,
 ): string | undefined {
   if (overlay.kind === "caption") {
-    return overlay.shotId === undefined || overlay.shotId === null
-      ? undefined
-      : "plan caption names a structural parent";
+    if (overlay.shotId !== undefined && overlay.shotId !== null) {
+      return "plan caption names a structural parent";
+    }
+    const track = overlay.captionTrack;
+    if (track === undefined || track === null) {
+      return "plan caption omits track metadata";
+    }
+    if (track.id.length === 0 || /[\t\n\f\r ]/u.test(track.id)) {
+      return "plan caption track identity is invalid";
+    }
+    if (!/^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/u.test(track.language)) {
+      return "plan caption language is invalid";
+    }
+    return undefined;
+  }
+  if (overlay.captionTrack !== undefined && overlay.captionTrack !== null) {
+    return "plan authored overlay names caption track metadata";
   }
   if (overlay.shotId === undefined || overlay.shotId === null) {
     return "plan overlay names an unknown shot";
@@ -831,12 +850,20 @@ function snapshotFrameBoundaries([first, second, third, ...rest]: readonly [
 function snapshotOverlay(
   overlay: BrowserPlan["overlays"][number],
 ): RuntimePlan["overlays"][number] {
-  return Object.freeze({
+  const snapshot = {
     node: snapshotNode(overlay.node),
     shotId: overlay.shotId ?? null,
     kind: overlay.kind,
     text: overlay.text,
     interval: Object.freeze({ ...overlay.interval }),
+  };
+  const track = overlay.captionTrack;
+  if (track === undefined || track === null) {
+    return Object.freeze(snapshot);
+  }
+  return Object.freeze({
+    ...snapshot,
+    captionTrack: Object.freeze({ ...track }),
   });
 }
 

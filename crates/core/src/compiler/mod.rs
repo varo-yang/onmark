@@ -45,15 +45,17 @@ mod variant_resolution;
 pub use bind::{BindReport, bind};
 pub use captions::{CaptionProjectionError, import_captions};
 pub use linked_film::{
-    LinkedAudio, LinkedCue, LinkedCues, LinkedElement, LinkedFilm, LinkedNode, LinkedOverlay,
-    LinkedScene, LinkedShot, LinkedShotContent, LinkedTransition, LinkedVideo, LinkedVoiceOver,
+    LinkedAudio, LinkedCaptionTrack, LinkedCue, LinkedCues, LinkedElement, LinkedFilm, LinkedNode,
+    LinkedOverlay, LinkedScene, LinkedShot, LinkedShotContent, LinkedTransition, LinkedVideo,
+    LinkedVoiceOver,
 };
 pub use parse::{ParseReport, parse};
 pub use resolve::{ResolveReport, resolve};
 pub use resolved_film::{
-    Authored, ResolvedAudio, ResolvedAudioEnvelope, ResolvedCue, ResolvedCues, ResolvedElement,
-    ResolvedFilm, ResolvedNode, ResolvedOverlay, ResolvedScene, ResolvedShot, ResolvedShotContent,
-    ResolvedStart, ResolvedText, ResolvedTransition, ResolvedVideo, ResolvedVoiceOver,
+    Authored, ResolvedAudio, ResolvedAudioEnvelope, ResolvedCaptionTrack, ResolvedCue,
+    ResolvedCues, ResolvedElement, ResolvedFilm, ResolvedNode, ResolvedOverlay, ResolvedScene,
+    ResolvedShot, ResolvedShotContent, ResolvedStart, ResolvedText, ResolvedTransition,
+    ResolvedVideo, ResolvedVoiceOver,
 };
 pub use solve::{SolveError, SolveReport, solve};
 pub use variant::{

@@ -3,7 +3,7 @@
 use std::error::Error;
 use std::fmt;
 
-use crate::model::{CaptionTrack, FrameConversionOverflow, FrameInterval, Rounding};
+use crate::model::{FrameConversionOverflow, FrameInterval, ImportedCaptionTrack, Rounding};
 use crate::timeline::{TimelineCaption, TimelineIr};
 
 /// Attaches normalized caption tracks to one solved Timeline.
@@ -24,24 +24,34 @@ use crate::timeline::{TimelineCaption, TimelineIr};
 /// invariant.
 pub fn import_captions(
     mut timeline: TimelineIr,
-    tracks: impl IntoIterator<Item = CaptionTrack>,
+    tracks: impl IntoIterator<Item = ImportedCaptionTrack>,
 ) -> Result<TimelineIr, CaptionProjectionError> {
     let film = timeline.interval();
     let timebase = timeline.timebase();
     let mut captions = Vec::new();
 
-    for cue in tracks.into_iter().flat_map(CaptionTrack::into_cues) {
-        let (interval, text, timing_span, text_span) = cue.into_parts();
-        let start = timebase.frame_at(interval.start(), Rounding::Ceil)?;
-        let end = timebase.frame_at(interval.end(), Rounding::Ceil)?;
-        let start = start.max(film.start());
-        let end = end.min(film.end());
-        if start >= end {
-            continue;
+    for track in tracks {
+        let (id, language, track) = track.into_parts();
+        for cue in track.into_cues() {
+            let (interval, text, timing_span, text_span) = cue.into_parts();
+            let start = timebase.frame_at(interval.start(), Rounding::Ceil)?;
+            let end = timebase.frame_at(interval.end(), Rounding::Ceil)?;
+            let start = start.max(film.start());
+            let end = end.min(film.end());
+            if start >= end {
+                continue;
+            }
+            let interval =
+                FrameInterval::new(start, end).expect("clipped caption frame bounds are ordered");
+            captions.push(TimelineCaption::new(
+                id.clone(),
+                language.clone(),
+                interval,
+                text,
+                timing_span,
+                text_span,
+            ));
         }
-        let interval =
-            FrameInterval::new(start, end).expect("clipped caption frame bounds are ordered");
-        captions.push(TimelineCaption::new(interval, text, timing_span, text_span));
     }
 
     timeline.replace_captions(captions);
@@ -80,8 +90,8 @@ mod tests {
 
     use crate::compiler;
     use crate::model::{
-        ByteOffset, CaptionCue, CaptionInterval, CaptionTrack, Duration, FrameRate, SourceId,
-        SourceSpan, Timebase,
+        ByteOffset, CaptionCue, CaptionInterval, CaptionLanguage, CaptionTrack, CaptionTrackId,
+        Duration, FrameRate, ImportedCaptionTrack, NodeId, SourceId, SourceSpan, Timebase,
     };
 
     use super::import_captions;
@@ -96,6 +106,11 @@ mod tests {
         ])
         .expect("the fixture cues are ordered");
 
+        let track = ImportedCaptionTrack::new(
+            CaptionTrackId::from(NodeId::parse("en").expect("the track ID is valid")),
+            CaptionLanguage::parse("en").expect("the language is valid"),
+            track,
+        );
         let timeline =
             import_captions(timeline, [track]).expect("caption times fit the frame grid");
 

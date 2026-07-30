@@ -4,6 +4,7 @@ use std::error::Error;
 use std::path::Path;
 
 mod audio;
+mod caption;
 mod continuity;
 mod envelope;
 mod html;
@@ -17,6 +18,10 @@ pub(super) fn grade_audio(repository: &Path) -> Result<(), Box<dyn Error>> {
 
 pub(super) fn grade_audio_envelope(repository: &Path) -> Result<(), Box<dyn Error>> {
     envelope::grade(repository)
+}
+
+pub(super) fn grade_captions(repository: &Path) -> Result<(), Box<dyn Error>> {
+    caption::grade(repository)
 }
 
 pub(super) fn grade_html(repository: &Path) -> Result<(), Box<dyn Error>> {

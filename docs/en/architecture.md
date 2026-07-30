@@ -1892,6 +1892,37 @@ or graph dependency.
 The runtime repeats only the wire-level duration invariant when admitting an
 untrusted plan; it does not derive or alter authored timing.
 
+Gate eight admits repeatable film-level caption-track declarations after the
+checked-in `caption-track-syntax` comparison retained 16/16 semantic accuracy
+for both candidate spellings across two independent repetitions.
+`om-captions` used 4,778 authored bytes versus 5,018 for
+`om-caption-track`, while native HTML `track` was rejected because its existing
+void-media-child semantics conflict with a film-level declaration. The
+screenplay therefore owns `id`, portable `src`, and `lang`; CLI
+`--captions` selects only an ordered subset and does not introduce a second
+source of track identity.
+
+The implementation preserves the existing phase ownership:
+
+1. bind retains repeatable direct film declarations and the film-wide ID index;
+2. resolve parses track identity, portable source, and conservative language
+   metadata once;
+3. the CLI reads each selected external file under the existing bounded
+   subtitle parser and combines normalized cues with its declaration;
+4. post-solve caption projection converts exact cue time to the film frame
+   grid and records track identity and language in Timeline IR;
+5. Render Graph, Browser Plan, artifact identity, local execution, and
+   distributed execution consume those facts without a caption-specific
+   scheduler;
+6. authoring creates film-level `om-caption` elements with `data-track` and
+   `lang`, leaving pixels to authored CSS.
+
+All declarations are selected in authored order by default. Multiple selected
+tracks burn in together. Track metadata counts against the existing bounded
+browser text budget; it cannot grow the wire request outside the admitted
+envelope. This addition introduces no parser dependency, package, cloud path,
+soft-subtitle muxer, translation service, or ASS layout engine.
+
 Gate eight does not add a Player, Studio, preview server, source-mutation API,
 component marketplace, remote authoring command, coordinator, database, queue,
 lease service, cloud workflow, infrastructure definition, or provider adapter.

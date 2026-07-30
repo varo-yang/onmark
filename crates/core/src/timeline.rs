@@ -6,9 +6,9 @@
 use std::collections::BTreeMap;
 
 use crate::model::{
-    AudioEnvelope, AudioGain, CueId, ElementKind, EventRef, FrameIndex, FrameInterval,
-    FrozenAssetId, GeneralAudioKind, MediaSource, NodeId, SourceSpan, Timebase, VariantFieldKind,
-    VariantFieldName, VariantValue,
+    AudioEnvelope, AudioGain, CaptionLanguage, CaptionTrackId, CueId, ElementKind, EventRef,
+    FrameIndex, FrameInterval, FrozenAssetId, GeneralAudioKind, MediaSource, NodeId, SourceSpan,
+    Timebase, VariantFieldKind, VariantFieldName, VariantValue,
 };
 
 /// Version of the Timeline IR contract.
@@ -17,7 +17,7 @@ pub struct TimelineVersion(u16);
 
 impl TimelineVersion {
     /// Only Timeline IR version accepted by this build.
-    pub const CURRENT: Self = Self(5);
+    pub const CURRENT: Self = Self(6);
 
     /// Returns the stable integer representation.
     #[must_use]
@@ -306,6 +306,8 @@ impl TimelineVariantScope {
 /// One imported caption projected onto the solved frame grid.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TimelineCaption {
+    track_id: CaptionTrackId,
+    language: CaptionLanguage,
     interval: FrameInterval,
     text: Box<str>,
     timing_span: SourceSpan,
@@ -314,17 +316,33 @@ pub struct TimelineCaption {
 
 impl TimelineCaption {
     pub(crate) fn new(
+        track_id: CaptionTrackId,
+        language: CaptionLanguage,
         interval: FrameInterval,
         text: impl Into<Box<str>>,
         timing_span: SourceSpan,
         text_span: SourceSpan,
     ) -> Self {
         Self {
+            track_id,
+            language,
             interval,
             text: text.into(),
             timing_span,
             text_span,
         }
+    }
+
+    /// Returns the stable authored track identity.
+    #[must_use]
+    pub const fn track_id(&self) -> &CaptionTrackId {
+        &self.track_id
+    }
+
+    /// Returns language metadata for browser presentation.
+    #[must_use]
+    pub const fn language(&self) -> &CaptionLanguage {
+        &self.language
     }
 
     /// Returns the executable half-open frame interval.

@@ -281,7 +281,7 @@ test("owns bound and omitted semantic visibility independently of authored CSS",
       "om-shot > :is(video, om-title, om-cta):not([data-om-node]) {",
       "  display: none !important;",
       "}",
-      "om-cues, om-cue, om-music, om-sfx, om-vo {",
+      "om-cues, om-cue, om-captions, om-music, om-sfx, om-vo {",
       "  display: none !important;",
       "}",
     ].join("\n"),
@@ -310,10 +310,16 @@ test("maps every overlay role to one stable semantic element", () => {
     node: { nodeId: 6, authoredId: null },
     shotId: null,
     kind: "caption",
+    captionTrack: { id: "en", language: "en-US" },
   });
 
   assert.equal(title.element.localName, "om-title");
   assert.equal(callToAction.element.localName, "om-cta");
+  assert.deepEqual(caption.element.dataset, {
+    omNode: "6",
+    track: "en",
+  });
+  assert.equal(caption.element.lang, "en-US");
   assert.equal(
     browser.authored.film.children.includes(
       caption.element as unknown as FakeElement,
@@ -489,7 +495,7 @@ test("releases prior extensions when later motion binding fails", async () => {
 // ── Fixture ──
 
 const PLAN: RuntimePlan = {
-  timelineVersion: 5,
+  timelineVersion: 6,
   frameRate: { numerator: 30, denominator: 1 },
   timeline: { start: 0, end: 90 },
   evaluation: { start: 0, end: 60 },
@@ -605,6 +611,7 @@ class FakeElement {
   decodeCalls = 0;
   hidden = false;
   id = "";
+  lang = "";
   muted = false;
   parent: FakeElement | undefined;
   playsInline = false;

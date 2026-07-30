@@ -27,19 +27,21 @@ contract: Timeline IR.
 
 ## Core model
 
-The current vocabulary is `film`, `fields`, `field`, `cues`, `cue`, `scene`,
-`shot`, `transition`, `video`, `vo`, `music`, `sfx`, `title`, and `cta`. A film
-may contain at most one direct `fields` child and one direct `cues` child.
+The current vocabulary is `film`, `fields`, `field`, `cues`, `cue`, `captions`,
+`scene`, `shot`, `transition`, `video`, `vo`, `music`, `sfx`, `title`, and
+`cta`. A film may contain at most one direct `fields` child and one direct
+`cues` child.
 `fields` declares presentation-only typed input; `cues` declares absolute time
-events. Neither participates in scene sequencing. A film may also own `music`
-that does not participate in scene sequencing. Scenes own sequential shots and
-explicit transition boundaries. A renderable film must contain at least one
-shot with a positive solved duration. A shot owns its `video`, `vo`, `sfx`,
-`title`, and `cta` content. Titles and CTAs are overlays and do not participate
-in sibling sequencing. `video` is the only current visual media element.
-General audio uses the semantic `music` and `sfx` elements; a generic `audio`
-element is not part of the vocabulary. Image and other media elements remain
-deferred.
+events. Neither participates in scene sequencing. Repeatable film-level
+`captions` declarations name external caption tracks and also remain outside
+scene sequencing. A film may own `music` with the same structural role. Scenes
+own sequential shots and explicit transition boundaries. A renderable film
+must contain at least one shot with a positive solved duration. A shot owns its
+`video`, `vo`, `sfx`, `title`, and `cta` content. Titles and CTAs are overlays
+and do not participate in sibling sequencing. `video` is the only current
+visual media element. General audio uses the semantic `music` and `sfx`
+elements; a generic `audio` element is not part of the vocabulary. Image and
+other media elements remain deferred.
 Structural binding retains `src` and other unparsed authored attributes for the
 attribute/reference resolution phase rather than discarding them.
 
@@ -52,6 +54,11 @@ Illustrative syntax:
     <om-cue id="offer" time="3s"></om-cue>
     <om-cue id="cta" time="7s"></om-cue>
   </om-cues>
+  <om-captions
+    id="en"
+    src="captions/en.vtt"
+    lang="en"
+  ></om-captions>
   <om-scene id="sale">
     <om-shot id="hero">
       <video src="product.mp4"></video>
@@ -212,6 +219,38 @@ private render root and mixes it outside browser capture at its solved frame
 interval. The presentation does not play, delay, or mix voice-over audio.
 Voice-over may use the exact `fade-in` and `fade-out` envelope described below.
 
+## Caption tracks
+
+Each direct `<om-captions>` child declares one external caption track. The
+element is repeatable and requires `id`, `src`, and `lang`:
+
+```html
+<om-captions id="en" src="captions/en.vtt" lang="en"></om-captions>
+<om-captions id="zh" src="captions/zh.srt" lang="zh-CN"></om-captions>
+```
+
+`id` uses the film-wide ID namespace. `src` is a screenplay-relative portable
+path with the same rules as authored media. `lang` is preserved for HTML
+language metadata and admits non-empty ASCII-alphanumeric subtags separated by
+hyphens. SRT, WebVTT, and the admitted ASS subset are parsed under fixed input,
+cue-count, text, and diagnostic bounds. File syntax and unsupported
+presentation semantics remain source-located caption diagnostics; missing or
+unreadable files remain typed infrastructure errors.
+
+All declared tracks are selected in authored order by default. Authoring
+commands may choose an ordered subset with `--captions en,zh`; an unknown or
+repeated selection is rejected. Multiple selected tracks are burned in
+together. The compiler projects every cue onto the exact film frame grid,
+clips it to the film interval, and retains track identity and language in
+Timeline IR and Browser Plan.
+
+The browser creates one film-level `om-caption` element per active cue, sets
+`data-track` to the declaration ID and `lang` to its language, and leaves
+layout and styling to authored CSS. The source track does not supply a second
+clock or hidden layout engine. Soft-subtitle muxing, automatic translation,
+word-level karaoke, and unrestricted ASS styling are not part of the current
+language.
+
 ## General audio
 
 `music` and `sfx` are distinct authored roles rather than a generic element
@@ -255,20 +294,21 @@ of the language.
 
 ## IDs and references
 
-Explicit IDs, including cue IDs, are non-empty, case-sensitive, and globally
-unique within one film. In keeping with the HTML `id` constraint, they may not
-contain ASCII whitespace. Non-ASCII characters are preserved exactly; the
-compiler does not silently normalize authored IDs. A later typed `CueId` or
-`EventRef` distinguishes cue references without creating a second declaration
-namespace.
+Explicit IDs, including cue IDs and caption-track IDs, are non-empty,
+case-sensitive, and globally unique within one film. In keeping with the HTML
+`id` constraint, they may not contain ASCII whitespace. Non-ASCII characters
+are preserved exactly; the compiler does not silently normalize authored IDs.
+Later typed identities distinguish cue and caption references without creating
+another declaration namespace.
 
 ## Attributes and resolution
 
 Structural binding is followed by attribute and reference resolution. `film`,
 `cues`, and `scene` admit no non-ID compiler attributes. `cue` requires `id`
-and `time`. `shot` admits optional `duration`; `transition` requires
-`duration`. `video` admits optional `src`, `delay`, `trim`, `speed`, `plays`,
-and `hold-last`; `vo` admits optional `src`, `delay`, `fade-in`, and `fade-out`;
+and `time`; `captions` requires `id`, `src`, and `lang`. `shot` admits optional
+`duration`; `transition` requires `duration`. `video` admits optional `src`,
+`delay`, `trim`, `speed`, `plays`, and `hold-last`; `vo` admits optional `src`,
+`delay`, `fade-in`, and `fade-out`;
 `music` requires `src` and admits optional `gain`, `fade-in`, and `fade-out`;
 `sfx` requires `src` and admits optional `delay`, `gain`, `fade-in`, and
 `fade-out`; `title` and `cta` admit optional `cue` or `delay`. `cue` and

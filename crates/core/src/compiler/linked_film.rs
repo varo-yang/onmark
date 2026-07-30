@@ -91,26 +91,30 @@ pub struct LinkedFilm {
     variants: Option<LinkedVariantSchema>,
     variant_bindings: Vec<LinkedVariantBinding>,
     cues: Option<LinkedCues>,
+    captions: Vec<LinkedCaptionTrack>,
     music: Vec<LinkedAudio>,
     scenes: Vec<LinkedScene>,
     ids: BTreeMap<NodeId, LinkedNode>,
 }
 
 impl LinkedFilm {
-    pub(super) fn new(
-        element: LinkedElement,
-        variants: Option<LinkedVariantSchema>,
-        variant_bindings: Vec<LinkedVariantBinding>,
-        cues: Option<LinkedCues>,
-        music: Vec<LinkedAudio>,
-        scenes: Vec<LinkedScene>,
-        ids: BTreeMap<NodeId, LinkedNode>,
-    ) -> Self {
+    pub(super) fn from_parts(parts: LinkedFilmParts) -> Self {
+        let LinkedFilmParts {
+            element,
+            variants,
+            variant_bindings,
+            cues,
+            captions,
+            music,
+            scenes,
+            ids,
+        } = parts;
         Self {
             element,
             variants,
             variant_bindings,
             cues,
+            captions,
             music,
             scenes,
             ids,
@@ -141,6 +145,12 @@ impl LinkedFilm {
         self.cues.as_ref()
     }
 
+    /// Returns external caption-track declarations in authored order.
+    #[must_use]
+    pub fn captions(&self) -> &[LinkedCaptionTrack] {
+        &self.captions
+    }
+
     /// Returns film-wide music in authored order.
     #[must_use]
     pub fn music(&self) -> &[LinkedAudio] {
@@ -165,6 +175,7 @@ impl LinkedFilm {
             variants: self.variants,
             variant_bindings: self.variant_bindings,
             cues: self.cues,
+            captions: self.captions,
             music: self.music,
             scenes: self.scenes,
             ids: self.ids,
@@ -178,6 +189,7 @@ pub(super) struct LinkedFilmParts {
     pub(super) variants: Option<LinkedVariantSchema>,
     pub(super) variant_bindings: Vec<LinkedVariantBinding>,
     pub(super) cues: Option<LinkedCues>,
+    pub(super) captions: Vec<LinkedCaptionTrack>,
     pub(super) music: Vec<LinkedAudio>,
     pub(super) scenes: Vec<LinkedScene>,
     pub(super) ids: BTreeMap<NodeId, LinkedNode>,
@@ -205,6 +217,28 @@ impl LinkedNode {
     #[must_use]
     pub const fn span(&self) -> SourceSpan {
         self.declared_at
+    }
+}
+
+/// One external caption-track declaration before attributes are typed.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LinkedCaptionTrack {
+    element: LinkedElement,
+}
+
+impl LinkedCaptionTrack {
+    pub(super) const fn new(element: LinkedElement) -> Self {
+        Self { element }
+    }
+
+    /// Returns the structurally bound declaration element.
+    #[must_use]
+    pub const fn element(&self) -> &LinkedElement {
+        &self.element
+    }
+
+    pub(super) fn into_element(self) -> LinkedElement {
+        self.element
     }
 }
 

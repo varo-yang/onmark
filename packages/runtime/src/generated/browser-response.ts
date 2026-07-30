@@ -83,7 +83,7 @@ export type RequestId = number;
 /**
  * Version of the native-to-browser message contract.
  */
-export type ProtocolVersion = 6;
+export type ProtocolVersion = 7;
 
 /**
  * One versioned event returned by the browser runtime.

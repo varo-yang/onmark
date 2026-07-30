@@ -111,7 +111,7 @@ export type RequestId = number;
 /**
  * Version of the native-to-browser message contract.
  */
-export type ProtocolVersion = 6;
+export type ProtocolVersion = 7;
 
 /**
  * One versioned command sent from the native executor to the browser.
@@ -142,7 +142,7 @@ export interface BrowserPlan {
    */
   shots: BrowserShot[];
   timeline: WireInterval;
-  timelineVersion: 5;
+  timelineVersion: 6;
   /**
    * @maxItems 10000
    */
@@ -181,11 +181,19 @@ export interface WireFrameRate {
  * One solved overlay placement consumed by the browser presentation.
  */
 export interface BrowserOverlay {
+  captionTrack?: BrowserCaptionTrack | null;
   interval: WireInterval;
   kind: BrowserOverlayKind;
   node: BrowserNode;
   shotId?: BrowserNodeId | null;
   text: string;
+}
+/**
+ * Stable caption-track metadata projected into browser presentation.
+ */
+export interface BrowserCaptionTrack {
+  id: string;
+  language: string;
 }
 /**
  * One scene container intersecting this unit, with its complete Timeline interval.

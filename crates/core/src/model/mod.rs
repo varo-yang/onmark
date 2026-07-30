@@ -27,8 +27,8 @@ pub use audio::{
     AudioSampleRate, InvalidAudioEnvelope, InvalidAudioGain, InvalidAudioSampleRate,
 };
 pub use caption::{
-    CaptionCue, CaptionInterval, CaptionTrack, InvalidCaptionCue, InvalidCaptionInterval,
-    InvalidCaptionTrack,
+    CaptionCue, CaptionInterval, CaptionLanguage, CaptionTrack, ImportedCaptionTrack,
+    InvalidCaptionCue, InvalidCaptionInterval, InvalidCaptionLanguage, InvalidCaptionTrack,
 };
 pub use duration::{Duration, InvalidDuration};
 pub use element::{ElementKind, GeneralAudioKind};
@@ -37,7 +37,7 @@ pub use media::{
     InvalidMediaSource, InvalidMediaSourceInterval, InvalidMediaTrim, InvalidPlayCount,
     InvalidPlaybackRate, MediaSource, MediaSourceInterval, MediaTrim, PlayCount, PlaybackRate,
 };
-pub use reference::{AssetRef, CueId, EventRef, InvalidAssetRef};
+pub use reference::{AssetRef, CaptionTrackId, CueId, EventRef, InvalidAssetRef};
 pub use source::{ByteOffset, InvalidSourceSpan, SourceId, SourceSpan};
 pub use temporal::{InvalidPresentationTemporalCapability, PresentationTemporalCapability};
 pub use time::{

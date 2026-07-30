@@ -1,0 +1,15 @@
+{
+  "date": "2026-07-30",
+  "executor": "codex exec",
+  "codexCliVersion": "0.146.0",
+  "provider": "openai",
+  "model": "gpt-5.6-sol",
+  "reasoningEffort": "low",
+  "repetitions": 2,
+  "batchSize": 8,
+  "sandbox": "read-only",
+  "ephemeral": true,
+  "ignoreUserConfig": true,
+  "ignoreRepositoryRules": true,
+  "structuredOutputSchema": "output-schema.json"
+}

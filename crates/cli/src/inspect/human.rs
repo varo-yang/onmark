@@ -79,7 +79,9 @@ fn write_timeline(output: &mut impl Write, timeline: &TimelineIr) -> io::Result<
     for (index, caption) in timeline.captions().iter().enumerate() {
         writeln!(
             output,
-            "Caption {index} {} {:?}",
+            "Caption {index} track {} lang {} {} {:?}",
+            caption.track_id(),
+            caption.language(),
             Interval(caption.interval()),
             caption.text(),
         )?;

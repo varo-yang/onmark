@@ -9,8 +9,9 @@ use std::time::Duration;
 
 use onmark_core::compiler;
 use onmark_core::model::{
-    AssetRef, FrameIndex, FrameRate, FrozenAsset, FrozenAssetId, PresentationTemporalCapability,
-    PresentationVisualCapability, SourceId, Timebase,
+    AssetRef, CaptionLanguage, CaptionTrackId, FrameIndex, FrameRate, FrozenAsset, FrozenAssetId,
+    ImportedCaptionTrack, PresentationTemporalCapability, PresentationVisualCapability, SourceId,
+    Timebase,
 };
 use onmark_core::protocol::{
     BrowserCommand, BrowserEvent, BrowserMediaMode, BrowserOverlayKind, BrowserPlan,
@@ -2340,14 +2341,18 @@ fn asset_ref(value: &str) -> AssetRef {
     AssetRef::parse(value).expect("the fixture asset reference is portable")
 }
 
-fn caption_track() -> onmark_core::model::CaptionTrack {
+fn caption_track() -> ImportedCaptionTrack {
     let source = b"WEBVTT\n\n00:00:00.750 --> 00:00:01.250\nAcross the partition\n";
     let limits =
         SubtitleLimits::new(source.len(), 1, 64).expect("the fixture subtitle limits are bounded");
     let report = parse_webvtt(SourceId::new(3), source, limits);
     let (track, errors) = report.into_parts();
     assert!(errors.is_empty());
-    track.expect("the fixture subtitle is valid")
+    ImportedCaptionTrack::new(
+        CaptionTrackId::parse("en").expect("the fixture track ID is valid"),
+        CaptionLanguage::parse("en").expect("the fixture language is valid"),
+        track.expect("the fixture subtitle is valid"),
+    )
 }
 
 fn write_projection(path: &Path, regions: &[&[u32]]) {

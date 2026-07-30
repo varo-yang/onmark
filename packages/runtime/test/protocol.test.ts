@@ -28,10 +28,10 @@ const PROTOCOL_FIXTURES = new URL(
 // ── Decoding boundaries ──
 
 test("decodes every checked-in browser protocol example", async () => {
-  for (const request of await fixture("browser-requests-v6.jsonl")) {
+  for (const request of await fixture("browser-requests-v7.jsonl")) {
     assert.deepEqual(decodeBrowserRequest(request), request);
   }
-  for (const response of await fixture("browser-responses-v6.jsonl")) {
+  for (const response of await fixture("browser-responses-v7.jsonl")) {
     assert.deepEqual(decodeBrowserResponse(response), response);
   }
 });
@@ -134,7 +134,7 @@ test("rejects protocol payloads outside generated resource budgets", () => {
       type: "load",
       mediaMode: "decoded",
       plan: {
-        timelineVersion: 5,
+        timelineVersion: 6,
         frameRate: { numerator: 30, denominator: 1 },
         timeline: { start: 0, end: 1 },
         evaluation: { start: 0, end: 1 },

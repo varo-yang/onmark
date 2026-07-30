@@ -145,12 +145,8 @@ the manifest:
 
 Unchanged render regions are reused across items and later managed-browser
 invocations; each run reports aggregate region and frame reuse. Variant values
-cannot change timing, media sources, dimensions, or output profiles. One
-standalone subtitle track can be shared by the complete batch:
-
-```bash
-onmark batch batch.json --subtitle captions.vtt
-```
+cannot change timing, media sources, dimensions, or output profiles. Caption
+tracks declared by the screenplay are shared by the complete batch.
 
 Use the default opaque H.264/AAC MP4 for delivery, or select the
 alpha-preserving ProRes 4444/PCM MOV profile by filename:
@@ -159,7 +155,13 @@ alpha-preserving ProRes 4444/PCM MOV profile by filename:
 onmark render film.html --output film.mov
 ```
 
-Resolution, exact rational frame rates, and imported subtitles stay explicit:
+Declare one or more external caption tracks in the film. Onmark burns every
+declared track by default; `--captions` selects an ordered subset:
+
+```html
+<om-captions id="en" src="captions/en.vtt" lang="en"></om-captions>
+<om-captions id="zh" src="captions/zh.srt" lang="zh-CN"></om-captions>
+```
 
 ```bash
 onmark render film.html \
@@ -167,7 +169,7 @@ onmark render film.html \
   --width 1920 \
   --height 1080 \
   --fps 30000/1001 \
-  --subtitle captions.vtt
+  --captions zh
 ```
 
 Install the optional agent skill for a product-owned create/check/inspect/render

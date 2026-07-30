@@ -45,6 +45,46 @@ impl fmt::Display for CueId {
     }
 }
 
+/// Typed identity of one external caption-track declaration.
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct CaptionTrackId(NodeId);
+
+impl CaptionTrackId {
+    /// Parses a track ID using the film-wide node-ID rules.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InvalidNodeId`] when the value is empty or contains ASCII
+    /// whitespace.
+    pub fn parse(value: impl Into<Box<str>>) -> Result<Self, InvalidNodeId> {
+        NodeId::parse(value).map(Self)
+    }
+
+    /// Returns the shared film-wide node identity.
+    #[must_use]
+    pub const fn as_node_id(&self) -> &NodeId {
+        &self.0
+    }
+
+    /// Returns the authored track identity.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+impl From<NodeId> for CaptionTrackId {
+    fn from(id: NodeId) -> Self {
+        Self(id)
+    }
+}
+
+impl fmt::Display for CaptionTrackId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(formatter)
+    }
+}
+
 /// Resolved source of a temporal event.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum EventRef {
@@ -123,13 +163,19 @@ fn is_screenplay_relative(value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{AssetRef, CueId, InvalidAssetRef};
+    use super::{AssetRef, CaptionTrackId, CueId, InvalidAssetRef};
 
     #[test]
     fn parses_typed_references_once() {
         assert_eq!(
             CueId::parse("offer").expect("the cue ID is valid").as_str(),
             "offer"
+        );
+        assert_eq!(
+            CaptionTrackId::parse("en")
+                .expect("the caption track ID is valid")
+                .as_str(),
+            "en",
         );
         assert_eq!(
             AssetRef::parse("product clip.mp4")

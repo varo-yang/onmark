@@ -7,8 +7,10 @@ use std::fmt::Write as _;
 
 use onmark_core::compiler;
 use onmark_core::model::{
-    AssetMetadata, AssetRef, Duration, FrameRate, FrozenAsset, FrozenAssetId, MediaTimebase,
-    SourceId, Timebase, VideoDimensions, VideoFrameMap, VideoMetadata, VideoTiming,
+    AssetMetadata, AssetRef, ByteOffset, CaptionCue, CaptionInterval, CaptionLanguage,
+    CaptionTrack, CaptionTrackId, Duration, FrameRate, FrozenAsset, FrozenAssetId,
+    ImportedCaptionTrack, MediaTimebase, NodeId, SourceId, SourceSpan, Timebase, VideoDimensions,
+    VideoFrameMap, VideoMetadata, VideoTiming,
 };
 use onmark_core::protocol::{
     BrowserCommand, BrowserEvent, BrowserMediaMode, BrowserPlan, BrowserRequest, BrowserResponse,
@@ -35,7 +37,7 @@ fn browser_requests_match_the_versioned_wire_contract() {
     ];
 
     assert_or_update(
-        &fixture("protocol", "browser-requests-v6.jsonl"),
+        &fixture("protocol", "browser-requests-v7.jsonl"),
         &render_json_lines(&requests),
     );
 }
@@ -64,7 +66,7 @@ fn browser_responses_match_the_versioned_wire_contract() {
     ];
 
     assert_or_update(
-        &fixture("protocol", "browser-responses-v6.jsonl"),
+        &fixture("protocol", "browser-responses-v7.jsonl"),
         &render_json_lines(&responses),
     );
 }
@@ -171,6 +173,14 @@ fn browser_plan_retains_solved_structure_and_content_ownership() {
                 "kind": "callToAction",
                 "text": "Buy now",
                 "interval": { "start": 45, "end": 75 }
+            },
+            {
+                "node": { "nodeId": 6, "authoredId": null },
+                "shotId": null,
+                "kind": "caption",
+                "captionTrack": { "id": "en", "language": "en" },
+                "text": "Caption",
+                "interval": { "start": 30, "end": 60 }
             }
         ]),
     );
@@ -255,7 +265,26 @@ fn timeline_fixture() -> (TimelineIr, FrozenAssetId, FrameRate) {
     let (timeline, diagnostics) = solved.into_parts();
     assert!(diagnostics.is_empty());
 
-    (timeline.expect("the fixture solves"), asset_id, rate)
+    let timeline = timeline.expect("the fixture solves");
+    let caption_interval = CaptionInterval::new(
+        Duration::from_nanos(1_000_000_000),
+        Duration::from_nanos(2_000_000_000),
+    )
+    .expect("the caption interval is non-empty");
+    let caption_span = SourceSpan::new(SourceId::new(1), ByteOffset::new(0), ByteOffset::new(1))
+        .expect("the caption span is ordered");
+    let caption = CaptionCue::new(caption_interval, "Caption", caption_span, caption_span)
+        .expect("the caption cue is valid");
+    let track = CaptionTrack::new(vec![caption]).expect("the caption track is non-empty");
+    let imported = ImportedCaptionTrack::new(
+        CaptionTrackId::from(NodeId::parse("en").expect("the caption track ID is valid")),
+        CaptionLanguage::parse("en").expect("the caption language is valid"),
+        track,
+    );
+    let timeline = compiler::import_captions(timeline, [imported])
+        .expect("the caption times fit the browser frame domain");
+
+    (timeline, asset_id, rate)
 }
 
 fn render_json_lines(values: &[impl serde::Serialize]) -> String {

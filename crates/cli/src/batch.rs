@@ -12,7 +12,7 @@ use std::process::ExitCode;
 
 use onmark_core::compiler;
 use onmark_core::diagnostics::Diagnostic;
-use onmark_core::model::{CaptionTrack, Timebase};
+use onmark_core::model::{ImportedCaptionTrack, Timebase};
 use onmark_core::render_graph::{PartitionPlan, RenderGraph};
 use onmark_core::timeline::TimelineIr;
 use onmark_render::{EncodeProfile, ExecutableUnit, RenderProfile};
@@ -22,6 +22,7 @@ use crate::arguments::{BatchArgs, RenderArgs, source_directory};
 use crate::artifact_cache::CacheAdmission;
 use crate::assets::FrozenCatalog;
 use crate::bundler::PresentationBundler;
+use crate::captions::CaptionImport;
 use crate::compilation;
 use crate::diagnostic::{self, AuthoredReport, JsonDiagnostic};
 use crate::environment::Executables;
@@ -30,7 +31,6 @@ use crate::input::{self, BoundedReadError};
 use crate::output;
 use crate::progress::Progress;
 use crate::render::{ExecutedRender, LocalRenderEngine, materialize_units};
-use crate::subtitle::SubtitleImport;
 use crate::variant::VariantImport;
 
 const BATCH_MANIFEST_VERSION: u16 = 1;
@@ -94,8 +94,12 @@ pub(super) async fn run(args: BatchArgs, json: bool) -> Result<BatchOutcome, Cli
             json,
         ));
     };
-    let caption_track = match BatchCaptions::load(first.subtitle.as_deref())? {
-        BatchCaptions::Ready(track) => track,
+    let caption_tracks = match BatchCaptions::load(
+        film.captions(),
+        &first.caption_tracks,
+        source_directory(screenplay),
+    )? {
+        BatchCaptions::Ready(tracks) => tracks,
         BatchCaptions::Rejected(report) => {
             return Ok(BatchOutcome::Rejected { report, json });
         }
@@ -104,7 +108,7 @@ pub(super) async fn run(args: BatchArgs, json: bool) -> Result<BatchOutcome, Cli
     let mut films = Vec::with_capacity(jobs.len());
     for job in &jobs {
         match VariantImport::apply(job.variant.as_deref(), film.clone())? {
-            VariantImport::Film(film) => films.push(film),
+            VariantImport::Film(film) => films.push(*film),
             VariantImport::Rejected(rejected) => {
                 let (path, source, diagnostics) = rejected.into_parts();
                 return Ok(BatchOutcome::rejected(path, source, diagnostics, json));
@@ -123,7 +127,7 @@ pub(super) async fn run(args: BatchArgs, json: bool) -> Result<BatchOutcome, Cli
         frozen.facts(),
         Timebase::new(first.frame_rate),
         &diagnostics,
-        caption_track.as_ref(),
+        &caption_tracks,
     )? {
         SolvedVariants::Ready(timelines) => timelines,
         SolvedVariants::Rejected(timing_diagnostics) => {
@@ -331,7 +335,7 @@ fn solve_variants(
     >,
     timebase: Timebase,
     diagnostics: &[Diagnostic],
-    caption_track: Option<&CaptionTrack>,
+    caption_tracks: &[ImportedCaptionTrack],
 ) -> Result<SolvedVariants, CliError> {
     let mut timelines = Vec::with_capacity(films.len());
     for film in films {
@@ -340,7 +344,10 @@ fn solve_variants(
         let Some(timeline) = timeline else {
             return Ok(SolvedVariants::Rejected(timing_diagnostics));
         };
-        timelines.push(compiler::import_captions(timeline, caption_track.cloned())?);
+        timelines.push(compiler::import_captions(
+            timeline,
+            caption_tracks.to_vec(),
+        )?);
     }
     Ok(SolvedVariants::Ready(timelines))
 }
@@ -351,18 +358,19 @@ enum SolvedVariants {
 }
 
 enum BatchCaptions {
-    Ready(Option<CaptionTrack>),
+    Ready(Vec<ImportedCaptionTrack>),
     Rejected(AuthoredReport),
 }
 
 impl BatchCaptions {
-    fn load(path: Option<&Path>) -> Result<Self, CliError> {
-        let Some(path) = path else {
-            return Ok(Self::Ready(None));
-        };
-        match SubtitleImport::load(path)? {
-            SubtitleImport::Track(track) => Ok(Self::Ready(Some(track))),
-            SubtitleImport::Rejected(rejected) => {
+    fn load(
+        declarations: &[compiler::ResolvedCaptionTrack],
+        selected: &[onmark_core::model::CaptionTrackId],
+        source_directory: &Path,
+    ) -> Result<Self, CliError> {
+        match CaptionImport::load(declarations, selected, source_directory)? {
+            CaptionImport::Ready(tracks) => Ok(Self::Ready(tracks)),
+            CaptionImport::Rejected(rejected) => {
                 let (path, source, diagnostics) = rejected.into_parts();
                 Ok(Self::Rejected(AuthoredReport {
                     path,
@@ -701,8 +709,8 @@ mod tests {
 
     use onmark_core::compiler;
     use onmark_core::model::{
-        ByteOffset, CaptionCue, CaptionInterval, CaptionTrack, Duration, FrameRate, SourceId,
-        SourceSpan, Timebase,
+        ByteOffset, CaptionCue, CaptionInterval, CaptionLanguage, CaptionTrack, CaptionTrackId,
+        Duration, FrameRate, ImportedCaptionTrack, SourceId, SourceSpan, Timebase,
     };
 
     use super::{
@@ -788,13 +796,18 @@ mod tests {
         )
         .expect("the fixture caption is valid");
         let track = CaptionTrack::new(vec![cue]).expect("the fixture track is nonempty");
+        let track = ImportedCaptionTrack::new(
+            CaptionTrackId::parse("en").expect("the track ID is valid"),
+            CaptionLanguage::parse("en").expect("the language is valid"),
+            track,
+        );
 
         let solved = solve_variants(
             vec![film.clone(), film],
             &BTreeMap::new(),
             Timebase::new(FrameRate::new(30, 1).expect("30 fps is valid")),
             &[],
-            Some(&track),
+            &[track],
         )
         .expect("the cue fits both variants");
         let SolvedVariants::Ready(timelines) = solved else {

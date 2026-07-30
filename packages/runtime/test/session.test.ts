@@ -23,7 +23,7 @@ import {
 } from "../src/index.js";
 
 const plan: BrowserPlan = {
-  timelineVersion: 5,
+  timelineVersion: 6,
   frameRate: { numerator: 30, denominator: 1 },
   timeline: { start: 0, end: 30 },
   evaluation: { start: 10, end: 20 },
@@ -361,6 +361,30 @@ test("takes ownership of plan facts and makes disposal terminal", async () => {
   assert.deepEqual(adapter.loadedPlan, plan);
 });
 
+test("retains immutable caption track metadata in the adapter snapshot", async () => {
+  const captioned = structuredClone(plan);
+  captioned.overlays.push({
+    node: { nodeId: 5, authoredId: null },
+    shotId: null,
+    kind: "caption",
+    captionTrack: { id: "en", language: "en-US" },
+    text: "Exact captions",
+    interval: { start: 10, end: 20 },
+  });
+  const adapter = new RecordingAdapter();
+  const session = new RuntimeSession(adapter);
+
+  const loaded = await session.dispatch(
+    request(1, { type: "load", plan: captioned }),
+  );
+
+  assert.equal(loaded.event.type, "loaded");
+  assert.deepEqual(adapter.loadedPlan?.overlays[1]?.captionTrack, {
+    id: "en",
+    language: "en-US",
+  });
+});
+
 test("retains complete structural timing across an evaluation window", async () => {
   const projected = structuredClone(plan);
   projected.scenes[0]!.interval = { start: 0, end: 30 };
@@ -564,6 +588,25 @@ test("rejects invalid browser overlay facts before adapter loading", async () =>
     node: { nodeId: 5, authoredId: "second-title" },
   });
   noncanonicalComponent.overlays.reverse();
+  const captionWithoutTrack = structuredClone(plan);
+  Object.assign(firstOverlay(captionWithoutTrack), {
+    kind: "caption",
+    shotId: null,
+  });
+  const authoredOverlayWithTrack = structuredClone(plan);
+  firstOverlay(authoredOverlayWithTrack).captionTrack = {
+    id: "en",
+    language: "en",
+  };
+  const malformedTrack = structuredClone(plan);
+  malformedTrack.overlays.push({
+    node: { nodeId: 5, authoredId: null },
+    shotId: null,
+    kind: "caption",
+    captionTrack: { id: "bad id", language: "en_US" },
+    text: "Broken",
+    interval: { start: 10, end: 20 },
+  });
 
   for (const invalidPlan of [
     emptyOverlay,
@@ -571,6 +614,9 @@ test("rejects invalid browser overlay facts before adapter loading", async () =>
     unrelatedOverlay,
     duplicateComponent,
     noncanonicalComponent,
+    captionWithoutTrack,
+    authoredOverlayWithTrack,
+    malformedTrack,
   ]) {
     const adapter = new RecordingAdapter();
     const session = new RuntimeSession(adapter);

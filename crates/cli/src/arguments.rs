@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::{error::Error, fmt};
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use onmark_core::model::FrameRate;
+use onmark_core::model::{CaptionTrackId, FrameRate};
 use onmark_render::{BrowserGraphicsBackend, EncodeLimits, EncodeProfile};
 
 use crate::execution::LOCAL_VIDEO_ENCODER_THREADS;
@@ -62,9 +62,14 @@ pub(super) struct BatchArgs {
     #[arg(long, default_value_t = 1_080)]
     pub(super) height: u32,
 
-    /// Standalone SRT, `WebVTT`, or ASS file shared by every batch render.
-    #[arg(long = "subtitle", value_name = "FILE")]
-    pub(super) subtitle: Option<PathBuf>,
+    /// Declared caption tracks to burn in, in presentation order. Defaults to all.
+    #[arg(
+        long = "captions",
+        value_name = "TRACKS",
+        value_delimiter = ',',
+        value_parser = parse_caption_track_id
+    )]
+    pub(super) caption_tracks: Vec<CaptionTrackId>,
 
     /// Browser executable. Defaults to headless shell on Linux and Chrome elsewhere.
     #[arg(long, help_heading = "Execution overrides")]
@@ -241,9 +246,14 @@ pub(super) struct ValidationArgs {
     )]
     pub(super) ffprobe: PathBuf,
 
-    /// Standalone SRT, `WebVTT`, or ASS file.
-    #[arg(long = "subtitle", value_name = "FILE")]
-    pub(super) subtitle: Option<PathBuf>,
+    /// Declared caption tracks to burn in, in presentation order. Defaults to all.
+    #[arg(
+        long = "captions",
+        value_name = "TRACKS",
+        value_delimiter = ',',
+        value_parser = parse_caption_track_id
+    )]
+    pub(super) caption_tracks: Vec<CaptionTrackId>,
 }
 
 #[derive(Debug, Args)]
@@ -349,9 +359,14 @@ pub(super) struct RenderArgs {
     )]
     pub(super) ffprobe: PathBuf,
 
-    /// Standalone SRT, `WebVTT`, or ASS file.
-    #[arg(long = "subtitle", value_name = "FILE")]
-    pub(super) subtitle: Option<PathBuf>,
+    /// Declared caption tracks to burn in, in presentation order. Defaults to all.
+    #[arg(
+        long = "captions",
+        value_name = "TRACKS",
+        value_delimiter = ',',
+        value_parser = parse_caption_track_id
+    )]
+    pub(super) caption_tracks: Vec<CaptionTrackId>,
 }
 
 #[derive(Debug, Args)]
@@ -472,7 +487,7 @@ impl BatchArgs {
             bundler: self.bundler.clone(),
             ffmpeg: self.ffmpeg.clone(),
             ffprobe: self.ffprobe.clone(),
-            subtitle: self.subtitle.clone(),
+            caption_tracks: self.caption_tracks.clone(),
         }
     }
 }
@@ -525,7 +540,7 @@ impl BenchmarkArgs {
             bundler: self.validation.bundler.clone(),
             ffmpeg: self.ffmpeg.clone(),
             ffprobe: self.validation.ffprobe.clone(),
-            subtitle: self.validation.subtitle.clone(),
+            caption_tracks: self.validation.caption_tracks.clone(),
         }
     }
 }
@@ -593,6 +608,10 @@ fn parse_frame_rate(value: &str) -> Result<FrameRate, String> {
         None => (parse_rate_component(value)?, 1),
     };
     FrameRate::new(numerator, denominator).map_err(|error| error.to_string())
+}
+
+fn parse_caption_track_id(value: &str) -> Result<CaptionTrackId, String> {
+    CaptionTrackId::parse(value).map_err(|reason| format!("invalid caption track ID: {reason}"))
 }
 
 fn parse_rate_component(value: &str) -> Result<u32, String> {
@@ -664,8 +683,8 @@ mod tests {
             "1080",
             "--height",
             "1920",
-            "--subtitle",
-            "campaign/captions.vtt",
+            "--captions",
+            "en,zh",
         ])
         .expect("the bounded batch command is valid");
         let Command::Batch(args) = cli.command else {
@@ -678,8 +697,11 @@ mod tests {
         assert_eq!(args.width, 1_080);
         assert_eq!(args.height, 1_920);
         assert_eq!(
-            args.subtitle.as_deref(),
-            Some(Path::new("campaign/captions.vtt")),
+            args.caption_tracks
+                .iter()
+                .map(onmark_core::model::CaptionTrackId::as_str)
+                .collect::<Vec<_>>(),
+            ["en", "zh"],
         );
         let render = args.render_args(
             PathBuf::from("campaign/film.html"),
@@ -687,8 +709,12 @@ mod tests {
             PathBuf::from("campaign/output.mp4"),
         );
         assert_eq!(
-            render.subtitle.as_deref(),
-            Some(Path::new("campaign/captions.vtt")),
+            render
+                .caption_tracks
+                .iter()
+                .map(onmark_core::model::CaptionTrackId::as_str)
+                .collect::<Vec<_>>(),
+            ["en", "zh"],
         );
     }
 
@@ -905,33 +931,19 @@ mod tests {
     }
 
     #[test]
-    fn accepts_one_standalone_subtitle_file() {
-        let cli = Cli::try_parse_from([
-            "onmark",
-            "render",
-            "film.html",
-            "--subtitle",
-            "captions.srt",
-        ])
-        .expect("one subtitle input is valid");
+    fn accepts_ordered_caption_track_selection() {
+        let cli = Cli::try_parse_from(["onmark", "render", "film.html", "--captions", "zh,en"])
+            .expect("the selected track IDs are valid");
         let Command::Render(args) = cli.command else {
             panic!("the fixture must parse as a render command");
         };
 
-        assert_eq!(args.subtitle.as_deref(), Some(Path::new("captions.srt")));
-
-        assert!(
-            Cli::try_parse_from([
-                "onmark",
-                "render",
-                "film.html",
-                "--subtitle",
-                "captions.srt",
-                "--subtitle",
-                "translation.vtt",
-            ])
-            .is_err(),
-            "multiple caption tracks require explicit selection semantics",
+        assert_eq!(
+            args.caption_tracks
+                .iter()
+                .map(onmark_core::model::CaptionTrackId::as_str)
+                .collect::<Vec<_>>(),
+            ["zh", "en"],
         );
     }
 

@@ -67,6 +67,11 @@ regression test:
 - a transition-trimmed partition incorrectly required its video placement to
   equal, rather than cover, the published output interval.
 
+The first bullet records the CLI surface used by this historical run. Gate
+eight replaced that flag with film-level `om-captions` declarations and
+optional ordered `--captions` selection; the workload source now uses the
+admitted spelling.
+
 No hidden fallback or campaign-specific executor was added. The fixes remain in
 the ordinary subtitle, authoring, motion, and visual-admission boundaries.
 

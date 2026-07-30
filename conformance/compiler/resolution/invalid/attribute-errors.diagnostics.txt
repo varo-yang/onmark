@@ -9,30 +9,38 @@ ONM-ATTR-002 error @0:179..214 element <om-cue> requires the "time" attribute
   help: add time="..." to <om-cue>
 ONM-ATTR-002 error @0:219..246 element <om-cue> requires the "id" attribute
   help: add id="..." to <om-cue>
-ONM-TIME-001 error @0:296..303 duration "3frames" is invalid: duration unit must be s or ms
+ONM-ATTR-002 error @0:262..319 element <om-captions> requires the "src" attribute
+  help: add src="..." to <om-captions>
+ONM-ATTR-002 error @0:322..390 element <om-captions> requires the "lang" attribute
+  help: add lang="..." to <om-captions>
+ONM-ATTR-003 error @0:449..454 attribute "lang" is invalid: caption language must contain alphanumeric subtags separated by hyphens
+  help: use a language tag such as lang="en" or lang="zh-CN"
+ONM-ATTR-002 error @0:473..529 element <om-captions> requires the "id" attribute
+  help: add id="..." to <om-captions>
+ONM-TIME-001 error @0:566..573 duration "3frames" is invalid: duration unit must be s or ms
   help: use an exact duration such as 3s, 500ms, or 1.5s
-ONM-ATTR-003 error @0:324..324 attribute "src" is invalid: asset reference cannot be empty
+ONM-ATTR-003 error @0:594..594 attribute "src" is invalid: asset reference cannot be empty
   help: provide a screenplay-relative path for "src"
-ONM-TIME-001 error @0:333..344 duration "1.0000001ms" is invalid: duration exceeds the supported fractional precision
+ONM-TIME-001 error @0:603..614 duration "1.0000001ms" is invalid: duration exceeds the supported fractional precision
   help: use an exact duration such as 3s, 500ms, or 1.5s
-ONM-ATTR-003 error @0:352..358 video trim "3s..2s" is invalid: trim end must be after its start
+ONM-ATTR-003 error @0:622..628 video trim "3s..2s" is invalid: trim end must be after its start
   help: use a source interval such as 3s..8s, 3s.., or ..8s
-ONM-ATTR-003 error @0:367..369 video speed "0x" is invalid: speed must be greater than zero
+ONM-ATTR-003 error @0:637..639 video speed "0x" is invalid: speed must be greater than zero
   help: use an exact positive rate such as 1x, 0.5x, or 2x
-ONM-ATTR-003 error @0:378..379 video plays "0" is invalid: plays must be greater than zero
+ONM-ATTR-003 error @0:648..649 video plays "0" is invalid: plays must be greater than zero
   help: use a positive whole number such as plays="3"
-ONM-TIME-001 error @0:392..394 video hold-last "0s" is invalid: duration must be greater than zero
+ONM-TIME-001 error @0:662..664 video hold-last "0s" is invalid: duration must be greater than zero
   help: use a positive exact duration such as hold-last="500ms"
-ONM-ATTR-001 error @0:396..403 attribute "mystery" is not allowed on <video>
+ONM-ATTR-001 error @0:666..673 attribute "mystery" is not allowed on <video>
   help: remove the "mystery" attribute
-ONM-REF-001 error @0:438..445 cue "missing" is not declared as a resolved event
+ONM-REF-001 error @0:708..715 cue "missing" is not declared as a resolved event
   help: declare this cue with a valid id and time, or use another cue
-ONM-ATTR-004 error @0:447..452 attributes "cue" and "delay" define conflicting start rules
+ONM-ATTR-004 error @0:717..722 attributes "cue" and "delay" define conflicting start rules
   help: keep either "cue" or "delay", not both
-  related @0:433..436 "cue" is first authored here
-ONM-ATTR-001 error @0:458..465 attribute "strange" is not allowed on <om-title>
+  related @0:703..706 "cue" is first authored here
+ONM-ATTR-001 error @0:728..735 attribute "strange" is not allowed on <om-title>
   help: remove the "strange" attribute
-ONM-ATTR-003 error @0:546..553 attribute "cue" is invalid: node ID cannot contain ASCII whitespace
+ONM-ATTR-003 error @0:816..823 attribute "cue" is invalid: node ID cannot contain ASCII whitespace
   help: use a non-empty cue ID without ASCII whitespace
-ONM-TIME-001 error @0:622..624 duration "0s" is invalid: duration must be greater than zero
+ONM-TIME-001 error @0:892..894 duration "0s" is invalid: duration must be greater than zero
   help: use an exact duration such as 3s, 500ms, or 1.5s

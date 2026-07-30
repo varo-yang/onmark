@@ -54,6 +54,7 @@ async fn renders_one_screenplay_reliably_across_real_processes() {
 async fn assembles_two_partitioned_units_across_real_processes() {
     let directory = tempdir().expect("the conformance workspace is available");
     let fixture = Fixture::materialize(directory.path(), "cli/audio-subtitle.html");
+    fixture.write_captions();
     fixture.generate_general_audio().await;
 
     render_fixture_twice(&fixture, SourceVideo::Moving, PARTITIONED_FRAME_COUNT, 0).await;
@@ -238,6 +239,14 @@ impl Fixture {
 
     fn replace_screenplay(&self, source: &str) {
         fs::write(&self.screenplay, source).expect("the screenplay fixture is writable");
+    }
+
+    fn write_captions(&self) {
+        fs::write(
+            self.root.join("captions.vtt"),
+            "WEBVTT\n\n00:00.200 --> 00:01.800\nExact captions\n",
+        )
+        .expect("the caption fixture is writable");
     }
 
     async fn generate_source_video(&self, video: SourceVideo) {

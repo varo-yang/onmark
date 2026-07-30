@@ -101,9 +101,10 @@ onmark render film.html --output release.mp4
 onmark render film.html --output edit.mov
 ```
 
-Keep rational rates exact (`--fps 30000/1001`). Import one SRT, WebVTT, or ASS
-track with `--subtitle`. Inspect the finished video rather than claiming visual
-quality from a successful exit code alone.
+Keep rational rates exact (`--fps 30000/1001`). Declare SRT, WebVTT, or ASS
+tracks with film-level `om-captions` elements; use `--captions en,zh` only to
+select an ordered subset. Inspect the finished video rather than claiming
+visual quality from a successful exit code alone.
 
 Before handing off, report the screenplay path, output path, exact CLI command,
 diagnostics, frame count, capture mode, graphics backend, output profile, reuse
