@@ -1284,6 +1284,10 @@ mod tests {
                 crate::UnsupportedVisualComposition::UnsupportedColorProfile,
             ),
             (
+                layered_video_asset_with_codec("av1"),
+                crate::UnsupportedVisualComposition::UnsupportedCodec,
+            ),
+            (
                 layered_video_asset_with_codec("vp9"),
                 crate::UnsupportedVisualComposition::UnsupportedCodec,
             ),
@@ -1521,11 +1525,10 @@ mod tests {
             true,
         );
         let missing_color = layered_video_asset(video_dimensions(), false);
-        let unproved_codec = layered_video_asset_with_codec("vp9");
-
         assert_browser_composition(mismatched);
         assert_browser_composition(missing_color);
-        assert_browser_composition(unproved_codec);
+        assert_browser_composition(layered_video_asset_with_codec("av1"));
+        assert_browser_composition(layered_video_asset_with_codec("vp9"));
     }
 
     #[test]

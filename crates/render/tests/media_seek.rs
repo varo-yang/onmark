@@ -117,6 +117,19 @@ async fn validates_vp9_browser_admission() {
 }
 
 #[tokio::test]
+#[ignore = "requires pinned Chromium, FFmpeg, ffprobe, and built runtime"]
+async fn validates_av1_browser_admission() {
+    run_case_with_codec(
+        "av1-cfr-30",
+        FrameRate::new(30, 1).expect("the AV1 fixture rate is valid"),
+        FrameRate::new(30, 1).expect("the output rate is valid"),
+        FixtureTiming::Constant,
+        FixtureCodec::Av1,
+    )
+    .await;
+}
+
+#[tokio::test]
 #[ignore = "requires Linux ONMARK_HEADLESS_SHELL, ONMARK_FFMPEG, and built runtime"]
 async fn compares_native_seek_with_alternative_media_paths() {
     let fixture = StrategyFixture::build().await;
@@ -383,10 +396,7 @@ async fn run_case_with_codec(
         .join(format!("{name}.{}", codec.container_extension()));
     generate_video_as(&media, source_frame_rate, timing, codec).await;
     let source_video = observe_admitted_video(&media).await;
-    if matches!(
-        (timing, codec),
-        (FixtureTiming::Constant, FixtureCodec::H264)
-    ) {
+    if timing == FixtureTiming::Constant && codec.preserves_constant_rate() {
         assert_eq!(
             source_video.timing,
             VideoTiming::Constant(source_frame_rate),
@@ -656,13 +666,19 @@ enum FixtureTiming {
 
 #[derive(Clone, Copy)]
 enum FixtureCodec {
+    Av1,
     H264,
     Vp9,
 }
 
 impl FixtureCodec {
+    const fn preserves_constant_rate(self) -> bool {
+        matches!(self, Self::Av1 | Self::H264)
+    }
+
     const fn name(self) -> &'static str {
         match self {
+            Self::Av1 => "av1",
             Self::H264 => "h264",
             Self::Vp9 => "vp9",
         }
@@ -670,13 +686,23 @@ impl FixtureCodec {
 
     const fn container_extension(self) -> &'static str {
         match self {
-            Self::H264 => "mp4",
+            Self::Av1 | Self::H264 => "mp4",
             Self::Vp9 => "webm",
         }
     }
 
     const fn encoder_arguments(self) -> &'static [&'static str] {
         match self {
+            Self::Av1 => &[
+                "-c:v",
+                "libsvtav1",
+                "-preset",
+                "10",
+                "-crf",
+                "35",
+                "-g",
+                "30",
+            ],
             Self::H264 => &[
                 "-c:v",
                 "libx264",

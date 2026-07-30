@@ -29,7 +29,7 @@ impl<'a> AdmittedVideo<'a> {
         let video = metadata
             .video_metadata()
             .ok_or(UnsupportedVideo::MissingVideoStream)?;
-        if !matches!(video.codec(), "h264" | "vp9") {
+        if !matches!(video.codec(), "av1" | "h264" | "vp9") {
             return Err(UnsupportedVideo::Codec(video.codec().into()));
         }
         if video.pixel_format() != "yuv420p" {
@@ -97,7 +97,7 @@ mod tests {
     #[test]
     fn admits_timed_browser_video_streams() {
         let rate = FrameRate::new(30_000, 1_001).expect("NTSC timing is valid");
-        for codec in ["h264", "vp9"] {
+        for codec in ["av1", "h264", "vp9"] {
             let supported = video(codec, VideoTiming::Constant(rate));
             let admitted =
                 AdmittedVideo::admit(&supported).expect("the browser codec profile is admitted");
