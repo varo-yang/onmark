@@ -1815,6 +1815,22 @@ the browser and encoder resource envelope equal to one ordinary render. The
 manifest is orchestration input, not screenplay syntax, and cannot override
 timing, assets, capabilities, render profile, or output dimensions.
 
+A 1,920 × 1,080 production-campaign exercise renders twenty variants over one
+435-frame screenplay, shared subtitle track, frozen asset set, and seven-region
+partition plan. Exact dependency scoping reuses 5,790 of 8,700 frame instances
+and 84 of 140 region instances. Film-shell edits invalidate the whole plan;
+shot and transition edits retain unrelated artifacts; an already cached
+composed variant reuses all seven regions. The workload exposed and now guards
+shared batch-subtitle import, boolean visibility ownership, fractional-frame
+GSAP boundaries, and transition-trimmed video coverage.
+
+That experiment deliberately separates cache identity from independent cold
+pixel identity. Its arbitrary mixed browser-composited presentation was not
+raw-RGBA identical across cold Chromium sessions, even under the software
+control. No new visual path is admitted from similarity metrics, and the
+existing exact conformance remains authoritative. The full result is recorded
+in `conformance/evidence/variant-campaign.md`.
+
 This addition does not add a template engine, string substitution, a global or
 URL input object, a source mutation API, remote authoring, a coordinator, or a
 mutable runtime update channel. Values are immutable for one Render Unit.

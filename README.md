@@ -120,7 +120,7 @@ Declare typed presentation fields when one film needs many data variants:
 Override only the values you need:
 
 ```json
-{"headline":"Autumn edit","accent":"#c56cff"}
+{ "headline": "Autumn edit", "accent": "#c56cff" }
 ```
 
 ```bash
@@ -137,14 +137,19 @@ the manifest:
   "version": 1,
   "screenplay": "film.html",
   "renders": [
-    {"variant": "variants/summer.json", "output": "renders/summer.mp4"},
-    {"variant": "variants/autumn.json", "output": "renders/autumn.mp4"}
+    { "variant": "variants/summer.json", "output": "renders/summer.mp4" },
+    { "variant": "variants/autumn.json", "output": "renders/autumn.mp4" }
   ]
 }
 ```
 
 Unchanged render regions are reused across items; variant values cannot change
-timing, media sources, dimensions, or output profiles.
+timing, media sources, dimensions, or output profiles. One standalone subtitle
+track can be shared by the complete batch:
+
+```bash
+onmark batch batch.json --subtitle captions.vtt
+```
 
 Use the default opaque H.264/AAC MP4 for delivery, or select the
 alpha-preserving ProRes 4444/PCM MOV profile by filename:

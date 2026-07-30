@@ -1,0 +1,489 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="onmark:visual-capability" content="separableOverlay" />
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body,
+      om-film,
+      om-scene,
+      om-shot {
+        display: block;
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+        width: 100%;
+      }
+
+      body {
+        background: #08090c;
+        color: #f5f1e8;
+        font-family: "Helvetica Neue", "Segoe UI", sans-serif;
+      }
+
+      om-film {
+        background:
+          radial-gradient(
+            circle at 78% 18%,
+            rgb(255 95 69 / 16%),
+            transparent 30%
+          ),
+          #08090c;
+        isolation: isolate;
+      }
+
+      om-shot {
+        inset: 0;
+        position: fixed;
+      }
+
+      video {
+        height: 100%;
+        inset: 0;
+        object-fit: cover;
+        position: absolute;
+        width: 100%;
+      }
+
+      .campaign-code {
+        color: var(--brandAccent, #ff5f45);
+        font-family: "SFMono-Regular", Consolas, monospace;
+        font-size: 18px;
+        left: 56px;
+        letter-spacing: 0.18em;
+        position: fixed;
+        text-transform: uppercase;
+        top: 48px;
+        z-index: 20;
+      }
+
+      .grain {
+        background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.86' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.24'/%3E%3C/svg%3E");
+        inset: 0;
+        mix-blend-mode: soft-light;
+        opacity: 0.2;
+        pointer-events: none;
+        position: fixed;
+        z-index: 18;
+      }
+
+      .hero {
+        --heroAccent: #ff5f45;
+      }
+
+      .hero::after,
+      .feature::after {
+        background:
+          linear-gradient(90deg, rgb(8 9 12 / 86%), transparent 66%),
+          linear-gradient(0deg, rgb(8 9 12 / 58%), transparent 44%);
+        content: "";
+        inset: 0;
+        position: absolute;
+      }
+
+      .hero-copy,
+      .feature-copy,
+      .closing-copy {
+        left: 8vw;
+        max-width: 78vw;
+        position: absolute;
+        top: 50%;
+        transform: translateY(-50%);
+        z-index: 3;
+      }
+
+      .eyebrow {
+        color: var(--heroAccent, #ff5f45);
+        font-family: "SFMono-Regular", Consolas, monospace;
+        font-size: 22px;
+        letter-spacing: 0.16em;
+        margin-bottom: 30px;
+        text-transform: uppercase;
+      }
+
+      om-title {
+        display: block;
+        font-size: clamp(88px, 9vw, 176px);
+        font-weight: 650;
+        letter-spacing: -0.075em;
+        line-height: 0.86;
+        max-width: 1ch;
+      }
+
+      .hero-badge {
+        background: var(--heroAccent, #ff5f45);
+        border-radius: 999px;
+        color: #08090c;
+        display: inline-block;
+        font-size: 18px;
+        font-weight: 700;
+        margin-top: 40px;
+        padding: 13px 22px;
+        text-transform: uppercase;
+      }
+
+      .proof {
+        align-items: center;
+        background:
+          linear-gradient(135deg, #f0e9dc 0 50%, #ded6ca 50%), #f0e9dc;
+        color: #121318;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        padding: 8vw;
+      }
+
+      .proof-copy {
+        align-self: end;
+        max-width: 570px;
+      }
+
+      .proof-copy h2 {
+        font-family: Georgia, serif;
+        font-size: 72px;
+        font-style: italic;
+        font-weight: 400;
+        letter-spacing: -0.04em;
+        line-height: 0.95;
+        margin: 0;
+      }
+
+      .proof-copy p {
+        font-size: 24px;
+        line-height: 1.4;
+        margin: 28px 0 0;
+        max-width: 470px;
+      }
+
+      .metric {
+        --proofMetric: 68;
+        align-items: flex-end;
+        aspect-ratio: 1;
+        background: #121318;
+        border-radius: 50%;
+        color: #f0e9dc;
+        counter-reset: proof var(--proofMetric);
+        display: flex;
+        justify-content: center;
+        justify-self: end;
+        padding-bottom: 18%;
+        position: relative;
+        width: min(58vw, 660px);
+      }
+
+      .metric::before {
+        content: counter(proof) "%";
+        font-size: 150px;
+        font-weight: 650;
+        letter-spacing: -0.08em;
+      }
+
+      .metric::after {
+        border: 2px solid var(--brandAccent, #ff5f45);
+        border-radius: 50%;
+        content: "";
+        inset: 8%;
+        position: absolute;
+      }
+
+      .feature-copy {
+        max-width: 720px;
+      }
+
+      .feature-copy h2 {
+        font-family: Georgia, serif;
+        font-size: 110px;
+        font-style: italic;
+        font-weight: 400;
+        letter-spacing: -0.06em;
+        line-height: 0.9;
+        margin: 0;
+      }
+
+      .feature-copy p {
+        color: rgb(245 241 232 / 78%);
+        font-size: 26px;
+        line-height: 1.4;
+        margin: 32px 0 0;
+        max-width: 580px;
+      }
+
+      .feature-chip {
+        border: 1px solid rgb(245 241 232 / 42%);
+        border-radius: 999px;
+        display: inline-block;
+        font-family: "SFMono-Regular", Consolas, monospace;
+        font-size: 17px;
+        letter-spacing: 0.1em;
+        margin-top: 38px;
+        padding: 12px 18px;
+        text-transform: uppercase;
+      }
+
+      .closing {
+        --ctaAccent: #7dffb2;
+        background:
+          radial-gradient(
+            circle at 82% 22%,
+            rgb(125 255 178 / 28%),
+            transparent 34%
+          ),
+          linear-gradient(145deg, #11131a, #060709);
+      }
+
+      .closing-copy {
+        max-width: 1200px;
+      }
+
+      .closing-copy p {
+        color: rgb(245 241 232 / 62%);
+        font-family: "SFMono-Regular", Consolas, monospace;
+        font-size: 21px;
+        letter-spacing: 0.12em;
+        margin: 0 0 30px;
+        text-transform: uppercase;
+      }
+
+      om-cta {
+        color: var(--ctaAccent, #7dffb2);
+        display: block;
+        font-size: clamp(92px, 10vw, 190px);
+        font-weight: 650;
+        letter-spacing: -0.08em;
+        line-height: 0.82;
+      }
+
+      om-transition {
+        --transitionTone: #ff5f45;
+        background: var(--transitionTone);
+        display: block;
+        inset: 0;
+        position: fixed;
+        transform: scaleX(0);
+        z-index: 40;
+      }
+
+      om-caption {
+        bottom: 54px;
+        color: #f5f1e8;
+        display: block;
+        font-family: Georgia, serif;
+        font-size: 38px;
+        font-style: italic;
+        left: 8vw;
+        line-height: 1.1;
+        max-width: 70vw;
+        position: fixed;
+        text-shadow: 0 3px 18px rgb(0 0 0 / 86%);
+        z-index: 30;
+      }
+    </style>
+  </head>
+  <body>
+    <om-film data-om-css="brandAccent" style="--brandAccent: #ff5f45">
+      <om-fields>
+        <om-field
+          name="campaignCode"
+          type="text"
+          default="Object / 24"
+        ></om-field>
+        <om-field name="brandAccent" type="color" default="#ff5f45"></om-field>
+        <om-field
+          name="heroHeadline"
+          type="text"
+          default="Make one. Speak to many."
+        ></om-field>
+        <om-field name="heroAccent" type="color" default="#ff5f45"></om-field>
+        <om-field name="heroBadge" type="boolean" default="false"></om-field>
+        <om-field name="proofMetric" type="integer" default="68"></om-field>
+        <om-field
+          name="proofLabel"
+          type="text"
+          default="Less repeated capture across a campaign."
+        ></om-field>
+        <om-field
+          name="featureCopy"
+          type="text"
+          default="Change the message. Keep the motion."
+        ></om-field>
+        <om-field
+          name="featureVisible"
+          type="boolean"
+          default="true"
+        ></om-field>
+        <om-field
+          name="ctaText"
+          type="text"
+          default="Render the difference."
+        ></om-field>
+        <om-field name="ctaAccent" type="color" default="#7dffb2"></om-field>
+        <om-field
+          name="transitionTone"
+          type="color"
+          default="#ff5f45"
+        ></om-field>
+      </om-fields>
+
+      <om-music
+        src="assets/score.wav"
+        gain="16%"
+        fade-in="500ms"
+        fade-out="1s"
+      ></om-music>
+      <div class="campaign-code" data-om-text="campaignCode">Object / 24</div>
+      <div class="grain"></div>
+
+      <om-scene>
+        <om-shot
+          id="hero"
+          class="hero"
+          data-om-css="heroAccent"
+          style="--heroAccent: #ff5f45"
+        >
+          <video src="assets/source.mp4" trim="0s..4s"></video>
+          <div class="hero-copy">
+            <div class="eyebrow" data-rise>Canonical variants</div>
+            <om-title data-om-text="heroHeadline" data-rise
+              >Make one. Speak to many.</om-title
+            >
+            <div class="hero-badge" data-om-show="heroBadge" hidden data-rise>
+              Limited release
+            </div>
+          </div>
+        </om-shot>
+
+        <om-transition duration="500ms"></om-transition>
+
+        <om-shot id="proof" duration="4s" class="proof">
+          <div class="proof-copy">
+            <!-- prettier-ignore -->
+            <h2 data-om-text="proofLabel" data-rise>Less repeated capture across a campaign.</h2>
+            <p data-rise>
+              Rust owns values and dependencies. The browser only realizes
+              pixels.
+            </p>
+          </div>
+          <div
+            class="metric"
+            data-om-css="proofMetric"
+            style="--proofMetric: 68"
+            data-rise
+          ></div>
+        </om-shot>
+
+        <om-transition
+          duration="500ms"
+          data-om-css="transitionTone"
+          style="--transitionTone: #ff5f45"
+        ></om-transition>
+
+        <om-shot id="feature" class="feature">
+          <video src="assets/source.mp4" trim="4s..8s"></video>
+          <div class="feature-copy">
+            <!-- prettier-ignore -->
+            <h2 data-om-text="featureCopy" data-rise>Change the message. Keep the motion.</h2>
+            <p data-rise>
+              One immutable plan per variant. One exact cache boundary for every
+              region.
+            </p>
+            <div class="feature-chip" data-om-show="featureVisible" data-rise>
+              Exact region reuse
+            </div>
+          </div>
+        </om-shot>
+
+        <om-transition duration="500ms"></om-transition>
+
+        <om-shot
+          id="closing"
+          class="closing"
+          duration="4s"
+          data-om-css="ctaAccent"
+          style="--ctaAccent: #7dffb2"
+        >
+          <div class="closing-copy">
+            <p data-rise>Onmark / deterministic video compiler</p>
+            <om-cta data-om-text="ctaText" data-rise
+              >Render the difference.</om-cta
+            >
+          </div>
+        </om-shot>
+      </om-scene>
+
+      <script type="module" data-om-motion>
+        import { gsapMotion } from "onmark/motion/gsap";
+
+        export const motion = gsapMotion({
+          shot({ element, timeline }) {
+            const rising = element.querySelectorAll("[data-rise]");
+
+            timeline.from(
+              rising,
+              {
+                duration: 0.7,
+                ease: "power4.out",
+                opacity: 0,
+                stagger: 0.09,
+                y: 48,
+              },
+              0.12,
+            );
+          },
+          transition({ element, incomingElement, outgoingElement, timeline }) {
+            timeline
+              .set(incomingElement, { zIndex: 2 }, 0)
+              .set(outgoingElement, { zIndex: 1 }, 0)
+              .fromTo(
+                incomingElement,
+                { clipPath: "inset(0 100% 0 0)" },
+                {
+                  clipPath: "inset(0 0% 0 0)",
+                  duration: 0.5,
+                  ease: "power3.inOut",
+                },
+                0,
+              )
+              .fromTo(
+                element,
+                { scaleX: 0, transformOrigin: "left center" },
+                {
+                  duration: 0.5,
+                  ease: "power3.inOut",
+                  scaleX: 1,
+                },
+                0,
+              )
+              .to(element, { duration: 0.25, opacity: 0 }, 0.25);
+          },
+          caption({ durationSeconds, element, timeline }) {
+            timeline
+              .from(
+                element,
+                {
+                  duration: 0.35,
+                  ease: "power3.out",
+                  opacity: 0,
+                  y: 18,
+                },
+                0,
+              )
+              .to(
+                element,
+                {
+                  duration: 0.25,
+                  ease: "power2.in",
+                  opacity: 0,
+                  y: -10,
+                },
+                Math.max(0.35, durationSeconds - 0.25),
+              );
+          },
+        });
+      </script>
+    </om-film>
+  </body>
+</html>

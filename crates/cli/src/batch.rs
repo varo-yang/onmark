@@ -12,7 +12,7 @@ use std::process::ExitCode;
 
 use onmark_core::compiler;
 use onmark_core::diagnostics::Diagnostic;
-use onmark_core::model::Timebase;
+use onmark_core::model::{CaptionTrack, Timebase};
 use onmark_core::render_graph::{PartitionPlan, RenderGraph};
 use onmark_core::timeline::TimelineIr;
 use onmark_render::{EncodeProfile, RenderProfile};
@@ -29,6 +29,7 @@ use crate::input::{self, BoundedReadError};
 use crate::output;
 use crate::progress::Progress;
 use crate::render::{ExecutedRender, LocalRenderEngine, materialize_units};
+use crate::subtitle::SubtitleImport;
 use crate::variant::VariantImport;
 
 const BATCH_MANIFEST_VERSION: u16 = 1;
@@ -90,6 +91,12 @@ pub(super) async fn run(args: BatchArgs, json: bool) -> Result<BatchOutcome, Cli
             json,
         ));
     };
+    let caption_track = match BatchCaptions::load(first.subtitle.as_deref())? {
+        BatchCaptions::Ready(track) => track,
+        BatchCaptions::Rejected(report) => {
+            return Ok(BatchOutcome::Rejected { report, json });
+        }
+    };
 
     let mut films = Vec::with_capacity(jobs.len());
     for job in &jobs {
@@ -113,6 +120,7 @@ pub(super) async fn run(args: BatchArgs, json: bool) -> Result<BatchOutcome, Cli
         frozen.facts(),
         Timebase::new(first.frame_rate),
         &diagnostics,
+        caption_track.as_ref(),
     )? {
         SolvedVariants::Ready(timelines) => timelines,
         SolvedVariants::Rejected(timing_diagnostics) => {
@@ -274,6 +282,7 @@ fn solve_variants(
     >,
     timebase: Timebase,
     diagnostics: &[Diagnostic],
+    caption_track: Option<&CaptionTrack>,
 ) -> Result<SolvedVariants, CliError> {
     let mut timelines = Vec::with_capacity(films.len());
     for film in films {
@@ -282,7 +291,7 @@ fn solve_variants(
         let Some(timeline) = timeline else {
             return Ok(SolvedVariants::Rejected(timing_diagnostics));
         };
-        timelines.push(timeline);
+        timelines.push(compiler::import_captions(timeline, caption_track.cloned())?);
     }
     Ok(SolvedVariants::Ready(timelines))
 }
@@ -290,6 +299,30 @@ fn solve_variants(
 enum SolvedVariants {
     Ready(Vec<TimelineIr>),
     Rejected(Vec<Diagnostic>),
+}
+
+enum BatchCaptions {
+    Ready(Option<CaptionTrack>),
+    Rejected(AuthoredReport),
+}
+
+impl BatchCaptions {
+    fn load(path: Option<&Path>) -> Result<Self, CliError> {
+        let Some(path) = path else {
+            return Ok(Self::Ready(None));
+        };
+        match SubtitleImport::load(path)? {
+            SubtitleImport::Track(track) => Ok(Self::Ready(Some(track))),
+            SubtitleImport::Rejected(rejected) => {
+                let (path, source, diagnostics) = rejected.into_parts();
+                Ok(Self::Rejected(AuthoredReport {
+                    path,
+                    source,
+                    diagnostics,
+                }))
+            }
+        }
+    }
 }
 
 fn common_partitions(timelines: &[TimelineIr]) -> Result<PartitionPlan, BatchError> {
@@ -538,9 +571,17 @@ impl Error for BatchError {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
+    use onmark_core::compiler;
+    use onmark_core::model::{
+        ByteOffset, CaptionCue, CaptionInterval, CaptionTrack, Duration, FrameRate, SourceId,
+        SourceSpan, Timebase,
+    };
+
     use super::{
         BATCH_MANIFEST_VERSION, BatchError, BatchManifest, BatchManifestRender, MAX_BATCH_RENDERS,
-        require_relative_path,
+        SolvedVariants, require_relative_path, solve_variants,
     };
 
     #[test]
@@ -593,6 +634,38 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn imports_one_shared_caption_track_into_every_variant() {
+        let film = resolved_film();
+        let cue = CaptionCue::new(
+            CaptionInterval::new(Duration::ZERO, Duration::from_nanos(500_000_000))
+                .expect("the fixture cue is nonempty"),
+            "Shared caption",
+            span(0, 1),
+            span(1, 2),
+        )
+        .expect("the fixture caption is valid");
+        let track = CaptionTrack::new(vec![cue]).expect("the fixture track is nonempty");
+
+        let solved = solve_variants(
+            vec![film.clone(), film],
+            &BTreeMap::new(),
+            Timebase::new(FrameRate::new(30, 1).expect("30 fps is valid")),
+            &[],
+            Some(&track),
+        )
+        .expect("the cue fits both variants");
+        let SolvedVariants::Ready(timelines) = solved else {
+            panic!("both captioned variants must solve");
+        };
+
+        assert!(
+            timelines
+                .iter()
+                .all(|timeline| timeline.captions().len() == 1)
+        );
+    }
+
     fn manifest_with_renders(count: usize) -> BatchManifest {
         let renders = (0..count)
             .map(|index| BatchManifestRender {
@@ -605,5 +678,25 @@ mod tests {
             screenplay: "film.html".into(),
             renders,
         }
+    }
+
+    fn resolved_film() -> compiler::ResolvedFilm {
+        let source = r#"<om-film><om-scene><om-shot duration="1s"></om-shot></om-scene></om-film>"#;
+        let (document, diagnostics) = compiler::parse(SourceId::new(0), source).into_parts();
+        assert!(diagnostics.is_empty());
+        let (film, diagnostics) = compiler::bind(document).into_parts();
+        assert!(diagnostics.is_empty());
+        let (film, diagnostics) = compiler::resolve(film.expect("the fixture binds")).into_parts();
+        assert!(diagnostics.is_empty());
+        film.expect("the fixture resolves")
+    }
+
+    fn span(start: u64, end: u64) -> SourceSpan {
+        SourceSpan::new(
+            SourceId::new(1),
+            ByteOffset::new(start),
+            ByteOffset::new(end),
+        )
+        .expect("the fixture span is ordered")
     }
 }
