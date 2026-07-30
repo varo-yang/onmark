@@ -138,6 +138,26 @@ test("rejects motion that escapes its compiler-owned interval", async () => {
   );
 });
 
+test("accepts a timeline ending at a fractional-frame boundary", async () => {
+  const motion = gsapMotion({
+    caption({ durationSeconds, timeline }) {
+      timeline.to({}, { duration: 0.25 }, Math.max(0, durationSeconds - 0.25));
+    },
+  });
+
+  await motion.bind({
+    frameRate: CONTEXT.frameRate,
+    targets: [
+      {
+        element: {} as HTMLElement,
+        interval: { start: 123, end: 218 },
+        kind: "caption",
+        node: { nodeId: 4 },
+      },
+    ],
+  });
+});
+
 test("composes semantic and selector rules without author-owned dispatch", async () => {
   const calls: string[] = [];
   const element = {

@@ -10,6 +10,8 @@ import type {
   PresentationTransitionTarget,
 } from "@onmark/authoring/types";
 
+const GSAP_TIME_PRECISION_SECONDS = 1e-7;
+
 // ── Public contract ──
 
 /** Local GSAP authoring facts for one semantic screenplay element. */
@@ -266,7 +268,9 @@ function requireLocalTimeline(
   durationSeconds: number,
   label: string,
 ): void {
-  if (timeline.duration() <= durationSeconds) {
+  // GSAP rounds animation boundaries to seven decimal places. Admit that
+  // representation error while retaining the compiler-owned interval.
+  if (timeline.duration() - durationSeconds <= GSAP_TIME_PRECISION_SECONDS) {
     return;
   }
   throw new RangeError(

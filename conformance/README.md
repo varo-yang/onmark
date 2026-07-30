@@ -159,3 +159,10 @@ It records cold, warm, and isolated-edit measurements; proves that review
 captures ordinary complete production regions; and documents the bounded
 manifest, contact-sheet, and PNG integrity contract. See
 [`evidence/exact-review-loop.md`](evidence/exact-review-loop.md).
+
+The production-campaign workload exercises twenty typed variants over one
+screenplay, subtitle track, frozen asset set, and partition plan. It records
+field-scope cache isolation separately from independent cold pixel
+repeatability; the latter remains unadmitted for the complete mixed
+browser-composited presentation. See
+[`evidence/variant-campaign.md`](evidence/variant-campaign.md).

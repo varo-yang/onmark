@@ -921,7 +921,7 @@ fn validate_layered_placement(
     if placement.asset_identity() != asset {
         return Err(UnsupportedVisualComposition::PrimaryVideoMismatch);
     }
-    if placement.interval() != plan.output() {
+    if !placement.interval().contains_interval(plan.output()) {
         return Err(UnsupportedVisualComposition::IncompleteCoverage);
     }
     if placement.source_timing().constant_frame_rate().is_none() {

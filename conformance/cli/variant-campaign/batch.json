@@ -1,0 +1,83 @@
+{
+  "version": 1,
+  "screenplay": "film.html",
+  "renders": [
+    { "output": "renders/01-default.mp4" },
+    {
+      "variant": "variants/02-hero-headline-a.json",
+      "output": "renders/02-hero-headline-a.mp4"
+    },
+    {
+      "variant": "variants/03-hero-headline-b.json",
+      "output": "renders/03-hero-headline-b.mp4"
+    },
+    {
+      "variant": "variants/04-hero-accent.json",
+      "output": "renders/04-hero-accent.mp4"
+    },
+    {
+      "variant": "variants/05-hero-badge.json",
+      "output": "renders/05-hero-badge.mp4"
+    },
+    {
+      "variant": "variants/06-proof-metric-a.json",
+      "output": "renders/06-proof-metric-a.mp4"
+    },
+    {
+      "variant": "variants/07-proof-metric-b.json",
+      "output": "renders/07-proof-metric-b.mp4"
+    },
+    {
+      "variant": "variants/08-proof-label.json",
+      "output": "renders/08-proof-label.mp4"
+    },
+    {
+      "variant": "variants/09-feature-copy-a.json",
+      "output": "renders/09-feature-copy-a.mp4"
+    },
+    {
+      "variant": "variants/10-feature-copy-b.json",
+      "output": "renders/10-feature-copy-b.mp4"
+    },
+    {
+      "variant": "variants/11-feature-hidden.json",
+      "output": "renders/11-feature-hidden.mp4"
+    },
+    {
+      "variant": "variants/12-cta-copy-a.json",
+      "output": "renders/12-cta-copy-a.mp4"
+    },
+    {
+      "variant": "variants/13-cta-copy-b.json",
+      "output": "renders/13-cta-copy-b.mp4"
+    },
+    {
+      "variant": "variants/14-cta-accent.json",
+      "output": "renders/14-cta-accent.mp4"
+    },
+    {
+      "variant": "variants/15-transition-tone-a.json",
+      "output": "renders/15-transition-tone-a.mp4"
+    },
+    {
+      "variant": "variants/16-transition-tone-b.json",
+      "output": "renders/16-transition-tone-b.mp4"
+    },
+    {
+      "variant": "variants/17-campaign-code.json",
+      "output": "renders/17-campaign-code.mp4"
+    },
+    {
+      "variant": "variants/18-brand-accent.json",
+      "output": "renders/18-brand-accent.mp4"
+    },
+    {
+      "variant": "variants/19-adjacent-fields.json",
+      "output": "renders/19-adjacent-fields.mp4"
+    },
+    {
+      "variant": "variants/20-composed-cache.json",
+      "output": "renders/20-composed-cache.mp4"
+    }
+  ]
+}

@@ -1787,6 +1787,20 @@ manifest 命名 screenplay、与 profile 无关的 variant document 及 output�
 manifest 属于 orchestration input，不是 screenplay syntax，也不能覆盖 timing、asset、
 capability、render profile 或 output dimension。
 
+一次 1,920 × 1,080 production-campaign 实验在同一份 435-frame screenplay、共享
+subtitle track、frozen asset set 与 7-region partition plan 上渲染 20 个 variant。精确
+dependency scope 复用了 8,700 个 frame instance 中的 5,790 个，以及 140 个 region
+instance 中的 84 个。film-shell edit 会使整个 plan 失效；shot 与 transition edit 会保留
+无关 artifact；已经缓存的 composed variant 会复用全部 7 个 region。该 workload 暴露并
+补上了 shared batch-subtitle import、boolean visibility ownership、fractional-frame
+GSAP boundary 与 transition-trimmed video coverage 的回归保护。
+
+该实验刻意区分 cache identity 与 independent cold pixel identity。它的任意混合
+browser-composited presentation 在独立 cold Chromium session 间并不 raw-RGBA
+identical，即使 software control 也有一个 frame 保留微小差异。相似度指标不准入新 visual
+path，现有 exact conformance 仍是权威。完整结果记录在
+`conformance/evidence/variant-campaign.md`。
+
 该能力不增加 template engine、string substitution、global/URL input object、source
 mutation API、remote authoring、coordinator 或 mutable runtime update channel。一份 Render
 Unit 内的 value immutable。会改变 temporal capability 与 cache identity 的逐帧动态 input

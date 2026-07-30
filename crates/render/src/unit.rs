@@ -1202,6 +1202,46 @@ mod tests {
     }
 
     #[test]
+    fn admits_a_video_covering_a_transition_trimmed_partition() {
+        let frozen = layered_video_asset(video_dimensions(), true);
+        let timeline = solve(
+            concat!(
+                "<om-film><om-scene>",
+                r#"<om-shot><video src="opening.mp4"></video></om-shot>"#,
+                r#"<om-transition duration="100ms"></om-transition>"#,
+                r#"<om-shot duration="1s"></om-shot>"#,
+                "</om-scene></om-film>",
+            ),
+            "opening.mp4",
+            frozen.clone(),
+        );
+        let partitions =
+            RenderGraph::from_timeline(&timeline, PresentationTemporalCapability::RandomAccess)
+                .expect("the transition fixture has complete render ownership")
+                .into_partition();
+        let partition = partitions
+            .units()
+            .first()
+            .expect("the fixture begins with a video-only partition");
+        let materialized = MaterializedAsset::new(frozen, "/tmp/opening.mp4")
+            .expect("the fixture path is present");
+
+        let unit = RenderUnit::from_partition(
+            &timeline,
+            partition,
+            placement_bounded_manifest(PresentationVisualCapability::SeparableOverlay),
+            render_profile(),
+            [materialized],
+        )
+        .expect("the video covers the complete published partition");
+
+        assert!(
+            unit.visual_execution().layered_media().is_some(),
+            "a transition may shorten output without invalidating its video base",
+        );
+    }
+
+    #[test]
     fn admits_static_browser_backdrop_layout_to_native_media() {
         let source_dimensions =
             VideoDimensions::new(1_920, 1_080).expect("fixture dimensions are positive");

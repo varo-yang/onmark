@@ -274,6 +274,7 @@ test("owns bound and omitted semantic visibility independently of authored CSS",
     visibility?.textContent,
     [
       "[data-om-node][hidden],",
+      "[data-om-show][hidden],",
       "om-film > om-scene:not([data-om-node]),",
       "om-scene > om-shot:not([data-om-node]),",
       "om-scene > om-transition,",

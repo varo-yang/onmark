@@ -44,6 +44,7 @@ const ELEMENTS = Object.freeze({
 // plan. Authored display rules cannot make those unbound nodes visible.
 const VISIBILITY_RULE = [
   "[data-om-node][hidden],",
+  "[data-om-show][hidden],",
   "om-film > om-scene:not([data-om-node]),",
   "om-scene > om-shot:not([data-om-node]),",
   "om-scene > om-transition,",

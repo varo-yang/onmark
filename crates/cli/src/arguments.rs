@@ -62,6 +62,10 @@ pub(super) struct BatchArgs {
     #[arg(long, default_value_t = 1_080)]
     pub(super) height: u32,
 
+    /// Standalone SRT, `WebVTT`, or ASS file shared by every batch render.
+    #[arg(long = "subtitle", value_name = "FILE")]
+    pub(super) subtitle: Option<PathBuf>,
+
     /// Browser executable. Defaults to headless shell on Linux and Chrome elsewhere.
     #[arg(long, help_heading = "Execution overrides")]
     pub(super) browser: Option<PathBuf>,
@@ -468,7 +472,7 @@ impl BatchArgs {
             bundler: self.bundler.clone(),
             ffmpeg: self.ffmpeg.clone(),
             ffprobe: self.ffprobe.clone(),
-            subtitle: None,
+            subtitle: self.subtitle.clone(),
         }
     }
 }
@@ -622,7 +626,7 @@ fn parse_benchmark_runs(value: &str) -> Result<usize, String> {
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
 
     use onmark_render::{BrowserGraphicsBackend, EncodeLimits, EncodeProfile};
 
@@ -660,6 +664,8 @@ mod tests {
             "1080",
             "--height",
             "1920",
+            "--subtitle",
+            "campaign/captions.vtt",
         ])
         .expect("the bounded batch command is valid");
         let Command::Batch(args) = cli.command else {
@@ -671,6 +677,19 @@ mod tests {
         assert_eq!(args.frame_rate.denominator(), 1_001);
         assert_eq!(args.width, 1_080);
         assert_eq!(args.height, 1_920);
+        assert_eq!(
+            args.subtitle.as_deref(),
+            Some(Path::new("campaign/captions.vtt")),
+        );
+        let render = args.render_args(
+            PathBuf::from("campaign/film.html"),
+            Some(PathBuf::from("campaign/variant.json")),
+            PathBuf::from("campaign/output.mp4"),
+        );
+        assert_eq!(
+            render.subtitle.as_deref(),
+            Some(Path::new("campaign/captions.vtt")),
+        );
     }
 
     #[test]
