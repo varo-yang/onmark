@@ -22,7 +22,7 @@ use crate::encoder::{
     LayeredMediaInput, LayeredOutput, LayeredSession,
 };
 use crate::unit::MAX_AUDIO_TRACKS;
-use crate::visual::BackdropLayoutPlan;
+use crate::visual::{BackdropLayoutPlan, native_media_schedule};
 use crate::{
     BrowserCaptureMode, BrowserGraphicsBackend, BrowserLaunchPolicy, BrowserLimits,
     CaptureEnvironmentId, EncodedVideo, ExecutableUnit, Ffmpeg, FfmpegSession, FrameArtifact,
@@ -825,6 +825,12 @@ fn append_backdrop_inputs(
                 "backdrop media identities changed after preflight",
             ));
         }
+        let schedule = native_media_schedule(plan, video).map_err(|_| {
+            invalid_plan(
+                output,
+                "backdrop source treatment changed after visual admission",
+            )
+        })?;
         inputs.push(BackdropMediaInput {
             path: unit.visual_asset_path(media.asset_identity()),
             source_frame_rate: video.source_timing().constant_frame_rate().ok_or_else(|| {
@@ -834,6 +840,7 @@ fn append_backdrop_inputs(
                 )
             })?,
             source: video.source().media_source(),
+            schedule,
             source_skip: start - video.interval().start().get(),
             output_start: start - origin,
             frames: end - start,
@@ -866,6 +873,12 @@ fn layered_media_input(
     }
     let source_skip = published.start().get() - video.interval().start().get();
     let frames = published.end().get() - published.start().get();
+    let schedule = native_media_schedule(unit.browser_plan(), video).map_err(|_| {
+        invalid_plan(
+            output,
+            "layered source treatment changed after visual admission",
+        )
+    })?;
     Ok(LayeredMediaInput {
         path,
         source_frame_rate: video.source_timing().constant_frame_rate().ok_or_else(|| {
@@ -875,6 +888,7 @@ fn layered_media_input(
             )
         })?,
         source: video.source().media_source(),
+        schedule,
         source_skip,
         frames,
     })

@@ -1394,12 +1394,12 @@ mod tests {
     }
 
     #[test]
-    fn keeps_unproved_source_continuity_in_browser_composition() {
+    fn admits_a_final_frame_hold_to_native_layering() {
         let frozen = layered_video_asset(video_dimensions(), true);
         let timeline = solve(
             concat!(
                 "<om-film><om-scene><om-shot>",
-                r#"<video src="opening.mp4" plays="2" hold-last="500ms"></video>"#,
+                r#"<video src="opening.mp4" hold-last="500ms"></video>"#,
                 "</om-shot></om-scene></om-film>",
             ),
             "opening.mp4",
@@ -1413,7 +1413,36 @@ mod tests {
             render_profile(),
             [materialized],
         )
-        .expect("source continuity retains the conservative browser path");
+        .expect("a final-frame hold retains native layering");
+
+        assert!(unit.visual_execution().layered_media().is_some());
+        assert_eq!(
+            unit.visual_execution().capture_cadence(),
+            BrowserCaptureCadence::PlacementBounded,
+        );
+    }
+
+    #[test]
+    fn keeps_repeated_playback_in_browser_composition() {
+        let frozen = layered_video_asset(video_dimensions(), true);
+        let timeline = solve(
+            concat!(
+                "<om-film><om-scene><om-shot>",
+                r#"<video src="opening.mp4" plays="2"></video>"#,
+                "</om-shot></om-scene></om-film>",
+            ),
+            "opening.mp4",
+            frozen.clone(),
+        );
+        let materialized = MaterializedAsset::new(frozen, "/tmp/opening.mp4")
+            .expect("the fixture path is present");
+        let unit = RenderUnit::whole_film(
+            &timeline,
+            placement_bounded_manifest(PresentationVisualCapability::SeparableOverlay),
+            render_profile(),
+            [materialized],
+        )
+        .expect("repeated playback retains the conservative browser path");
 
         assert!(unit.visual_execution().layered_media().is_none());
         assert_eq!(

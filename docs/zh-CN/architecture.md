@@ -1831,9 +1831,12 @@ resolve 对每项 treatment 只解析一次，solve 使用整数有理运算推�
 独占完整 source mapping，Browser Plan 把该事实传给确定性的 CFR 或 VFR 选帧。原生合成
 在 Chromium 对照证明 source-frame selection，且彼此独立的本地与 worker 分区产出相同
 native raw-RGBA sequence 后准入 trim 与 speed；它不要求已知不同的 Chromium 与 `FFmpeg`
-decode/color path 得出相同 hash。重复播放与最终帧停留在取得同样独立的 native 证据前仍走
-browser composition。runtime 只在接纳不可信 plan 时重复校验 wire-level duration
-invariant，不推导或修改 authored timing。
+decode/color path 得出相同 hash。最终帧停留也在整片、分片与 worker artifact 保持相同
+native raw pixel 后获得准入。Rust 独占 hold 开始处的精确 midpoint 边界；FFmpeg 在单独的
+streaming branch 选取 source interval 的真实末帧，再按整数帧数补齐。重复播放仍走 browser
+composition：离散帧缓存循环既不能精确表达不落在输出帧网格上的 pass boundary，也无法为
+任意 source interval 提供合适的资源上界。runtime 只在接纳不可信 plan 时重复校验 wire-level
+duration invariant，不推导或修改 authored timing。
 
 Gate 八还在 checked-in 生成对比保持 20/20 可靠性后，接纳了显式
 `<om-transition duration="…"></om-transition>` boundary。bind 要求 marker 位于同一

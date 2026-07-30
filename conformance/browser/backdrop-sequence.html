@@ -34,7 +34,9 @@
   <body>
     <om-film>
       <om-scene>
-        <om-shot><video src="source.mp4"></video></om-shot>
+        <om-shot>
+          <video src="source.mp4" trim="0s..500ms" hold-last="500ms"></video>
+        </om-shot>
         <om-shot duration="1s"
           ><om-title>Browser-only closing</om-title></om-shot
         >

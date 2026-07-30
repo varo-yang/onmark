@@ -25,7 +25,7 @@ use super::layered_process::{frame_bytes, read_frames, spawn, take_pipe, validat
 use super::limits::EncodeLimits;
 use super::process::{CapturedStderr, capture_stderr};
 use super::session::{EncodedVideo, with_stderr};
-use crate::visual::PixelRegion;
+use crate::visual::{NativeMediaSchedule, PixelRegion};
 use crate::{DecodedRgba, RawRgbaHash, RenderProfile};
 
 const CLEANUP_TIMEOUT: Duration = Duration::from_secs(5);
@@ -84,6 +84,8 @@ pub(crate) struct LayeredMediaInput {
     pub(crate) path: PathBuf,
     pub(crate) source_frame_rate: WireFrameRate,
     pub(crate) source: MediaSource,
+    /// Whole-placement schedule sliced by `source_skip` and `frames`.
+    pub(crate) schedule: NativeMediaSchedule,
     /// Selected output frames skipped before this unit begins publishing.
     pub(crate) source_skip: u64,
     pub(crate) frames: u64,
@@ -94,6 +96,8 @@ pub(crate) struct BackdropMediaInput {
     pub(crate) path: PathBuf,
     pub(crate) source_frame_rate: WireFrameRate,
     pub(crate) source: MediaSource,
+    /// Whole-placement schedule sliced by `source_skip` and `frames`.
+    pub(crate) schedule: NativeMediaSchedule,
     pub(crate) source_skip: u64,
     pub(crate) output_start: u64,
     pub(crate) frames: u64,

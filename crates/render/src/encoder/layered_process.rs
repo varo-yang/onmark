@@ -14,11 +14,12 @@ use tokio::sync::mpsc;
 
 use super::error::{EncodeError, EncodeErrorKind};
 use super::layered::{
-    BackdropMediaInput, CanonicalFrame, LayeredInputs, LayeredJob, LayeredOutput,
+    BackdropMediaInput, CanonicalFrame, LayeredInputs, LayeredJob, LayeredMediaInput, LayeredOutput,
 };
 use super::limits::EncodeLimits;
 use super::process::configure_video_output;
 use super::profile::EncodeProfile;
+use crate::visual::NativeMediaSchedule;
 use crate::{RawRgbaHash, RenderProfile};
 
 const MAX_MEDIA_INPUTS: usize = 64;
@@ -68,12 +69,19 @@ fn validate_inputs(job: &LayeredJob) -> Result<(), EncodeError> {
                 .try_fold(0_u64, |total, media| total.checked_add(media.frames));
             planned == Some(job.frames)
                 && media.iter().all(|media| {
-                    media.frames != 0 && media.source_skip.checked_add(media.frames).is_some()
+                    media.frames != 0
+                        && media
+                            .source_skip
+                            .checked_add(media.frames)
+                            .is_some_and(|end| end <= media.schedule.output_frames())
                 })
         }
         LayeredInputs::BrowserBase(media) => media.iter().all(|media| {
             media.frames != 0
-                && media.source_skip.checked_add(media.frames).is_some()
+                && media
+                    .source_skip
+                    .checked_add(media.frames)
+                    .is_some_and(|end| end <= media.schedule.output_frames())
                 && media
                     .output_start
                     .checked_add(media.frames)
@@ -262,6 +270,7 @@ fn append_backdrop_media_filter(
     output_rate: WireFrameRate,
 ) {
     let selection = source_selection_filter(media.source_frame_rate, output_rate, media.source);
+    append_source_schedule(filter, index, &selection, media.schedule, output_rate);
     let end = media
         .source_skip
         .checked_add(media.frames)
@@ -269,7 +278,7 @@ fn append_backdrop_media_filter(
     write!(
         filter,
         concat!(
-            "[{index}:v]{selection},",
+            "[source{index}]",
             "trim=start_frame={skip}:end_frame={end},",
             "setpts=PTS-STARTPTS+{start}*{rate_denominator}/",
             "({rate_numerator}*TB),",
@@ -279,7 +288,6 @@ fn append_backdrop_media_filter(
             "out_range=full:out_color_matrix=bt709,format=rgba[media{index}];",
         ),
         index = index,
-        selection = selection,
         skip = media.source_skip,
         end = end,
         start = media.output_start,
@@ -298,10 +306,11 @@ fn append_backdrop_media_filter(
 fn append_media_filter(
     filter: &mut String,
     index: usize,
-    media: &super::layered::LayeredMediaInput,
+    media: &LayeredMediaInput,
     output_rate: WireFrameRate,
 ) {
     let selection = source_selection_filter(media.source_frame_rate, output_rate, media.source);
+    append_source_schedule(filter, index, &selection, media.schedule, output_rate);
     let end = media
         .source_skip
         .checked_add(media.frames)
@@ -309,17 +318,134 @@ fn append_media_filter(
     write!(
         filter,
         concat!(
-            "[{index}:v]{selection},trim=start_frame={skip}:end_frame={end},",
+            "[source{index}]trim=start_frame={skip}:end_frame={end},",
             "setpts=PTS-STARTPTS,",
             "scale=in_range=limited:in_color_matrix=bt709:",
             "out_range=full:out_color_matrix=bt709,format=rgba[base{index}];",
         ),
         index = index,
-        selection = selection,
         skip = media.source_skip,
         end = end,
     )
     .expect("writing an FFmpeg filter into a String cannot fail");
+}
+
+fn append_source_schedule(
+    filter: &mut String,
+    index: usize,
+    selection: &str,
+    schedule: NativeMediaSchedule,
+    output_rate: WireFrameRate,
+) {
+    let playback = schedule.playback_frames();
+    let held = schedule.output_frames() - playback;
+
+    match (playback, held) {
+        (0, held) => {
+            append_held_source(
+                filter,
+                index,
+                held,
+                schedule,
+                output_rate,
+                HoldBranch::WholeSource,
+            );
+        }
+        (playback, 0) => {
+            write!(
+                filter,
+                concat!(
+                    "[{index}:v]{selection},",
+                    "trim=end_frame={playback},setpts=PTS-STARTPTS[source{index}];",
+                ),
+                index = index,
+                selection = selection,
+                playback = playback,
+            )
+            .expect("writing an FFmpeg filter into a String cannot fail");
+        }
+        (playback, held) => {
+            // The second branch consumes the same decode but emits only the
+            // selected interval's final frame. No complete pass is cached.
+            write!(filter, "[{index}:v]split=2[selected{index}][final{index}];")
+                .expect("writing an FFmpeg filter into a String cannot fail");
+            write!(
+                filter,
+                "[selected{index}]{selection},trim=end_frame={playback},\
+                 setpts=PTS-STARTPTS[playback{index}];",
+            )
+            .expect("writing an FFmpeg filter into a String cannot fail");
+            append_held_source(
+                filter,
+                index,
+                held,
+                schedule,
+                output_rate,
+                HoldBranch::SplitFinal,
+            );
+            write!(
+                filter,
+                "[playback{index}][held{index}]concat=n=2:v=1:a=0[source{index}];",
+            )
+            .expect("writing an FFmpeg filter into a String cannot fail");
+        }
+    }
+}
+
+fn append_held_source(
+    filter: &mut String,
+    index: usize,
+    frames: u64,
+    schedule: NativeMediaSchedule,
+    output_rate: WireFrameRate,
+    branch: HoldBranch,
+) {
+    branch.write_input(filter, index);
+    let last = schedule.final_source_frame();
+    let end = last + 1;
+    let padding = frames - 1;
+    write!(
+        filter,
+        concat!(
+            "trim=start_frame={last}:end_frame={end},setpts=PTS-STARTPTS,",
+            "fps=fps={rate_numerator}/{rate_denominator}:",
+            "round=near:start_time=0:eof_action=pass,",
+            "tpad=stop_mode=clone:stop={padding},",
+            "setpts=N*{rate_denominator}/({rate_numerator}*TB)",
+        ),
+        last = last,
+        end = end,
+        padding = padding,
+        rate_numerator = output_rate.numerator(),
+        rate_denominator = output_rate.denominator(),
+    )
+    .expect("writing an FFmpeg filter into a String cannot fail");
+    branch.write_output(filter, index);
+    filter.push(';');
+}
+
+#[derive(Clone, Copy)]
+enum HoldBranch {
+    WholeSource,
+    SplitFinal,
+}
+
+impl HoldBranch {
+    fn write_input(self, filter: &mut String, index: usize) {
+        match self {
+            Self::WholeSource => write!(filter, "[{index}:v]"),
+            Self::SplitFinal => write!(filter, "[final{index}]"),
+        }
+        .expect("writing an FFmpeg filter into a String cannot fail");
+    }
+
+    fn write_output(self, filter: &mut String, index: usize) {
+        match self {
+            Self::WholeSource => write!(filter, "[source{index}]"),
+            Self::SplitFinal => write!(filter, "[held{index}]"),
+        }
+        .expect("writing an FFmpeg filter into a String cannot fail");
+    }
 }
 
 fn append_concat_filter(filter: &mut String, inputs: usize) -> &'static str {
@@ -437,7 +563,7 @@ mod tests {
     use crate::encoder::{
         BackdropMediaInput, LayeredInputs, LayeredJob, LayeredMediaInput, LayeredOutput,
     };
-    use crate::visual::PixelRegion;
+    use crate::visual::{NativeMediaSchedule, PixelRegion};
 
     #[test]
     fn owns_the_exact_midpoint_frame_selection_formula() {
@@ -531,6 +657,51 @@ mod tests {
     }
 
     #[test]
+    fn realizes_a_hold_from_the_selected_source_interval_final_frame() {
+        let rate = FrameRate::new(30, 1).expect("the fixture rate is valid");
+        let mut media = media("film.mp4", 45, rate);
+        media.source = held_source();
+        media.schedule = schedule(30, 45, 29);
+        let job = LayeredJob {
+            inputs: LayeredInputs::VideoBase(vec![media]),
+            output_frame_rate: rate.into(),
+            frames: 45,
+            profile: RenderProfile::new(320, 180).expect("the fixture profile is valid"),
+            destination: LayeredOutput::Frames,
+            diagnostic_path: PathBuf::from("artifact.onmark-frames"),
+        };
+
+        let filter = composition_filter(&job);
+
+        assert!(filter.contains("[0:v]split=2[selected0][final0]"));
+        assert!(filter.contains("[final0]trim=start_frame=29:end_frame=30"));
+        assert!(filter.contains("tpad=stop_mode=clone:stop=14"));
+        assert!(filter.contains("[playback0][held0]concat=n=2:v=1:a=0[source0]"));
+        assert!(!filter.contains("loop="));
+    }
+
+    #[test]
+    fn realizes_a_hold_that_owns_the_first_output_midpoint() {
+        let rate = FrameRate::new(2, 1).expect("the fixture rate is valid");
+        let mut media = media("film.mp4", 2, rate);
+        media.schedule = schedule(0, 2, 0);
+        let job = LayeredJob {
+            inputs: LayeredInputs::VideoBase(vec![media]),
+            output_frame_rate: rate.into(),
+            frames: 2,
+            profile: RenderProfile::new(320, 180).expect("the fixture profile is valid"),
+            destination: LayeredOutput::Frames,
+            diagnostic_path: PathBuf::from("artifact.onmark-frames"),
+        };
+
+        let filter = composition_filter(&job);
+
+        assert!(!filter.contains("split=2"));
+        assert!(filter.contains("[0:v]trim=start_frame=0:end_frame=1"));
+        assert!(filter.contains("tpad=stop_mode=clone:stop=1"));
+    }
+
+    #[test]
     fn places_native_media_above_the_browser_backdrop() {
         let rate = FrameRate::new(30, 1).expect("the fixture rate is valid");
         let job = LayeredJob {
@@ -538,6 +709,7 @@ mod tests {
                 path: PathBuf::from("card.mp4"),
                 source_frame_rate: rate.into(),
                 source: identity_source(),
+                schedule: schedule(30, 30, 29),
                 source_skip: 2,
                 output_start: 5,
                 frames: 10,
@@ -566,13 +738,37 @@ mod tests {
             path: PathBuf::from(path),
             source_frame_rate: rate.into(),
             source: identity_source(),
+            schedule: schedule(frames, frames, frames.saturating_sub(1)),
             source_skip: 0,
             frames,
         }
     }
 
+    fn schedule(
+        playback_frames: u64,
+        output_frames: u64,
+        final_source_frame: u64,
+    ) -> NativeMediaSchedule {
+        NativeMediaSchedule::new(playback_frames, output_frames, final_source_frame)
+            .expect("the fixture schedule is valid")
+    }
+
     fn identity_source() -> MediaSource {
         media_source(0, 1_000_000_000, 1, 1)
+    }
+
+    fn held_source() -> MediaSource {
+        let interval =
+            MediaSourceInterval::new(Duration::ZERO, Duration::from_nanos(1_000_000_000))
+                .expect("the fixture source interval is valid");
+        MediaSource::new(
+            interval,
+            PlaybackRate::ONE,
+            PlayCount::ONE,
+            Duration::from_nanos(500_000_000),
+            Duration::from_nanos(1_000_000_000),
+        )
+        .expect("the fixture source selection is valid")
     }
 
     fn media_source(
