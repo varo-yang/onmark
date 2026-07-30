@@ -1,0 +1,14 @@
+{
+  "captions-element": {
+    "passed": 16,
+    "total": 16,
+    "authoredBytes": 4778
+  },
+  "caption-track-element": {
+    "passed": 16,
+    "total": 16,
+    "authoredBytes": 5018
+  },
+  "admitted": "captions-element",
+  "reason": "Equal generation reliability with 240 fewer authored bytes. One external file is semantically a collection of caption cues, while projected cues retain the singular om-caption name."
+}

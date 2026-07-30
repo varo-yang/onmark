@@ -11,6 +11,7 @@ mod batch;
 mod benchmark;
 mod browser_install;
 mod bundler;
+mod captions;
 mod check;
 mod compilation;
 mod diagnostic;
@@ -26,7 +27,6 @@ mod progress;
 mod render;
 mod review;
 mod snapshot;
-mod subtitle;
 mod variant;
 mod worker;
 

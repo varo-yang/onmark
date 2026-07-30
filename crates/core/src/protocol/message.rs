@@ -35,7 +35,7 @@ pub struct ProtocolVersion(u16);
 
 impl ProtocolVersion {
     /// Only browser protocol version accepted by this build.
-    pub const CURRENT: Self = Self(6);
+    pub const CURRENT: Self = Self(7);
 
     /// Returns the stable integer representation.
     #[must_use]
@@ -478,7 +478,7 @@ mod tests {
     #[test]
     fn parses_exact_prepared_media_layout_evidence() {
         let encoded = serde_json::json!({
-            "version": 6,
+            "version": 7,
             "requestId": 2,
             "event": {
                 "type": "prepared",

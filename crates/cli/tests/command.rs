@@ -173,7 +173,7 @@ fn inspect_reuses_structured_diagnostics_without_tool_preflight() {
     assert!(output.stderr.is_empty());
     let report: serde_json::Value =
         serde_json::from_slice(&output.stdout).expect("the inspection is JSON");
-    assert_eq!(report["version"], 5);
+    assert_eq!(report["version"], 6);
     assert_eq!(report["command"], "inspect");
     assert_eq!(report["valid"], false);
     assert!(report.get("inspection").is_none());
@@ -320,7 +320,8 @@ fn reports_subtitle_errors_against_their_own_source_before_preflight() {
     let subtitles = directory.path().join("captions.vtt");
     std::fs::write(
         &screenplay,
-        "<om-film><om-scene><om-shot duration=\"1s\"></om-shot></om-scene></om-film>",
+        "<om-film><om-captions id=\"en\" src=\"captions.vtt\" lang=\"en\"></om-captions>\
+         <om-scene><om-shot duration=\"1s\"></om-shot></om-scene></om-film>",
     )
     .expect("the fixture screenplay is writable");
     std::fs::write(&subtitles, "WEBVTT\n\n00:01.000 --> 00:00.000\nBad\n")
@@ -329,8 +330,6 @@ fn reports_subtitle_errors_against_their_own_source_before_preflight() {
     let output = Command::new(env!("CARGO_BIN_EXE_onmark"))
         .arg("render")
         .arg(screenplay)
-        .arg("--subtitle")
-        .arg(&subtitles)
         .env("PATH", "")
         .output()
         .expect("the CLI can be started");

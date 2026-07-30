@@ -30,6 +30,7 @@ fn run() -> Result<(), Box<dyn Error>> {
         Command::Schema(mode) => schema::generate(repository, mode),
         Command::AudioEvaluation => evaluation::grade_audio(repository),
         Command::AudioEnvelopeEvaluation => evaluation::grade_audio_envelope(repository),
+        Command::CaptionEvaluation => evaluation::grade_captions(repository),
         Command::HtmlEvaluation => evaluation::grade_html(repository),
         Command::TransitionEvaluation => evaluation::grade_transition(repository),
         Command::VariantEvaluation => evaluation::grade_variant(repository),
@@ -50,6 +51,7 @@ enum Command {
     Schema(schema::GenerationMode),
     AudioEvaluation,
     AudioEnvelopeEvaluation,
+    CaptionEvaluation,
     HtmlEvaluation,
     TransitionEvaluation,
     VariantEvaluation,
@@ -72,6 +74,9 @@ impl Command {
             }
             [command, subject] if command == "eval" && subject == "audio-envelope" => {
                 Ok(Self::AudioEnvelopeEvaluation)
+            }
+            [command, subject] if command == "eval" && subject == "captions" => {
+                Ok(Self::CaptionEvaluation)
             }
             [command, subject] if command == "eval" && subject == "html" => {
                 Ok(Self::HtmlEvaluation)
@@ -112,6 +117,7 @@ impl fmt::Display for InvalidCommand {
         formatter.write_str(
             "expected `cargo xtask schema [--check]`, `cargo xtask eval audio`, \
              `cargo xtask eval audio-envelope`, \
+             `cargo xtask eval captions`, \
              `cargo xtask eval html`, `cargo xtask eval transition`, \
              `cargo xtask eval variant`, `cargo xtask eval video`, \
              `cargo xtask release prepare <version>`, \

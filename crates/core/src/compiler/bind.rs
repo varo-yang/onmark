@@ -12,9 +12,9 @@ use crate::syntax::{Attribute, Element, Node, SourceDocument, TextNode};
 
 use super::diagnostic::author_diagnostic;
 use super::linked_film::{
-    LinkedAudio, LinkedCue, LinkedCues, LinkedElement, LinkedFilm, LinkedId, LinkedNode,
-    LinkedOverlay, LinkedScene, LinkedShot, LinkedShotContent, LinkedTransition, LinkedVideo,
-    LinkedVoiceOver,
+    LinkedAudio, LinkedCaptionTrack, LinkedCue, LinkedCues, LinkedElement, LinkedFilm,
+    LinkedFilmParts, LinkedId, LinkedNode, LinkedOverlay, LinkedScene, LinkedShot,
+    LinkedShotContent, LinkedTransition, LinkedVideo, LinkedVoiceOver,
 };
 use super::variant::{LinkedVariantField, LinkedVariantSchema};
 use super::variant_binding::collect_variant_bindings;
@@ -135,6 +135,7 @@ impl Binder {
         let linked = self.bind_element(attributes, ElementKind::Film, span);
         let mut variants = None;
         let mut cues = None;
+        let mut captions = Vec::new();
         let mut music = Vec::new();
         let mut scenes = Vec::new();
 
@@ -148,6 +149,7 @@ impl Binder {
                     self.bind_variant_schema_container(child, &mut variants);
                 }
                 Some(ElementKind::Cues) => self.bind_cues_container(child, &mut cues),
+                Some(ElementKind::Captions) => captions.push(self.bind_captions(child)),
                 Some(ElementKind::Music) => {
                     music.push(self.bind_audio(child, GeneralAudioKind::Music));
                 }
@@ -159,16 +161,24 @@ impl Binder {
 
         let variants = variants.map(|(_, schema)| schema);
         let cues = cues.map(|(_, cues)| cues);
-        let film = LinkedFilm::new(
-            linked,
+        let film = LinkedFilm::from_parts(LinkedFilmParts {
+            element: linked,
             variants,
             variant_bindings,
             cues,
+            captions,
             music,
             scenes,
-            self.ids,
-        );
+            ids: self.ids,
+        });
         (film, self.diagnostics)
+    }
+
+    fn bind_captions(&mut self, element: Element) -> LinkedCaptionTrack {
+        let (_, attributes, children, span) = element.into_parts();
+        let linked = self.bind_element(attributes, ElementKind::Captions, span);
+        self.reject_child_elements_and_text(children, ElementKind::Captions);
+        LinkedCaptionTrack::new(linked)
     }
 
     fn bind_variant_schema_container(

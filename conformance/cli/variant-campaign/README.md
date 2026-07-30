@@ -16,8 +16,7 @@ cp showcases/assets/fractal.mp4 \
 cp showcases/assets/pulse.wav \
   conformance/cli/variant-campaign/assets/score.wav
 
-onmark --json batch conformance/cli/variant-campaign/batch.json \
-  --subtitle conformance/cli/variant-campaign/captions.vtt
+onmark --json batch conformance/cli/variant-campaign/batch.json
 ```
 
 The checked-in source is an evidence workload, not a release smoke. Its

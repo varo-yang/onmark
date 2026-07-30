@@ -1847,6 +1847,26 @@ shot set 通过 `BundleProjection` 交给 bundler，并通过 Browser Plan 交�
 本地、增量与分布式执行消费同一关系。TypeScript 只接收已求解 interval 与相邻 DOM
 element 来实现像素，不选择 window，也不推导 graph dependency。
 
+Gate 八也在 `caption-track-syntax` 的 checked-in 对比中准入了可重复的 film-level
+caption track declaration。两个候选拼写各做两次独立重复，均保持 16/16 semantic
+accuracy；`om-captions` 使用 4,778 authored bytes，少于 `om-caption-track` 的
+5,018。原生 HTML `track` 已有 void media child 语义，与 film-level declaration
+冲突，因此没有进入 live arm。screenplay 独占 `id`、portable `src` 与 `lang`；
+CLI `--captions` 只选择有序子集，不成为第二个 track identity 来源。
+
+实现继续遵守现有 phase ownership：bind 保留 repeatable film child 与 film-wide ID
+index；resolve 只解析一次 track identity、portable source 与保守的 language metadata；
+CLI 通过现有有界 subtitle parser 读取每条 selected external file；post-solve caption
+projection 把精确 cue time 转到 film frame grid，并把 track identity 与 language 写入
+Timeline IR；Render Graph、Browser Plan、artifact identity、本地与分布式 executor
+消费同一事实，不建立 caption-specific scheduler。authoring 只创建带 `data-track` 与
+`lang` 的 film-level `om-caption`，像素继续由 authored CSS 拥有。
+
+默认按 authored order 选择全部声明，多条 selected track 同时 burn in。track metadata
+计入现有 bounded browser text budget，不能把 wire request 推出准入 envelope。这项能力
+没有新增 parser dependency、package、cloud path、soft-subtitle muxer、translation
+service 或 ASS layout engine。
+
 Gate 八不加入 Player、Studio、preview server、source-mutation API、component marketplace、
 remote authoring command、coordinator、database、queue、lease service、cloud workflow、
 infrastructure definition 或新的 provider adapter。Agent integration 只是稳定 CLI diagnostic

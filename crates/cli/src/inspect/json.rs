@@ -16,7 +16,7 @@ use serde::Serialize;
 use crate::check::{Inspection, RegionInspection, Validation};
 use crate::diagnostic::JsonDiagnostic;
 
-const REPORT_VERSION: u16 = 5;
+const REPORT_VERSION: u16 = 6;
 
 pub(super) fn write(validation: &Validation) -> io::Result<()> {
     let report = &validation.report;
@@ -435,6 +435,8 @@ struct JsonGain {
 
 #[derive(Serialize)]
 struct JsonCaption<'a> {
+    track_id: &'a str,
+    language: &'a str,
     interval: JsonInterval,
     text: &'a str,
     timing_span: JsonSpan,
@@ -444,6 +446,8 @@ struct JsonCaption<'a> {
 impl<'a> From<&'a TimelineCaption> for JsonCaption<'a> {
     fn from(caption: &'a TimelineCaption) -> Self {
         Self {
+            track_id: caption.track_id().as_str(),
+            language: caption.language().as_str(),
             interval: caption.interval().into(),
             text: caption.text(),
             timing_span: caption.timing_span().into(),

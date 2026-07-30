@@ -34,7 +34,7 @@ pub use message::{
     RUNTIME_HOST_NAME, RequestId,
 };
 pub use plan::{
-    BrowserNode, BrowserNodeId, BrowserOverlay, BrowserOverlayKind, BrowserPlan, BrowserScene,
-    BrowserShot, BrowserTransition, BrowserVariantField, BrowserVariantValue, BrowserVideo,
-    BrowserVideoSource, BrowserVideoTiming, InvalidBrowserPlan,
+    BrowserCaptionTrack, BrowserNode, BrowserNodeId, BrowserOverlay, BrowserOverlayKind,
+    BrowserPlan, BrowserScene, BrowserShot, BrowserTransition, BrowserVariantField,
+    BrowserVariantValue, BrowserVideo, BrowserVideoSource, BrowserVideoTiming, InvalidBrowserPlan,
 };

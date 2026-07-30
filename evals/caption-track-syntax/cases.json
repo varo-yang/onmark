@@ -1,0 +1,121 @@
+{
+  "cases": [
+    {
+      "id": "single-default",
+      "tracks": [
+        {
+          "id": "en",
+          "src": "captions/en.vtt",
+          "lang": "en"
+        }
+      ],
+      "selectedTracks": ["en"],
+      "video": "media/intro.mp4"
+    },
+    {
+      "id": "localized-choice",
+      "tracks": [
+        {
+          "id": "en",
+          "src": "captions/en.srt",
+          "lang": "en"
+        },
+        {
+          "id": "zh",
+          "src": "captions/zh.srt",
+          "lang": "zh-CN"
+        }
+      ],
+      "selectedTracks": ["zh"],
+      "video": "media/product.mp4"
+    },
+    {
+      "id": "bilingual-open",
+      "tracks": [
+        {
+          "id": "en",
+          "src": "captions/en.ass",
+          "lang": "en"
+        },
+        {
+          "id": "ja",
+          "src": "captions/ja.ass",
+          "lang": "ja"
+        }
+      ],
+      "selectedTracks": ["en", "ja"],
+      "video": "media/interview.mp4"
+    },
+    {
+      "id": "replace-source",
+      "tracks": [
+        {
+          "id": "en",
+          "src": "captions/final-en.vtt",
+          "lang": "en"
+        }
+      ],
+      "selectedTracks": ["en"],
+      "video": "media/cut.mp4"
+    },
+    {
+      "id": "change-language",
+      "tracks": [
+        {
+          "id": "pt",
+          "src": "captions/pt-br.vtt",
+          "lang": "pt-BR"
+        }
+      ],
+      "selectedTracks": ["pt"],
+      "video": "media/launch.mp4"
+    },
+    {
+      "id": "remove-track",
+      "tracks": [
+        {
+          "id": "en",
+          "src": "captions/en.vtt",
+          "lang": "en"
+        }
+      ],
+      "selectedTracks": ["en"],
+      "video": "media/story.mp4"
+    },
+    {
+      "id": "three-track-order",
+      "tracks": [
+        {
+          "id": "fr",
+          "src": "captions/fr.vtt",
+          "lang": "fr"
+        },
+        {
+          "id": "de",
+          "src": "captions/de.vtt",
+          "lang": "de"
+        },
+        {
+          "id": "en",
+          "src": "captions/en.vtt",
+          "lang": "en"
+        }
+      ],
+      "selectedTracks": ["de", "en"],
+      "video": "media/demo.mp4"
+    },
+    {
+      "id": "styled-track",
+      "tracks": [
+        {
+          "id": "narration",
+          "src": "captions/narration.srt",
+          "lang": "en"
+        }
+      ],
+      "selectedTracks": ["narration"],
+      "video": "media/editorial.mp4",
+      "style": "om-caption[data-track=\"narration\"] { color: #ffd24a; }"
+    }
+  ]
+}

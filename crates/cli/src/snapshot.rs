@@ -27,6 +27,7 @@ use crate::arguments::{SnapshotArgs, source_directory};
 use crate::artifact_cache::{ArtifactCache, ArtifactReuse, CacheAdmission};
 use crate::assets::FrozenCatalog;
 use crate::bundler::{BundleArtifact, BundleRegion, PresentationBundler};
+use crate::captions::CaptionImport;
 use crate::compilation;
 use crate::diagnostic::{self, AuthoredReport, JsonDiagnostic};
 use crate::environment::Executables;
@@ -35,7 +36,6 @@ use crate::failure::CliError;
 use crate::input;
 use crate::output;
 use crate::progress::Progress;
-use crate::subtitle::SubtitleImport;
 use crate::variant::VariantImport;
 
 struct PreparedSnapshot {
@@ -109,7 +109,7 @@ impl SnapshotOutcome {
         }
     }
 
-    fn rejected_subtitle(rejected: crate::subtitle::RejectedSubtitle, json: bool) -> Self {
+    fn rejected_captions(rejected: crate::captions::RejectedCaptions, json: bool) -> Self {
         let (path, source, diagnostics) = rejected.into_parts();
         Self::rejected(path, source, diagnostics, json)
     }
@@ -164,7 +164,7 @@ async fn prepare(
         ))));
     };
     let film = match VariantImport::apply(args.validation.variant.as_deref(), film)? {
-        VariantImport::Film(film) => film,
+        VariantImport::Film(film) => *film,
         VariantImport::Rejected(rejected) => {
             let (path, source, diagnostics) = rejected.into_parts();
             return Ok(Preparation::Rejected(Box::new(SnapshotOutcome::rejected(
@@ -175,20 +175,17 @@ async fn prepare(
             ))));
         }
     };
-    let caption_track = match args
-        .validation
-        .subtitle
-        .as_deref()
-        .map(SubtitleImport::load)
-        .transpose()?
-    {
-        Some(SubtitleImport::Track(track)) => Some(track),
-        Some(SubtitleImport::Rejected(rejected)) => {
+    let caption_tracks = match CaptionImport::load(
+        film.captions(),
+        &args.validation.caption_tracks,
+        source_directory(&args.validation.screenplay),
+    )? {
+        CaptionImport::Ready(tracks) => tracks,
+        CaptionImport::Rejected(rejected) => {
             return Ok(Preparation::Rejected(Box::new(
-                SnapshotOutcome::rejected_subtitle(rejected, json),
+                SnapshotOutcome::rejected_captions(rejected, json),
             )));
         }
-        None => None,
     };
 
     output::reject_existing(&output)?;
@@ -212,7 +209,7 @@ async fn prepare(
             json,
         ))));
     };
-    let timeline = compiler::import_captions(timeline, caption_track)?;
+    let timeline = compiler::import_captions(timeline, caption_tracks)?;
 
     Ok(Preparation::Ready(Box::new(PreparedSnapshot {
         args,

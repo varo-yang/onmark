@@ -7,22 +7,24 @@ use std::collections::BTreeMap;
 
 use crate::diagnostics::{Diagnostic, DiagnosticCode, Diagnostics};
 use crate::model::{
-    AssetRef, AudioGain, CueId, Duration, ElementKind, EventRef, GeneralAudioKind, InvalidAssetRef,
-    InvalidAudioGain, InvalidDuration, InvalidMediaTrim, InvalidNodeId, InvalidPlayCount,
-    InvalidPlaybackRate, MediaTrim, NodeId, PlayCount, PlaybackRate, SourceSpan,
+    AssetRef, AudioGain, CaptionLanguage, CaptionTrackId, CueId, Duration, ElementKind, EventRef,
+    GeneralAudioKind, InvalidAssetRef, InvalidAudioGain, InvalidCaptionLanguage, InvalidDuration,
+    InvalidMediaTrim, InvalidNodeId, InvalidPlayCount, InvalidPlaybackRate, MediaTrim, NodeId,
+    PlayCount, PlaybackRate, SourceSpan,
 };
 use crate::syntax::{Attribute, TextNode};
 
 use super::diagnostic::author_diagnostic;
 use super::linked_film::{
-    LinkedAudio, LinkedCue, LinkedCues, LinkedElement, LinkedFilm, LinkedFilmParts, LinkedId,
-    LinkedNode, LinkedOverlay, LinkedScene, LinkedShot, LinkedShotContent, LinkedTransition,
-    LinkedVideo, LinkedVoiceOver,
+    LinkedAudio, LinkedCaptionTrack, LinkedCue, LinkedCues, LinkedElement, LinkedFilm,
+    LinkedFilmParts, LinkedId, LinkedNode, LinkedOverlay, LinkedScene, LinkedShot,
+    LinkedShotContent, LinkedTransition, LinkedVideo, LinkedVoiceOver,
 };
 use super::resolved_film::{
-    Authored, ResolvedAudio, ResolvedAudioEnvelope, ResolvedCue, ResolvedCues, ResolvedElement,
-    ResolvedFilm, ResolvedNode, ResolvedOverlay, ResolvedScene, ResolvedShot, ResolvedShotContent,
-    ResolvedStart, ResolvedText, ResolvedTransition, ResolvedVideo, ResolvedVoiceOver,
+    Authored, ResolvedAudio, ResolvedAudioEnvelope, ResolvedCaptionTrack, ResolvedCue,
+    ResolvedCues, ResolvedElement, ResolvedFilm, ResolvedNode, ResolvedOverlay, ResolvedScene,
+    ResolvedShot, ResolvedShotContent, ResolvedStart, ResolvedText, ResolvedTransition,
+    ResolvedVideo, ResolvedVoiceOver,
 };
 use super::variant_resolution::resolve_variant_schema;
 
@@ -83,6 +85,7 @@ impl Resolver {
             variants,
             variant_bindings,
             cues,
+            captions,
             music,
             scenes,
             ids,
@@ -92,6 +95,10 @@ impl Resolver {
         let variants =
             resolve_variant_schema(variants, variant_bindings, &mut resolver.diagnostics);
         let cues = cues.map(|cues| resolver.resolve_cues(cues));
+        let captions = captions
+            .into_iter()
+            .filter_map(|caption| resolver.resolve_caption_track(caption))
+            .collect();
         let music = music
             .into_iter()
             .filter_map(|audio| resolver.resolve_audio(audio))
@@ -110,10 +117,58 @@ impl Resolver {
             .into_iter()
             .map(|(id, node)| (id, resolved_node(node)))
             .collect();
-        let candidate = ResolvedFilm::new(element, variants, cues, music, resolved_scenes, ids);
+        let candidate = ResolvedFilm::new(
+            element,
+            variants,
+            cues,
+            captions,
+            music,
+            resolved_scenes,
+            ids,
+        );
         let film = (!diagnostics.has_errors()).then_some(candidate);
 
         ResolveReport { film, diagnostics }
+    }
+
+    fn resolve_caption_track(
+        &mut self,
+        caption: LinkedCaptionTrack,
+    ) -> Option<ResolvedCaptionTrack> {
+        let input = ElementInput::new(caption.into_element());
+        let mut attributes = input.attributes;
+        let source = attributes.take("src");
+        let language = attributes.take("lang");
+        attributes.reject_unknown(input.kind, &mut self.diagnostics);
+
+        let id = match input.id {
+            LinkedId::Valid(id) => Some(id),
+            LinkedId::Missing => {
+                self.diagnostics
+                    .push(missing_attribute(input.kind, "id", input.span));
+                None
+            }
+            LinkedId::Rejected => None,
+        };
+        let element = ResolvedElement::new(input.kind, id.clone(), input.span);
+        let source = self.resolve_required_asset(source, &element);
+        let language = self.resolve_required_caption_language(language, &element);
+        let (Some(id), Some(source), Some(language)) = (id, source, language) else {
+            return None;
+        };
+
+        let declared_at = self
+            .ids
+            .get(&id)
+            .expect("every bound caption ID has an index entry")
+            .span();
+        let track_id = CaptionTrackId::from(id);
+        Some(ResolvedCaptionTrack::new(
+            element,
+            Authored::new(track_id, declared_at),
+            source,
+            language,
+        ))
     }
 
     fn resolve_cues(&mut self, cues: LinkedCues) -> ResolvedCues {
@@ -351,6 +406,20 @@ impl Resolver {
         }
     }
 
+    fn resolve_caption_language(
+        &mut self,
+        attribute: &Attribute,
+    ) -> Option<Authored<CaptionLanguage>> {
+        match CaptionLanguage::parse(attribute.value()) {
+            Ok(language) => Some(Authored::new(language, attribute.value_span())),
+            Err(reason) => {
+                self.diagnostics
+                    .push(invalid_caption_language(attribute, reason));
+                None
+            }
+        }
+    }
+
     fn resolve_required_asset(
         &mut self,
         attribute: Option<Attribute>,
@@ -363,6 +432,20 @@ impl Resolver {
         };
 
         self.resolve_asset(&attribute)
+    }
+
+    fn resolve_required_caption_language(
+        &mut self,
+        attribute: Option<Attribute>,
+        element: &ResolvedElement,
+    ) -> Option<Authored<CaptionLanguage>> {
+        let Some(attribute) = attribute else {
+            self.diagnostics
+                .push(missing_attribute(element.kind(), "lang", element.span()));
+            return None;
+        };
+
+        self.resolve_caption_language(&attribute)
     }
 
     fn resolve_overlay(&mut self, overlay: LinkedOverlay) -> ResolvedOverlay {
@@ -742,6 +825,15 @@ fn invalid_asset_reference(attribute: &Attribute, reason: InvalidAssetRef) -> Di
             "provide a screenplay-relative path for \"{}\"",
             attribute.name()
         ),
+    )
+}
+
+fn invalid_caption_language(attribute: &Attribute, reason: InvalidCaptionLanguage) -> Diagnostic {
+    author_diagnostic(
+        DiagnosticCode::InvalidAttributeValue,
+        attribute.value_span(),
+        format!("attribute \"lang\" is invalid: {reason}"),
+        "use a language tag such as lang=\"en\" or lang=\"zh-CN\"",
     )
 }
 

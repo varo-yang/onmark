@@ -617,6 +617,7 @@ function isCompilerOnlyElement(tagName: string): boolean {
   return (
     tagName === "om-fields" ||
     tagName === "om-cues" ||
+    tagName === "om-captions" ||
     tagName === "om-music" ||
     tagName === "om-sfx" ||
     tagName === "om-vo"

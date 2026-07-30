@@ -22,9 +22,9 @@ use crate::artifact_cache::ArtifactCacheError;
 use crate::assets::AssetError;
 use crate::batch::BatchError;
 use crate::bundler::BundleError;
+use crate::captions::CaptionLoadError;
 use crate::environment::EnvironmentError;
 use crate::input::BoundedReadError;
-use crate::subtitle::SubtitleLoadError;
 use crate::variant::VariantLoadError;
 
 #[derive(Debug)]
@@ -60,7 +60,7 @@ pub(super) enum CliError {
     ArtifactCache(ArtifactCacheError),
     Assets(AssetError),
     Solve(SolveError),
-    Subtitle(SubtitleLoadError),
+    Captions(CaptionLoadError),
     Variant(VariantLoadError),
     CaptionProjection(CaptionProjectionError),
     Bundle(BundleError),
@@ -162,7 +162,7 @@ impl fmt::Display for CliError {
             Self::ArtifactCache(source) => source.fmt(formatter),
             Self::Assets(source) => source.fmt(formatter),
             Self::Solve(source) => source.fmt(formatter),
-            Self::Subtitle(source) => source.fmt(formatter),
+            Self::Captions(source) => source.fmt(formatter),
             Self::Variant(source) => source.fmt(formatter),
             Self::CaptionProjection(source) => source.fmt(formatter),
             Self::Bundle(source) => source.fmt(formatter),
@@ -198,7 +198,7 @@ impl Error for CliError {
             Self::ArtifactCache(source) => Some(source),
             Self::Assets(source) => Some(source),
             Self::Solve(source) => Some(source),
-            Self::Subtitle(source) => Some(source),
+            Self::Captions(source) => Some(source),
             Self::Variant(source) => Some(source),
             Self::CaptionProjection(source) => Some(source),
             Self::Bundle(source) => Some(source),
@@ -278,9 +278,9 @@ impl From<SolveError> for CliError {
     }
 }
 
-impl From<SubtitleLoadError> for CliError {
-    fn from(source: SubtitleLoadError) -> Self {
-        Self::Subtitle(source)
+impl From<CaptionLoadError> for CliError {
+    fn from(source: CaptionLoadError) -> Self {
+        Self::Captions(source)
     }
 }
 

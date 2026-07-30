@@ -51,7 +51,7 @@ const VISIBILITY_RULE = [
   "om-shot > :is(video, om-title, om-cta):not([data-om-node]) {",
   "  display: none !important;",
   "}",
-  "om-cues, om-cue, om-music, om-sfx, om-vo {",
+  "om-cues, om-cue, om-captions, om-music, om-sfx, om-vo {",
   "  display: none !important;",
   "}",
 ].join("\n");
@@ -256,7 +256,13 @@ class AuthoredDocument {
   }
 
   #bindCaption(placement: RuntimeOverlay): OverlayPresentation {
+    const track = placement.captionTrack;
+    if (track === undefined || track === null) {
+      throw new Error("caption placement requires track metadata");
+    }
     const element = this.#document.createElement(ELEMENTS.caption);
+    element.dataset["track"] = track.id;
+    element.lang = track.language;
     element.textContent = placement.text;
     this.#nodeIndex().film.append(element);
     const bound = bindElement(element, placement.node, () => element.remove());

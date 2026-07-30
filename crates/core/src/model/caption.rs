@@ -6,7 +6,108 @@
 use std::error::Error;
 use std::fmt;
 
-use super::{Duration, SourceSpan};
+use super::{CaptionTrackId, Duration, SourceSpan};
+
+/// Validated language metadata carried by one caption track.
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct CaptionLanguage(Box<str>);
+
+impl CaptionLanguage {
+    /// Parses a conservative language-tag surface suitable for HTML `lang`.
+    ///
+    /// Onmark preserves tag casing and does not canonicalize subtags. The
+    /// accepted surface is intentionally narrower than the complete BCP 47
+    /// registry: non-empty ASCII alphanumeric subtags separated by hyphens.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InvalidCaptionLanguage`] when the value is empty or contains
+    /// characters outside the admitted surface.
+    pub fn parse(value: impl Into<Box<str>>) -> Result<Self, InvalidCaptionLanguage> {
+        let value = value.into();
+        if value.is_empty() {
+            return Err(InvalidCaptionLanguage::Empty);
+        }
+        if !value.split('-').all(|subtag| {
+            !subtag.is_empty() && subtag.bytes().all(|byte| byte.is_ascii_alphanumeric())
+        }) {
+            return Err(InvalidCaptionLanguage::Malformed);
+        }
+        Ok(Self(value))
+    }
+
+    /// Returns the authored language metadata.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for CaptionLanguage {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+/// Reason caption language metadata cannot enter the typed model.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum InvalidCaptionLanguage {
+    /// No language metadata was authored.
+    Empty,
+    /// A subtag is empty or contains a non-ASCII-alphanumeric character.
+    Malformed,
+}
+
+impl fmt::Display for InvalidCaptionLanguage {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::Empty => "caption language cannot be empty",
+            Self::Malformed => {
+                "caption language must contain alphanumeric subtags separated by hyphens"
+            }
+        })
+    }
+}
+
+impl Error for InvalidCaptionLanguage {}
+
+/// One selected normalized caption track with stable authored identity.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ImportedCaptionTrack {
+    id: CaptionTrackId,
+    language: CaptionLanguage,
+    track: CaptionTrack,
+}
+
+impl ImportedCaptionTrack {
+    /// Combines a resolved declaration with one normalized external file.
+    #[must_use]
+    pub const fn new(id: CaptionTrackId, language: CaptionLanguage, track: CaptionTrack) -> Self {
+        Self {
+            id,
+            language,
+            track,
+        }
+    }
+
+    /// Returns the stable authored track identity.
+    #[must_use]
+    pub const fn id(&self) -> &CaptionTrackId {
+        &self.id
+    }
+
+    /// Returns the language metadata projected into browser presentation.
+    #[must_use]
+    pub const fn language(&self) -> &CaptionLanguage {
+        &self.language
+    }
+
+    /// Consumes the imported track without copying cue text.
+    #[must_use]
+    pub fn into_parts(self) -> (CaptionTrackId, CaptionLanguage, CaptionTrack) {
+        (self.id, self.language, self.track)
+    }
+}
 
 /// A non-empty sequence of normalized caption cues.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -236,8 +337,8 @@ impl Error for InvalidCaptionInterval {}
 #[cfg(test)]
 mod tests {
     use super::{
-        CaptionCue, CaptionInterval, CaptionTrack, InvalidCaptionCue, InvalidCaptionInterval,
-        InvalidCaptionTrack,
+        CaptionCue, CaptionInterval, CaptionLanguage, CaptionTrack, InvalidCaptionCue,
+        InvalidCaptionInterval, InvalidCaptionLanguage, InvalidCaptionTrack,
     };
     use crate::model::{ByteOffset, Duration, SourceId, SourceSpan};
 
@@ -258,6 +359,28 @@ mod tests {
         assert_eq!(track.cues()[0].text(), "First\nline");
         assert_eq!(track.cues()[0].timing_span(), timing_span);
         assert_eq!(track.cues()[0].text_span(), text_span);
+    }
+
+    #[test]
+    fn validates_conservative_html_language_metadata() {
+        assert_eq!(
+            CaptionLanguage::parse("zh-Hans-CN")
+                .expect("alphanumeric subtags are admitted")
+                .as_str(),
+            "zh-Hans-CN",
+        );
+        assert_eq!(
+            CaptionLanguage::parse(""),
+            Err(InvalidCaptionLanguage::Empty),
+        );
+        assert_eq!(
+            CaptionLanguage::parse("en_US"),
+            Err(InvalidCaptionLanguage::Malformed),
+        );
+        assert_eq!(
+            CaptionLanguage::parse("en-"),
+            Err(InvalidCaptionLanguage::Malformed),
+        );
     }
 
     #[test]

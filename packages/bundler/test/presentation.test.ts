@@ -2,9 +2,17 @@
 
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import {
+  cp,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { env } from "node:process";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
@@ -17,6 +25,8 @@ import {
   type BundleOptions,
   type BundleProjection,
 } from "../src/index.js";
+
+const UPDATE_GOLDENS = env["ONMARK_UPDATE_GOLDENS"] !== undefined;
 
 // ── Authored document
 
@@ -79,6 +89,7 @@ test("excludes compiler-only facts from presentation identity", async () => {
         '<om-film id="demo">',
         '  <om-fields><om-field name="accent" type="color" default="#ff4d36"></om-field></om-fields>',
         '  <om-cues><om-cue id="reveal" time="1s"></om-cue></om-cues>',
+        '  <om-captions id="en" src="captions.vtt" lang="en"></om-captions>',
         '  <om-music src="first.mp3" gain="50%"></om-music>',
         '  <om-scene><om-shot duration="2s">',
         '    <om-sfx src="first.wav" delay="250ms"></om-sfx>',
@@ -126,7 +137,7 @@ test("excludes compiler-only facts from presentation identity", async () => {
     );
     assert.doesNotMatch(
       html,
-      /om-fields|om-field|om-cues|om-cue|om-music|om-sfx|om-vo/u,
+      /om-fields|om-field|om-cues|om-cue|om-captions|om-music|om-sfx|om-vo/u,
     );
     assert.doesNotMatch(
       html,
@@ -820,15 +831,7 @@ test("keeps the checked-in browser bundle current", async () => {
       ),
     );
 
-    const files = await artifactFiles(expected);
-    assert.deepEqual(await artifactFiles(outputDirectory), files);
-    for (const file of files) {
-      assert.deepEqual(
-        await readFile(join(outputDirectory, file)),
-        await readFile(join(expected, file)),
-        `${file} is stale`,
-      );
-    }
+    await assertCurrentBundle(expected, outputDirectory);
   });
 });
 
@@ -848,15 +851,7 @@ test("keeps the remote-partition bundle current", async () => {
       ),
     );
 
-    const files = await artifactFiles(expected);
-    assert.deepEqual(await artifactFiles(outputDirectory), files);
-    for (const file of files) {
-      assert.deepEqual(
-        await readFile(join(outputDirectory, file)),
-        await readFile(join(expected, file)),
-        `${file} is stale`,
-      );
-    }
+    await assertCurrentBundle(expected, outputDirectory);
   });
 });
 
@@ -1103,6 +1098,27 @@ async function artifactFiles(root: string, directory = ""): Promise<string[]> {
     }
   }
   return files.sort();
+}
+
+async function assertCurrentBundle(
+  expected: string,
+  actual: string,
+): Promise<void> {
+  if (UPDATE_GOLDENS) {
+    await rm(expected, { recursive: true });
+    await cp(actual, expected, { recursive: true });
+    return;
+  }
+
+  const files = await artifactFiles(expected);
+  assert.deepEqual(await artifactFiles(actual), files);
+  for (const file of files) {
+    assert.deepEqual(
+      await readFile(join(actual, file)),
+      await readFile(join(expected, file)),
+      `${file} is stale`,
+    );
+  }
 }
 
 async function generatedText(directory: string): Promise<string> {

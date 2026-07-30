@@ -6,8 +6,8 @@
 use std::collections::BTreeMap;
 
 use crate::model::{
-    AssetRef, AudioGain, CueId, Duration, ElementKind, EventRef, GeneralAudioKind, MediaTrim,
-    NodeId, PlayCount, PlaybackRate, SourceSpan,
+    AssetRef, AudioGain, CaptionLanguage, CaptionTrackId, CueId, Duration, ElementKind, EventRef,
+    GeneralAudioKind, MediaTrim, NodeId, PlayCount, PlaybackRate, SourceSpan,
 };
 
 use super::variant::{ResolvedVariantSchema, ResolvedVariantValues};
@@ -109,6 +109,7 @@ pub struct ResolvedFilm {
     variants: ResolvedVariantSchema,
     variant_values: ResolvedVariantValues,
     cues: Option<ResolvedCues>,
+    captions: Vec<ResolvedCaptionTrack>,
     music: Vec<ResolvedAudio>,
     scenes: Vec<ResolvedScene>,
     ids: BTreeMap<NodeId, ResolvedNode>,
@@ -119,6 +120,7 @@ impl ResolvedFilm {
         element: ResolvedElement,
         variants: ResolvedVariantSchema,
         cues: Option<ResolvedCues>,
+        captions: Vec<ResolvedCaptionTrack>,
         music: Vec<ResolvedAudio>,
         scenes: Vec<ResolvedScene>,
         ids: BTreeMap<NodeId, ResolvedNode>,
@@ -129,6 +131,7 @@ impl ResolvedFilm {
             variants,
             variant_values,
             cues,
+            captions,
             music,
             scenes,
             ids,
@@ -164,6 +167,12 @@ impl ResolvedFilm {
         self.cues.as_ref()
     }
 
+    /// Returns external caption-track declarations in authored order.
+    #[must_use]
+    pub fn captions(&self) -> &[ResolvedCaptionTrack] {
+        &self.captions
+    }
+
     /// Returns resolved film-wide music in authored order.
     #[must_use]
     pub fn music(&self) -> &[ResolvedAudio] {
@@ -183,6 +192,8 @@ impl ResolvedFilm {
     }
 
     pub(super) fn into_parts(self) -> ResolvedFilmParts {
+        // Caption files enter at the CLI boundary before this solve-only
+        // handoff; normalized cues join the Timeline after solving.
         ResolvedFilmParts {
             element: self.element,
             variants: self.variants,
@@ -202,6 +213,55 @@ pub(super) struct ResolvedFilmParts {
     pub(super) cues: Option<ResolvedCues>,
     pub(super) music: Vec<ResolvedAudio>,
     pub(super) scenes: Vec<ResolvedScene>,
+}
+
+/// One typed external caption-track declaration.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ResolvedCaptionTrack {
+    element: ResolvedElement,
+    id: Authored<CaptionTrackId>,
+    source: Authored<AssetRef>,
+    language: Authored<CaptionLanguage>,
+}
+
+impl ResolvedCaptionTrack {
+    pub(super) const fn new(
+        element: ResolvedElement,
+        id: Authored<CaptionTrackId>,
+        source: Authored<AssetRef>,
+        language: Authored<CaptionLanguage>,
+    ) -> Self {
+        Self {
+            element,
+            id,
+            source,
+            language,
+        }
+    }
+
+    /// Returns the declaration element and source provenance.
+    #[must_use]
+    pub const fn element(&self) -> &ResolvedElement {
+        &self.element
+    }
+
+    /// Returns the stable track identity and its authored span.
+    #[must_use]
+    pub const fn id(&self) -> &Authored<CaptionTrackId> {
+        &self.id
+    }
+
+    /// Returns the external subtitle source and its authored span.
+    #[must_use]
+    pub const fn source(&self) -> &Authored<AssetRef> {
+        &self.source
+    }
+
+    /// Returns language metadata and its authored span.
+    #[must_use]
+    pub const fn language(&self) -> &Authored<CaptionLanguage> {
+        &self.language
+    }
 }
 
 /// The optional singleton cue container after cue resolution.

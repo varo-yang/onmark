@@ -15,6 +15,8 @@ pub enum ElementKind {
     Cues,
     /// Named absolute time event.
     Cue,
+    /// One external caption-track declaration.
+    Captions,
     /// Sequential narrative container.
     Scene,
     /// Sequential unit with one local time origin.
@@ -65,6 +67,7 @@ impl ElementKind {
             "om-field" => Some(Self::Field),
             "om-cues" => Some(Self::Cues),
             "om-cue" => Some(Self::Cue),
+            "om-captions" => Some(Self::Captions),
             "om-scene" => Some(Self::Scene),
             "om-shot" => Some(Self::Shot),
             "om-transition" => Some(Self::Transition),
@@ -87,6 +90,7 @@ impl ElementKind {
             Self::Field => "om-field",
             Self::Cues => "om-cues",
             Self::Cue => "om-cue",
+            Self::Captions => "om-captions",
             Self::Scene => "om-scene",
             Self::Shot => "om-shot",
             Self::Transition => "om-transition",
@@ -118,6 +122,7 @@ mod tests {
             "om-field",
             "om-cues",
             "om-cue",
+            "om-captions",
             "om-scene",
             "om-shot",
             "om-transition",

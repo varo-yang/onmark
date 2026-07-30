@@ -27,6 +27,7 @@ use crate::arguments::{ReviewArgs, source_directory};
 use crate::artifact_cache::{ArtifactCache, ArtifactReuse, CacheAdmission, CapturedArtifacts};
 use crate::assets::FrozenCatalog;
 use crate::bundler::PresentationBundler;
+use crate::captions::CaptionImport;
 use crate::compilation;
 use crate::diagnostic::{self, AuthoredReport, JsonDiagnostic};
 use crate::environment::Executables;
@@ -35,7 +36,6 @@ use crate::failure::CliError;
 use crate::input;
 use crate::output;
 use crate::progress::Progress;
-use crate::subtitle::SubtitleImport;
 use crate::variant::VariantImport;
 
 use self::plan::{ReviewPlan, ReviewPlanError};
@@ -118,7 +118,7 @@ impl ReviewOutcome {
         }
     }
 
-    fn rejected_subtitle(rejected: crate::subtitle::RejectedSubtitle, json: bool) -> Self {
+    fn rejected_captions(rejected: crate::captions::RejectedCaptions, json: bool) -> Self {
         let (path, source, diagnostics) = rejected.into_parts();
         Self::rejected(path, source, diagnostics, json)
     }
@@ -162,7 +162,7 @@ async fn prepare(args: ReviewArgs, json: bool, started: Instant) -> Result<Prepa
         ))));
     };
     let film = match VariantImport::apply(args.validation.variant.as_deref(), film)? {
-        VariantImport::Film(film) => film,
+        VariantImport::Film(film) => *film,
         VariantImport::Rejected(rejected) => {
             let (path, source, diagnostics) = rejected.into_parts();
             return Ok(Preparation::Rejected(Box::new(ReviewOutcome::rejected(
@@ -173,20 +173,17 @@ async fn prepare(args: ReviewArgs, json: bool, started: Instant) -> Result<Prepa
             ))));
         }
     };
-    let caption_track = match args
-        .validation
-        .subtitle
-        .as_deref()
-        .map(SubtitleImport::load)
-        .transpose()?
-    {
-        Some(SubtitleImport::Track(track)) => Some(track),
-        Some(SubtitleImport::Rejected(rejected)) => {
+    let caption_tracks = match CaptionImport::load(
+        film.captions(),
+        &args.validation.caption_tracks,
+        source_directory(&args.validation.screenplay),
+    )? {
+        CaptionImport::Ready(tracks) => tracks,
+        CaptionImport::Rejected(rejected) => {
             return Ok(Preparation::Rejected(Box::new(
-                ReviewOutcome::rejected_subtitle(rejected, json),
+                ReviewOutcome::rejected_captions(rejected, json),
             )));
         }
-        None => None,
     };
     let baseline = args
         .against
@@ -219,7 +216,7 @@ async fn prepare(args: ReviewArgs, json: bool, started: Instant) -> Result<Prepa
             json,
         ))));
     };
-    let timeline = compiler::import_captions(timeline, caption_track)?;
+    let timeline = compiler::import_captions(timeline, caption_tracks)?;
 
     Ok(Preparation::Ready(Box::new(PreparedReview {
         args,

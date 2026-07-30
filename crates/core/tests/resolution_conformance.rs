@@ -7,9 +7,9 @@ use std::fs;
 use std::path::Path;
 
 use onmark_core::compiler::{
-    self, Authored, ResolvedAudio, ResolvedCues, ResolvedElement, ResolvedFilm, ResolvedOverlay,
-    ResolvedScene, ResolvedShot, ResolvedShotContent, ResolvedStart, ResolvedText, ResolvedVideo,
-    ResolvedVoiceOver,
+    self, Authored, ResolvedAudio, ResolvedCaptionTrack, ResolvedCues, ResolvedElement,
+    ResolvedFilm, ResolvedOverlay, ResolvedScene, ResolvedShot, ResolvedShotContent, ResolvedStart,
+    ResolvedText, ResolvedVideo, ResolvedVoiceOver,
 };
 use onmark_core::model::{AssetRef, Duration, EventRef, SourceId};
 
@@ -165,6 +165,10 @@ impl ResolvedFilmRenderer {
             self.render_cues(cues)?;
         }
 
+        for captions in film.captions() {
+            self.render_captions(captions)?;
+        }
+
         for music in film.music() {
             self.render_audio(music, "  ")?;
         }
@@ -174,6 +178,19 @@ impl ResolvedFilmRenderer {
         }
 
         self.render_index(film)
+    }
+
+    fn render_captions(&mut self, captions: &ResolvedCaptionTrack) -> std::fmt::Result {
+        writeln!(
+            self.output,
+            "  captions id={} id@{} src={} src@{} lang={} lang@{}",
+            captions.id().value(),
+            span(captions.id().span()),
+            captions.source().value(),
+            span(captions.source().span()),
+            captions.language().value(),
+            span(captions.language().span()),
+        )
     }
 
     fn render_cues(&mut self, cues: &ResolvedCues) -> std::fmt::Result {

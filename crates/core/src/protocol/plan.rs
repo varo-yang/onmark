@@ -11,9 +11,10 @@ use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::model::{
-    Duration, ElementKind, FrameInterval, FrameRate, FrozenAssetId, MediaSource,
-    MediaSourceInterval, MediaTimebase, NodeId, PlayCount, PlaybackRate, Rounding, Timebase,
-    VariantFieldKind, VariantFieldName, VariantValue, VideoFrameMap, VideoTiming,
+    CaptionLanguage, CaptionTrackId, Duration, ElementKind, FrameInterval, FrameRate,
+    FrozenAssetId, MediaSource, MediaSourceInterval, MediaTimebase, NodeId, PlayCount,
+    PlaybackRate, Rounding, Timebase, VariantFieldKind, VariantFieldName, VariantValue,
+    VideoFrameMap, VideoTiming,
 };
 #[cfg(feature = "schema")]
 use crate::model::{MAX_EXACT_VARIANT_INTEGER, MAX_VARIANT_TEXT_BYTES};
@@ -465,6 +466,8 @@ fn validate_structure(wire: &BrowserPlanWire) -> Result<(), InvalidBrowserPlan> 
     for overlay in &wire.overlays {
         claims.claim(overlay.node())?;
         validate_overlay_interval(overlay.interval(), wire.timeline, wire.evaluation)?;
+        validate_caption_track(overlay.kind(), overlay.shot_id(), overlay.caption_track())
+            .map_err(|_| InvalidBrowserPlan::InvalidCaptionTrack)?;
         match (overlay.kind(), overlay.shot_id()) {
             (BrowserOverlayKind::Caption, None) => {}
             (BrowserOverlayKind::Title | BrowserOverlayKind::CallToAction, Some(shot_id)) => {
@@ -1515,6 +1518,41 @@ pub enum BrowserOverlayKind {
     Caption,
 }
 
+/// Stable caption-track metadata projected into browser presentation.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct BrowserCaptionTrack {
+    #[cfg_attr(feature = "schema", schemars(regex(pattern = r"^[^\t\n\f\r ]+$")))]
+    id: Box<str>,
+    #[cfg_attr(
+        feature = "schema",
+        schemars(regex(pattern = r"^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$"))
+    )]
+    language: Box<str>,
+}
+
+impl BrowserCaptionTrack {
+    pub(super) fn new(id: &CaptionTrackId, language: &CaptionLanguage) -> Self {
+        Self {
+            id: id.as_str().into(),
+            language: language.as_str().into(),
+        }
+    }
+
+    /// Returns the stable authored track identity.
+    #[must_use]
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    /// Returns language metadata for the generated caption element.
+    #[must_use]
+    pub fn language(&self) -> &str {
+        &self.language
+    }
+}
+
 /// One solved overlay placement consumed by the browser presentation.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -1523,6 +1561,8 @@ pub struct BrowserOverlay {
     node: BrowserNode,
     shot_id: Option<BrowserNodeId>,
     kind: BrowserOverlayKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    caption_track: Option<BrowserCaptionTrack>,
     #[cfg_attr(
         feature = "schema",
         schemars(length(max = MAX_BROWSER_OVERLAY_TEXT_CHARACTERS))
@@ -1536,6 +1576,7 @@ impl BrowserOverlay {
         node: BrowserNode,
         shot_id: Option<BrowserNodeId>,
         kind: BrowserOverlayKind,
+        caption_track: Option<BrowserCaptionTrack>,
         text: Box<str>,
         interval: WireInterval,
     ) -> Self {
@@ -1543,6 +1584,7 @@ impl BrowserOverlay {
             node,
             shot_id,
             kind,
+            caption_track,
             text,
             interval,
         }
@@ -1566,10 +1608,23 @@ impl BrowserOverlay {
         self.kind
     }
 
+    /// Returns track metadata for a caption overlay.
+    #[must_use]
+    pub const fn caption_track(&self) -> Option<&BrowserCaptionTrack> {
+        self.caption_track.as_ref()
+    }
+
     /// Returns decoded authored text with source runs joined in order.
     #[must_use]
     pub fn text(&self) -> &str {
         &self.text
+    }
+
+    pub(super) fn text_bytes(&self) -> usize {
+        let track_bytes = self.caption_track.as_ref().map_or(0, |track| {
+            track.id.len().saturating_add(track.language.len())
+        });
+        self.text.len().saturating_add(track_bytes)
     }
 
     /// Returns the complete solved visibility interval.
@@ -1590,11 +1645,14 @@ impl<'de> Deserialize<'de> for BrowserOverlay {
                 "browser overlay text exceeds the character limit",
             ));
         }
+        validate_caption_track(wire.kind, wire.shot_id, wire.caption_track.as_ref())
+            .map_err(D::Error::custom)?;
 
         Ok(Self {
             node: wire.node,
             shot_id: wire.shot_id,
             kind: wire.kind,
+            caption_track: wire.caption_track,
             text: wire.text,
             interval: wire.interval,
         })
@@ -1607,14 +1665,37 @@ struct BrowserOverlayWire {
     node: BrowserNode,
     shot_id: Option<BrowserNodeId>,
     kind: BrowserOverlayKind,
+    caption_track: Option<BrowserCaptionTrack>,
     text: Box<str>,
     interval: WireInterval,
+}
+
+fn validate_caption_track(
+    kind: BrowserOverlayKind,
+    shot_id: Option<BrowserNodeId>,
+    track: Option<&BrowserCaptionTrack>,
+) -> Result<(), &'static str> {
+    match (kind, shot_id, track) {
+        (BrowserOverlayKind::Caption, None, Some(track))
+            if NodeId::parse(track.id()).is_ok()
+                && CaptionLanguage::parse(track.language()).is_ok() =>
+        {
+            Ok(())
+        }
+        (BrowserOverlayKind::Title | BrowserOverlayKind::CallToAction, Some(_), None) => Ok(()),
+        (BrowserOverlayKind::Caption, _, _) => {
+            Err("browser caption must name one valid track and no structural parent")
+        }
+        (BrowserOverlayKind::Title | BrowserOverlayKind::CallToAction, _, _) => {
+            Err("authored browser overlay must name one shot and no caption track")
+        }
+    }
 }
 
 fn overlay_text_bytes(overlays: &[BrowserOverlay]) -> usize {
     overlays
         .iter()
-        .map(|overlay| overlay.text.len())
+        .map(BrowserOverlay::text_bytes)
         .try_fold(0_usize, usize::checked_add)
         .unwrap_or(usize::MAX)
 }
@@ -1704,6 +1785,8 @@ pub enum InvalidBrowserPlan {
     OverlayTextTooLong(ElementKind),
     /// One imported caption exceeds the per-placement text budget.
     CaptionTextTooLong,
+    /// Caption-track metadata is missing, malformed, or attached to an authored overlay.
+    InvalidCaptionTrack,
     /// Combined overlay and typed-field text exceeds the bounded CDP request budget.
     BrowserTextBudget,
     /// One video lacks the source timing proved during render admission.
@@ -1762,6 +1845,7 @@ impl fmt::Display for InvalidBrowserPlan {
             Self::ChildCrossesParent => "browser node crosses its structural parent",
             Self::InvalidTransitionRelation => "browser transition does not connect adjacent shots",
             Self::CaptionTextTooLong => "browser caption text exceeds the character limit",
+            Self::InvalidCaptionTrack => "browser caption track metadata is invalid",
             Self::BrowserTextBudget => "browser text exceeds the request byte budget",
             Self::UnsupportedSourceTiming => "source frame timing cannot be presented as video",
             Self::SourceTimingBudget => "browser source timing exceeds the request budget",
@@ -1824,6 +1908,7 @@ impl Error for InvalidBrowserPlan {
             | Self::InvalidOverlayKind(_)
             | Self::OverlayTextTooLong(_)
             | Self::CaptionTextTooLong
+            | Self::InvalidCaptionTrack
             | Self::BrowserTextBudget
             | Self::MissingSourceTiming(_)
             | Self::UnsupportedSourceTiming
@@ -1843,10 +1928,10 @@ mod tests {
     use std::collections::{BTreeMap, BTreeSet};
 
     use crate::model::{
-        ByteOffset, Duration, ElementKind, FrameIndex, FrameInterval, FrameRate, FrozenAssetId,
-        MAX_VARIANT_TEXT_BYTES, MediaSource, MediaSourceInterval, PlayCount, PlaybackRate,
-        SourceId, SourceSpan, Timebase, VariantFieldKind, VariantFieldName, VariantValue,
-        VideoTiming,
+        ByteOffset, CaptionLanguage, CaptionTrackId, Duration, ElementKind, FrameIndex,
+        FrameInterval, FrameRate, FrozenAssetId, MAX_VARIANT_TEXT_BYTES, MediaSource,
+        MediaSourceInterval, NodeId, PlayCount, PlaybackRate, SourceId, SourceSpan, Timebase,
+        VariantFieldKind, VariantFieldName, VariantValue, VideoTiming,
     };
     use crate::timeline::{
         TimelineCaption, TimelineContent, TimelineElement, TimelineIr, TimelineOverlay,
@@ -1864,7 +1949,7 @@ mod tests {
     #[test]
     fn parses_only_validated_browser_plan_facts() {
         let plan = r#"{
-            "timelineVersion":5,
+            "timelineVersion":6,
             "frameRate":{"numerator":30,"denominator":1},
             "timeline":{"start":0,"end":1},
             "evaluation":{"start":0,"end":1},
@@ -1948,7 +2033,7 @@ mod tests {
     #[test]
     fn rejects_duplicate_node_identity_at_the_wire_boundary() {
         let plan = r#"{
-            "timelineVersion":5,
+            "timelineVersion":6,
             "frameRate":{"numerator":30,"denominator":1},
             "timeline":{"start":0,"end":1},
             "evaluation":{"start":0,"end":1},
@@ -1971,7 +2056,7 @@ mod tests {
     #[test]
     fn rejects_non_dense_node_identity_at_the_wire_boundary() {
         let plan = r#"{
-            "timelineVersion":5,
+            "timelineVersion":6,
             "frameRate":{"numerator":30,"denominator":1},
             "timeline":{"start":0,"end":1},
             "evaluation":{"start":0,"end":1},
@@ -1996,7 +2081,7 @@ mod tests {
     #[test]
     fn rejects_a_child_interval_outside_its_structural_parent() {
         let plan = r#"{
-            "timelineVersion":5,
+            "timelineVersion":6,
             "frameRate":{"numerator":30,"denominator":1},
             "timeline":{"start":0,"end":4},
             "evaluation":{"start":0,"end":4},
@@ -2016,7 +2101,7 @@ mod tests {
     #[test]
     fn rejects_noncanonical_browser_node_order() {
         let plan = r#"{
-            "timelineVersion":5,
+            "timelineVersion":6,
             "frameRate":{"numerator":30,"denominator":1},
             "timeline":{"start":0,"end":4},
             "evaluation":{"start":0,"end":4},
@@ -2042,7 +2127,7 @@ mod tests {
     #[test]
     fn rejects_a_transition_across_scene_ownership() {
         let plan = r#"{
-            "timelineVersion":5,
+            "timelineVersion":6,
             "frameRate":{"numerator":30,"denominator":1},
             "timeline":{"start":0,"end":4},
             "evaluation":{"start":0,"end":4},
@@ -2076,7 +2161,7 @@ mod tests {
     #[test]
     fn rejects_a_transition_that_does_not_match_the_shot_boundary() {
         let plan = r#"{
-            "timelineVersion":5,
+            "timelineVersion":6,
             "frameRate":{"numerator":30,"denominator":1},
             "timeline":{"start":0,"end":6},
             "evaluation":{"start":0,"end":6},
@@ -2146,7 +2231,7 @@ mod tests {
     #[test]
     fn enumerates_structural_placement_boundaries_without_content() {
         let plan = r#"{
-            "timelineVersion":5,
+            "timelineVersion":6,
             "frameRate":{"numerator":30,"denominator":1},
             "timeline":{"start":0,"end":4},
             "evaluation":{"start":0,"end":4},
@@ -2224,6 +2309,27 @@ mod tests {
         assert_eq!(plan.overlays()[0].kind(), BrowserOverlayKind::Caption);
         assert_eq!(plan.overlays()[0].interval().start().get(), 1);
         assert_eq!(plan.overlays()[0].interval().end().get(), 3);
+    }
+
+    #[test]
+    fn rejects_missing_or_malformed_caption_track_metadata() {
+        let mut timeline = timeline_with_content_in(Vec::new(), interval(0, 4));
+        timeline.replace_captions(vec![caption(interval(1, 3), "Caption")]);
+        let plan = BrowserPlan::from_timeline(&timeline, &BTreeMap::new())
+            .expect("the typed caption forms a valid browser plan");
+        let wire = serde_json::to_value(plan).expect("the browser plan serializes");
+
+        let mut missing = wire.clone();
+        missing["overlays"][0]
+            .as_object_mut()
+            .expect("the fixture overlay is an object")
+            .remove("captionTrack");
+        assert!(serde_json::from_value::<BrowserPlan>(missing).is_err());
+
+        let mut malformed = wire;
+        malformed["overlays"][0]["captionTrack"]["language"] =
+            serde_json::Value::String("en_US".to_owned());
+        assert!(serde_json::from_value::<BrowserPlan>(malformed).is_err());
     }
 
     #[test]
@@ -2467,7 +2573,14 @@ mod tests {
     fn caption(interval: FrameInterval, text: &str) -> TimelineCaption {
         let span = SourceSpan::new(SourceId::new(1), ByteOffset::ZERO, ByteOffset::ZERO)
             .expect("equal source bounds form a valid span");
-        TimelineCaption::new(interval, text, span, span)
+        TimelineCaption::new(
+            CaptionTrackId::from(NodeId::parse("en").expect("the track ID is valid")),
+            CaptionLanguage::parse("en").expect("the language is valid"),
+            interval,
+            text,
+            span,
+            span,
+        )
     }
 
     fn variant_text(name: &str, bytes: usize) -> TimelineVariantField {

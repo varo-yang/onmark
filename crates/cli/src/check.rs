@@ -10,7 +10,7 @@ use std::process::ExitCode;
 use onmark_core::compiler;
 use onmark_core::compiler::ResolvedFilm;
 use onmark_core::diagnostics::Diagnostic;
-use onmark_core::model::{CaptionTrack, Timebase};
+use onmark_core::model::{ImportedCaptionTrack, Timebase};
 use onmark_core::render_graph::{PartitionPlan, RenderGraph};
 use onmark_core::timeline::TimelineIr;
 use onmark_media::Ffprobe;
@@ -20,13 +20,13 @@ use serde::Serialize;
 use crate::arguments::{CheckArgs, source_directory};
 use crate::assets::FrozenCatalog;
 use crate::bundler::{BundleRegion, PresentationBundler};
+use crate::captions::CaptionImport;
 use crate::compilation;
 use crate::diagnostic::{self, AuthoredReport, JsonDiagnostic};
 use crate::environment::CheckExecutables;
 use crate::execution;
 use crate::failure::CliError;
 use crate::input;
-use crate::subtitle::SubtitleImport;
 use crate::variant::VariantImport;
 
 const REPORT_VERSION: u16 = 1;
@@ -59,7 +59,7 @@ struct ResolvedInput {
     source: String,
     film: ResolvedFilm,
     diagnostics: Vec<Diagnostic>,
-    caption_track: Option<CaptionTrack>,
+    caption_tracks: Vec<ImportedCaptionTrack>,
 }
 
 enum InitialValidation {
@@ -115,7 +115,7 @@ fn resolve_input(args: crate::arguments::ValidationArgs) -> Result<InitialValida
         }));
     };
     let film = match VariantImport::apply(args.variant.as_deref(), film)? {
-        VariantImport::Film(film) => film,
+        VariantImport::Film(film) => *film,
         VariantImport::Rejected(rejected) => {
             let (path, source, diagnostics) = rejected.into_parts();
             return Ok(InitialValidation::Rejected(Validation {
@@ -124,21 +124,19 @@ fn resolve_input(args: crate::arguments::ValidationArgs) -> Result<InitialValida
             }));
         }
     };
-    let caption_track = match args
-        .subtitle
-        .as_deref()
-        .map(SubtitleImport::load)
-        .transpose()?
-    {
-        Some(SubtitleImport::Track(track)) => Some(track),
-        Some(SubtitleImport::Rejected(rejected)) => {
+    let caption_tracks = match CaptionImport::load(
+        film.captions(),
+        &args.caption_tracks,
+        source_directory(&args.screenplay),
+    )? {
+        CaptionImport::Ready(tracks) => tracks,
+        CaptionImport::Rejected(rejected) => {
             let (path, source, diagnostics) = rejected.into_parts();
             return Ok(InitialValidation::Rejected(Validation {
                 report: authored_report(path, source, diagnostics),
                 inspection: None,
             }));
         }
-        None => None,
     };
 
     Ok(InitialValidation::Resolved(ResolvedInput {
@@ -146,7 +144,7 @@ fn resolve_input(args: crate::arguments::ValidationArgs) -> Result<InitialValida
         source,
         film,
         diagnostics,
-        caption_track,
+        caption_tracks,
     }))
 }
 
@@ -156,7 +154,7 @@ async fn validate_resolved(input: ResolvedInput) -> Result<Validation, CliError>
         source,
         film,
         diagnostics,
-        caption_track,
+        caption_tracks,
     } = input;
     let executables = CheckExecutables::discover(&args)?;
     let probe = Ffprobe::new(
@@ -180,7 +178,7 @@ async fn validate_resolved(input: ResolvedInput) -> Result<Validation, CliError>
             inspection: None,
         });
     };
-    let timeline = compiler::import_captions(timeline, caption_track)?;
+    let timeline = compiler::import_captions(timeline, caption_tracks)?;
 
     let bundler = PresentationBundler::new(executables.bundler);
     let partitions =

@@ -3,6 +3,7 @@ film id=-
   cues id=-
     cue id=offer
     cue id=cta
+  captions id=en
   scene id=sale
     shot id=hero
       video id=-
@@ -10,6 +11,7 @@ film id=-
       om-cta id=-
 index
   cta -> om-cue @0:81..84
-  hero -> om-shot @0:159..163
+  en -> om-captions @0:138..140
+  hero -> om-shot @0:229..233
   offer -> om-cue @0:38..43
-  sale -> om-scene @0:135..139
+  sale -> om-scene @0:205..209

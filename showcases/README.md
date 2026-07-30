@@ -15,11 +15,10 @@ onmark render showcases/liquid-type.html \
   --height 1080
 ```
 
-`caption-documentary.html` also imports the checked-in WebVTT fixture:
+`caption-documentary.html` declares the checked-in WebVTT fixture directly:
 
 ```bash
-onmark render showcases/caption-documentary.html \
-  --subtitle showcases/assets/field-notes.vtt
+onmark render showcases/caption-documentary.html
 ```
 
 Rendered videos stay outside version control. Source, local assets, and the

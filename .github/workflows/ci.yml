@@ -92,8 +92,10 @@ jobs:
         run: |
           cargo xtask eval audio
           cargo xtask eval audio-envelope
+          cargo xtask eval captions
           cargo xtask eval html
           cargo xtask eval transition
+          cargo xtask eval variant
           cargo xtask eval video
 
       - name: Check TypeScript
