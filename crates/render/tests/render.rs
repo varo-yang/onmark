@@ -538,7 +538,7 @@ async fn renders_and_repeats_the_production_layered_path() {
 
 #[tokio::test]
 #[ignore = "requires ONMARK_BUNDLER, ONMARK_FFMPEG, ONMARK_FFPROBE, and a supported browser"]
-async fn preserves_backdrop_layout_across_whole_local_and_worker_execution() {
+async fn preserves_held_backdrop_layout_across_whole_local_and_worker_execution() {
     let directory = tempdir().expect("the experiment workspace must be available");
     let source = repository().join("conformance/browser/backdrop-sequence.html");
     let bundle = FixtureBundle::build_from(

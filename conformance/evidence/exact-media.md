@@ -1,8 +1,8 @@
 # Exact-media admission
 
 This record admits complete VFR timing, exact source-local video treatment, and
-native trim/speed execution as separate claims. It does not treat two different
-decoder/color paths as pixel-interchangeable.
+native trim, speed, and final-frame-hold execution as separate claims. It does
+not treat two different decoder/color paths as pixel-interchangeable.
 
 ## Authored language
 
@@ -60,11 +60,15 @@ and `FFmpeg` use different decode/color paths and therefore are checked for
 source-frame identity and independent repeatability rather than equal RGBA
 hashes.
 
-## Native trim and speed
+## Native trim, speed, and final-frame hold
 
 The native layered path realizes the Rust-owned source interval and exact
-playback ratio in one closed FFmpeg selection formula. Repeated playback and
-final-frame hold deliberately remain on browser composition.
+playback ratio in one closed FFmpeg selection formula. For a final-frame hold,
+Rust additionally counts the output-frame midpoints before the exact hold
+boundary. FFmpeg splits the decoded stream: one branch realizes those playback
+frames, while the other selects the source interval's actual final frame and
+extends it by an exact frame count. This avoids both floating-point duration
+rounding and buffering a complete video pass.
 
 The retained real-process test uses two independently materialized partition
 sets over disjoint half-second trims at half speed. It requires every partition
@@ -73,7 +77,26 @@ sequences by canonical raw RGBA, renders the local partition sequence, assembles
 the worker artifacts through the same final encoder, and compares decoded video
 and audio outputs.
 
+The backdrop fixture adds a half-second hold after a half-second trim. Its
+production proof compares the complete native composition with two
+independently captured partitions by canonical raw RGBA, then renders the local
+partitions and assembles the worker artifacts through the same encoder.
+Repetition remains browser-composited: FFmpeg's finite `loop` filter caches a
+discrete frame sequence with a 32,767-frame ceiling, while authored pass
+boundaries may fall between output frames. Neither behavior implements
+Onmark's continuous-time modulo rule with a suitable resource bound.
+
 Run the proofs:
+
+```bash
+ONMARK_BUNDLER=/path/to/onmark-bundle \
+ONMARK_PORTABLE_CHROME=/path/to/chrome \
+ONMARK_FFMPEG=/path/to/ffmpeg \
+ONMARK_FFPROBE=/path/to/ffprobe \
+cargo test -p onmark-render --test render \
+  preserves_source_edits_across_local_and_worker_partition_execution \
+  -- --exact --ignored --nocapture
+```
 
 ```bash
 ONMARK_BUNDLER=/path/to/onmark-bundle \
@@ -81,7 +104,7 @@ ONMARK_PORTABLE_CHROME=/path/to/chrome-headless-shell \
 ONMARK_FFMPEG=/path/to/ffmpeg \
 ONMARK_FFPROBE=/path/to/ffprobe \
 cargo test -p onmark-render --test render \
-  preserves_source_edits_across_local_and_worker_partition_execution \
+  preserves_held_backdrop_layout_across_whole_local_and_worker_execution \
   -- --exact --ignored --nocapture
 ```
 
@@ -94,15 +117,16 @@ cargo test -p onmark-render --test media_seek \
   -- --exact --ignored --nocapture
 ```
 
-## Browser repetition and final-frame hold
+## Browser repetition
 
 The retained `media-continuity.html` fixture keeps two one-second shots while
 combining aligned trims, exact speed, four complete plays, and a 200 ms
-final-frame hold. The production executor renders it once as a whole film and
-again as two independently materialized Render Units, then requires equal
-decoded video hashes, equal final audio hashes, and the same 60-frame result.
-This proves that `plays` and `hold-last` cross the real Chromium/FFmpeg boundary
-without creating a second timeline or losing partition equivalence.
+final-frame hold. Because repetition is present, the production executor
+renders it once as a whole film and again as two independently materialized
+Render Units through Chromium, then requires equal decoded video hashes, equal
+final audio hashes, and the same 60-frame result. This proves that combined
+`plays` and `hold-last` cross the real browser/FFmpeg boundary without creating
+a second timeline or losing partition equivalence.
 
 ```bash
 ONMARK_BUNDLER=/path/to/onmark-bundle \

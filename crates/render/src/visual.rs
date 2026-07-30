@@ -9,12 +9,12 @@ use std::error::Error;
 use std::fmt;
 
 use onmark_core::model::{
-    FrozenAssetId, PresentationFrameBehavior, PresentationVisualCapability, VideoColorProfile,
-    VideoDimensions, VideoTiming,
+    FrameRate, FrozenAssetId, PresentationFrameBehavior, PresentationVisualCapability, Timebase,
+    VideoColorProfile, VideoDimensions, VideoTiming,
 };
 use onmark_core::protocol::{
     BROWSER_OBJECT_POSITION_SCALE, BrowserMediaLayout, BrowserMediaPlacement, BrowserNodeId,
-    BrowserObjectFit, BrowserPlan, MAX_BROWSER_MEDIA_LAYOUTS,
+    BrowserObjectFit, BrowserPlan, BrowserVideo, MAX_BROWSER_MEDIA_LAYOUTS, WireFrameRate,
 };
 use serde::ser::SerializeStruct as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -242,7 +242,7 @@ fn select_backdrop_media_plan<'a>(
         if !matches!(video.source_timing(), VideoTiming::Constant(_)) {
             return Err(UnsupportedVisualComposition::VariableSourceTiming);
         }
-        if !native_source_treatment_is_supported(placement) {
+        if native_media_schedule(plan, placement).is_err() {
             return Err(UnsupportedVisualComposition::UnsupportedSourceTreatment);
         }
         media.push(BackdropMedia {
@@ -289,12 +289,6 @@ fn select_layered_media_plan<'a>(
         return None;
     }
     if video.color_profile() != Some(VideoColorProfile::Bt709Limited) {
-        return None;
-    }
-    if !matches!(video.source_timing(), VideoTiming::Constant(_)) {
-        return None;
-    }
-    if !native_source_treatment_is_supported(placement) {
         return None;
     }
 
@@ -709,7 +703,7 @@ fn validate_backdrop_plan(
         if placement.source_timing().constant_frame_rate().is_none() {
             return Err(UnsupportedVisualComposition::VariableSourceTiming);
         }
-        if !native_source_treatment_is_supported(placement) {
+        if native_media_schedule(plan, placement).is_err() {
             return Err(UnsupportedVisualComposition::UnsupportedSourceTreatment);
         }
     }
@@ -927,7 +921,7 @@ fn validate_layered_placement(
     if placement.source_timing().constant_frame_rate().is_none() {
         return Err(UnsupportedVisualComposition::VariableSourceTiming);
     }
-    if !native_source_treatment_is_supported(placement) {
+    if native_media_schedule(plan, placement).is_err() {
         return Err(UnsupportedVisualComposition::UnsupportedSourceTreatment);
     }
     if dimensions.width() != profile.width() || dimensions.height() != profile.height() {
@@ -936,9 +930,87 @@ fn validate_layered_placement(
     Ok(())
 }
 
-fn native_source_treatment_is_supported(placement: &onmark_core::protocol::BrowserVideo) -> bool {
+pub(crate) fn native_media_schedule(
+    plan: &BrowserPlan,
+    placement: &BrowserVideo,
+) -> Result<NativeMediaSchedule, UnsupportedVisualComposition> {
     let source = placement.source().media_source();
-    source.plays().get() == 1 && source.hold_last().as_nanos() == 0
+    if source.plays().get() != 1 {
+        return Err(UnsupportedVisualComposition::UnsupportedSourceTreatment);
+    }
+    let output_rate = frame_rate(plan.frame_rate())?;
+    let source_rate = placement
+        .source_timing()
+        .constant_frame_rate()
+        .ok_or(UnsupportedVisualComposition::VariableSourceTiming)?;
+    let playback_frames = Timebase::new(output_rate)
+        .frames_before_media_hold(source)
+        .map_err(|_| UnsupportedVisualComposition::UnsupportedSourceTreatment)?
+        .get();
+    let output_frames = placement.interval().end().get() - placement.interval().start().get();
+    let final_source_frame = final_source_frame(source_rate, source.interval().end().as_nanos())
+        .ok_or(UnsupportedVisualComposition::UnsupportedSourceTreatment)?;
+
+    NativeMediaSchedule::new(playback_frames, output_frames, final_source_frame)
+        .ok_or(UnsupportedVisualComposition::UnsupportedSourceTreatment)
+}
+
+fn frame_rate(rate: WireFrameRate) -> Result<FrameRate, UnsupportedVisualComposition> {
+    FrameRate::new(rate.numerator(), rate.denominator())
+        .map_err(|_| UnsupportedVisualComposition::UnsupportedSourceTreatment)
+}
+
+// The browser selects the frame containing `end - ε`, which is exactly
+// `ceil(end * rate) - 1` for a CFR source.
+fn final_source_frame(rate: WireFrameRate, end_nanoseconds: u64) -> Option<u64> {
+    let numerator = u128::from(end_nanoseconds) * u128::from(rate.numerator());
+    let denominator = 1_000_000_000_u128 * u128::from(rate.denominator());
+    let exclusive_end = numerator.div_ceil(denominator);
+
+    exclusive_end
+        .checked_sub(1)
+        .and_then(|frame| u64::try_from(frame).ok())
+}
+
+/// Exact one-pass CFR schedule admitted for native final-frame realization.
+///
+/// `output_frames` includes frame-grid rounding and any authored hold. Repeated
+/// playback never constructs this value. The final source index leaves room for
+/// the encoder to form its exclusive frame bound.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct NativeMediaSchedule {
+    playback_frames: u64,
+    output_frames: u64,
+    final_source_frame: u64,
+}
+
+impl NativeMediaSchedule {
+    pub(crate) fn new(
+        playback_frames: u64,
+        output_frames: u64,
+        final_source_frame: u64,
+    ) -> Option<Self> {
+        if output_frames == 0 || playback_frames > output_frames || final_source_frame == u64::MAX {
+            return None;
+        }
+        Some(Self {
+            playback_frames,
+            output_frames,
+            final_source_frame,
+        })
+    }
+
+    pub(crate) const fn playback_frames(self) -> u64 {
+        self.playback_frames
+    }
+
+    pub(crate) const fn output_frames(self) -> u64 {
+        self.output_frames
+    }
+
+    pub(crate) const fn final_source_frame(self) -> u64 {
+        self.final_source_frame
+    }
 }
 
 /// Reason a declared visual capability cannot enter the production pixel path.
@@ -970,7 +1042,7 @@ pub enum UnsupportedVisualComposition {
     IncompleteCoverage,
     /// Native selection has not proved variable source-frame timestamps.
     VariableSourceTiming,
-    /// Native selection has not proved repeated playback or a final-frame hold.
+    /// Native selection has not proved this source-treatment combination.
     UnsupportedSourceTreatment,
     /// Source pixels cannot be placed without inventing CSS layout semantics.
     DimensionMismatch,

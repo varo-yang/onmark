@@ -1869,8 +1869,13 @@ Plan transports that fact to deterministic CFR or VFR frame selection. Native
 composition admits trim and speed after the Chromium control proves source-frame
 selection and independent local and worker partitions produce equal native
 raw-RGBA sequences. It does not require the known-different Chromium and
-`FFmpeg` decode/color paths to hash equally. Repeated playback and final-frame
-holds remain browser-composited until the same independent native proof exists.
+`FFmpeg` decode/color paths to hash equally. Final-frame hold is also admitted
+after whole-film, partition, and worker artifacts retain equal native raw
+pixels. Rust owns the exact midpoint where the hold begins; FFmpeg selects the
+source interval's actual final frame on a separate streaming branch and pads by
+an integer frame count. Repeated playback remains browser-composited: a
+discrete cached loop is neither exact for off-grid pass boundaries nor suitably
+bounded for arbitrary source intervals.
 
 Gate eight also admits the explicit
 `<om-transition duration="…"></om-transition>` boundary after its checked-in

@@ -205,24 +205,20 @@ impl Timebase {
         rounding: Rounding,
     ) -> Result<FrameCount, FrameConversionOverflow> {
         let rate = source.playback_rate();
-        let playback_nanos = u128::from(source.interval().duration().as_nanos())
-            .checked_mul(u128::from(rate.denominator()))
-            .and_then(|value| value.checked_mul(u128::from(source.plays().get())));
-        let held_nanos =
-            u128::from(source.hold_last().as_nanos()).checked_mul(u128::from(rate.numerator()));
-        let numerator = playback_nanos
-            .zip(held_nanos)
-            .and_then(|(playback, hold)| playback.checked_add(hold))
-            .and_then(|value| value.checked_mul(u128::from(self.frame_rate.numerator())));
-        let Some(numerator) = numerator else {
+        let playback = self.media_playback_fraction(source);
+        let held = u128::from(source.hold_last().as_nanos())
+            .checked_mul(u128::from(self.frame_rate.numerator()))
+            .and_then(|value| value.checked_mul(u128::from(rate.numerator())));
+        let Some(((playback, denominator), held)) = playback.zip(held) else {
             return Err(FrameConversionOverflow {
                 duration: source.natural_duration(),
                 frame_rate: self.frame_rate,
             });
         };
-        let denominator = u128::from(NANOS_PER_SECOND)
-            * u128::from(self.frame_rate.denominator())
-            * u128::from(rate.numerator());
+        let numerator = playback.checked_add(held).ok_or(FrameConversionOverflow {
+            duration: source.natural_duration(),
+            frame_rate: self.frame_rate,
+        })?;
 
         u64::try_from(rounded_quotient(numerator, denominator, rounding))
             .map_err(|_| FrameConversionOverflow {
@@ -230,6 +226,62 @@ impl Timebase {
                 frame_rate: self.frame_rate,
             })
             .map(FrameCount::new)
+    }
+
+    /// Counts output-frame midpoints that occur before the final-frame hold.
+    ///
+    /// A hold begins at an exact rational time, which need not lie on an output
+    /// frame boundary. This count therefore follows the same midpoint rule as
+    /// browser source-frame selection rather than rounding the playback
+    /// duration independently.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FrameConversionOverflow`] when the exact intermediate value or
+    /// resulting count exceeds the frame domain.
+    pub fn frames_before_media_hold(
+        self,
+        source: MediaSource,
+    ) -> Result<FrameCount, FrameConversionOverflow> {
+        let Some((numerator, denominator)) = self.media_playback_fraction(source) else {
+            return Err(FrameConversionOverflow {
+                duration: source.natural_duration(),
+                frame_rate: self.frame_rate,
+            });
+        };
+        let numerator = numerator.checked_mul(2);
+        let denominator = denominator.checked_mul(2);
+        let Some((numerator, denominator)) = numerator.zip(denominator) else {
+            return Err(FrameConversionOverflow {
+                duration: source.natural_duration(),
+                frame_rate: self.frame_rate,
+            });
+        };
+        let frames = numerator
+            .checked_sub(denominator / 2)
+            .map_or(0, |distance| {
+                rounded_quotient(distance, denominator, Rounding::Ceil)
+            });
+
+        u64::try_from(frames)
+            .map(FrameCount::new)
+            .map_err(|_| FrameConversionOverflow {
+                duration: source.natural_duration(),
+                frame_rate: self.frame_rate,
+            })
+    }
+
+    fn media_playback_fraction(self, source: MediaSource) -> Option<(u128, u128)> {
+        let rate = source.playback_rate();
+        let numerator = u128::from(source.interval().duration().as_nanos())
+            .checked_mul(u128::from(rate.denominator()))?
+            .checked_mul(u128::from(source.plays().get()))?
+            .checked_mul(u128::from(self.frame_rate.numerator()))?;
+        let denominator = u128::from(NANOS_PER_SECOND)
+            .checked_mul(u128::from(self.frame_rate.denominator()))?
+            .checked_mul(u128::from(rate.numerator()))?;
+
+        Some((numerator, denominator))
     }
 
     fn frame_number(
@@ -474,6 +526,45 @@ mod tests {
                 Ok(floor.get()),
             );
         }
+
+        #[test]
+        fn media_hold_begins_at_the_first_midpoint_after_playback(
+            nanoseconds in 1_u64..=10_000_000_000,
+            hold_nanoseconds in 0_u64..=10_000_000_000,
+            speed_numerator in 1_u32..=8,
+            speed_denominator in 1_u32..=8,
+            plays in 1_u32..=5,
+            output_rate in 1_u32..=120,
+        ) {
+            let timebase = Timebase::new(
+                FrameRate::new(output_rate, 1).expect("the generated output rate is valid"),
+            );
+            let source = media_source(
+                Duration::from_nanos(nanoseconds),
+                PlaybackRate::new(speed_numerator, speed_denominator)
+                    .expect("the generated playback rate is valid"),
+                PlayCount::new(plays).expect("the generated play count is positive"),
+                Duration::from_nanos(hold_nanoseconds),
+            );
+            let playback = timebase.frames_before_media_hold(source)
+                .expect("the bounded generated source fits the frame domain");
+            let total = timebase.frames_for_media(source, Rounding::Ceil)
+                .expect("the bounded generated source fits the frame domain");
+            let (boundary_numerator, boundary_denominator) = timebase
+                .media_playback_fraction(source)
+                .expect("the bounded generated source has an exact playback boundary");
+            let boundary_numerator = boundary_numerator * 2;
+            let first_held_midpoint =
+                (u128::from(playback.get()) * 2 + 1) * boundary_denominator;
+
+            prop_assert!(playback <= total);
+            prop_assert!(first_held_midpoint >= boundary_numerator);
+            if playback.get() > 0 {
+                let final_playback_midpoint =
+                    (u128::from(playback.get()) * 2 - 1) * boundary_denominator;
+                prop_assert!(final_playback_midpoint < boundary_numerator);
+            }
+        }
     }
 
     #[test]
@@ -562,6 +653,42 @@ mod tests {
                 Rounding::Ceil,
             ),
             Ok(FrameCount::new(750)),
+        );
+    }
+
+    #[test]
+    fn counts_frame_midpoints_before_the_final_frame_hold() {
+        let timebase = Timebase::new(FrameRate::new(2, 1).expect("2 fps is valid"));
+        let source = media_source(
+            Duration::from_nanos(750_000_000),
+            PlaybackRate::ONE,
+            PlayCount::ONE,
+            Duration::from_nanos(1_000_000_000),
+        );
+
+        assert_eq!(
+            timebase.frames_before_media_hold(source),
+            Ok(FrameCount::new(1)),
+        );
+        assert_eq!(
+            timebase.frames_for_media(source, Rounding::Ceil),
+            Ok(FrameCount::new(4)),
+        );
+    }
+
+    #[test]
+    fn allows_a_hold_to_own_the_first_output_midpoint() {
+        let timebase = Timebase::new(FrameRate::new(2, 1).expect("2 fps is valid"));
+        let source = media_source(
+            Duration::from_nanos(200_000_000),
+            PlaybackRate::ONE,
+            PlayCount::ONE,
+            Duration::from_nanos(1_000_000_000),
+        );
+
+        assert_eq!(
+            timebase.frames_before_media_hold(source),
+            Ok(FrameCount::new(0)),
         );
     }
 
