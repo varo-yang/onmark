@@ -143,9 +143,10 @@ the manifest:
 }
 ```
 
-Unchanged render regions are reused across items; variant values cannot change
-timing, media sources, dimensions, or output profiles. One standalone subtitle
-track can be shared by the complete batch:
+Unchanged render regions are reused across items and later managed-browser
+invocations; each run reports aggregate region and frame reuse. Variant values
+cannot change timing, media sources, dimensions, or output profiles. One
+standalone subtitle track can be shared by the complete batch:
 
 ```bash
 onmark batch batch.json --subtitle captions.vtt

@@ -647,7 +647,10 @@ presentation-global byte、selected semantic subtree 与其他真实 browser inp
 desktop launcher 用 pinned browser artifact、OS/architecture 与有界 system-font inventory
 命名保守 host seed；native 再加入 capture mode、graphics backend 与 composition version。
 显式 custom browser 不属于 launcher-owned browser identity，因此关闭 persistent reuse。
-cache publication 使用 deterministic capture-contract identity 寻址且原子完成；
+native graphics override 在取得完整 workload 的 cold-process 证据前也保持 ephemeral。
+batch 只在 exact contract 已准入时使用同一份 persistent store，否则只使用 batch
+lifetime 内的私有 store。cache publication 使用 deterministic capture-contract identity
+寻址且原子完成；
 immutable valid entry 无需全局 lease 即可读取，唯一的跨进程锁只拥有损坏修复与
 publication。损坏或 identity 不符的 artifact 会被删除并重新 capture。store 同时受
 artifact 数与 byte 上限约束；满额后保留既有有效 entry，让新 miss 保持 ephemeral，
@@ -1108,21 +1111,34 @@ Chromium 自身的 sandbox。更底层的 real-process suite 仍使用一次性�
 `--no-sandbox` wrapper；两种 CI 例外都不会改变产品 launch policy。产品与本地
 browser launch 默认仍然启用 Chromium sandbox。canonical default 与所有 worker
 policy 都显式锁定 ANGLE 的 `SwiftShader` backend：host GPU 的可用性不能悄悄改变像素，
-也不能使 whole-film 与 partition capture 产生分歧。macOS desktop execution 可以显式选择
-`Metal` graphics backend，并在 page execution 前通过 CDP
-反查实际 GL renderer，若 Chromium 回退到 software renderer 则直接失败。这是独立的
-capture environment，而不是 `SwiftShader` identity 的更快实现：
-backend-sensitive WebGL pixels 预期会不同。opt-in macOS conformance 已证明 Metal
-在独立进程、重复与乱序 seek、WAAPI、GSAP 和 Three.js effects 下逐帧 raw-RGBA
-精确复现；fixture 同时保留 software sequence，让两个 environment identity 被意外混同
-时显式失败。macOS CLI 选择这条已验证 backend，并与 capture mode 一同报告；Linux 与
-Windows 继续使用 `SwiftShader`。其他 native backend 必须独立准入，并获得显式 variant。
+也不能使 whole-film 与 partition capture 产生分歧。browser process 还会关闭 GPU
+rasterization、partial raster reuse 与 runtime-selected Skia optimization，锁定 sRGB，
+并在 readback 前排空所有 compositor stage。这些 switch 合起来是一份 exact raster
+contract，而不是互相独立的性能旋钮；它们属于 code-owned capture-environment
+composition version。
+
+macOS desktop execution 仍可显式选择 `Metal` graphics backend，并在 page execution
+前通过 CDP 反查实际 GL renderer；Chromium 若回退到 software renderer 就直接失败。
+这是独立 capture environment，而不是 `SwiftShader` identity 的更快实现：
+backend-sensitive WebGL pixel 预期会不同。opt-in macOS conformance 覆盖独立 Metal
+session、重复与乱序 seek、WAAPI、GSAP 和 Three.js effect。在完整 mixed workload
+取得与 canonical software contract 相同的 cold-process 证据前，Metal 只作为显式且
+ephemeral-cache 的 override。其他 native backend 同样必须独立准入。
 
 首轮锁定 macOS 性能测量使用 Apple M5、Chrome for Testing 149.0.7827.55 与 release
 CLI，把 checked-in CSS/GSAP presentation 以 1,920×1,080 渲染 45 帧。三次独立
 `SwiftShader` 用时 10.80、6.61、6.56 秒，三次 Metal 用时 7.28、4.66、4.73 秒；warm
 pair 约快 29%。这些是包含 compile、bundle、browser launch、capture 与 encode 的端到端
-CLI 样本，不支持扩大为跨平台结论。`--graphics software` 保留可复现的 control path。
+CLI 样本，不支持扩大为跨平台结论；它们早于 exact raster contract，只保留为历史
+native-backend 证据，不再描述当前默认 policy。
+
+exact-raster follow-up 在同一 host 上使用 Chrome for Testing 149.0.7827.55。应用该
+raster contract 前，435 帧、7 个 region 的 mixed-media campaign 在两个 cold capture
+间有 430 帧 raw-RGBA 不同；应用后，两份独立 cache directory 与 browser process 产出的
+435 帧全部精确相等，capture 分别用时 256.70 与 306.37 秒，仍在此前观察到的 software
+区间内。一份更小的 75 帧、5-region CSS/GSAP fixture 也逐帧相等，capture 分别为 32.63
+与 33.16 秒，略低于 partial-raster control 的 34.68 秒。这组数据准入 pinned
+`SwiftShader` contract 的 persistent reuse，但不声称 CPU raster 在所有 workload 上更快。
 
 本地 CLI 默认给最终 H.264 encoder 分配四个线程。CPU 或内存预算不同的 host 可以通过
 `--video-encoder-threads` 显式选择 1 到 64；Onmark 不从 ambient core count 推导这个值，
@@ -1795,11 +1811,11 @@ instance 中的 84 个。film-shell edit 会使整个 plan 失效；shot 与 tra
 补上了 shared batch-subtitle import、boolean visibility ownership、fractional-frame
 GSAP boundary 与 transition-trimmed video coverage 的回归保护。
 
-该实验刻意区分 cache identity 与 independent cold pixel identity。它的任意混合
-browser-composited presentation 在独立 cold Chromium session 间并不 raw-RGBA
-identical，即使 software control 也有一个 frame 保留微小差异。相似度指标不准入新 visual
-path，现有 exact conformance 仍是权威。完整结果记录在
-`conformance/evidence/variant-campaign.md`。
+该实验刻意区分 cache identity 与 independent cold pixel identity。首轮实验暴露了
+Chromium tiled GPU raster path 的 cold-process 漂移；exact raster follow-up 关闭 GPU
+与 partial raster、锁定 baseline Skia code path 后，两个独立 cold session 的 435 帧
+canonical raw-RGBA 全部一致。cross-batch persistent reuse 只对这份锁定的 software
+contract 准入。完整结果记录在 `conformance/evidence/variant-campaign.md`。
 
 该能力不增加 template engine、string substitution、global/URL input object、source
 mutation API、remote authoring、coordinator 或 mutable runtime update channel。一份 Render

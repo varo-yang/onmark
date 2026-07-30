@@ -86,12 +86,19 @@ pub(super) fn unit_root_limits() -> UnitRootLimits {
         .expect("the CLI unit policy stays within the render safety envelope")
 }
 
-#[cfg(target_os = "macos")]
-pub(super) const fn local_graphics_backend() -> onmark_render::BrowserGraphicsBackend {
-    onmark_render::BrowserGraphicsBackend::Metal
-}
-
-#[cfg(not(target_os = "macos"))]
 pub(super) const fn local_graphics_backend() -> onmark_render::BrowserGraphicsBackend {
     onmark_render::BrowserGraphicsBackend::SwiftShader
+}
+
+#[cfg(test)]
+mod tests {
+    use onmark_render::BrowserGraphicsBackend;
+
+    #[test]
+    fn local_default_uses_the_exact_software_graphics_contract() {
+        assert_eq!(
+            super::local_graphics_backend(),
+            BrowserGraphicsBackend::SwiftShader,
+        );
+    }
 }

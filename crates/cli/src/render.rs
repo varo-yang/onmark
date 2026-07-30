@@ -485,6 +485,23 @@ pub(super) fn ffprobe(executable: PathBuf) -> Ffprobe {
 }
 
 impl LocalExecutorOptions {
+    fn from_render_args(
+        args: &RenderArgs,
+        executables: &Executables,
+        encode_profile: EncodeProfile,
+    ) -> Self {
+        Self {
+            browser: executables.browser.path.clone(),
+            capture_mode: executables.browser.capture_mode,
+            ffmpeg: executables.ffmpeg.clone(),
+            graphics_backend: args
+                .graphics_backend()
+                .unwrap_or_else(execution::local_graphics_backend),
+            video_encoder_threads: args.video_encoder_threads(),
+            encode_profile,
+        }
+    }
+
     fn into_executor(self) -> RenderExecutor {
         let Self {
             browser,
@@ -513,18 +530,8 @@ impl LocalRenderEngine {
         encode_profile: EncodeProfile,
         cache_admission: CacheAdmission,
     ) -> Result<Self, CliError> {
-        let graphics_backend = args
-            .graphics_backend()
-            .unwrap_or_else(execution::local_graphics_backend);
-        let executor = LocalExecutorOptions {
-            browser: executables.browser.path.clone(),
-            capture_mode: executables.browser.capture_mode,
-            ffmpeg: executables.ffmpeg.clone(),
-            graphics_backend,
-            video_encoder_threads: args.video_encoder_threads(),
-            encode_profile,
-        }
-        .into_executor();
+        let executor = LocalExecutorOptions::from_render_args(args, executables, encode_profile)
+            .into_executor();
         let cache = ArtifactCache::from_environment(
             cache_admission,
             executor.capture_mode(),
@@ -542,29 +549,21 @@ impl LocalRenderEngine {
         executables: &Executables,
         encode_profile: EncodeProfile,
         cache_directory: &Path,
-    ) -> Self {
-        let graphics_backend = args
-            .graphics_backend()
-            .unwrap_or_else(execution::local_graphics_backend);
-        let executor = LocalExecutorOptions {
-            browser: executables.browser.path.clone(),
-            capture_mode: executables.browser.capture_mode,
-            ffmpeg: executables.ffmpeg.clone(),
-            graphics_backend,
-            video_encoder_threads: args.video_encoder_threads(),
-            encode_profile,
-        }
-        .into_executor();
+        cache_admission: CacheAdmission,
+    ) -> Result<Self, CliError> {
+        let executor = LocalExecutorOptions::from_render_args(args, executables, encode_profile)
+            .into_executor();
         let cache = ArtifactCache::for_batch(
             cache_directory,
+            cache_admission,
             executor.capture_mode(),
             executor.graphics_backend(),
-        );
-        Self {
+        )?;
+        Ok(Self {
             cache,
             encode_profile,
             executor,
-        }
+        })
     }
 
     pub(super) async fn execute(
