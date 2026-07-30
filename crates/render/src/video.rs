@@ -29,8 +29,11 @@ impl<'a> AdmittedVideo<'a> {
         let video = metadata
             .video_metadata()
             .ok_or(UnsupportedVideo::MissingVideoStream)?;
-        if video.codec() != "h264" {
+        if !matches!(video.codec(), "h264" | "vp9") {
             return Err(UnsupportedVideo::Codec(video.codec().into()));
+        }
+        if video.pixel_format() != "yuv420p" {
+            return Err(UnsupportedVideo::PixelFormat(video.pixel_format().into()));
         }
         match video.timing() {
             VideoTiming::Constant(_) | VideoTiming::Variable(_) => {}
@@ -61,6 +64,8 @@ pub enum UnsupportedVideo {
     MissingVideoStream,
     /// The selected codec is outside the locked browser profile.
     Codec(Box<str>),
+    /// The decoded source-pixel layout is outside the locked browser profile.
+    PixelFormat(Box<str>),
     /// A single-frame stream has no source frame rate.
     StillFrame,
 }
@@ -70,6 +75,9 @@ impl fmt::Display for UnsupportedVideo {
         match self {
             Self::MissingVideoStream => formatter.write_str("asset has no video stream"),
             Self::Codec(codec) => write!(formatter, "video codec {codec:?} is not supported"),
+            Self::PixelFormat(format) => {
+                write!(formatter, "video pixel format {format:?} is not supported")
+            }
             Self::StillFrame => formatter.write_str("single-frame video is not supported"),
         }
     }
@@ -87,14 +95,16 @@ mod tests {
     use super::{AdmittedVideo, UnsupportedVideo};
 
     #[test]
-    fn admits_timed_h264_visual_streams() {
+    fn admits_timed_browser_video_streams() {
         let rate = FrameRate::new(30_000, 1_001).expect("NTSC timing is valid");
-        let supported = video("h264", VideoTiming::Constant(rate));
-        let admitted =
-            AdmittedVideo::admit(&supported).expect("CFR H.264 is an admitted video profile");
+        for codec in ["h264", "vp9"] {
+            let supported = video(codec, VideoTiming::Constant(rate));
+            let admitted =
+                AdmittedVideo::admit(&supported).expect("the browser codec profile is admitted");
 
-        assert_eq!(admitted.timing(), &VideoTiming::Constant(rate));
-        assert_eq!(admitted.metadata().pixel_format(), "yuv420p");
+            assert_eq!(admitted.timing(), &VideoTiming::Constant(rate));
+            assert_eq!(admitted.metadata().pixel_format(), "yuv420p");
+        }
         assert_eq!(
             AdmittedVideo::admit(&AssetMetadata::audio(
                 Duration::from_nanos(1),
@@ -104,8 +114,16 @@ mod tests {
             Err(UnsupportedVideo::MissingVideoStream),
         );
         assert_eq!(
-            AdmittedVideo::admit(&video("vp9", VideoTiming::Constant(rate))),
-            Err(UnsupportedVideo::Codec("vp9".into())),
+            AdmittedVideo::admit(&video("hevc", VideoTiming::Constant(rate))),
+            Err(UnsupportedVideo::Codec("hevc".into())),
+        );
+        assert_eq!(
+            AdmittedVideo::admit(&video_with_format(
+                "vp9",
+                "yuv420p10le",
+                VideoTiming::Constant(rate),
+            )),
+            Err(UnsupportedVideo::PixelFormat("yuv420p10le".into())),
         );
         assert_eq!(
             AdmittedVideo::admit(&video("h264", variable_timing()))
@@ -120,6 +138,10 @@ mod tests {
     }
 
     fn video(codec: &str, timing: VideoTiming) -> AssetMetadata {
+        video_with_format(codec, "yuv420p", timing)
+    }
+
+    fn video_with_format(codec: &str, pixel_format: &str, timing: VideoTiming) -> AssetMetadata {
         let duration = match &timing {
             VideoTiming::Variable(frame_map) => frame_map.duration(),
             VideoTiming::Constant(_) | VideoTiming::Still => Duration::from_nanos(1),
@@ -128,7 +150,7 @@ mod tests {
             duration,
             VideoDimensions::new(1_920, 1_080).expect("fixture dimensions are positive"),
             codec,
-            "yuv420p",
+            pixel_format,
             timing,
         )
         .expect("the fixture metadata is normalized");

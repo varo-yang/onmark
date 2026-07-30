@@ -262,6 +262,12 @@ integration failure，而不是 authored diagnostic。媒体元素缺少 authore
 source 时仍可通过静态 resolve，但无法产出可渲染 Timeline
 IR，并在 solve 阶段收到 authored asset diagnostic。
 
+视频探测会通过一次有界 selected-stream query 取得所有 decoded-frame
+timestamp。若 stream 与最后一帧都没有报告 terminal duration，`onmark-media`
+才追加一次有界 packet query，并且只接纳属于该 final presentation timestamp
+的 duration。它不会拿 container duration 代替，因为音频流可能比视频更长。拥有完整
+frame response 的素材仍保持两次 query；packet query 是保留证据的例外路径，不是默认成本。
+
 诊断是语言产品的一部分，不是日志。每条创作诊断必须包含稳定 code、源码 span、直接原因、相关节点，并在存在确定修法时给出可执行建议。建议面向人和 LLM 使用源码词汇，例如“定义
 `cue:offer`，或将该标题改为相对当前 shot 的 `delay`”，不能只暴露求解器术语。
 
@@ -1903,6 +1909,13 @@ capture byte-identical，同一 source-frame timestamp 的独立 FFmpeg
 extraction 也在重复执行间 byte-stable。实验同时发现：把精确 CFR 帧边界秒数直接写入
 `video.currentTime` 会选中前一帧，必须采样 Rust 已选帧内部。
 
+Gate 八把 8-bit `yuv420p` VP9/WebM fixture 加进了同一套乱序 browser
+实验。WebM 的毫秒 timebase 会把 30 fps 表示为交替的 33/34 ms interval，因此
+Onmark 保留真实 probe boundary 并建模为 VFR，不发明一个有理 CFR rate。该容器没有报告
+final decoded-frame duration；上面的条件 packet query 补齐了匹配的 33 ms terminal
+interval。两个独立 pinned-Chromium session 得到 byte-identical capture。这份证据只让
+VP9 进入 `browserComposite`，并不让它进入 native composition。
+
 两条 decode path 并非 pixel-interchangeable。四张 320×180
 RGBA 帧共 921,600 个 channel，Chromium canvas 与 FFmpeg raw
 extraction 约有 229k–232k 个 channel 不同，mean absolute
@@ -1945,19 +1958,22 @@ frozen asset metadata 拥有完整 BT.709 limited color tuple、且 bundle 显�
 `separableOverlay` 后，准入了更窄的生产合约。planner 会在 launch 前用事实选择该
 native path；否则选择 `browserComposite`。executor 绝不在运行中切换成隐藏 fallback。
 
-当前视觉 profile 接纳具备一个精确 CFR rate 或完整 VFR timestamp map 的 H.264
-素材。`browserComposite` 使用锁定 Chromium decoder 作为权威 decode/color path，且只有
-`requestVideoFrameCallback.mediaTime` 指向 Rust 选中的 source frame 时才返回
-ready。`separableOverlay` 只有在 Gate 七的 color、layout 与 source-treatment proof
-成立且素材为 CFR 时，才使用已准入的持久 native decoder 与 compositor。不支持的 codec
-与不完整 native-path fact 不会被静默近似：它们会被拒绝，或留在已经证明的 browser path。
+当前 browser 视觉 profile 接纳具备一个精确 CFR rate 或完整 VFR timestamp map 的
+8-bit `yuv420p` H.264 与 VP9 素材。`browserComposite` 使用锁定 Chromium decoder
+作为权威 decode/color path，且只有 `requestVideoFrameCallback.mediaTime` 指向 Rust
+选中的 source frame 时才返回 ready。native composition 仍然只接纳 H.264，并且仅在
+Gate 七的 color、layout、source-treatment proof 成立且素材为 CFR 时，才使用已准入的
+持久 native decoder 与 compositor。不支持的 browser codec 与 pixel format 会被拒绝；
+browser 已接纳但 native 未证明的 codec 或不完整 native-path fact 会留在已证明的
+browser path，不会静默扩大 native admission。
 
 这条策略由 render-owned `AdmittedVideo` proof 对 core-owned metadata 执行 admission
-来表达。它借用规范化事实，不复制第二套 render 媒体模型，并证明 H.264 与完整 source
-timing。Render Unit 保留该 timing，并只向每个 browser placement lower 一次；native
-admission 再独立要求其中的 constant-rate 子集。decoded-media conformance 通过生产用
-的有界 ffprobe boundary 同时取得 CFR 与 VFR 证据，whole-film executor 则通过 production
-adapter 消费同一份被接纳的视频。
+来表达。它借用规范化事实，不复制第二套 render 媒体模型，并证明已接纳的 browser codec
+与完整 source timing。Render Unit 保留 codec 与 timing，并只向每个 browser placement
+lower timing 一次；native admission 再独立要求 H.264 与其中的 constant-rate 子集。
+decoded-media conformance 通过生产用的有界 ffprobe boundary 同时取得 CFR、VFR 与
+missing-terminal-duration 证据，whole-film executor 则通过 production adapter 消费
+同一份被接纳的视频。
 
 - 当前 native capture 已选择 headless shell 的 CDP
   BeginFrameControl；只有更强的正确性与性能证据才能重开 WebDriver BiDi、surface

@@ -12,7 +12,13 @@ use onmark_core::model::AssetMetadata;
 
 use crate::error::{InvalidFfprobe, ProbeError, Stream};
 use crate::process::{OutputReaders, ProcessOutput, RunningProbe};
-use crate::response::{FrameProbeRequest, parse_frame_timing, parse_metadata};
+use crate::response::{
+    FrameProbeRequest, FrameTimingProbe, ProbedVideoTiming, parse_frame_timing, parse_metadata,
+    parse_terminal_packet_duration,
+};
+
+const FRAME_ENTRIES: &str = "frame=best_effort_timestamp,pkt_duration:stream=time_base,duration_ts";
+const PACKET_ENTRIES: &str = "packet=pts,duration";
 
 /// Configured boundary for probing local artifacts with ffprobe.
 ///
@@ -100,13 +106,30 @@ impl Ffprobe {
         let pending = parse_metadata(path, &metadata.stdout.bytes)?;
         let timing = pending
             .frame_probe_request()
-            .map(|request| {
-                let frames = self.capture(self.spawn_frames(path, request)?, path)?;
-                parse_frame_timing(path, &frames.stdout.bytes)
-            })
+            .map(|request| self.probe_video_timing(path, request))
             .transpose()?;
 
         pending.finish(path, timing)
+    }
+
+    fn probe_video_timing(
+        &self,
+        path: &Path,
+        request: FrameProbeRequest,
+    ) -> Result<ProbedVideoTiming, ProbeError> {
+        let frames = self.capture(self.spawn_frames(path, request)?, path)?;
+        match parse_frame_timing(path, &frames.stdout.bytes)? {
+            FrameTimingProbe::Complete(timing) => Ok(timing),
+            FrameTimingProbe::NeedsPacketDuration(pending) => {
+                let packets = self.capture(self.spawn_packets(path, request)?, path)?;
+                let duration = parse_terminal_packet_duration(
+                    path,
+                    &packets.stdout.bytes,
+                    pending.last_timestamp(),
+                )?;
+                pending.finish(path, duration)
+            }
+        }
     }
 
     fn capture(&self, mut process: RunningProbe, path: &Path) -> Result<ProcessOutput, ProbeError> {
@@ -172,6 +195,24 @@ impl Ffprobe {
         path: &Path,
         request: FrameProbeRequest,
     ) -> Result<RunningProbe, ProbeError> {
+        self.spawn_selected(path, request, "-show_frames", FRAME_ENTRIES)
+    }
+
+    fn spawn_packets(
+        &self,
+        path: &Path,
+        request: FrameProbeRequest,
+    ) -> Result<RunningProbe, ProbeError> {
+        self.spawn_selected(path, request, "-show_packets", PACKET_ENTRIES)
+    }
+
+    fn spawn_selected(
+        &self,
+        path: &Path,
+        request: FrameProbeRequest,
+        section: &str,
+        entries: &str,
+    ) -> Result<RunningProbe, ProbeError> {
         let stream = request.stream_index().to_string();
         let child = Command::new(&self.executable)
             .args([
@@ -181,9 +222,9 @@ impl Ffprobe {
             ])
             .arg(stream)
             .args([
-                OsStr::new("-show_frames"),
+                OsStr::new(section),
                 OsStr::new("-show_entries"),
-                OsStr::new("frame=best_effort_timestamp,pkt_duration:stream=time_base,duration_ts"),
+                OsStr::new(entries),
                 OsStr::new("-of"),
                 OsStr::new("json"),
                 OsStr::new("--"),

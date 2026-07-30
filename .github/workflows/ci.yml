@@ -230,4 +230,8 @@ jobs:
             -p onmark-render --test media_seek \
             admission::correctness::selects_exact_cfr_frames -- \
             --exact --ignored --test-threads=1
+          cargo test --locked \
+            -p onmark-render --test media_seek \
+            validates_vp9_browser_admission -- \
+            --exact --ignored --test-threads=1
           cargo test --locked -p onmark-cli --test render -- --ignored --test-threads=1
