@@ -99,6 +99,7 @@
           // Stage already copied the decoded source into the canvas output;
           // confirmation only closes that staged-frame transaction.
           pendingFrame = undefined;
+          return [];
         },
         async dispose() {
           pendingFrame = undefined;
