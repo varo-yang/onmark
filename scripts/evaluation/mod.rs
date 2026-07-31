@@ -6,6 +6,7 @@ use std::path::Path;
 mod audio;
 mod caption;
 mod continuity;
+mod ducking;
 mod envelope;
 mod html;
 mod transition;
@@ -18,6 +19,10 @@ pub(super) fn grade_audio(repository: &Path) -> Result<(), Box<dyn Error>> {
 
 pub(super) fn grade_audio_envelope(repository: &Path) -> Result<(), Box<dyn Error>> {
     envelope::grade(repository)
+}
+
+pub(super) fn grade_audio_ducking(repository: &Path) -> Result<(), Box<dyn Error>> {
+    ducking::grade(repository)
 }
 
 pub(super) fn grade_captions(repository: &Path) -> Result<(), Box<dyn Error>> {

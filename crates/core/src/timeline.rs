@@ -7,8 +7,8 @@ use std::collections::BTreeMap;
 
 use crate::model::{
     AudioEnvelope, AudioGain, CaptionLanguage, CaptionTrackId, CueId, ElementKind, EventRef,
-    FrameIndex, FrameInterval, FrozenAssetId, GeneralAudioKind, MediaSource, NodeId, SourceSpan,
-    Timebase, VariantFieldKind, VariantFieldName, VariantValue,
+    FrameCount, FrameIndex, FrameInterval, FrozenAssetId, GeneralAudioKind, MediaSource, NodeId,
+    SourceSpan, Timebase, VariantFieldKind, VariantFieldName, VariantValue,
 };
 
 /// Version of the Timeline IR contract.
@@ -17,7 +17,7 @@ pub struct TimelineVersion(u16);
 
 impl TimelineVersion {
     /// Only Timeline IR version accepted by this build.
-    pub const CURRENT: Self = Self(6);
+    pub const CURRENT: Self = Self(7);
 
     /// Returns the stable integer representation.
     #[must_use]
@@ -671,6 +671,7 @@ impl TimelineVoiceOver {
                 asset_id,
                 AudioGain::UNITY,
                 envelope,
+                None,
                 TimelineAudioKind::VoiceOver,
             ),
             text,
@@ -748,6 +749,7 @@ pub struct TimelineAudio {
     asset_id: FrozenAssetId,
     gain: AudioGain,
     envelope: AudioEnvelope,
+    ducking: Option<TimelineAudioDucking>,
     kind: TimelineAudioKind,
 }
 
@@ -758,6 +760,7 @@ impl TimelineAudio {
         asset_id: FrozenAssetId,
         gain: AudioGain,
         envelope: AudioEnvelope,
+        ducking: Option<TimelineAudioDucking>,
         kind: TimelineAudioKind,
     ) -> Self {
         Self {
@@ -766,6 +769,7 @@ impl TimelineAudio {
             asset_id,
             gain,
             envelope,
+            ducking,
             kind,
         }
     }
@@ -800,10 +804,74 @@ impl TimelineAudio {
         self.envelope
     }
 
+    /// Returns the optional voice-over-driven gain envelope.
+    #[must_use]
+    pub const fn ducking(&self) -> Option<&TimelineAudioDucking> {
+        self.ducking.as_ref()
+    }
+
     /// Returns the retained narrative or general-audio role.
     #[must_use]
     pub const fn kind(&self) -> TimelineAudioKind {
         self.kind
+    }
+}
+
+/// Exact voice-over-driven amplitude facts for one music placement.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TimelineAudioDucking {
+    authored_at: SourceSpan,
+    target: AudioGain,
+    attack: FrameCount,
+    release: FrameCount,
+    voice_overs: Vec<FrameInterval>,
+}
+
+impl TimelineAudioDucking {
+    pub(crate) const fn new(
+        authored_at: SourceSpan,
+        target: AudioGain,
+        attack: FrameCount,
+        release: FrameCount,
+        voice_overs: Vec<FrameInterval>,
+    ) -> Self {
+        Self {
+            authored_at,
+            target,
+            attack,
+            release,
+            voice_overs,
+        }
+    }
+
+    /// Returns the source span that authored the policy.
+    #[must_use]
+    pub const fn authored_at(&self) -> SourceSpan {
+        self.authored_at
+    }
+
+    /// Returns the absolute music gain held beneath voice-over.
+    #[must_use]
+    pub const fn target(&self) -> AudioGain {
+        self.target
+    }
+
+    /// Returns the predictive attenuation length.
+    #[must_use]
+    pub const fn attack(&self) -> FrameCount {
+        self.attack
+    }
+
+    /// Returns the recovery length after voice-over.
+    #[must_use]
+    pub const fn release(&self) -> FrameCount {
+        self.release
+    }
+
+    /// Returns voice-over intervals intersecting the music placement.
+    #[must_use]
+    pub fn voice_overs(&self) -> &[FrameInterval] {
+        &self.voice_overs
     }
 }
 

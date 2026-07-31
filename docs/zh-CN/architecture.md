@@ -206,7 +206,15 @@ gain 通过 `volume` 应用；`amix` normalization 被明确关闭，避免多�
 Timeline IR 还把每条已接纳 fade 保留为精确 frame count。encoder 把 fade-in end 与
 fade-out start 投影到同一个 48 kHz grid，并生成显式指定 linear curve、silence 与 unity
 level 的 sample-indexed `afade` filter。fade-out rounding 由 placement end 独占，因此在
-frame grid 上刚好相接的 ramp 不会因为两次独立 sample rounding 而重叠。
+frame grid 上刚好相接的 ramp 不会因为两次独立 sample rounding 而重叠。Gate 八沿用同一条
+path 加入语义化 music ducking。Timeline IR 保留绝对 duck target、精确 attack/release frame
+length，以及与 music 相交的每个已求解 voice-over interval。unit composition 把完整计划限制在
+512 个 voice-over window。Rust 将这些 fact 投影到 output sample grid，合并重叠的影响区间以避免
+gain pumping，并生成互不重叠的 constant/linear sample segment。FFmpeg 只执行这些 segment；
+不采用 waveform-sensitive sidechain compression 或按 audio frame 求值的 volume expression，
+因为前者会引入第二个 timing decision mechanism，后者会丢失 sample-boundary 精度。local render
+与 distributed artifact assembly 消费同一个 `AudioPlan`，worker capture 仍然只处理视觉，不会
+分叉 audio semantics。
 已入库的 audio-syntax eval 用四十条真实模型输出比较了语义元素 `<om-music>`/`<om-sfx>` 与泛化的
 `<audio kind="...">`。两臂都保持 20/20 generation reliability，因此 Gate 四接纳语义元素：元素类型直接编码 role 与合法 containment，不再引入第二套 kind/parent
 有效性矩阵。authored gain 是 `0%` 到 `100%`（含端点）的精确闭区间。
@@ -1761,6 +1769,11 @@ track 一旦改变作者语义，就属于语言工作。每项新增能力都�
 prompts、grader、raw model outputs 与 baseline。之后 trim、rate、gain、fade、dependency 或
 transition interval 由 Rust 独占；TypeScript 只能实现已经求解的视觉 effect。JavaScript
 timeline、CLI flag 或 `FFmpeg` filter string 都不能成为另一套 scheduler。
+
+Gate 八在两臂生成实验中比较 `duck-to` 与 `voice-gain` 后接纳 `duck-to`。两种拼写在
+两次重复中都保持 20/20 semantic accuracy；`duck-to` authored bytes 更少，也不会把
+music policy 命名成第二个 voice-over amplitude。compiler 将它解释为已求解 voice-over
+下方的绝对 music gain，不把它当成 relative ratio 或 authored time boundary。
 
 Gate 八在比较 declarative HTML binding、module-owned binding 与 source placeholder
 三条生成路径后，接纳 canonical typed variant。三条 arm 都完成了锁定的十二个 case；

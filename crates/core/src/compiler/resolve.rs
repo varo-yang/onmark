@@ -368,6 +368,10 @@ impl Resolver {
             GeneralAudioKind::SoundEffect => attributes.take("delay"),
         };
         let gain_attribute = attributes.take("gain");
+        let duck_to_attribute = match kind {
+            GeneralAudioKind::Music => attributes.take("duck-to"),
+            GeneralAudioKind::SoundEffect => None,
+        };
         let envelope = self.take_audio_envelope(&mut attributes);
         attributes.reject_unknown(element.kind(), &mut self.diagnostics);
 
@@ -376,16 +380,32 @@ impl Resolver {
             Some(attribute) => self.resolve_duration(attribute).map(Some),
             None => Some(None),
         };
-        let gain = match gain_attribute {
-            Some(attribute) => self.resolve_audio_gain(&attribute),
+        let gain = match gain_attribute.as_ref() {
+            Some(attribute) => self.resolve_audio_gain(attribute),
             None => Some(AudioGain::UNITY),
         };
-        let (Some(source), Some(delay), Some(gain)) = (source, delay, gain) else {
+        let duck_to = match duck_to_attribute.as_ref() {
+            Some(attribute) => self
+                .resolve_audio_gain(attribute)
+                .map(|gain| Some(Authored::new(gain, attribute.value_span()))),
+            None => Some(None),
+        };
+        let (Some(source), Some(delay), Some(gain), Some(duck_to)) = (source, delay, gain, duck_to)
+        else {
             return None;
         };
+        if let Some(duck_to) = duck_to.as_ref()
+            && *duck_to.value() > gain
+        {
+            self.diagnostics.push(invalid_ducking_gain(
+                duck_to.span(),
+                gain_attribute.as_ref(),
+            ));
+            return None;
+        }
 
         Some(ResolvedAudio::new(
-            kind, element, source, delay, gain, envelope,
+            kind, element, source, delay, gain, duck_to, envelope,
         ))
     }
 
@@ -733,6 +753,22 @@ fn invalid_audio_gain(attribute: &Attribute, reason: InvalidAudioGain) -> Diagno
         format!("audio gain \"{}\" is invalid: {reason}", attribute.value()),
         "use an exact linear gain from 0% through 100%",
     )
+}
+
+fn invalid_ducking_gain(duck_to: SourceSpan, gain: Option<&Attribute>) -> Diagnostic {
+    let diagnostic = author_diagnostic(
+        DiagnosticCode::ConflictingAttributes,
+        duck_to,
+        "attribute \"duck-to\" cannot exceed the music gain",
+        "use a \"duck-to\" percentage no greater than \"gain\"",
+    );
+
+    let Some(gain) = gain else {
+        return diagnostic;
+    };
+    diagnostic
+        .with_related(gain.value_span(), "music gain is authored here")
+        .expect("the static music-gain relation is non-blank")
 }
 
 fn invalid_trim(attribute: &Attribute, reason: InvalidMediaTrim) -> Diagnostic {

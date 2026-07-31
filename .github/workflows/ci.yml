@@ -91,6 +91,7 @@ jobs:
       - name: Regrade frozen language evaluations
         run: |
           cargo xtask eval audio
+          cargo xtask eval audio-ducking
           cargo xtask eval audio-envelope
           cargo xtask eval captions
           cargo xtask eval html

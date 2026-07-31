@@ -1,0 +1,14 @@
+{
+  "duck-to": {
+    "passed": 20,
+    "total": 20,
+    "authoredBytes": 5724
+  },
+  "voice-gain": {
+    "passed": 20,
+    "total": 20,
+    "authoredBytes": 5772
+  },
+  "admitted": "duck-to",
+  "reason": "Equal generation reliability with 48 fewer authored bytes and an explicit domain verb that cannot be mistaken for voice-over amplitude."
+}

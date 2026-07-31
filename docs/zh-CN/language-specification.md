@@ -304,17 +304,35 @@ error，不能静默裁掉尾部。
 采用精确文法 `整数%`，范围为 `0%` 到 `100%`（含端点），默认 `100%`；它表示线性振幅比例，不是分贝。引用素材必须含有音轨。混音和 mux
 属于原生执行边界，浏览器不播放这些元素。
 
+music 还可以声明 `duck-to="整数%"`。该值表示任何已求解 voice-over placement
+生效期间保持的绝对线性增益，不是相对于 `gain` 的比例，并且不得高于 music
+的 authored/default gain。Rust 从已求解 voice-over interval 推导 attack、hold 与 release
+envelope：当前策略先将 nominal 20 ms attack 与 250 ms release 向上取整到 film frame
+grid，在 voice-over 起点达到 duck gain，并在 voice-over 结束后回到 base gain；若 music
+placement 在 voice-over 前有足够素材则提前开始衰减。当前一段 voice-over 的 recovery
+与后一段的 pre-attenuation 重叠时，music
+会在间隙中保持 duck gain，避免刚升高又立刻降低的 pumping。ducking 只改变振幅，
+不移动或改变任一 placement 的长度。film 没有 voice-over 时仍保留这项 authored
+intent，但不会产生可听变化。
+
 `vo`、`music` 与 `sfx` 可选写 `fade-in` 和 `fade-out` 时长。fade-in 从已求解
 placement 起点开始，fade-out 在其 exclusive end 结束；二者都是 silence 与 authored/default
 gain 之间的 linear-amplitude ramp。fade 只改变振幅，不会移动、缩短或延长 placement；两者之和
 必须能装入实际求解出的 placement，包括在 film 末端被裁短的 music，否则 solve 报告
 `ONM-AUDIO-002`。Rust 先把时长转换成精确帧事实，再投影到整数 output-sample
 boundary；browser code 不拥有另一条 audio envelope。
+ducking 与 placement fade 重叠时，fade 仍是 silence 到当前 gain 的外层
+envelope；它不会停用 ducking，也不会把 duck target 拉高。
 
 已入库的 `audio-envelope-syntax` 实验比较了 flat `fade-in`/`fade-out` attribute 与
 `om-envelope` child。两臂各做两次独立重复，都保持 20/20 semantic accuracy；flat attribute
 只使用 4,914 authored bytes，另一臂为 5,868，并且不会把 treatment child 混入 voice-over
 铭文，因此语言只接纳 flat attribute。
+
+已入库的 `audio-ducking-syntax` 实验用十种代表性的 music/voice-over
+组合、两次独立重复比较了 `duck-to` 与 `voice-gain`。两种拼写都保持 20/20 semantic
+accuracy；`duck-to` authored bytes 更少，并且命名的是操作而不是第二个 voice-over
+振幅，因此语言接纳 `duck-to`。
 
 ## 8. ID、作用域与引用
 
@@ -335,7 +353,7 @@ boundary；browser code 不拥有另一条 audio envelope。
 `video` 可有 `src`、`delay`、`trim`、`speed`、`plays` 与
 `hold-last`，`vo` 可有 `src`、`delay`、`fade-in` 与
 `fade-out`；`title`、`cta` 可有 `cue` 或
-`delay`；`music` 必须有 `src`，可有 `gain`、`fade-in` 与 `fade-out`；`sfx`
+`delay`；`music` 必须有 `src`，可有 `gain`、`duck-to`、`fade-in` 与 `fade-out`；`sfx`
 必须有 `src`，可有 `delay`、`gain`、`fade-in` 与 `fade-out`。同一个 overlay 不能同时写 `cue` 与
 `delay`，因为两者定义互相竞争的起点规则。`video` 或 `vo` 缺少 `src`
 时仍可用于静态分析；`music` 与 `sfx` 则在 resolve 阶段要求 `src`。任何元素显式写空

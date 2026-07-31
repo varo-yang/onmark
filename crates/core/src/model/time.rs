@@ -406,6 +406,27 @@ impl FrameInterval {
             && self.start.0 < other.end.0
             && other.start.0 < self.end.0
     }
+
+    /// Returns the non-empty frames shared with `other`.
+    #[must_use]
+    pub const fn intersection(self, other: Self) -> Option<Self> {
+        let start = if self.start.0 >= other.start.0 {
+            self.start
+        } else {
+            other.start
+        };
+        let end = if self.end.0 <= other.end.0 {
+            self.end
+        } else {
+            other.end
+        };
+
+        if start.0 < end.0 {
+            Some(Self { start, end })
+        } else {
+            None
+        }
+    }
 }
 
 /// A frame interval whose end precedes its start.
@@ -789,6 +810,19 @@ mod tests {
 
         assert!(!left.intersects(right));
         assert!(left.intersects(overlap));
+    }
+
+    #[test]
+    fn intersection_retains_only_shared_frames() {
+        let left = FrameInterval::new(FrameIndex::new(4), FrameIndex::new(8))
+            .expect("ordered bounds form an interval");
+        let right = FrameInterval::new(FrameIndex::new(6), FrameIndex::new(10))
+            .expect("ordered bounds form an interval");
+        let shared = FrameInterval::new(FrameIndex::new(6), FrameIndex::new(8))
+            .expect("ordered bounds form an interval");
+
+        assert_eq!(left.intersection(right), Some(shared));
+        assert_eq!(right.intersection(left), Some(shared));
     }
 
     #[test]

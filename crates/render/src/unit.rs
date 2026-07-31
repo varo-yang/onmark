@@ -18,7 +18,7 @@ use onmark_core::model::{
 };
 use onmark_core::protocol::{BrowserPlan, BundleManifest, InvalidBrowserPlan};
 use onmark_core::render_graph::{PartitionPlan, RenderPartition};
-use onmark_core::timeline::{TimelineAudio, TimelineIr, TimelineShotIndex};
+use onmark_core::timeline::{TimelineAudio, TimelineAudioDucking, TimelineIr, TimelineShotIndex};
 
 use crate::{
     AdmittedVideo, CaptureEnvironmentId, RenderProfile, UnsupportedVideo, WorkerCaptureRequest,
@@ -26,6 +26,7 @@ use crate::{
 use crate::{UnsupportedVisualComposition, VisualExecutionPlan};
 
 pub(crate) const MAX_AUDIO_TRACKS: usize = 32;
+const MAX_AUDIO_DUCKING_WINDOWS: usize = 512;
 
 /// One frozen artifact at its browser-visible execution location.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -176,6 +177,7 @@ pub struct RenderAudio {
     interval: FrameInterval,
     gain: AudioGain,
     envelope: AudioEnvelope,
+    ducking: Option<TimelineAudioDucking>,
     samples: AudioSampleCount,
     channel_layout: AudioChannelLayout,
 }
@@ -207,6 +209,12 @@ impl RenderAudio {
     #[must_use]
     pub const fn envelope(&self) -> AudioEnvelope {
         self.envelope
+    }
+
+    /// Returns the optional voice-over-driven gain facts.
+    #[must_use]
+    pub const fn ducking(&self) -> Option<&TimelineAudioDucking> {
+        self.ducking.as_ref()
     }
 
     /// Returns how many decoded source samples belong to this placement.
@@ -592,6 +600,8 @@ pub enum InvalidRenderUnit {
     },
     /// The audio plan would exceed the bounded process envelope.
     AudioTrackLimit,
+    /// Voice-over-driven music automation exceeds the bounded filter plan.
+    AudioDuckingWindowLimit,
     /// An audio placement escapes the solved film interval.
     AudioOutsideTimeline(FrozenAssetId),
     /// Materialized bytes do not contain the audio stream solved by core.
@@ -637,6 +647,12 @@ impl fmt::Display for InvalidRenderUnit {
                     "audio plan exceeds the {MAX_AUDIO_TRACKS}-track limit"
                 )
             }
+            Self::AudioDuckingWindowLimit => {
+                write!(
+                    formatter,
+                    "audio plan exceeds the {MAX_AUDIO_DUCKING_WINDOWS}-window ducking limit"
+                )
+            }
             Self::AudioOutsideTimeline(id) => {
                 write!(
                     formatter,
@@ -677,6 +693,7 @@ impl Error for InvalidRenderUnit {
             | Self::DuplicateAsset(_)
             | Self::MissingAsset(_)
             | Self::AudioTrackLimit
+            | Self::AudioDuckingWindowLimit
             | Self::AudioOutsideTimeline(_)
             | Self::MissingAudioStream(_)
             | Self::FrameOutsideOutput(_) => None,
@@ -769,6 +786,7 @@ fn audio_plan(
     available: &BTreeMap<FrozenAssetId, MaterializedAsset>,
 ) -> Result<AudioPlan, InvalidRenderUnit> {
     let mut tracks = Vec::new();
+    let mut ducking_windows = 0_usize;
 
     for (mix_order, audio) in timeline.audio().enumerate() {
         if !owns_audio_start(output, audio) {
@@ -777,6 +795,16 @@ fn audio_plan(
         if tracks.len() == MAX_AUDIO_TRACKS {
             return Err(InvalidRenderUnit::AudioTrackLimit);
         }
+        let windows = audio
+            .ducking()
+            .map_or(0, |ducking| ducking.voice_overs().len());
+        let Some(total) = ducking_windows.checked_add(windows) else {
+            return Err(InvalidRenderUnit::AudioDuckingWindowLimit);
+        };
+        if total > MAX_AUDIO_DUCKING_WINDOWS {
+            return Err(InvalidRenderUnit::AudioDuckingWindowLimit);
+        }
+        ducking_windows = total;
         tracks.push(render_audio(
             mix_order,
             audio,
@@ -821,6 +849,7 @@ fn render_audio(
         interval,
         gain: audio.gain(),
         envelope: audio.envelope(),
+        ducking: audio.ducking().cloned(),
         samples,
         channel_layout,
     })
@@ -849,9 +878,9 @@ mod tests {
     use onmark_core::timeline::TimelineIr;
 
     use super::{
-        BundleManifest, CaptureEnvironmentId, InvalidRenderUnit, MAX_AUDIO_TRACKS,
-        MaterializedAsset, RenderAudio, RenderProfile, RenderUnit, VisualExecutionPlan,
-        WorkerCaptureRequest,
+        BundleManifest, CaptureEnvironmentId, InvalidRenderUnit, MAX_AUDIO_DUCKING_WINDOWS,
+        MAX_AUDIO_TRACKS, MaterializedAsset, RenderAudio, RenderProfile, RenderUnit,
+        VisualExecutionPlan, WorkerCaptureRequest,
     };
     use crate::{AlphaMode, BrowserCaptureCadence, WorkerCaptureVersion};
 
@@ -1822,6 +1851,67 @@ mod tests {
                 [materialized],
             ),
             Err(InvalidRenderUnit::AudioTrackLimit),
+        );
+    }
+
+    #[test]
+    fn bounds_partition_ducking_before_filter_composition() {
+        let music = FrozenAsset::new(
+            FrozenAssetId::from_sha256([1; 32]),
+            AssetMetadata::audio(
+                Duration::from_nanos(600_000_000_000),
+                audio_sample_rate(),
+                AudioChannelLayout::Stereo,
+            ),
+        );
+        let voice = FrozenAsset::new(
+            FrozenAssetId::from_sha256([2; 32]),
+            AssetMetadata::audio(
+                Duration::from_nanos(1_000_000_000),
+                audio_sample_rate(),
+                AudioChannelLayout::Mono,
+            ),
+        );
+        let shots = r#"<om-shot><om-vo src="voice.wav">Read me</om-vo></om-shot>"#
+            .repeat(MAX_AUDIO_DUCKING_WINDOWS + 1);
+        let source = format!(
+            r#"<om-film><om-music src="music.wav" duck-to="25%"></om-music><om-scene>{shots}</om-scene></om-film>"#
+        );
+        let assets = BTreeMap::from([
+            (
+                AssetRef::parse("music.wav").expect("the fixture asset is valid"),
+                music.clone(),
+            ),
+            (
+                AssetRef::parse("voice.wav").expect("the fixture asset is valid"),
+                voice.clone(),
+            ),
+        ]);
+        let timeline = solve_with_assets(&source, &assets);
+        let partitions =
+            RenderGraph::from_timeline(&timeline, PresentationTemporalCapability::RandomAccess)
+                .expect("the solved fixture has complete render ownership")
+                .into_partition();
+        let first = partitions
+            .units()
+            .first()
+            .expect("the fixture has a first partition");
+        let materialized = [
+            MaterializedAsset::new(music, "/tmp/music.wav")
+                .expect("the fixture music path is present"),
+            MaterializedAsset::new(voice, "/tmp/voice.wav")
+                .expect("the fixture voice path is present"),
+        ];
+
+        assert_eq!(
+            RenderUnit::from_partition(
+                &timeline,
+                first,
+                bundle_manifest(),
+                render_profile(),
+                materialized,
+            ),
+            Err(InvalidRenderUnit::AudioDuckingWindowLimit),
         );
     }
 

@@ -132,7 +132,18 @@ encoder projects the fade-in end and fade-out start onto the same 48 kHz grid
 and emits sample-indexed `afade` filters with explicit linear curves, silence,
 and unity levels. The placement end owns fade-out rounding, so adjacent ramps
 that meet on the frame grid cannot overlap because of two independent sample
-roundings.
+roundings. Gate eight extends the same path with semantic music ducking.
+Timeline IR retains the absolute duck target, exact attack and release frame
+lengths, and every intersecting solved voice-over interval. Unit composition
+bounds the complete plan at 512 voice-over windows. Rust projects those facts
+onto the output sample grid, coalesces overlapping influence windows to avoid
+gain pumping, and emits non-overlapping constant or linear sample segments.
+FFmpeg only executes those segments; waveform-sensitive sidechain compression
+and frame-evaluated volume expressions are intentionally excluded because they
+would create a second timing decision mechanism or lose sample-boundary
+precision. Local rendering and distributed artifact assembly consume this same
+`AudioPlan`, so worker capture remains visual-only and cannot fork audio
+semantics.
 The final AAC path trims or pads the mix to the visual frame count projected
 onto the same grid and lets the visual stream close the container through
 `-shortest`. A partition-owning track therefore cannot lengthen an independently
@@ -1783,6 +1794,13 @@ outputs, and baseline required by the language admission rule. Rust then owns
 the resulting trim, rate, gain, fade, dependency, or transition interval;
 TypeScript may only realize the already-solved visual effect. No JavaScript
 timeline, CLI flag, or `FFmpeg` filter string may become an alternate scheduler.
+
+Gate eight admits `duck-to` after a two-arm generation experiment against
+`voice-gain`. Both spellings retained 20/20 semantic accuracy across two
+repetitions; `duck-to` used fewer authored bytes and avoided naming the music
+policy as a second voice-over amplitude. The compiler treats it as an absolute
+music gain beneath solved voice-over, not as a relative ratio or an authored
+time boundary.
 
 Gate eight admits canonical typed variants after a three-arm generation
 comparison of declarative HTML bindings, module-owned bindings, and source

@@ -111,7 +111,7 @@ export type RequestId = number;
 /**
  * Version of the native-to-browser message contract.
  */
-export type ProtocolVersion = 7;
+export type ProtocolVersion = 8;
 
 /**
  * One versioned command sent from the native executor to the browser.
@@ -142,7 +142,7 @@ export interface BrowserPlan {
    */
   shots: BrowserShot[];
   timeline: WireInterval;
-  timelineVersion: 6;
+  timelineVersion: 7;
   /**
    * @maxItems 10000
    */

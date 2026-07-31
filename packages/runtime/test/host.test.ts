@@ -41,7 +41,7 @@ test("installs one immutable host that decodes before dispatch", async () => {
         type: "load",
         mediaMode: "decoded",
         plan: {
-          timelineVersion: 6,
+          timelineVersion: 7,
           frameRate: { numerator: 30, denominator: 1 },
           timeline: { start: 0, end: 1 },
           evaluation: { start: 0, end: 1 },

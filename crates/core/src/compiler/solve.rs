@@ -16,10 +16,10 @@ use crate::model::{
     VideoMetadata,
 };
 use crate::timeline::{
-    TimelineAudio, TimelineAudioKind, TimelineContent, TimelineElement, TimelineEvent,
-    TimelineFacts, TimelineIr, TimelineOverlay, TimelineScene, TimelineShot, TimelineText,
-    TimelineTiming, TimelineTransition, TimelineVariantField, TimelineVariantScope, TimelineVideo,
-    TimelineVoiceOver, TimingReason,
+    TimelineAudio, TimelineAudioDucking, TimelineAudioKind, TimelineContent, TimelineElement,
+    TimelineEvent, TimelineFacts, TimelineIr, TimelineOverlay, TimelineScene, TimelineShot,
+    TimelineText, TimelineTiming, TimelineTransition, TimelineVariantField, TimelineVariantScope,
+    TimelineVideo, TimelineVoiceOver, TimingReason,
 };
 
 use super::diagnostic::author_diagnostic;
@@ -30,6 +30,9 @@ use super::resolved_film::{
     ResolvedText, ResolvedTransition, ResolvedVideo, ResolvedVideoTreatment, ResolvedVoiceOver,
 };
 use super::variant::{LinkedVariantScope, ResolvedVariantSchema, ResolvedVariantValues};
+
+const DUCKING_ATTACK: Duration = Duration::from_nanos(20_000_000);
+const DUCKING_RELEASE: Duration = Duration::from_nanos(250_000_000);
 
 /// Optional Timeline IR and the authored diagnostics produced while solving it.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -140,7 +143,8 @@ impl<'a> Solver<'a> {
         }
 
         let interval = interval(FrameIndex::ZERO, self.cursor.position());
-        let mut general_audio = self.solve_music(music, interval)?;
+        let voice_overs = voice_over_intervals(&timeline_scenes);
+        let mut general_audio = self.solve_music(music, interval, &voice_overs)?;
         general_audio.append(&mut self.sound_effects);
         let variants = timeline_variants(variants, variant_values, &timeline_scenes);
         let candidate = TimelineIr::new(TimelineFacts {
@@ -564,6 +568,7 @@ impl<'a> Solver<'a> {
             src,
             delay,
             gain,
+            duck_to,
             envelope,
         } = audio.into_parts();
         let Some(media) = self.prepare_resolved_media(element, src, delay, MediaTrack::Audio)?
@@ -573,13 +578,49 @@ impl<'a> Solver<'a> {
         let Some(envelope) = self.prepare_audio_envelope(envelope) else {
             return Ok(None);
         };
+        let ducking = match self.prepare_ducking(duck_to) {
+            DuckingPreparation::Absent => None,
+            DuckingPreparation::Rejected => return Ok(None),
+            DuckingPreparation::Prepared(ducking) => Some(ducking),
+        };
 
         Ok(Some(PreparedAudio {
             media,
             gain,
             envelope,
+            ducking,
             kind: kind.into(),
         }))
+    }
+
+    fn prepare_ducking(&mut self, duck_to: Option<Authored<AudioGain>>) -> DuckingPreparation {
+        let Some(duck_to) = duck_to else {
+            return DuckingPreparation::Absent;
+        };
+        let (target, authored_at) = duck_to.into_parts();
+        let Some(attack) = frames_for(
+            self.timebase,
+            DUCKING_ATTACK,
+            authored_at,
+            &mut self.diagnostics,
+        ) else {
+            return DuckingPreparation::Rejected;
+        };
+        let Some(release) = frames_for(
+            self.timebase,
+            DUCKING_RELEASE,
+            authored_at,
+            &mut self.diagnostics,
+        ) else {
+            return DuckingPreparation::Rejected;
+        };
+
+        DuckingPreparation::Prepared(PreparedDucking {
+            authored_at,
+            target,
+            attack,
+            release,
+        })
     }
 
     fn prepare_audio_envelope(
@@ -663,11 +704,12 @@ impl<'a> Solver<'a> {
         &mut self,
         music: Vec<ResolvedAudio>,
         film: FrameInterval,
+        voice_overs: &[FrameInterval],
     ) -> Result<Vec<TimelineAudio>, SolveError> {
         let prepared = self.prepare_audio_tracks(music)?;
         let mut timeline = Vec::with_capacity(prepared.len());
         for audio in prepared {
-            if let Some(audio) = place_music(audio, film, &mut self.diagnostics) {
+            if let Some(audio) = place_music(audio, film, voice_overs, &mut self.diagnostics) {
                 timeline.push(audio);
             }
         }
@@ -1210,6 +1252,15 @@ fn voice_overs(shot: &TimelineShot) -> impl Iterator<Item = &TimelineVoiceOver> 
     })
 }
 
+fn voice_over_intervals(scenes: &[TimelineScene]) -> Vec<FrameInterval> {
+    scenes
+        .iter()
+        .flat_map(TimelineScene::shots)
+        .flat_map(voice_overs)
+        .map(|voice_over| voice_over.audio().timing().interval())
+        .collect()
+}
+
 /// Media with shot-relative bounds, before its owning shot is placed.
 struct PreparedMedia {
     element: ResolvedElement,
@@ -1224,7 +1275,22 @@ struct PreparedAudio {
     media: PreparedMedia,
     gain: AudioGain,
     envelope: PreparedAudioEnvelope,
+    ducking: Option<PreparedDucking>,
     kind: TimelineAudioKind,
+}
+
+struct PreparedDucking {
+    authored_at: SourceSpan,
+    target: AudioGain,
+    attack: FrameCount,
+    release: FrameCount,
+}
+
+/// Whether an authored ducking policy can cross the frame-conversion phase.
+enum DuckingPreparation {
+    Absent,
+    Rejected,
+    Prepared(PreparedDucking),
 }
 
 #[derive(Clone, Copy, Default)]
@@ -1284,12 +1350,14 @@ fn place_media(media: PreparedMedia, shot: FrameInterval, end_reason: TimingReas
 fn place_music(
     audio: PreparedAudio,
     film: FrameInterval,
+    voice_overs: &[FrameInterval],
     diagnostics: &mut Diagnostics,
 ) -> Option<TimelineAudio> {
     let PreparedAudio {
         media,
         gain,
         envelope,
+        ducking,
         kind,
     } = audio;
     let authored_at = media.element.span();
@@ -1305,6 +1373,7 @@ fn place_music(
         end_reason,
     );
     let envelope = envelope.fit(timing.interval().len(), authored_at, diagnostics)?;
+    let ducking = ducking.map(|ducking| lower_ducking(&ducking, timing.interval(), voice_overs));
 
     Some(TimelineAudio::new(
         authored_at,
@@ -1312,8 +1381,28 @@ fn place_music(
         media.asset_id,
         gain,
         envelope,
+        ducking,
         kind,
     ))
+}
+
+fn lower_ducking(
+    ducking: &PreparedDucking,
+    music: FrameInterval,
+    voice_overs: &[FrameInterval],
+) -> TimelineAudioDucking {
+    let voice_overs = voice_overs
+        .iter()
+        .filter_map(|voice_over| music.intersection(*voice_over))
+        .collect();
+
+    TimelineAudioDucking::new(
+        ducking.authored_at,
+        ducking.target,
+        ducking.attack,
+        ducking.release,
+        voice_overs,
+    )
 }
 
 fn place_sound_effect(
@@ -1325,8 +1414,13 @@ fn place_sound_effect(
         media,
         gain,
         envelope,
+        ducking,
         kind,
     } = audio;
+    debug_assert!(
+        ducking.is_none(),
+        "sound effects cannot carry a music-ducking policy"
+    );
     let authored_at = media.element.span();
     let start = advance(shot.start(), media.start, authored_at, diagnostics)?;
     let end = advance(shot.start(), media.end, authored_at, diagnostics)?;
@@ -1347,6 +1441,7 @@ fn place_sound_effect(
         media.asset_id,
         gain,
         envelope,
+        None,
         kind,
     ))
 }
