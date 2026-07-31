@@ -1,6 +1,6 @@
 # Onmark Presentation Contract
 
-> Status: current browser authoring contract through the active Gate eight and
+> Status: current browser authoring contract after completion of Gate eight and
 > distributed incremental rendering.
 
 `film.html` is the complete authored entry. Onmark custom elements own

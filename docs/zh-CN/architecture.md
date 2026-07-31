@@ -1,6 +1,6 @@
 # Onmark 架构设计
 
-> 状态：Gate 八已在 Gate 一至 Gate 七及分布式增量渲染完成后启动。已完成关卡保留为历史验收证据；尚未实现的能力会明确标为延期。
+> 状态：Gate 一至 Gate 八及分布式增量渲染均已完成。已完成关卡保留为历史验收证据；尚未实现的能力会明确标为延期。
 
 本文与《Onmark 语言规格书》平级。语言规格负责“创作者如何表达影片”，本文负责“已编译的影片如何成为成片”，两者只通过 versioned
 Timeline IR 接合。
@@ -1638,7 +1638,7 @@ Gate 七当时没有加入 VFR、新 codec、HDR、hardware acceleration、lossy
 capture、transition、playback-rate control、Studio、component marketplace 或新的 screenplay
 拼写；它们仍属于独立的 measured gate 或 language gate。
 
-### 第八关（进行中）：闭合创作反馈，并扩展经过测量的媒体交付能力
+### 第八关（已完成）：闭合创作反馈，并扩展经过测量的媒体交付能力
 
 本关先把现有 compiler 与 renderer 已经拥有的事实变成正式产品表面。`check`
 在不启动 Chromium 的前提下验证作者源码、素材、presentation resource 与 render planning；
@@ -1894,6 +1894,12 @@ compiler policy。
 仓库中的 `skills/onmark-video` 通过开放 Agent Skills 目录布局分发。它不包含 executable
 helper、模板、复制的语言规范或私有 render path；安装它的 agent 必须通过已发布 CLI 闭合
 反馈循环，并把 versioned JSON diagnostics 与 inspection 视为权威事实。
+
+Gate 八以安装后的桌面产品收口，而不是以 workspace 内部入口代替产品边界。release admission
+会把打包后的公共包与平台包安装进空 consumer project，再验证 authoring validation、inspection、
+MP4/MOV render、精确 snapshot/review、variant batch、caption、语义 music ducking、
+persistent artifact reuse 与 no-clobber publication。精确候选与观测结果记录在
+[`conformance/evidence/gate-eight-closure.md`](../../conformance/evidence/gate-eight-closure.md)。
 
 每一关都使用最终方向的 IR 和协议，但只实现本关真实消费的部分。上一关没有稳定通过，不创建下一关的空架子。
 
