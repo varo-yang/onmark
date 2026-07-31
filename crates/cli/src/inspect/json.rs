@@ -7,16 +7,16 @@ use onmark_core::model::{
     VariantValue,
 };
 use onmark_core::timeline::{
-    TimelineAudio, TimelineCaption, TimelineContent, TimelineElement, TimelineEvent, TimelineIr,
-    TimelineScene, TimelineShot, TimelineText, TimelineTiming, TimelineVariantField,
-    TimelineVariantScope, TimingReason,
+    TimelineAudio, TimelineAudioDucking, TimelineCaption, TimelineContent, TimelineElement,
+    TimelineEvent, TimelineIr, TimelineScene, TimelineShot, TimelineText, TimelineTiming,
+    TimelineVariantField, TimelineVariantScope, TimingReason,
 };
 use serde::Serialize;
 
 use crate::check::{Inspection, RegionInspection, Validation};
 use crate::diagnostic::JsonDiagnostic;
 
-const REPORT_VERSION: u16 = 6;
+const REPORT_VERSION: u16 = 7;
 
 pub(super) fn write(validation: &Validation) -> io::Result<()> {
     let report = &validation.report;
@@ -393,6 +393,8 @@ struct JsonAudio<'a> {
     asset_id: String,
     gain: JsonGain,
     envelope: JsonEnvelope,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ducking: Option<JsonDucking>,
 }
 
 impl<'a> From<&'a TimelineAudio> for JsonAudio<'a> {
@@ -407,6 +409,7 @@ impl<'a> From<&'a TimelineAudio> for JsonAudio<'a> {
                 denominator: gain.denominator(),
             },
             envelope: audio.envelope().into(),
+            ducking: audio.ducking().map(JsonDucking::from),
         }
     }
 }
@@ -431,6 +434,35 @@ impl From<AudioEnvelope> for JsonEnvelope {
 struct JsonGain {
     numerator: u32,
     denominator: u32,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct JsonDucking {
+    target: JsonGain,
+    attack_frames: u64,
+    release_frames: u64,
+    voice_overs: Vec<JsonInterval>,
+}
+
+impl From<&TimelineAudioDucking> for JsonDucking {
+    fn from(ducking: &TimelineAudioDucking) -> Self {
+        let target = ducking.target();
+        Self {
+            target: JsonGain {
+                numerator: target.numerator(),
+                denominator: target.denominator(),
+            },
+            attack_frames: ducking.attack().get(),
+            release_frames: ducking.release().get(),
+            voice_overs: ducking
+                .voice_overs()
+                .iter()
+                .copied()
+                .map(JsonInterval::from)
+                .collect(),
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -653,7 +685,7 @@ mod tests {
     #[test]
     fn projects_exact_audio_envelopes() {
         let source = concat!(
-            r#"<om-film><om-music src="bed.wav" fade-in="500ms" fade-out="1s"></om-music>"#,
+            r#"<om-film><om-music src="bed.wav" duck-to="10%" fade-in="500ms" fade-out="1s"></om-music>"#,
             "<om-scene><om-shot>",
             r#"<om-vo src="voice.wav" fade-in="250ms" fade-out="250ms">Read.</om-vo>"#,
             "</om-shot></om-scene></om-film>",
@@ -688,6 +720,12 @@ mod tests {
             .expect("the projection retains the music track");
         assert_eq!(music["envelope"]["fadeInFrames"], 15);
         assert_eq!(music["envelope"]["fadeOutFrames"], 30);
+        assert_eq!(music["ducking"]["target"]["numerator"], 1);
+        assert_eq!(music["ducking"]["target"]["denominator"], 10);
+        assert_eq!(music["ducking"]["attackFrames"], 1);
+        assert_eq!(music["ducking"]["releaseFrames"], 8);
+        assert_eq!(music["ducking"]["voiceOvers"][0]["start"], 0);
+        assert_eq!(music["ducking"]["voiceOvers"][0]["end"], 60);
         let voice_over = &document["scenes"][0]["shots"][0]["content"][0];
         assert_eq!(voice_over["envelope"]["fadeInFrames"], 8);
         assert_eq!(voice_over["envelope"]["fadeOutFrames"], 8);

@@ -1,6 +1,7 @@
 //! `FFmpeg` visual encoding and final audio-mix boundary.
 
 mod audio;
+mod ducking;
 mod error;
 mod layered;
 mod layered_process;

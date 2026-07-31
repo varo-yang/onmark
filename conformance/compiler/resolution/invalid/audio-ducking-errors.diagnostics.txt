@@ -1,0 +1,6 @@
+# onmark diagnostic test rendering; not a wire format
+ONM-ATTR-004 error @0:58..61 attribute "duck-to" cannot exceed the music gain
+  help: use a "duck-to" percentage no greater than "gain"
+  related @0:44..47 music gain is authored here
+ONM-ATTR-001 error @0:144..151 attribute "duck-to" is not allowed on <om-sfx>
+  help: remove the "duck-to" attribute

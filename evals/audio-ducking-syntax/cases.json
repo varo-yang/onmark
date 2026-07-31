@@ -1,0 +1,241 @@
+{
+  "cases": [
+    {
+      "id": "basic-duck",
+      "music": [
+        {
+          "src": "audio/bed.wav",
+          "duckTo": "25%"
+        }
+      ],
+      "scenes": [
+        [
+          {
+            "video": "media/opening.mp4",
+            "voiceOvers": [
+              {
+                "src": "audio/opening-voice.wav",
+                "text": "The story stays clear."
+              }
+            ]
+          }
+        ]
+      ]
+    },
+    {
+      "id": "base-and-duck-gain",
+      "music": [
+        {
+          "src": "audio/theme.wav",
+          "gain": "60%",
+          "duckTo": "20%"
+        }
+      ],
+      "scenes": [
+        [
+          {
+            "video": "media/product.mp4",
+            "voiceOvers": [
+              {
+                "src": "audio/product-voice.wav",
+                "text": "Focus on the product."
+              }
+            ]
+          }
+        ]
+      ]
+    },
+    {
+      "id": "selective-tracks",
+      "music": [
+        {
+          "src": "audio/score.wav",
+          "gain": "50%",
+          "duckTo": "15%"
+        },
+        {
+          "src": "audio/texture.wav",
+          "gain": "10%"
+        }
+      ],
+      "scenes": [
+        [
+          {
+            "video": "media/detail.mp4",
+            "voiceOvers": [
+              {
+                "src": "audio/detail-voice.wav",
+                "text": "Only the score moves aside."
+              }
+            ]
+          }
+        ]
+      ]
+    },
+    {
+      "id": "voices-across-shots",
+      "music": [
+        {
+          "src": "audio/campaign.wav",
+          "duckTo": "30%"
+        }
+      ],
+      "scenes": [
+        [
+          {
+            "video": "media/first.mp4",
+            "voiceOvers": [
+              {
+                "src": "audio/first-voice.wav",
+                "text": "First thought."
+              }
+            ]
+          },
+          {
+            "video": "media/second.mp4",
+            "voiceOvers": [
+              {
+                "src": "audio/second-voice.wav",
+                "text": "Second thought."
+              }
+            ]
+          }
+        ]
+      ]
+    },
+    {
+      "id": "delayed-voice",
+      "music": [
+        {
+          "src": "audio/ambient.wav",
+          "gain": "45%",
+          "duckTo": "18%"
+        }
+      ],
+      "scenes": [
+        [
+          {
+            "video": "media/walkthrough.mp4",
+            "voiceOvers": [
+              {
+                "src": "audio/walkthrough-voice.wav",
+                "delay": "750ms",
+                "text": "The narration begins after the picture."
+              }
+            ]
+          }
+        ]
+      ]
+    },
+    {
+      "id": "fades-compose",
+      "music": [
+        {
+          "src": "audio/closing.wav",
+          "gain": "55%",
+          "duckTo": "22%",
+          "fadeIn": "500ms",
+          "fadeOut": "1s"
+        }
+      ],
+      "scenes": [
+        [
+          {
+            "video": "media/closing.mp4",
+            "voiceOvers": [
+              {
+                "src": "audio/closing-voice.wav",
+                "text": "Every treatment remains local."
+              }
+            ]
+          }
+        ]
+      ]
+    },
+    {
+      "id": "no-duck-control",
+      "music": [
+        {
+          "src": "audio/plain.wav",
+          "gain": "35%"
+        }
+      ],
+      "scenes": [
+        [
+          {
+            "video": "media/plain.mp4",
+            "voiceOvers": [
+              {
+                "src": "audio/plain-voice.wav",
+                "text": "Do not invent a treatment."
+              }
+            ]
+          }
+        ]
+      ]
+    },
+    {
+      "id": "remove-duck",
+      "music": [
+        {
+          "src": "audio/revised.wav",
+          "gain": "40%"
+        }
+      ],
+      "scenes": [
+        [
+          {
+            "video": "media/revised.mp4",
+            "voiceOvers": [
+              {
+                "src": "audio/revised-voice.wav",
+                "text": "The ducking treatment was removed."
+              }
+            ]
+          }
+        ]
+      ]
+    },
+    {
+      "id": "retarget-duck",
+      "music": [
+        {
+          "src": "audio/interview.wav",
+          "gain": "70%",
+          "duckTo": "12%"
+        }
+      ],
+      "scenes": [
+        [
+          {
+            "video": "media/interview.mp4",
+            "voiceOvers": [
+              {
+                "src": "audio/interview-voice.wav",
+                "text": "The new target is twelve percent."
+              }
+            ]
+          }
+        ]
+      ]
+    },
+    {
+      "id": "policy-without-current-voice",
+      "music": [
+        {
+          "src": "audio/instrumental.wav",
+          "gain": "50%",
+          "duckTo": "20%"
+        }
+      ],
+      "scenes": [
+        [
+          {
+            "video": "media/instrumental.mp4",
+            "voiceOvers": []
+          }
+        ]
+      ]
+    }
+  ]
+}

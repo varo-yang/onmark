@@ -1,5 +1,6 @@
 //! Exact audio algebra shared by probing, compilation, and execution planning.
 
+use std::cmp::Ordering;
 use std::error::Error;
 use std::fmt;
 
@@ -103,6 +104,20 @@ impl AudioGain {
         }
 
         Self::new(percentage, 100)
+    }
+}
+
+impl Ord for AudioGain {
+    fn cmp(&self, other: &Self) -> Ordering {
+        let left = u64::from(self.numerator) * u64::from(other.denominator);
+        let right = u64::from(other.numerator) * u64::from(self.denominator);
+        left.cmp(&right)
+    }
+}
+
+impl PartialOrd for AudioGain {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
     }
 }
 
@@ -436,6 +451,17 @@ mod tests {
             AudioGain::parse_percentage("101%"),
             Err(InvalidAudioGain::PercentageOutOfRange),
         );
+    }
+
+    #[test]
+    fn orders_exact_gain_ratios() {
+        let quarter = AudioGain::new(1, 4).expect("one quarter is valid");
+        let third = AudioGain::new(1, 3).expect("one third is valid");
+        let half = AudioGain::new(50, 100).expect("one half is valid");
+
+        assert!(quarter < third);
+        assert!(third < half);
+        assert_eq!(half, AudioGain::new(1, 2).expect("one half is valid"));
     }
 
     #[test]

@@ -483,7 +483,7 @@ impl TimelineRenderer {
     fn render_audio(&mut self, audio: &TimelineAudio) -> std::fmt::Result {
         writeln!(
             self.output,
-            "  audio kind={} {} asset={} gain={}/{} fade-in={} fade-out={}",
+            "  audio kind={} {} asset={} gain={}/{} fade-in={} fade-out={}{}",
             audio_kind(audio.kind()),
             timing(audio.timing()),
             audio.asset_id(),
@@ -491,8 +491,33 @@ impl TimelineRenderer {
             audio.gain().denominator(),
             audio.envelope().fade_in().get(),
             audio.envelope().fade_out().get(),
+            ducking(audio),
         )
     }
+}
+
+fn ducking(audio: &TimelineAudio) -> String {
+    let Some(ducking) = audio.ducking() else {
+        return String::new();
+    };
+    let voices = if ducking.voice_overs().is_empty() {
+        String::from("-")
+    } else {
+        ducking
+            .voice_overs()
+            .iter()
+            .map(|interval| frames(*interval))
+            .collect::<Vec<_>>()
+            .join(",")
+    };
+
+    format!(
+        " duck-to={}/{} attack={} release={} voices={voices}",
+        ducking.target().numerator(),
+        ducking.target().denominator(),
+        ducking.attack().get(),
+        ducking.release().get(),
+    )
 }
 
 fn audio_kind(kind: TimelineAudioKind) -> &'static str {

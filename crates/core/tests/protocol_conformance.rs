@@ -37,7 +37,7 @@ fn browser_requests_match_the_versioned_wire_contract() {
     ];
 
     assert_or_update(
-        &fixture("protocol", "browser-requests-v7.jsonl"),
+        &fixture("protocol", "browser-requests-v8.jsonl"),
         &render_json_lines(&requests),
     );
 }
@@ -66,7 +66,7 @@ fn browser_responses_match_the_versioned_wire_contract() {
     ];
 
     assert_or_update(
-        &fixture("protocol", "browser-responses-v7.jsonl"),
+        &fixture("protocol", "browser-responses-v8.jsonl"),
         &render_json_lines(&responses),
     );
 }

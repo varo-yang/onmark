@@ -475,6 +475,7 @@ pub struct ResolvedAudio {
     src: Authored<AssetRef>,
     delay: Option<Authored<Duration>>,
     gain: AudioGain,
+    duck_to: Option<Authored<AudioGain>>,
     envelope: ResolvedAudioEnvelope,
 }
 
@@ -485,6 +486,7 @@ impl ResolvedAudio {
         src: Authored<AssetRef>,
         delay: Option<Authored<Duration>>,
         gain: AudioGain,
+        duck_to: Option<Authored<AudioGain>>,
         envelope: ResolvedAudioEnvelope,
     ) -> Self {
         Self {
@@ -493,6 +495,7 @@ impl ResolvedAudio {
             src,
             delay,
             gain,
+            duck_to,
             envelope,
         }
     }
@@ -521,6 +524,12 @@ impl ResolvedAudio {
         self.gain
     }
 
+    /// Returns the optional absolute gain used beneath solved voice-over.
+    #[must_use]
+    pub const fn duck_to(&self) -> Option<&Authored<AudioGain>> {
+        self.duck_to.as_ref()
+    }
+
     /// Returns authored fade lengths relative to the solved placement.
     #[must_use]
     pub const fn envelope(&self) -> &ResolvedAudioEnvelope {
@@ -534,6 +543,7 @@ impl ResolvedAudio {
             src: self.src,
             delay: self.delay,
             gain: self.gain,
+            duck_to: self.duck_to,
             envelope: self.envelope,
         }
     }
@@ -545,6 +555,7 @@ pub(super) struct ResolvedAudioParts {
     pub(super) src: Authored<AssetRef>,
     pub(super) delay: Option<Authored<Duration>>,
     pub(super) gain: AudioGain,
+    pub(super) duck_to: Option<Authored<AudioGain>>,
     pub(super) envelope: ResolvedAudioEnvelope,
 }
 

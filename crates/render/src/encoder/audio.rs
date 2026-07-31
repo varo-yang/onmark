@@ -18,6 +18,7 @@ use tokio::process::{Child, Command};
 use tokio::runtime::Handle;
 use tokio::time::timeout;
 
+use super::ducking::{AudioDuckingInput, AudioSampleDucking};
 use super::error::{EncodeError, EncodeErrorKind};
 use super::limits::EncodeLimits;
 use super::process::{CapturedStderr, capture_stderr};
@@ -39,6 +40,7 @@ pub(crate) struct AudioInput {
     channel_layout: AudioChannelLayout,
     gain: AudioGain,
     envelope: AudioEnvelope,
+    ducking: Option<AudioDuckingInput>,
 }
 
 impl AudioInput {
@@ -52,6 +54,9 @@ impl AudioInput {
             channel_layout: track.channel_layout(),
             gain: track.gain(),
             envelope: track.envelope(),
+            ducking: track
+                .ducking()
+                .map(|ducking| AudioDuckingInput::from_timeline(ducking, track.interval().start())),
         }
     }
 
@@ -66,6 +71,7 @@ impl AudioInput {
             channel_layout: AudioChannelLayout::Stereo,
             gain: AudioGain::UNITY,
             envelope: AudioEnvelope::NONE,
+            ducking: None,
         }
     }
 
@@ -73,7 +79,7 @@ impl AudioInput {
         self.mix_order
     }
 
-    fn write_filter(&self, output: &mut String, index: usize, placement: AudioPlacement) {
+    fn write_filter(&self, output: &mut String, index: usize, placement: &AudioPlacement) {
         let stream = index + 1;
         write!(
             output,
@@ -90,17 +96,14 @@ impl AudioInput {
         write!(
             output,
             "aformat=sample_fmts=fltp:sample_rates={OUTPUT_SAMPLE_RATE_HZ}:channel_layouts=stereo,\
-             atrim=end_sample={},asetpts=N/SR/TB,",
+             atrim=end_sample={},asetpts=N/SR/TB[prepared{index}];",
             placement.samples.get(),
         )
         .expect("writing into a String cannot fail");
-        write!(
-            output,
-            "volume={}/{},",
-            self.gain.numerator(),
-            self.gain.denominator(),
-        )
-        .expect("writing into a String cannot fail");
+        placement
+            .ducking
+            .write_filter(output, index, self.gain, placement.samples);
+        write!(output, "[leveled{index}]").expect("writing into a String cannot fail");
         placement.envelope.write_filters(output);
         write!(
             output,
@@ -118,11 +121,11 @@ fn channel_filter(layout: AudioChannelLayout) -> &'static str {
     }
 }
 
-#[derive(Clone, Copy)]
 struct AudioPlacement {
     delay: AudioSampleCount,
     samples: AudioSampleCount,
     envelope: AudioSampleEnvelope,
+    ducking: AudioSampleDucking,
 }
 
 /// One envelope after both frame boundaries enter the output sample grid.
@@ -337,13 +340,21 @@ fn audio_filter(
         let samples =
             output_sample_rate().samples_for(input.duration, frame_rate, Rounding::Ceil)?;
         let envelope = sample_envelope(input.envelope, input.duration, samples, frame_rate)?;
+        let ducking = AudioSampleDucking::project(
+            input.ducking.as_ref(),
+            input.gain,
+            samples,
+            frame_rate,
+            output_sample_rate(),
+        )?;
         input.write_filter(
             &mut filter,
             index,
-            AudioPlacement {
+            &AudioPlacement {
                 delay,
                 samples,
                 envelope,
+                ducking,
             },
         );
     }
@@ -484,10 +495,10 @@ fn discard_partial_output(output: &Path) {
 
 #[cfg(test)]
 mod tests {
-    use super::{AudioInput, audio_filter, output_samples, sample_envelope};
+    use super::{AudioDuckingInput, AudioInput, audio_filter, output_samples, sample_envelope};
     use onmark_core::model::{
         AudioChannelLayout, AudioEnvelope, AudioGain, AudioSampleCount, FrameCount, FrameIndex,
-        FrameRate,
+        FrameInterval, FrameRate,
     };
 
     #[test]
@@ -504,6 +515,7 @@ mod tests {
                 channel_layout: AudioChannelLayout::Stereo,
                 gain: AudioGain::UNITY,
                 envelope: AudioEnvelope::NONE,
+                ducking: None,
             },
             AudioInput {
                 mix_order: 1,
@@ -519,6 +531,7 @@ mod tests {
                     FrameCount::new(15),
                 )
                 .expect("the fades fit the placement"),
+                ducking: None,
             },
         ];
 
@@ -529,13 +542,15 @@ mod tests {
                 "[1:a]atrim=end_sample=48000,asetpts=N/SR/TB,",
                 "aresample=48000,anull,",
                 "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,",
-                "atrim=end_sample=48000,asetpts=N/SR/TB,",
-                "volume=1/1,adelay=delays=0S:all=1[audio0];",
+                "atrim=end_sample=48000,asetpts=N/SR/TB[prepared0];",
+                "[prepared0]volume=1/1[leveled0];",
+                "[leveled0]adelay=delays=0S:all=1[audio0];",
                 "[2:a]atrim=end_sample=24000,asetpts=N/SR/TB,",
                 "aresample=48000,pan=stereo|c0=c0|c1=c0,",
                 "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,",
-                "atrim=end_sample=24000,asetpts=N/SR/TB,",
-                "volume=1/2,",
+                "atrim=end_sample=24000,asetpts=N/SR/TB[prepared1];",
+                "[prepared1]volume=1/2[leveled1];",
+                "[leveled1]",
                 "afade=t=in:ss=0:ns=4800:curve=tri:silence=0:unity=1,",
                 "afade=t=out:ss=14400:ns=9600:curve=tri:silence=0:unity=1,",
                 "adelay=delays=24000S:all=1[audio1];",
@@ -559,6 +574,7 @@ mod tests {
             channel_layout: AudioChannelLayout::Stereo,
             gain: AudioGain::UNITY,
             envelope: AudioEnvelope::NONE,
+            ducking: None,
         };
 
         let filter = audio_filter(&[input], rate, AudioSampleCount::new(1_602))
@@ -568,6 +584,50 @@ mod tests {
             "atrim=end_sample=1472,asetpts=N/SR/TB,aresample=48000,anull,\
              aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,\
              atrim=end_sample=1602,asetpts=N/SR/TB"
+        ));
+    }
+
+    #[test]
+    fn writes_sample_exact_music_ducking_segments() {
+        let rate = FrameRate::new(30, 1).expect("rate is valid");
+        let voice_over = FrameInterval::new(FrameIndex::new(15), FrameIndex::new(30))
+            .expect("the voice-over interval is ordered");
+        let input = AudioInput {
+            mix_order: 0,
+            source: "music.wav".into(),
+            start: FrameIndex::ZERO,
+            duration: FrameCount::new(60),
+            samples: AudioSampleCount::new(96_000),
+            channel_layout: AudioChannelLayout::Stereo,
+            gain: AudioGain::UNITY,
+            envelope: AudioEnvelope::NONE,
+            ducking: Some(AudioDuckingInput::fixture(
+                AudioGain::new(1, 4).expect("one quarter is valid"),
+                FrameCount::new(1),
+                FrameCount::new(8),
+                vec![voice_over],
+            )),
+        };
+
+        let filter = audio_filter(&[input], rate, AudioSampleCount::new(96_000))
+            .expect("the ducking envelope fits the output grid");
+
+        assert!(
+            filter.contains("[prepared0]asplit=5[duck0_0][duck0_1][duck0_2][duck0_3][duck0_4]")
+        );
+        assert!(filter.contains(
+            "[duck0_1]atrim=start_sample=22400:end_sample=24000,asetpts=N/SR/TB,\
+             volume=1/1,afade=t=out:ss=0:ns=1600:curve=tri:silence=1*1/(4*1):unity=1\
+             [gain0_1]"
+        ));
+        assert!(filter.contains(
+            "[duck0_2]atrim=start_sample=24000:end_sample=48000,asetpts=N/SR/TB,\
+             volume=1/4[gain0_2]"
+        ));
+        assert!(filter.contains(
+            "[duck0_3]atrim=start_sample=48000:end_sample=60800,asetpts=N/SR/TB,\
+             volume=1/1,afade=t=in:ss=0:ns=12800:curve=tri:silence=1*1/(4*1):unity=1\
+             [gain0_3]"
         ));
     }
 

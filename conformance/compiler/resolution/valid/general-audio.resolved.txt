@@ -1,12 +1,12 @@
 # onmark resolution test rendering; not a wire format
 film id=mix
-  om-music id=bed src=bed.wav delay=- gain=1/4 fade-in=0.5s fade-out=1s
+  om-music id=bed src=bed.wav delay=- gain=1/4 duck-to=1/10 fade-in=0.5s fade-out=1s
   scene id=-
     shot id=opening duration=-
       video id=- src=opening.mp4 delay=- trim=- speed=1/1 plays=1 hold-last=0s
-      om-sfx id=hit src=hit.wav delay=0.25s gain=1/2 fade-in=0.1s fade-out=0.1s
+      om-sfx id=hit src=hit.wav delay=0.25s gain=1/2 duck-to=- fade-in=0.1s fade-out=0.1s
 index
-  bed -> om-music @0:35..38
-  hit -> om-sfx @0:213..216
+  bed -> om-music @0:39..42
+  hit -> om-sfx @0:254..257
   mix -> om-film @0:13..16
-  opening -> om-shot @0:137..144
+  opening -> om-shot @0:178..185

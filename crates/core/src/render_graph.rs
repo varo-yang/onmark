@@ -500,6 +500,7 @@ mod tests {
             asset,
             AudioGain::new(1, 2).expect("one half is a valid gain"),
             AudioEnvelope::NONE,
+            None,
             TimelineAudioKind::Music,
         );
         let rate = FrameRate::new(30, 1).expect("30 fps is valid");

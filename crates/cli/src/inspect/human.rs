@@ -5,8 +5,8 @@ use std::io::{self, Write};
 
 use onmark_core::model::{AudioEnvelope, FrameInterval};
 use onmark_core::timeline::{
-    TimelineContent, TimelineElement, TimelineIr, TimelineScene, TimelineShot, TimelineText,
-    TimelineTiming, TimelineVariantScope, TimelineVideo,
+    TimelineAudioDucking, TimelineContent, TimelineElement, TimelineIr, TimelineScene,
+    TimelineShot, TimelineText, TimelineTiming, TimelineVariantScope, TimelineVideo,
 };
 
 use crate::check::{RegionInspection, Validation};
@@ -67,13 +67,14 @@ fn write_timeline(output: &mut impl Write, timeline: &TimelineIr) -> io::Result<
         let gain = audio.gain();
         writeln!(
             output,
-            "Audio {} {} asset {} gain {}/{} {}",
+            "Audio {} {} asset {} gain {}/{} {}{}",
             audio.kind().as_str(),
             Timing(audio.timing()),
             audio.asset_id(),
             gain.numerator(),
             gain.denominator(),
             Envelope(audio.envelope()),
+            Ducking(audio.ducking()),
         )?;
     }
     for (index, caption) in timeline.captions().iter().enumerate() {
@@ -255,6 +256,32 @@ impl fmt::Display for Envelope {
             self.0.fade_in().get(),
             self.0.fade_out().get(),
         )
+    }
+}
+
+struct Ducking<'a>(Option<&'a TimelineAudioDucking>);
+
+impl fmt::Display for Ducking<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Some(ducking) = self.0 else {
+            return Ok(());
+        };
+        let target = ducking.target();
+        write!(
+            formatter,
+            " duck-to {}/{} attack {} release {} voices",
+            target.numerator(),
+            target.denominator(),
+            ducking.attack().get(),
+            ducking.release().get(),
+        )?;
+        if ducking.voice_overs().is_empty() {
+            return formatter.write_str(" none");
+        }
+        for voice_over in ducking.voice_overs() {
+            write!(formatter, " {}", Interval(*voice_over))?;
+        }
+        Ok(())
     }
 }
 

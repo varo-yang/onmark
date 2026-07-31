@@ -276,6 +276,20 @@ amplitude ratio, not decibels. The referenced artifact must contain an audio
 stream. Mixing and muxing remain native execution concerns; the browser does
 not play these elements.
 
+Music may also declare `duck-to="integer%"`. The value is the absolute linear
+gain held while any solved voice-over placement is active; it is not a ratio
+relative to `gain` and may not exceed the music's authored or default gain.
+Rust derives the attack, hold, and release envelope from solved voice-over
+intervals. The current policy rounds nominal 20 ms attack and 250 ms release
+lengths up to the film's frame grid. It reaches the duck gain at voice-over
+start and returns to the base gain after voice-over end, with pre-attenuation
+when the music placement contains enough preceding material.
+When one voice-over's recovery overlaps the next voice-over's pre-attenuation,
+the music remains at the duck gain through the gap instead of pumping upward
+and immediately downward. Ducking changes amplitude only and does not move or
+resize either placement. A film without voice-over retains the policy as
+authored intent but has no audible ducking.
+
 `vo`, `music`, and `sfx` admit optional `fade-in` and `fade-out` durations.
 The fade-in begins at the solved placement start; the fade-out ends at its
 exclusive end. Both are linear-amplitude ramps between silence and the authored
@@ -284,6 +298,8 @@ extend the placement. Their sum must fit the actual solved placement, including
 music clipped at the film end, or solving reports `ONM-AUDIO-002`. Rust converts
 the durations to exact frame facts and then to integer output-sample
 boundaries; browser code does not own an audio envelope.
+When ducking and a placement fade overlap, the fade remains the outer
+silence-to-current-gain envelope; it does not disable or raise the duck target.
 
 The spelling was admitted by the checked-in `audio-envelope-syntax`
 experiment. Flat `fade-in`/`fade-out` attributes and an `om-envelope` child both
@@ -291,6 +307,12 @@ retained 20/20 semantic accuracy across two independent repetitions. The flat
 attributes used 4,914 authored bytes versus 5,868 and avoided mixing a
 treatment child into voice-over inscription, so the child spelling is not part
 of the language.
+
+The checked-in `audio-ducking-syntax` experiment compared `duck-to` with
+`voice-gain` across ten representative music and voice-over arrangements and
+two independent repetitions. Both spellings retained 20/20 semantic accuracy.
+`duck-to` used fewer authored bytes and names the operation rather than a
+second voice-over amplitude, so it is the admitted spelling.
 
 ## IDs and references
 
@@ -309,7 +331,8 @@ and `time`; `captions` requires `id`, `src`, and `lang`. `shot` admits optional
 `duration`; `transition` requires `duration`. `video` admits optional `src`,
 `delay`, `trim`, `speed`, `plays`, and `hold-last`; `vo` admits optional `src`,
 `delay`, `fade-in`, and `fade-out`;
-`music` requires `src` and admits optional `gain`, `fade-in`, and `fade-out`;
+`music` requires `src` and admits optional `gain`, `duck-to`, `fade-in`, and
+`fade-out`;
 `sfx` requires `src` and admits optional `delay`, `gain`, `fade-in`, and
 `fade-out`; `title` and `cta` admit optional `cue` or `delay`. `cue` and
 `delay` cannot appear together on one overlay because they define competing

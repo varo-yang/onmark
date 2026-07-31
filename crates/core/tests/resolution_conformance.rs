@@ -67,6 +67,19 @@ fn authored_audio_errors_match_stable_diagnostics() {
 }
 
 #[test]
+fn audio_ducking_errors_match_stable_diagnostics() {
+    let source_path = fixture("compiler/resolution", "invalid/audio-ducking-errors.html");
+    let expected_path = fixture(
+        "compiler/resolution",
+        "invalid/audio-ducking-errors.diagnostics.txt",
+    );
+    let report = resolve_fixture(&source_path);
+
+    assert!(report.film().is_none());
+    assert_or_update(&expected_path, &render_diagnostics(report.diagnostics()));
+}
+
+#[test]
 fn deferred_timing_attributes_remain_unsupported() {
     let source_path = fixture(
         "compiler/resolution",
@@ -274,9 +287,19 @@ impl ResolvedFilmRenderer {
     }
 
     fn render_audio(&mut self, audio: &ResolvedAudio, indent: &str) -> std::fmt::Result {
+        let duck_to = audio.duck_to().map_or_else(
+            || "-".to_owned(),
+            |gain| {
+                format!(
+                    "{}/{}",
+                    gain.value().numerator(),
+                    gain.value().denominator()
+                )
+            },
+        );
         writeln!(
             self.output,
-            "{indent}{} id={} src={} delay={} gain={}/{} fade-in={} fade-out={}",
+            "{indent}{} id={} src={} delay={} gain={}/{} duck-to={duck_to} fade-in={} fade-out={}",
             audio.element().kind(),
             id(audio.element()),
             audio.src().value(),
