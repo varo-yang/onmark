@@ -35,6 +35,7 @@ const CACHE_ENVIRONMENT: &str =
 async fn renders_one_screenplay_reliably_across_real_processes() {
     let directory = tempdir().expect("the conformance workspace is available");
     let fixture = Fixture::materialize(directory.path(), "cli/desktop-release.html");
+    fixture.write_captions();
     let first = render_fixture_twice(&fixture, SourceVideo::Solid, DESKTOP_FRAME_COUNT, 15).await;
     assert!(
         first.inspection.has_motion_before(10),

@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "screenplay": "film.html",
+  "renders": [
+    {
+      "variant": null,
+      "output": "batch-default.mp4"
+    },
+    {
+      "variant": "variant.json",
+      "output": "batch-variant.mp4"
+    }
+  ]
+}

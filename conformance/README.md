@@ -94,13 +94,18 @@ cargo test -p onmark-render --test render \
   renders_the_browser_plan_to_a_verified_mp4 -- --ignored
 ```
 
-`cli/desktop-release.html` drives the installed desktop contract. The release
-smoke copies that complete authored document into a private workspace,
-generates its referenced media, and invokes the real `onmark` binary twice. It
-verifies each independent Chromium and `FFmpeg` session's decoded frame count,
-motion, stream facts, and audio placement, then proves that a third invocation
-cannot replace an existing output. Canonical raw-RGBA equality is asserted
-before lossy MP4 encoding, not inferred from independently encoded output:
+`cli/desktop-release.html` and its adjacent caption, variant, and batch inputs
+drive the installed desktop contract. The release smoke copies those authored
+inputs into a private workspace, generates their referenced media, and invokes
+only the packaged `onmark` entry point. It validates the typed variant, selected
+caption track, and solved music ducking through `check` and `inspect`; exercises
+exact `snapshot`, `review`, and two-item `batch` output; and renders the delivery
+and editing profiles. Two separate CLI invocations must retain equal decoded
+video and audio, the expected frame count, motion, and stream facts; persistent
+frame-artifact reuse remains allowed. A final invocation proves that an existing
+output cannot be replaced. The lower-level browser/encoder conformance asserts
+canonical raw-RGBA equality before lossy MP4 encoding rather than inferring it
+from independently encoded output:
 
 ```bash
 ONMARK_HEADLESS_SHELL=/path/to/chrome-headless-shell \

@@ -25,20 +25,37 @@
     }
 
     om-title,
-    om-cta {
+    om-cta,
+    om-caption {
       background: rgb(0 0 0 / 70%);
       bottom: 12px;
       left: 12px;
       padding: 6px 10px;
       position: fixed;
     }
+
+    om-caption {
+      bottom: 52px;
+    }
   </style>
+
+  <om-fields>
+    <om-field name="headline" type="text" default="Onmark"></om-field>
+  </om-fields>
+  <om-captions id="en" src="captions.vtt" lang="en"></om-captions>
+  <om-music
+    src="voice.m4a"
+    gain="25%"
+    duck-to="10%"
+    fade-in="100ms"
+    fade-out="100ms"
+  ></om-music>
 
   <om-scene>
     <om-shot>
       <video src="source.mp4" trim="250ms..750ms" speed="0.5x"></video>
       <om-vo src="voice.m4a" delay="500ms">A deterministic voice-over.</om-vo>
-      <om-title>Onmark</om-title>
+      <om-title data-om-text="headline">Onmark</om-title>
       <om-cta delay="500ms">Render now</om-cta>
     </om-shot>
   </om-scene>
