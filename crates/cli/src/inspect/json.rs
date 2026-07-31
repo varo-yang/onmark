@@ -466,6 +466,7 @@ impl From<&TimelineAudioDucking> for JsonDucking {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct JsonCaption<'a> {
     track_id: &'a str,
     language: &'a str,
@@ -577,7 +578,7 @@ mod tests {
         FrozenAsset, FrozenAssetId, Timebase, VideoDimensions, VideoMetadata, VideoTiming,
     };
 
-    use super::{JsonRegion, JsonTimeline};
+    use super::{JsonCaption, JsonInterval, JsonRegion, JsonSpan, JsonTimeline};
     use crate::check::RegionInspection;
     use crate::compilation;
 
@@ -601,6 +602,30 @@ mod tests {
         assert_eq!(document["nativeMedia"], 2);
         assert_eq!(document["variantFields"], serde_json::json!(["accent"]));
         assert_eq!(document["visualMode"], "separableBackdrop");
+    }
+
+    #[test]
+    fn projects_caption_metadata_with_public_json_names() {
+        let document = serde_json::to_value(JsonCaption {
+            track_id: "en",
+            language: "en",
+            interval: JsonInterval { start: 3, end: 9 },
+            text: "Installed product",
+            timing_span: JsonSpan {
+                start_byte: 10,
+                end_byte: 20,
+            },
+            text_span: JsonSpan {
+                start_byte: 21,
+                end_byte: 38,
+            },
+        })
+        .expect("the caption projection serializes");
+
+        assert_eq!(document["trackId"], "en");
+        assert_eq!(document["timingSpan"]["startByte"], 10);
+        assert_eq!(document["textSpan"]["endByte"], 38);
+        assert!(document.get("track_id").is_none());
     }
 
     #[test]

@@ -76,7 +76,11 @@ async function admitRelease(request, root) {
   const tools = releaseTools(consumer);
   await materializeFilm(film);
   await generateMedia(tools.ffmpeg, film);
-  return admitRender(tools, film);
+  const authoring = await admitAuthoring(tools, film);
+  const rendering = await admitRender(tools, film);
+  const feedback = await admitFeedback(tools, film);
+
+  return Object.freeze({ ...rendering, authoring, feedback });
 }
 
 async function packRelease(request, destination) {
@@ -168,9 +172,19 @@ function releaseTarget() {
 
 async function materializeFilm(directory) {
   const repository = fileURLToPath(new URL("../../..", import.meta.url));
-  await copyFile(
-    join(repository, "conformance/cli/desktop-release.html"),
-    join(directory, "film.html"),
+  const fixtures = Object.freeze([
+    ["desktop-release.html", "film.html"],
+    ["desktop-release.vtt", "captions.vtt"],
+    ["desktop-release.variant.json", "variant.json"],
+    ["desktop-release.batch.json", "batch.json"],
+  ]);
+  await Promise.all(
+    fixtures.map(([source, destination]) =>
+      copyFile(
+        join(repository, "conformance", "cli", source),
+        join(directory, destination),
+      ),
+    ),
   );
 }
 
@@ -278,6 +292,229 @@ async function encodeAudio(ffmpeg, directory, input) {
   );
 }
 
+// ── Gate-eight product surfaces
+
+async function admitAuthoring(tools, directory) {
+  const screenplay = join(directory, "film.html");
+  const variant = join(directory, "variant.json");
+  const authoringControls = [
+    "--variant",
+    variant,
+    "--captions",
+    "en",
+    "--width",
+    String(WIDTH),
+    "--height",
+    String(HEIGHT),
+    "--json",
+  ];
+  const check = await captureCommandReport(
+    tools.onmark,
+    ["check", screenplay, ...authoringControls],
+    directory,
+    "check",
+  );
+  const inspection = await captureCommandReport(
+    tools.onmark,
+    ["inspect", screenplay, ...authoringControls],
+    directory,
+    "inspect",
+  );
+  admitInspection(inspection);
+
+  return admitCheck(check);
+}
+
+function admitCheck(report) {
+  const summary = report.summary;
+  if (
+    report.valid !== true ||
+    !isObject(summary) ||
+    summary.frames !== EXPECTED_OUTPUT_FRAMES ||
+    summary.assets !== 2 ||
+    summary.renderRegions !== 1
+  ) {
+    throw new Error("installed check did not retain the release plan");
+  }
+  return Object.freeze({
+    assets: summary.assets,
+    frames: summary.frames,
+    regions: summary.renderRegions,
+  });
+}
+
+function admitInspection(report) {
+  const timeline = report.inspection?.timeline;
+  const variants = Array.isArray(timeline?.variants) ? timeline.variants : [];
+  const captions = Array.isArray(timeline?.captions) ? timeline.captions : [];
+  const audio = Array.isArray(timeline?.audio) ? timeline.audio : [];
+  const headline = variants.find((field) => field?.name === "headline");
+  const music = audio.find((track) => track?.kind === "music");
+
+  if (report.valid !== true || headline?.value !== "Exact release") {
+    throw new Error("installed inspect did not apply the typed variant");
+  }
+  if (captions.length !== 1 || captions[0]?.trackId !== "en") {
+    throw new Error(
+      "installed inspect did not retain the selected caption track",
+    );
+  }
+  if (
+    music?.ducking?.target?.numerator !== 1 ||
+    music.ducking.target.denominator !== 10 ||
+    !Array.isArray(music.ducking.voiceOvers) ||
+    music.ducking.voiceOvers.length !== 1
+  ) {
+    throw new Error("installed inspect did not retain semantic music ducking");
+  }
+}
+
+async function admitFeedback(tools, directory) {
+  const screenplay = join(directory, "film.html");
+  const onmark = tools.onmark;
+  const snapshotFrame = await admitSnapshot(onmark, directory, screenplay);
+  const reviewCheckpoints = await admitReview(onmark, directory, screenplay);
+  const batchRenders = await admitBatch(tools, directory);
+
+  return Object.freeze({
+    batchRenders,
+    reviewCheckpoints,
+    snapshotFrame,
+  });
+}
+
+async function admitSnapshot(onmark, directory, screenplay) {
+  const snapshot = join(directory, "frame-12.png");
+  const report = await captureCommandReport(
+    onmark,
+    [
+      "snapshot",
+      screenplay,
+      "--frame",
+      "12",
+      "--output",
+      snapshot,
+      "--width",
+      String(WIDTH),
+      "--height",
+      String(HEIGHT),
+      "--json",
+    ],
+    directory,
+    "snapshot",
+  );
+  await requireFile(snapshot);
+  if (report.captured !== true || report.completed?.frame !== 12) {
+    throw new Error("installed snapshot captured the wrong frame");
+  }
+  return report.completed.frame;
+}
+
+async function admitReview(onmark, directory, screenplay) {
+  const review = join(directory, "review");
+  const report = await captureCommandReport(
+    onmark,
+    [
+      "review",
+      screenplay,
+      "--output",
+      review,
+      "--width",
+      String(WIDTH),
+      "--height",
+      String(HEIGHT),
+      "--json",
+    ],
+    directory,
+    "review",
+  );
+  await Promise.all([
+    requireFile(join(review, "manifest.json")),
+    requireFile(join(review, "index.html")),
+  ]);
+  if (report.completed !== true || report.review?.checkpoints < 1) {
+    throw new Error("installed review retained no exact checkpoints");
+  }
+  return report.review.checkpoints;
+}
+
+async function admitBatch(tools, directory) {
+  const outputs = [
+    join(directory, "batch-default.mp4"),
+    join(directory, "batch-variant.mp4"),
+  ];
+  const report = await captureCommandReport(
+    tools.onmark,
+    [
+      "batch",
+      join(directory, "batch.json"),
+      "--width",
+      String(WIDTH),
+      "--height",
+      String(HEIGHT),
+      "--captions",
+      "en",
+      "--json",
+    ],
+    directory,
+    "batch",
+  );
+
+  await Promise.all(outputs.map((output) => requireFile(output)));
+  const [frames, videos, audio] = await Promise.all([
+    Promise.all(
+      outputs.map((output) => verifyStreams(tools.ffprobe, output, directory)),
+    ),
+    Promise.all(
+      outputs.map((output) =>
+        decodedVideoHash(tools.ffmpeg, output, directory),
+      ),
+    ),
+    Promise.all(
+      outputs.map((output) =>
+        decodedAudioHash(tools.ffmpeg, output, directory),
+      ),
+    ),
+  ]);
+  if (
+    report.rendered !== true ||
+    report.renders?.length !== outputs.length ||
+    frames.some((count) => count !== EXPECTED_OUTPUT_FRAMES) ||
+    videos[0] === videos[1] ||
+    audio[0] !== audio[1]
+  ) {
+    throw new Error("installed batch outputs do not match the release fixture");
+  }
+  return report.renders.length;
+}
+
+async function captureCommandReport(onmark, arguments_, directory, command) {
+  const result = await captureInvocation(
+    appendArguments(onmark, arguments_),
+    directory,
+    RENDER_TIMEOUT_MILLISECONDS,
+  );
+  const report = JSON.parse(result.stdout);
+  if (
+    !isObject(report) ||
+    !Number.isSafeInteger(report.version) ||
+    report.version < 1 ||
+    report.command !== command ||
+    !Array.isArray(report.diagnostics) ||
+    report.diagnostics.length !== 0
+  ) {
+    throw new Error(`installed ${command} returned an invalid success report`);
+  }
+  return report;
+}
+
+async function requireFile(path) {
+  const metadata = await stat(path);
+  if (!metadata.isFile() || metadata.size === 0) {
+    throw new Error(`installed product did not publish ${path}`);
+  }
+}
+
 async function admitRender(tools, directory) {
   const screenplay = join(directory, "film.html");
   const first = join(directory, "first.mp4");
@@ -350,7 +587,8 @@ async function admitRender(tools, directory) {
 
 async function renderIndependently(onmark, screenplay, outputs, directory) {
   const renderMilliseconds = [];
-  // Separate CLI invocations guarantee independent native and browser sessions.
+  // Separate CLI invocations exercise installed assembly while permitting the
+  // production frame cache to prove its ordinary reuse contract.
   for (const output of outputs) {
     const invocation = appendArguments(onmark, [
       "render",
