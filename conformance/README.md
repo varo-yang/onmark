@@ -115,6 +115,10 @@ ONMARK_FFPROBE=/path/to/ffprobe \
 cargo test -p onmark-cli --test render -- --ignored
 ```
 
+The exact installed candidate and observed Gate-eight closure results are
+recorded in
+[`evidence/gate-eight-closure.md`](evidence/gate-eight-closure.md).
+
 CI runs all real-process conformance on Ubuntu 24.04 with the Chrome for Testing
 build recorded in `packages/launcher/desktop-release.json` and Ubuntu's
 `FFmpeg` 7:6.1.1-3ubuntu5. Exact executable paths

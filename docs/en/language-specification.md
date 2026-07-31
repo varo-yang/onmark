@@ -1,8 +1,8 @@
 # Onmark Language Specification
 
-> Status: current screenplay language through the active Gate eight and
-> distributed incremental rendering. Gate eight admits only spelling backed by
-> checked-in generation evidence. Deferred language capabilities are listed
+> Status: current screenplay language after completion of Gate eight and
+> distributed incremental rendering. Gate eight admitted only spellings backed
+> by checked-in generation evidence. Deferred language capabilities are listed
 > explicitly.
 
 ## Purpose

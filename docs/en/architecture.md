@@ -1,8 +1,8 @@
 # Onmark Architecture
 
-> Status: Gate eight is active after completion of Gate seven and distributed
-> incremental rendering. Completed gates are retained as historical acceptance
-> evidence; unimplemented work is marked deferred.
+> Status: Gates one through eight and distributed incremental rendering are
+> complete. Completed gates are retained as historical acceptance evidence;
+> unimplemented work is marked deferred.
 
 This document is paired with the Onmark Language Specification. The language
 defines authored meaning; this document defines execution. Their only contract
@@ -1628,7 +1628,7 @@ screenshot transport, parallel browser capture, transitions, playback-rate
 control, Studio, component marketplace, or new screenplay spelling.
 Those remain separate measured or language gates.
 
-**Gate eight (active): close the authoring loop and broaden measured media
+**Gate eight (complete): close the authoring loop and broaden measured media
 delivery.** The gate begins with product surfaces that expose facts the existing
 compiler and renderer already own. `check` validates authored source, assets,
 presentation resources, and render planning without launching Chromium.
@@ -1960,6 +1960,15 @@ through the open Agent Skills layout. It contains no executable helper,
 template, copied language specification, or private render path: the installed
 agent must close its feedback loop through the released CLI and treat versioned
 JSON diagnostics and inspection as authoritative.
+
+Gate eight closed against the installed desktop product rather than workspace
+entry points. Its release admission installs the packed public and platform
+packages into an empty consumer project, then exercises authoring validation,
+inspection, MP4 and MOV rendering, exact snapshot and review output, variant
+batch rendering, captions, semantic music ducking, persistent artifact reuse,
+and no-clobber publication. The exact candidate and observed results are
+recorded in
+[`conformance/evidence/gate-eight-closure.md`](../../conformance/evidence/gate-eight-closure.md).
 
 Every gate uses the final-direction contracts but implements only fields
 consumed by that gate. A failed gate blocks construction of the next gate's

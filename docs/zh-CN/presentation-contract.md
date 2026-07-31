@@ -1,6 +1,6 @@
 # Onmark Presentation Contract
 
-> 状态：当前 browser authoring 合约已覆盖进行中的 Gate 八及分布式增量渲染。
+> 状态：当前 browser authoring 合约已覆盖已完成的 Gate 八及分布式增量渲染。
 
 `film.html` 是完整的作者入口。Onmark custom element 拥有结构、ID、cue、素材引用和时间关系；
 普通 HTML 与 inline CSS 拥有 presentation。可选的
