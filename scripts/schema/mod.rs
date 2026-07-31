@@ -12,14 +12,18 @@ use schemars::{JsonSchema, schema_for};
 use serde_json::Value;
 
 pub(super) fn generate(repository: &Path, mode: GenerationMode) -> Result<(), Box<dyn Error>> {
+    const BROWSER_SCHEMAS: [&str; 2] = [
+        "browser-request-v9.schema.json",
+        "browser-response-v9.schema.json",
+    ];
     let artifacts = [
         SchemaArtifact::new::<BrowserRequest>(
-            "https://onmark.dev/schemas/browser-request-v8.schema.json",
-            "browser-request-v8.schema.json",
+            "https://onmark.dev/schemas/browser-request-v9.schema.json",
+            "browser-request-v9.schema.json",
         )?,
         SchemaArtifact::new::<BrowserResponse>(
-            "https://onmark.dev/schemas/browser-response-v8.schema.json",
-            "browser-response-v8.schema.json",
+            "https://onmark.dev/schemas/browser-response-v9.schema.json",
+            "browser-response-v9.schema.json",
         )?,
         SchemaArtifact::new::<BundleManifest>(
             "https://onmark.dev/schemas/bundle-manifest-v1.schema.json",
@@ -42,11 +46,36 @@ pub(super) fn generate(repository: &Path, mode: GenerationMode) -> Result<(), Bo
     if mode == GenerationMode::Write {
         fs::create_dir_all(&directory)?;
     }
+    reject_or_remove_obsolete_browser_schemas(&directory, mode, &BROWSER_SCHEMAS)?;
 
     for artifact in artifacts {
         artifact.publish(&directory, mode)?;
     }
     generate_typescript(repository, mode)
+}
+
+fn reject_or_remove_obsolete_browser_schemas(
+    directory: &Path,
+    mode: GenerationMode,
+    retained: &[&str],
+) -> Result<(), Box<dyn Error>> {
+    for entry in fs::read_dir(directory)? {
+        let entry = entry?;
+        let filename = entry.file_name();
+        let filename = filename.to_string_lossy();
+        let browser_schema =
+            filename.starts_with("browser-request-v") || filename.starts_with("browser-response-v");
+        if !browser_schema || retained.contains(&filename.as_ref()) {
+            continue;
+        }
+
+        let path = entry.path();
+        if mode == GenerationMode::Check {
+            return Err(Box::new(StaleArtifact(path)));
+        }
+        fs::remove_file(path)?;
+    }
+    Ok(())
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]

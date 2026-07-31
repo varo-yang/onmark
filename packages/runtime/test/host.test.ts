@@ -20,7 +20,9 @@ const adapter: RuntimeAdapter = {
     return [];
   },
   async seek(_frame: RuntimeFrame): Promise<void> {},
-  async confirm(_frame: RuntimeFrame): Promise<void> {},
+  async confirm(_frame: RuntimeFrame) {
+    return [];
+  },
   async dispose(): Promise<void> {},
 };
 

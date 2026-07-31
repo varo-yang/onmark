@@ -5,6 +5,8 @@ import type { RuntimeFrame } from "./clock.js";
 import type {
   BrowserMediaLayout,
   BrowserMediaPlacement,
+  BrowserVisualFindings,
+  BrowserVisualIssue,
 } from "./generated/browser-response.js";
 import {
   videoFrameSelection,
@@ -17,6 +19,7 @@ import {
   type RuntimeMediaMode,
   type RuntimePlan,
 } from "./session.js";
+import { MAX_BROWSER_VISUAL_FINDINGS } from "./generated/runtime-contract.js";
 import { DecodedVideo, type BrowserVideoElement } from "./video.js";
 import {
   ownPresentationResources,
@@ -122,6 +125,13 @@ interface BoundOverlay {
   readonly presentation: OverlayPresentation;
 }
 
+interface BoundVisualSubject {
+  readonly element: HTMLElement;
+  readonly interval: RuntimeShot["interval"];
+  readonly kind: "shot" | "overlay";
+  readonly nodeId: number;
+}
+
 interface BoundContainer<T> {
   readonly placement: T;
   readonly presentation: ContainerPresentation;
@@ -149,6 +159,7 @@ interface LoadedPresentation {
   readonly videos: readonly BoundVideo[];
   readonly layoutVideos: readonly BoundLayoutVideo[];
   readonly overlays: readonly BoundOverlay[];
+  readonly visualSubjects: readonly BoundVisualSubject[];
 }
 
 type FailedPresentation = Omit<LoadedPresentation, "kind"> & {
@@ -210,6 +221,7 @@ export class PresentationRuntimeAdapter implements RuntimeAdapter {
       shots: [],
     };
     let boundStructure: BoundStructure;
+    let visualSubjects: readonly BoundVisualSubject[];
     const videos: BoundVideo[] = [];
     const layoutVideos: BoundLayoutVideo[] = [];
     const overlays: BoundOverlay[] = [];
@@ -219,6 +231,7 @@ export class PresentationRuntimeAdapter implements RuntimeAdapter {
       this.#bindTransitions(plan, transitions);
       this.#bindVideos(plan, mediaMode, videos, layoutVideos);
       this.#bindOverlays(plan, overlays);
+      visualSubjects = bindVisualSubjects(boundStructure.shots, overlays);
       const extensions = await this.#bindings.bindExtensions(plan);
       // Take both returned collections before either ownership projection or
       // validation can fail; cleanup must retain every transferred resource.
@@ -255,6 +268,7 @@ export class PresentationRuntimeAdapter implements RuntimeAdapter {
       videos,
       layoutVideos,
       overlays,
+      visualSubjects,
     };
   }
 
@@ -299,8 +313,8 @@ export class PresentationRuntimeAdapter implements RuntimeAdapter {
     }
   }
 
-  async confirm(frame: RuntimeFrame): Promise<void> {
-    this.#loadedState("confirm");
+  async confirm(frame: RuntimeFrame): Promise<BrowserVisualFindings> {
+    const state = this.#loadedState("confirm");
     const staged = this.#staged;
     if (staged === undefined || staged.frame.index !== frame.index) {
       throw new RuntimeAdapterError(
@@ -311,7 +325,9 @@ export class PresentationRuntimeAdapter implements RuntimeAdapter {
 
     try {
       await confirmVideos(staged.videos);
+      const findings = inspectPresentation(frame, state.visualSubjects);
       this.#staged = undefined;
+      return findings;
     } catch (error) {
       this.#staged = undefined;
       this.#state = { ...this.#loadedState("confirm"), kind: "failed" };
@@ -426,6 +442,96 @@ export class PresentationRuntimeAdapter implements RuntimeAdapter {
     }
     return this.#state;
   }
+}
+
+function inspectPresentation(
+  frame: RuntimeFrame,
+  subjects: readonly BoundVisualSubject[],
+): BrowserVisualFindings {
+  const findings: BrowserVisualFindings = [];
+  for (const subject of subjects) {
+    const { interval } = subject;
+    if (frame.index < interval.start || frame.index >= interval.end) {
+      continue;
+    }
+    const issues = inspectVisualSubject(subject);
+    for (const issue of issues) {
+      findings.push({
+        nodeId: subject.nodeId,
+        issue,
+      });
+      if (findings.length === MAX_BROWSER_VISUAL_FINDINGS) {
+        return findings;
+      }
+    }
+  }
+  return findings;
+}
+
+function bindVisualSubjects(
+  shots: readonly BoundContainer<RuntimeShot>[],
+  overlays: readonly BoundOverlay[],
+): readonly BoundVisualSubject[] {
+  const subjects: BoundVisualSubject[] = [];
+  for (const shot of shots) {
+    subjects.push({
+      element: shot.presentation.element,
+      interval: shot.placement.interval,
+      kind: "shot",
+      nodeId: shot.placement.node.nodeId,
+    });
+  }
+  for (const overlay of overlays) {
+    subjects.push({
+      element: overlay.presentation.element,
+      interval: overlay.placement.interval,
+      kind: "overlay",
+      nodeId: overlay.placement.node.nodeId,
+    });
+  }
+  subjects.sort((left, right) => left.nodeId - right.nodeId);
+  return subjects;
+}
+
+function inspectVisualSubject(
+  subject: BoundVisualSubject,
+): readonly BrowserVisualIssue[] {
+  if (hasEmptyBox(subject.element)) {
+    return ["emptyBox"];
+  }
+  return subject.kind === "overlay" ? inspectOverlay(subject.element) : [];
+}
+
+function inspectOverlay(element: HTMLElement): readonly BrowserVisualIssue[] {
+  if (hasEmptyBox(element)) {
+    return ["emptyBox"];
+  }
+
+  const view = element.ownerDocument.defaultView;
+  if (view === null) {
+    throw new RuntimeAdapterError(
+      "operation",
+      "overlay layout requires an active browser document",
+    );
+  }
+  const style = view.getComputedStyle(element);
+  const issues: BrowserVisualIssue[] = [];
+  if (clips(style.overflowX) && element.scrollWidth > element.clientWidth) {
+    issues.push("clippedHorizontally");
+  }
+  if (clips(style.overflowY) && element.scrollHeight > element.clientHeight) {
+    issues.push("clippedVertically");
+  }
+  return issues;
+}
+
+function hasEmptyBox(element: HTMLElement): boolean {
+  const rectangle = element.getBoundingClientRect();
+  return rectangle.width <= 0 || rectangle.height <= 0;
+}
+
+function clips(overflow: string): boolean {
+  return overflow === "hidden" || overflow === "clip";
 }
 
 // ── Frame application ──

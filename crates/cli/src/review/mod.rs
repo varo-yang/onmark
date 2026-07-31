@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 use onmark_core::compiler;
 use onmark_core::diagnostics::Diagnostic;
 use onmark_core::model::Timebase;
+use onmark_core::protocol::BrowserVisualFindings;
 use onmark_core::render_graph::{PartitionPlan, RenderGraph};
 use onmark_core::timeline::TimelineIr;
 use onmark_media::Ffprobe;
@@ -41,6 +42,7 @@ use crate::variant::VariantImport;
 use self::plan::{ReviewPlan, ReviewPlanError};
 use self::report::{
     ReviewBaseline, ReviewComparison, ReviewDocument, ReviewPublication, ReviewReportError,
+    ReviewReportInput,
 };
 
 mod plan;
@@ -61,6 +63,7 @@ struct PreparedReview {
 struct CapturedReview {
     artifacts: CapturedArtifacts,
     frames: Vec<CapturedFrame>,
+    visual_findings: Vec<BrowserVisualFindings>,
     capture_mode: BrowserCaptureMode,
     graphics_backend: BrowserGraphicsBackend,
 }
@@ -100,6 +103,7 @@ pub(super) struct CompletedReview {
     document_id: String,
     regions: usize,
     checkpoints: usize,
+    visual_finding_count: usize,
     baseline: Option<PathBuf>,
     comparison: Option<ReviewComparison>,
     summary: ReviewSummary,
@@ -278,22 +282,24 @@ async fn execute(
     let CapturedReview {
         artifacts,
         frames,
+        visual_findings,
         capture_mode,
         graphics_backend,
     } = captured;
 
     progress.started("publish")?;
     let publish_started = Instant::now();
-    let document = ReviewDocument::build(
-        &source,
-        &timeline,
+    let report = ReviewReportInput {
+        source: &source,
+        timeline: &timeline,
         profile,
-        &partitions,
-        &review,
-        artifacts.as_slice(),
-        frames,
-    )
-    .map_err(ReviewError::from)?;
+        partitions: &partitions,
+        plan: &review,
+        units: &units,
+        artifacts: artifacts.as_slice(),
+    };
+    let document =
+        ReviewDocument::build(&report, frames, &visual_findings).map_err(ReviewError::from)?;
     let output = args
         .output
         .clone()
@@ -315,6 +321,7 @@ async fn execute(
         document_id: document.id().to_owned(),
         regions: document.regions(),
         checkpoints: document.checkpoints(),
+        visual_finding_count: document.visual_finding_count(),
         baseline: baseline.map(|previous| previous.path().to_owned()),
         comparison,
         summary: ReviewSummary {
@@ -396,11 +403,13 @@ async fn capture_review(
     let artifacts = cache
         .capture(&executor, units, execution::frame_artifact_limits())
         .await?;
-    let frames = read_checkpoints(review, partitions, artifacts.as_slice()).await?;
+    let (frames, visual_findings) =
+        read_checkpoints(review, partitions, artifacts.as_slice()).await?;
 
     Ok(CapturedReview {
         artifacts,
         frames,
+        visual_findings,
         capture_mode,
         graphics_backend,
     })
@@ -410,7 +419,7 @@ async fn read_checkpoints(
     review: &ReviewPlan,
     partitions: &PartitionPlan,
     artifacts: &[FrameArtifact],
-) -> Result<Vec<CapturedFrame>, ReviewError> {
+) -> Result<(Vec<CapturedFrame>, Vec<BrowserVisualFindings>), ReviewError> {
     if partitions.units().len() != artifacts.len() {
         return Err(ReviewError::ArtifactCount {
             regions: partitions.units().len(),
@@ -426,7 +435,7 @@ async fn read_checkpoints(
             .push((index, checkpoint.position()));
     }
 
-    let mut frames = std::iter::repeat_with(|| None)
+    let mut evidence = std::iter::repeat_with(|| None)
         .take(review.checkpoints().len())
         .collect::<Vec<_>>();
     let mut captured = 0;
@@ -435,19 +444,22 @@ async fn read_checkpoints(
             .iter()
             .map(|(_, position)| *position)
             .collect::<Vec<_>>();
-        let selected = artifact.frames_at(&positions).await?;
-        captured += selected.len();
-        for ((index, _), frame) in region.into_iter().zip(selected) {
-            frames[index] = Some(frame);
+        let (frames, findings) = artifact.frames_with_visual_findings_at(&positions).await?;
+        captured += frames.len();
+        let selected = frames.into_iter().zip(findings);
+        for ((index, _), (frame, findings)) in region.into_iter().zip(selected) {
+            evidence[index] = Some((frame, findings));
         }
     }
-    frames
-        .into_iter()
-        .collect::<Option<Vec<_>>>()
-        .ok_or(ReviewError::CheckpointCount {
-            planned: review.checkpoints().len(),
-            captured,
-        })
+    let evidence =
+        evidence
+            .into_iter()
+            .collect::<Option<Vec<_>>>()
+            .ok_or(ReviewError::CheckpointCount {
+                planned: review.checkpoints().len(),
+                captured,
+            })?;
+    Ok(evidence.into_iter().unzip())
 }
 
 fn read_screenplay(args: &ReviewArgs) -> Result<String, CliError> {
@@ -502,10 +514,11 @@ fn write_completed(completed: &CompletedReview) -> io::Result<ExitCode> {
     let mut stdout = io::stdout().lock();
     writeln!(
         stdout,
-        "{} exact review {} with {} checkpoints across {} regions at {}",
+        "{} exact review {} with {} checkpoints, {} objective layout findings across {} regions at {}",
         completed.summary.publication,
         completed.document_id,
         completed.checkpoints,
+        completed.visual_finding_count,
         completed.regions,
         completed.output.display(),
     )?;
@@ -585,6 +598,7 @@ struct JsonCompleted {
     review_id: String,
     regions: usize,
     checkpoints: usize,
+    visual_finding_count: usize,
     capture_mode: String,
     graphics_backend: String,
     reused_regions: usize,
@@ -604,6 +618,7 @@ impl JsonCompleted {
             review_id: completed.document_id.clone(),
             regions: completed.regions,
             checkpoints: completed.checkpoints,
+            visual_finding_count: completed.visual_finding_count,
             capture_mode: completed.summary.capture_mode.to_string(),
             graphics_backend: completed.summary.graphics_backend.to_string(),
             reused_regions: completed.summary.reuse.reused_regions(),

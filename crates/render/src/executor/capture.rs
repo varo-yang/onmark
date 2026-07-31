@@ -10,7 +10,7 @@ use std::time::Instant;
 
 use onmark_core::protocol::{
     BrowserCommand, BrowserEvent, BrowserMediaMode, BrowserPlan, BrowserRequest, BrowserResponse,
-    RequestId, WireFrame, WireFrameRate,
+    BrowserVisualFindings, RequestId, WireFrame, WireFrameRate,
 };
 use url::Url;
 
@@ -48,8 +48,14 @@ struct FreshFrameCapture {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+struct BrowserFrame {
+    png: EncodedPng,
+    visual_findings: BrowserVisualFindings,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 enum FrameCapture {
-    Reuse(EncodedPng),
+    Reuse(BrowserFrame),
     Capture(CaptureReason),
 }
 
@@ -287,7 +293,7 @@ async fn render_frames(
     let frame_rate = plan.frame_rate();
     let placement_boundaries: BTreeSet<_> = plan.placement_boundaries().collect();
     let output_frames = plan.output().start().get()..plan.output().end().get();
-    let mut previous_png = None;
+    let mut previous = None;
 
     for (index, request_ids) in output_frames.zip(requests.frame_requests()) {
         let frame = WireFrame::new(index)
@@ -297,9 +303,9 @@ async fn render_frames(
         } else {
             SurfaceChange::Stable
         };
-        let capture = plan_frame_capture(cadence, surface_change, previous_png.as_ref());
-        let png = match capture {
-            FrameCapture::Reuse(png) => png,
+        let capture = plan_frame_capture(cadence, surface_change, previous.as_ref());
+        let frame = match capture {
+            FrameCapture::Reuse(frame) => frame,
             FrameCapture::Capture(reason) => {
                 capture_frame(
                     browser,
@@ -316,9 +322,9 @@ async fn render_frames(
             }
         };
         frames
-            .write(png.clone(), browser.render_profile(), metrics, output)
+            .write(frame.clone(), browser.render_profile(), metrics, output)
             .await?;
-        previous_png = Some(png);
+        previous = Some(frame);
     }
     Ok(())
 }
@@ -326,7 +332,7 @@ async fn render_frames(
 fn plan_frame_capture(
     cadence: BrowserCaptureCadence,
     surface_change: SurfaceChange,
-    previous: Option<&EncodedPng>,
+    previous: Option<&BrowserFrame>,
 ) -> FrameCapture {
     match (cadence, surface_change, previous) {
         (BrowserCaptureCadence::PlacementBounded, SurfaceChange::Stable, Some(previous)) => {
@@ -343,7 +349,7 @@ async fn capture_frame(
     capture: FreshFrameCapture,
     metrics: &mut FrameCaptureMetrics,
     output: &Path,
-) -> Result<EncodedPng, RenderError> {
+) -> Result<BrowserFrame, RenderError> {
     let started = Instant::now();
     stage_frame(browser, capture.requests.seek, capture.frame, output).await?;
     metrics.seek += started.elapsed();
@@ -355,7 +361,8 @@ async fn capture_frame(
     metrics.readback += started.elapsed();
 
     let started = Instant::now();
-    confirm_frame(browser, capture.requests.confirm, capture.frame, output).await?;
+    let visual_findings =
+        confirm_frame(browser, capture.requests.confirm, capture.frame, output).await?;
     metrics.confirm += started.elapsed();
 
     match capture.reason {
@@ -371,7 +378,10 @@ async fn capture_frame(
     }
 
     metrics.browser_captures += 1;
-    Ok(png)
+    Ok(BrowserFrame {
+        png,
+        visual_findings,
+    })
 }
 
 /// The two bounded destinations for a captured browser frame.
@@ -393,11 +403,15 @@ pub(super) enum FrameSink<'a> {
 impl FrameSink<'_> {
     async fn write(
         &mut self,
-        png: EncodedPng,
+        frame: BrowserFrame,
         profile: RenderProfile,
         metrics: &mut FrameCaptureMetrics,
         output: &Path,
     ) -> Result<(), RenderError> {
+        let BrowserFrame {
+            png,
+            visual_findings,
+        } = frame;
         match self {
             Self::Encoder(encoder) => {
                 let started = Instant::now();
@@ -407,7 +421,9 @@ impl FrameSink<'_> {
                     .map_err(|source| RenderError::encoder(output, source))?;
                 metrics.write += started.elapsed();
             }
-            Self::Artifact(writer) => write_artifact(writer, profile, png, metrics, output).await?,
+            Self::Artifact(writer) => {
+                write_artifact(writer, profile, png, &visual_findings, metrics, output).await?;
+            }
             Self::LayeredVideo(compositor) => {
                 let foreground = decode_foreground(&png, profile, metrics, output)?;
                 let started = Instant::now();
@@ -421,8 +437,16 @@ impl FrameSink<'_> {
                 compositor,
                 artifact,
             } => {
-                write_layered_artifact(compositor, artifact, profile, &png, metrics, output)
-                    .await?;
+                write_layered_artifact(
+                    compositor,
+                    artifact,
+                    profile,
+                    &png,
+                    &visual_findings,
+                    metrics,
+                    output,
+                )
+                .await?;
             }
         }
         metrics.frames += 1;
@@ -435,6 +459,7 @@ async fn write_layered_artifact(
     artifact: &mut FrameArtifactWriter,
     profile: RenderProfile,
     foreground: &EncodedPng,
+    findings: &BrowserVisualFindings,
     metrics: &mut FrameCaptureMetrics,
     output: &Path,
 ) -> Result<(), RenderError> {
@@ -447,6 +472,9 @@ async fn write_layered_artifact(
     if let Some(frame) = frame {
         write_canonical_artifact(artifact, profile, frame, output).await?;
     }
+    artifact
+        .stage_visual_findings(findings)
+        .map_err(|source| RenderError::artifact(output, source))?;
     metrics.write += started.elapsed();
     Ok(())
 }
@@ -482,9 +510,13 @@ async fn write_artifact(
     writer: &mut FrameArtifactWriter,
     profile: RenderProfile,
     png: EncodedPng,
+    findings: &BrowserVisualFindings,
     metrics: &mut FrameCaptureMetrics,
     output: &Path,
 ) -> Result<(), RenderError> {
+    writer
+        .stage_visual_findings(findings)
+        .map_err(|source| RenderError::artifact(output, source))?;
     let pixel_started = Instant::now();
     let captured = CapturedFrame::from_png(png, profile)
         .map_err(|source| RenderError::browser(output, source))?;
@@ -529,10 +561,19 @@ async fn confirm_frame(
     request_id: RequestId,
     frame: WireFrame,
     output: &Path,
-) -> Result<(), RenderError> {
+) -> Result<BrowserVisualFindings, RenderError> {
     let request = BrowserRequest::new(request_id, BrowserCommand::Confirm { frame });
-    let expected = BrowserEvent::FrameReady { frame };
-    dispatch_expected(browser, request, expected, output).await
+    match dispatch(browser, request, output).await?.into_event() {
+        BrowserEvent::FrameReady {
+            frame: confirmed,
+            visual_findings,
+        } if confirmed == frame => Ok(visual_findings),
+        BrowserEvent::Failed(failure) => Err(RenderError::runtime_failure(output, &failure)),
+        _ => Err(RenderError::protocol(
+            output,
+            "browser response does not match the requested phase",
+        )),
+    }
 }
 
 async fn dispatch_expected(
@@ -598,13 +639,18 @@ mod tests {
     use std::path::Path;
 
     use super::{
-        CaptureReason, FrameCapture, SurfaceChange, finish_runtime_session, plan_frame_capture,
+        BrowserFrame, CaptureReason, FrameCapture, SurfaceChange, finish_runtime_session,
+        plan_frame_capture,
     };
     use crate::executor::{RenderError, RenderErrorKind};
     use crate::{BrowserCaptureCadence, EncodedPng};
+    use onmark_core::protocol::BrowserVisualFindings;
 
-    fn preceding_frame() -> EncodedPng {
-        EncodedPng::new(Vec::new())
+    fn preceding_frame() -> BrowserFrame {
+        BrowserFrame {
+            png: EncodedPng::new(Vec::new()),
+            visual_findings: BrowserVisualFindings::empty(),
+        }
     }
 
     #[test]

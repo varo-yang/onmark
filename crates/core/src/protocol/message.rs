@@ -14,7 +14,9 @@ use crate::model::MAX_VARIANT_TEXT_BYTES;
 
 #[cfg(feature = "schema")]
 use super::plan::MAX_BROWSER_TEXT_BYTES;
-use super::{BrowserMediaLayout, BrowserPlan, WireFrame};
+#[cfg(feature = "schema")]
+use super::visual::MAX_BROWSER_VISUAL_FINDINGS;
+use super::{BrowserMediaLayout, BrowserPlan, BrowserVisualFindings, WireFrame};
 
 /// Browser-global capability installed by every compatible runtime bundle.
 pub const RUNTIME_HOST_NAME: &str = "__ONMARK_RUNTIME__";
@@ -35,7 +37,7 @@ pub struct ProtocolVersion(u16);
 
 impl ProtocolVersion {
     /// Only browser protocol version accepted by this build.
-    pub const CURRENT: Self = Self(8);
+    pub const CURRENT: Self = Self(9);
 
     /// Returns the stable integer representation.
     #[must_use]
@@ -194,6 +196,7 @@ pub enum BrowserMediaMode {
     schemars(
         extend("x-onmark-max-failure-message-characters" = MAX_FAILURE_MESSAGE_CHARACTERS),
         extend("x-onmark-max-pending-resources" = MAX_PENDING_RESOURCES),
+        extend("x-onmark-max-browser-visual-findings" = MAX_BROWSER_VISUAL_FINDINGS),
         extend(
             "x-onmark-max-pending-resource-characters" = MAX_PENDING_RESOURCE_CHARACTERS
         )
@@ -271,6 +274,8 @@ pub enum BrowserEvent {
     FrameReady {
         /// Exact frame confirmed by browser media state.
         frame: WireFrame,
+        /// Objective semantic-layout facts observed for the captured state.
+        visual_findings: BrowserVisualFindings,
     },
     /// The browser rejected a command or could not reach readiness.
     Failed(ProtocolFailure),
@@ -478,7 +483,7 @@ mod tests {
     #[test]
     fn parses_exact_prepared_media_layout_evidence() {
         let encoded = serde_json::json!({
-            "version": 8,
+            "version": 9,
             "requestId": 2,
             "event": {
                 "type": "prepared",

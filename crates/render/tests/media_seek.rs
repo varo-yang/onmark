@@ -30,8 +30,8 @@ use onmark_core::model::{
     SourceId, Timebase, VideoColorProfile, VideoDimensions, VideoMetadata, VideoTiming,
 };
 use onmark_core::protocol::{
-    BrowserCommand, BrowserEvent, BrowserMediaMode, BrowserPlan, BrowserRequest, RequestId,
-    WireFrame,
+    BrowserCommand, BrowserEvent, BrowserMediaMode, BrowserPlan, BrowserRequest,
+    BrowserVisualFindings, RequestId, WireFrame,
 };
 use onmark_media::Ffprobe;
 use onmark_render::{
@@ -653,6 +653,7 @@ async fn confirm(
         response.event(),
         &BrowserEvent::FrameReady {
             frame: frame(index),
+            visual_findings: BrowserVisualFindings::empty(),
         },
     );
     Ok(())

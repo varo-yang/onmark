@@ -12,6 +12,8 @@ use std::fmt;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use onmark_core::protocol::BrowserVisualFindings;
+
 use format::{FrameArtifactDescriptor, Header};
 pub use format::{FrameArtifactId, InvalidFrameArtifactId};
 use reader::{FrameArtifactFingerprintSequence, open_verified};
@@ -281,18 +283,35 @@ impl FrameArtifact {
         &self,
         positions: &[u64],
     ) -> Result<Vec<CapturedFrame>, FrameArtifactError> {
+        self.frames_with_visual_findings_at(positions)
+            .await
+            .map(|(frames, _)| frames)
+    }
+
+    /// Reads selected frames and their aligned visual evidence in one pass.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FrameArtifactError`] under the same conditions as
+    /// [`Self::frames_at`].
+    pub async fn frames_with_visual_findings_at(
+        &self,
+        positions: &[u64],
+    ) -> Result<(Vec<CapturedFrame>, Vec<BrowserVisualFindings>), FrameArtifactError> {
         self.validate_positions(positions)?;
         let mut selected = positions.iter().copied().peekable();
         let mut frames = Vec::with_capacity(positions.len());
+        let mut findings = Vec::with_capacity(positions.len());
         let mut reader = self.reader().await?;
 
         for position in 0..self.frames() {
             if selected.next_if_eq(&position).is_some() {
-                let frame = reader
-                    .next_frame()
+                let (frame, visual_findings) = reader
+                    .next_frame_with_visual_findings()
                     .await?
                     .ok_or_else(|| self.missing_requested_frame())?;
                 frames.push(frame);
+                findings.push(visual_findings);
             } else {
                 reader
                     .next_recorded_fingerprint()
@@ -300,14 +319,37 @@ impl FrameArtifact {
                     .ok_or_else(|| self.missing_requested_frame())?;
             }
         }
-        if reader.next_recorded_fingerprint().await?.is_some() {
-            return Err(FrameArtifactError::invalid(
-                &self.path,
-                "frame artifact contains more records than declared",
-            ));
-        }
+        Ok((frames, findings))
+    }
 
-        Ok(frames)
+    /// Reads visual findings for selected frame positions in one verified pass.
+    ///
+    /// Positions use the same artifact-local, strictly increasing coordinate as
+    /// [`Self::frames_at`]. Frame PNG bytes are checksummed without decoding,
+    /// and the returned findings remain aligned with the requested positions.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FrameArtifactError`] when positions are invalid or any frame
+    /// or visual-evidence record fails validation.
+    pub async fn visual_findings_at(
+        &self,
+        positions: &[u64],
+    ) -> Result<Vec<BrowserVisualFindings>, FrameArtifactError> {
+        self.validate_positions(positions)?;
+        let mut selected = positions.iter().copied().peekable();
+        let mut findings = Vec::with_capacity(positions.len());
+        let mut reader = self.reader().await?;
+        for position in 0..self.frames() {
+            let (_, visual_findings) = reader
+                .next_recorded_fingerprint_with_visual_findings()
+                .await?
+                .ok_or_else(|| self.missing_requested_frame())?;
+            if selected.next_if_eq(&position).is_some() {
+                findings.push(visual_findings);
+            }
+        }
+        Ok(findings)
     }
 
     /// Reads the sole verified frame from a single-frame artifact.
@@ -585,6 +627,10 @@ fn actual_continues(path: &Path, position: u128) -> FrameArtifactError {
 #[cfg(test)]
 mod tests {
     use onmark_core::model::{FrameIndex, FrameInterval, FrameRate};
+    use onmark_core::protocol::{
+        BrowserNodeId, BrowserVisualFinding, BrowserVisualFindings, BrowserVisualIssue,
+    };
+    use sha2::{Digest as _, Sha256};
     use std::path::Path;
     use tempfile::tempdir;
 
@@ -694,6 +740,56 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn preserves_canonical_visual_findings_with_each_frame() {
+        let directory = tempdir().expect("the fixture directory is available");
+        let path = directory.path().join("worker.onmark-frames");
+        let expected = BrowserVisualFindings::new(vec![BrowserVisualFinding::new(
+            BrowserNodeId::new(7),
+            BrowserVisualIssue::ClippedVertically,
+        )])
+        .expect("the fixture finding is canonical");
+        let mut writer = FrameArtifactWriter::create(&path, descriptor(), limits())
+            .await
+            .expect("the artifact writer can stage one frame");
+        writer
+            .stage_visual_findings(&expected)
+            .expect("the finding fits the artifact limits");
+        writer
+            .write_frame(&captured_frame())
+            .await
+            .expect("the frame fits the artifact limits");
+        let artifact = writer
+            .finish()
+            .await
+            .expect("the completed artifact publishes atomically");
+
+        let findings = artifact
+            .visual_findings_at(&[0])
+            .await
+            .expect("the selected visual evidence verifies");
+
+        assert_eq!(findings, [expected]);
+    }
+
+    #[tokio::test]
+    async fn rejects_two_visual_records_before_their_frame() {
+        let directory = tempdir().expect("the fixture directory is available");
+        let path = directory.path().join("worker.onmark-frames");
+        let mut writer = FrameArtifactWriter::create(&path, descriptor_with_frames(2), limits())
+            .await
+            .expect("the artifact writer can stage two frames");
+
+        writer
+            .stage_visual_findings(&BrowserVisualFindings::empty())
+            .expect("the first visual record belongs to the next frame");
+        let error = writer
+            .stage_visual_findings(&BrowserVisualFindings::empty())
+            .expect_err("a second visual record would break frame alignment");
+
+        assert_eq!(error.kind(), FrameArtifactErrorKind::InvalidArtifact);
+    }
+
+    #[tokio::test]
     async fn reads_one_verified_frame_without_retaining_the_artifact_sequence() {
         let directory = tempdir().expect("the fixture directory is available");
         let artifact = artifact(&directory.path().join("frames.onmark-frames"), &[1, 2]).await;
@@ -764,7 +860,7 @@ mod tests {
             .expect("the fixture artifact is readable");
         let final_byte = bytes
             .last_mut()
-            .expect("the fixture artifact contains a final fingerprint");
+            .expect("the fixture artifact contains visual evidence");
         *final_byte ^= 1;
         tokio::fs::write(&path, bytes)
             .await
@@ -908,13 +1004,14 @@ mod tests {
         let header = Header {
             descriptor: descriptor(),
             frames: 1,
-            payload_bytes: 41,
+            payload_bytes: 43,
             digest: [0; 32],
         };
         let mut bytes = header.encode().to_vec();
         bytes.extend_from_slice(&1_u64.to_be_bytes());
         bytes.push(1);
         bytes.extend_from_slice(&[0; 32]);
+        bytes.extend_from_slice(&0_u16.to_be_bytes());
         tokio::fs::write(&path, bytes)
             .await
             .expect("the tampered artifact fixture is writable");
@@ -928,6 +1025,33 @@ mod tests {
             .expect_err("the checksum mismatch must reject the artifact");
 
         assert_eq!(error.kind(), FrameArtifactErrorKind::InvalidArtifact);
+    }
+
+    #[tokio::test]
+    async fn rejects_invalid_or_noncanonical_visual_evidence() {
+        let directory = tempdir().expect("the fixture directory is available");
+        let invalid = forged_visual_artifact(
+            &directory.path().join("invalid.onmark-frames"),
+            &[0, 1, 0, 0, 0, 0, u8::MAX],
+        )
+        .await;
+        let duplicate = forged_visual_artifact(
+            &directory.path().join("duplicate.onmark-frames"),
+            &[0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        )
+        .await;
+
+        let invalid = invalid
+            .verify()
+            .await
+            .expect_err("an unknown visual issue must be rejected");
+        let duplicate = duplicate
+            .verify()
+            .await
+            .expect_err("duplicate visual findings must be rejected");
+
+        assert_eq!(invalid.kind(), FrameArtifactErrorKind::InvalidArtifact);
+        assert_eq!(duplicate.kind(), FrameArtifactErrorKind::InvalidArtifact);
     }
 
     #[tokio::test]
@@ -958,11 +1082,11 @@ mod tests {
         let mut header = Header {
             descriptor: descriptor(),
             frames: 1,
-            payload_bytes: 41,
+            payload_bytes: 43,
             digest: [0; 32],
         }
         .encode();
-        header[8..10].copy_from_slice(&1_u16.to_be_bytes());
+        header[8..10].copy_from_slice(&2_u16.to_be_bytes());
         tokio::fs::write(&path, header)
             .await
             .expect("the old-version fixture is writable");
@@ -1057,6 +1181,28 @@ mod tests {
             .finish()
             .await
             .expect("the artifact publishes atomically")
+    }
+
+    async fn forged_visual_artifact(path: &Path, evidence: &[u8]) -> FrameArtifact {
+        let mut payload = Vec::with_capacity(8 + 1 + RawRgbaHash::BYTE_LENGTH + evidence.len());
+        payload.extend_from_slice(&1_u64.to_be_bytes());
+        payload.push(1);
+        payload.extend_from_slice(&[0; RawRgbaHash::BYTE_LENGTH]);
+        payload.extend_from_slice(evidence);
+        let header = Header {
+            descriptor: descriptor(),
+            frames: 1,
+            payload_bytes: u64::try_from(payload.len()).expect("the fixture payload fits in u64"),
+            digest: Sha256::digest(&payload).into(),
+        };
+        let mut artifact = header.encode().to_vec();
+        artifact.extend_from_slice(&payload);
+        tokio::fs::write(path, artifact)
+            .await
+            .expect("the forged artifact fixture is writable");
+        FrameArtifact::open(path, limits())
+            .await
+            .expect("the forged artifact header is structurally valid")
     }
 
     fn encoded_png(color: u8) -> EncodedPng {

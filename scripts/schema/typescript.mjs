@@ -21,10 +21,10 @@ await main(process.argv.slice(2)).catch(reportFailure);
 async function main(arguments_) {
   const mode = generationMode(arguments_);
   const requestSchema = await readJson(
-    "schemas/browser-request-v8.schema.json",
+    "schemas/browser-request-v9.schema.json",
   );
   const responseSchema = await readJson(
-    "schemas/browser-response-v8.schema.json",
+    "schemas/browser-response-v9.schema.json",
   );
   const bundleSchema = await readJson("schemas/bundle-manifest-v1.schema.json");
   const projectionSchema = await readJson(
@@ -161,6 +161,7 @@ function compileValidators(request, response) {
       "x-onmark-max-failure-message-characters",
       "x-onmark-max-pending-resources",
       "x-onmark-max-pending-resource-characters",
+      "x-onmark-max-browser-visual-findings",
     ],
     strict: true,
   });
@@ -338,6 +339,10 @@ function runtimeContractSource(request, response) {
     response["x-onmark-max-failure-message-characters"],
     "failure-message character limit",
   );
+  const browserVisualFindings = schemaNumber(
+    response["x-onmark-max-browser-visual-findings"],
+    "browser visual-finding limit",
+  );
   const browserVideos = schemaNumber(
     request.$defs?.BrowserPlan?.properties?.videos?.maxItems,
     "browser-plan video limit",
@@ -382,6 +387,7 @@ export const BROWSER_OBJECT_POSITION_SCALE = ${JSON.stringify(browserObjectPosit
 export const MAX_BROWSER_TRANSITIONS = ${JSON.stringify(browserTransitions)} as const;
 export const MAX_BROWSER_OVERLAYS = ${JSON.stringify(browserOverlays)} as const;
 export const MAX_BROWSER_OVERLAY_TEXT_CHARACTERS = ${JSON.stringify(overlayTextCharacters)} as const;
+export const MAX_BROWSER_VISUAL_FINDINGS = ${JSON.stringify(browserVisualFindings)} as const;
 export const MAX_FAILURE_MESSAGE_CHARACTERS = ${JSON.stringify(failureMessageCharacters)} as const;
 export const MAX_PENDING_RESOURCES = ${JSON.stringify(pendingResources)} as const;
 export const MAX_PENDING_RESOURCE_CHARACTERS = ${JSON.stringify(pendingResourceCharacters)} as const;

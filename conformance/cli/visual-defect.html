@@ -1,0 +1,40 @@
+<!doctype html>
+<om-film>
+  <style>
+    html,
+    body,
+    om-film,
+    om-scene,
+    om-shot {
+      display: block;
+      height: 100%;
+      margin: 0;
+      width: 100%;
+    }
+
+    om-shot {
+      align-items: center;
+      display: flex;
+      justify-content: center;
+    }
+
+    om-title {
+      display: block;
+      height: 20px;
+      overflow: hidden;
+      width: 80px;
+    }
+
+    om-title span {
+      display: block;
+      height: 40px;
+      width: 160px;
+    }
+  </style>
+
+  <om-scene>
+    <om-shot duration="1s">
+      <om-title id="clipped-title"><span>Clipped title</span></om-title>
+    </om-shot>
+  </om-scene>
+</om-film>

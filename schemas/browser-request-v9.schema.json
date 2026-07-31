@@ -616,7 +616,7 @@
       ]
     },
     "ProtocolVersion": {
-      "const": 8,
+      "const": 9,
       "description": "Version of the native-to-browser message contract.",
       "format": "uint16",
       "maximum": 65535,
@@ -724,7 +724,7 @@
       "type": "object"
     }
   },
-  "$id": "https://onmark.dev/schemas/browser-request-v8.schema.json",
+  "$id": "https://onmark.dev/schemas/browser-request-v9.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "One versioned command sent from the native executor to the browser.",

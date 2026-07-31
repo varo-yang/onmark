@@ -416,14 +416,18 @@ compositor 没有 visual damage 时，headless shell 可能省略
 `screenshotData`。native 通常复用上一张有效 PNG，但在 placement
 boundary 绝不复用。缺失的 boundary 或首帧 screenshot 会获得一次有界的正亚毫秒 offset 重试；重试仍为空就失败而不循环。
 
-capture 后的 `Confirm(frame)` 会在 native 接受 captured
-payload 前等待预先注册的 media observer。在 placement
-boundary，observer 可能在 pre-capture commit 上完成。确认后 native 会在该
-transaction 的下一个正亚毫秒 tick 执行一次有界的 reconciliation
-capture。若没有新的 compositor
-damage，就零拷贝复用精确 capture 的 PNG；若出现新 pixels，则用确认后的结果替换。
-native 只有完成这一步后才能写入 payload。这样可以关闭 media observer 与精确
-screenshot 分别落在同一 compositor turn 两侧的竞态。
+capture 后的 `Confirm(frame)` 会在 native 接受 captured payload 前等待预先注册的
+media observer，随后只测量当前 active 的 semantic shot 与 overlay binding 的三项已
+准入 layout failure：没有正 rendered area、水平 self-clipping 和垂直 self-clipping。
+结果是随 `FrameReady` 返回的有界 canonical collection，不是任意 DOM 遍历、审美评分
+或作者意图推断。runtime 最多保留按 node 与 issue canonical 排序的前 256 条 fact；达到
+evidence budget 后停止继续检查，但绝不令 authored frame 失败。在 placement boundary，
+observer 可能在 pre-capture commit 上完成。
+确认后 native 会在该 transaction 的下一个正亚毫秒 tick 执行一次有界的
+reconciliation capture。若没有新的 compositor damage，就零拷贝复用精确 capture 的
+PNG 及其 findings；若出现新 pixels，则用确认后的结果替换。native 只有完成这一步后
+才能写入 payload。这样可以关闭 media observer 与精确 screenshot 分别落在同一
+compositor turn 两侧的竞态。
 
 portable `Screenshot` backend 不拥有 compositor clock。它在 `Seek(frame)` 完成后激活
 target，通过 `Page.captureScreenshot` 读取一次当前 surface，以这次 readback 触发并界定
@@ -630,10 +634,13 @@ Onmark 支持依赖驱动的增量渲染，但不承诺“每个 shot 永远独�
 
 增量执行复用经过验证的 `FrameArtifact`，而不是散落的 PNG 或独立编码 MP4 segment。
 候选 artifact 必须与该 unit 的 Browser Plan projection、实际消费的 presentation bytes、
-Render Profile、capture backend 和 locked capture-environment identity 完全一致。reader
-在复用前验证 payload checksum；assembly 把 PNG 交给 encoder 时会逐帧重算 canonical
-raw-RGBA fingerprint。命中、新 capture 的 miss、本地执行和 worker 结果都进入同一条
-artifact assembler，因此 warm execution 不会长出第二套编码或 audio path。
+Render Profile、capture backend 和 locked capture-environment identity 完全一致。artifact
+的每条有序 frame record 会把 PNG、raw-RGBA fingerprint 与有界 visual findings 放在一起，
+完整 payload 由同一个 checksum 覆盖。reader 在复用前验证 finding count、canonical
+ordering 与 payload checksum；assembly 把 PNG 交给 encoder
+时仍逐帧重算 canonical raw-RGBA fingerprint。命中、新 capture 的 miss、本地 execution
+和 worker 结果都进入同一条 artifact assembler，因此 warm execution 不会长出第二套
+encoding、evidence 或 audio path。
 
 production authored-HTML artifact 已由 presentation contract 准入 random access，并按
 Render Graph region 分别投影。Rust 通过 versioned `BundleProjection` process contract
@@ -1900,6 +1907,22 @@ Gate 八以安装后的桌面产品收口，而不是以 workspace 内部入口�
 MP4/MOV render、精确 snapshot/review、variant batch、caption、语义 music ducking、
 persistent artifact reuse 与 no-clobber publication。精确候选与观测结果记录在
 [`conformance/evidence/gate-eight-closure.md`](../../conformance/evidence/gate-eight-closure.md)。
+
+**Gate 九（完成）：接纳有界、客观的视觉反馈。** runtime 在既有 `Confirm`
+transaction 内部、精确帧 effect 与 media readiness 完成之后，测量 deterministic
+browser protocol 定义的三项 layout fact。证据随每帧进入相同的本地或分布式
+`FrameArtifact`；cache hit 保留证据，不会重跑 Chromium 或另起一条 inspection path。
+`review` 把 unit-local node identity 投影回 authored shot、title、call-to-action 与
+caption fact，并写进 versioned manifest 和静态 contact sheet。普通 `render` 输出保持
+不变；finding 不决定成功、不修改 source，也不改变 pixels。
+
+本关不增加 general DOM crawler、screenshot heuristic、aesthetic scorer、
+computer-vision model、preview runtime、Studio、source mutation 或 fallback capture。
+准入 corpus 检出了 3/3 个注入 defect；全部 25 个 checked-in showcase 的 29 个
+semantic checkpoint 没有产生 finding；测量主机上的 review median overhead 为 0.45%。
+一次 cold CLI review 与一次 verified warm artifact reuse 发布了完全相同的 pixels 和
+findings。contract、threshold、environment、raw run 与 reuse evidence 记录在
+[`conformance/evidence/objective-visual-feedback.md`](../../conformance/evidence/objective-visual-feedback.md)。
 
 每一关都使用最终方向的 IR 和协议，但只实现本关真实消费的部分。上一关没有稳定通过，不创建下一关的空架子。
 

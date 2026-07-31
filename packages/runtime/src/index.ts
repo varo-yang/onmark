@@ -11,6 +11,9 @@ export type {
   BrowserMediaLayout,
   BrowserMediaPlacement,
   BrowserResponse,
+  BrowserVisualFinding,
+  BrowserVisualFindings,
+  BrowserVisualIssue,
 } from "./generated/browser-response.js";
 export type { BrowserPlan, BrowserVideo } from "./generated/browser-request.js";
 export { runtimeFrameAt, type RuntimeFrame } from "./clock.js";
@@ -57,6 +60,7 @@ export {
   BROWSER_OBJECT_POSITION_SCALE,
   MAX_BROWSER_MEDIA_LAYOUTS,
   MAX_BROWSER_OVERLAYS,
+  MAX_BROWSER_VISUAL_FINDINGS,
   MAX_BROWSER_OVERLAY_TEXT_CHARACTERS,
   MAX_BROWSER_VIDEOS,
   MAX_BROWSER_TRANSITIONS,

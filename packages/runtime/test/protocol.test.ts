@@ -9,6 +9,7 @@ import {
   BROWSER_PROTOCOL_VERSION,
   MAX_BROWSER_OVERLAYS,
   MAX_BROWSER_OVERLAY_TEXT_CHARACTERS,
+  MAX_BROWSER_VISUAL_FINDINGS,
   MAX_BROWSER_VIDEOS,
   MAX_FAILURE_MESSAGE_CHARACTERS,
   MAX_PENDING_RESOURCE_CHARACTERS,
@@ -28,10 +29,10 @@ const PROTOCOL_FIXTURES = new URL(
 // ── Decoding boundaries ──
 
 test("decodes every checked-in browser protocol example", async () => {
-  for (const request of await fixture("browser-requests-v8.jsonl")) {
+  for (const request of await fixture("browser-requests-v9.jsonl")) {
     assert.deepEqual(decodeBrowserRequest(request), request);
   }
-  for (const response of await fixture("browser-responses-v8.jsonl")) {
+  for (const response of await fixture("browser-responses-v9.jsonl")) {
     assert.deepEqual(decodeBrowserResponse(response), response);
   }
 });
@@ -221,6 +222,23 @@ test("rejects protocol payloads outside generated resource budgets", () => {
   for (const response of oversizedFailures) {
     assert.throws(() => decodeBrowserResponse(response), ProtocolDecodeError);
   }
+
+  const excessiveVisualFindings = {
+    version: BROWSER_PROTOCOL_VERSION,
+    requestId: 1,
+    event: {
+      type: "frameReady",
+      frame: 0,
+      visualFindings: Array.from(
+        { length: MAX_BROWSER_VISUAL_FINDINGS + 1 },
+        () => ({ nodeId: 4, issue: "emptyBox" }),
+      ),
+    },
+  };
+  assert.throws(
+    () => decodeBrowserResponse(excessiveVisualFindings),
+    ProtocolDecodeError,
+  );
 });
 
 // ── Fixtures ──

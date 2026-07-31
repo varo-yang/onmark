@@ -111,7 +111,7 @@ export type RequestId = number;
 /**
  * Version of the native-to-browser message contract.
  */
-export type ProtocolVersion = 8;
+export type ProtocolVersion = 9;
 
 /**
  * One versioned command sent from the native executor to the browser.

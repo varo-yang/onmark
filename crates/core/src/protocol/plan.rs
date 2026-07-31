@@ -911,7 +911,9 @@ impl BrowserVariantValue {
 pub struct BrowserNodeId(#[cfg_attr(feature = "schema", schemars(range(max = u32::MAX)))] u32);
 
 impl BrowserNodeId {
-    pub(super) const fn new(value: u32) -> Self {
+    /// Creates one unit-local wire identity assigned by a projection boundary.
+    #[must_use]
+    pub const fn new(value: u32) -> Self {
         Self(value)
     }
 
