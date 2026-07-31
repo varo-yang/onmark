@@ -19,8 +19,8 @@ const FRAMES_PER_SECOND: u64 = 30;
 const MICROS_PER_SECOND: u64 = 1_000_000;
 const AUDIO_SAMPLE_RATE: u64 = 48_000;
 const AUDIBLE_SAMPLE_THRESHOLD: u16 = 256;
-// AAC can spread a transient across one 1024-sample coding frame.
-const AUDIO_START_TOLERANCE_MICROS: u64 = 25_000;
+// Codec priming may defer the first audible sample by part of a video frame.
+const AUDIO_START_TOLERANCE_MICROS: u64 = MICROS_PER_SECOND / FRAMES_PER_SECOND;
 const DESKTOP_FRAME_COUNT: usize = 45;
 const PARTITIONED_FRAME_COUNT: usize = 60;
 const EXACT_RASTER_FRAME_COUNT: u64 = 75;
