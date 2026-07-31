@@ -363,7 +363,9 @@ function admitInspection(report) {
     music?.ducking?.target?.numerator !== 1 ||
     music.ducking.target.denominator !== 10 ||
     !Array.isArray(music.ducking.voiceOvers) ||
-    music.ducking.voiceOvers.length !== 1
+    music.ducking.voiceOvers.length !== 1 ||
+    music.ducking.voiceOvers[0]?.start !== 15 ||
+    music.ducking.voiceOvers[0]?.end !== 30
   ) {
     throw new Error("installed inspect did not retain semantic music ducking");
   }

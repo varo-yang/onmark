@@ -36,7 +36,7 @@ async fn renders_one_screenplay_reliably_across_real_processes() {
     let directory = tempdir().expect("the conformance workspace is available");
     let fixture = Fixture::materialize(directory.path(), "cli/desktop-release.html");
     fixture.write_captions();
-    let first = render_fixture_twice(&fixture, SourceVideo::Solid, DESKTOP_FRAME_COUNT, 15).await;
+    let first = render_fixture_twice(&fixture, SourceVideo::Solid, DESKTOP_FRAME_COUNT, 0).await;
     assert!(
         first.inspection.has_motion_before(10),
         "the static source must expose exact-frame GSAP motion before the CTA boundary",

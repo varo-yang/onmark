@@ -31,7 +31,7 @@ planner, template, or hidden pixel fallback.
 - npm: 11.17.0
 - browser contract: Chrome for Testing 149.0.7827.55
 - FFmpeg and ffprobe: 8.1.2
-- profile: 320 × 180, opaque, 24 fps
+- profile: 320 × 180, opaque, 30 fps
 - duration: 45 frames
 - capture: portable screenshot on the exact SwiftShader contract
 
@@ -40,7 +40,7 @@ The installed candidate reported:
 | Surface | Observed result |
 | --- | --- |
 | `check` | 45 frames, 2 assets, 1 render region |
-| `inspect` | variant `headline = "Exact release"`, caption track `en`, music duck target `1/10`, 1 voice-over interval |
+| `inspect` | variant `headline = "Exact release"`, caption track `en`, music duck target `1/10`, duck interval 15–30 |
 | MP4 | 45 decoded H.264 frames and AAC audio |
 | MOV | ProRes 4444 video and PCM audio |
 | `snapshot` | absolute frame 12 |
@@ -49,7 +49,7 @@ The installed candidate reported:
 | no-clobber | nonzero status; existing output identity unchanged |
 
 The final installed-product run reused the already verified persistent artifact
-and measured 262.2 ms and 257.1 ms for the MP4 invocations and 282.3 ms for the
+and measured 257.9 ms and 255.4 ms for the MP4 invocations and 286.1 ms for the
 MOV invocation. These are observations, not portable performance thresholds.
 Independent browser-process raw-RGBA repeatability remains owned by the
 lower-level exact-raster conformance; a cache hit is not presented as a second
