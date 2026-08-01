@@ -10,11 +10,13 @@ import type {
 import type {
   BrowserMediaLayout,
   BrowserResponse,
+  BrowserVisualFindings,
 } from "./generated/browser-response.js";
 import {
   BROWSER_PROTOCOL_VERSION,
   MAX_BROWSER_TEXT_BYTES,
   MAX_BROWSER_MEDIA_LAYOUTS,
+  MAX_BROWSER_VISUAL_FINDINGS,
   MAX_FAILURE_MESSAGE_CHARACTERS,
   MAX_PENDING_RESOURCE_CHARACTERS,
   MAX_PENDING_RESOURCES,
@@ -47,8 +49,8 @@ export interface RuntimeAdapter {
   prepare(frame: RuntimeFrame): Promise<BrowserMediaLayout>;
   /** Stages one exact frame and registers media presentation observers. */
   seek(frame: RuntimeFrame): Promise<void>;
-  /** Verifies media presentation after native compositor capture. */
-  confirm(frame: RuntimeFrame): Promise<void>;
+  /** Verifies captured media and returns bounded facts about the staged layout. */
+  confirm(frame: RuntimeFrame): Promise<BrowserVisualFindings>;
   /** Releases all resources owned by this adapter. */
   dispose(): Promise<void>;
 }
@@ -251,16 +253,22 @@ export class RuntimeSession {
     }
 
     try {
-      await this.#adapter.confirm(runtimeFrameAt(frame, this.#state.frameRate));
+      const findings = await this.#adapter.confirm(
+        runtimeFrameAt(frame, this.#state.frameRate),
+      );
+      const visualFindings = snapshotVisualFindings(findings);
+      this.#state = { ...this.#state, kind: "ready" };
+      return response(requestId, {
+        type: "frameReady",
+        frame,
+        visualFindings,
+      });
     } catch (error) {
       // Confirmation consumes staged media observers and may succeed for only
       // a prefix of videos. Retrying cannot reconstruct that transaction.
       this.#state = { kind: "failed" };
       return readinessFailure(requestId, "confirmFailed", error);
     }
-
-    this.#state = { ...this.#state, kind: "ready" };
-    return response(requestId, { type: "frameReady", frame });
   }
 
   async #dispose(requestId: number): Promise<BrowserResponse> {
@@ -325,6 +333,77 @@ function response(requestId: number, event: BrowserEvent): BrowserResponse {
     requestId,
     event,
   });
+}
+
+function snapshotVisualFindings(
+  findings: BrowserVisualFindings,
+): BrowserVisualFindings {
+  if (findings.length > MAX_BROWSER_VISUAL_FINDINGS) {
+    throw new RuntimeAdapterError(
+      "operation",
+      "browser visual findings exceed the per-frame limit",
+    );
+  }
+
+  const owned = findings.map((finding) => {
+    if (
+      !Number.isSafeInteger(finding.nodeId) ||
+      finding.nodeId < 0 ||
+      finding.nodeId > 2 ** 32 - 1
+    ) {
+      throw new RuntimeAdapterError(
+        "operation",
+        "browser visual finding has an invalid node identity",
+      );
+    }
+    visualFindingOrder(finding.issue);
+    return { nodeId: finding.nodeId, issue: finding.issue };
+  });
+  owned.sort(compareVisualFindings);
+
+  let previous: (typeof owned)[number] | undefined;
+  for (const finding of owned) {
+    if (
+      previous?.nodeId === finding.nodeId &&
+      previous.issue === finding.issue
+    ) {
+      throw new RuntimeAdapterError(
+        "operation",
+        "browser visual findings contain a duplicate",
+      );
+    }
+    previous = finding;
+    Object.freeze(finding);
+  }
+  return Object.freeze(owned) as BrowserVisualFindings;
+}
+
+function compareVisualFindings(
+  left: BrowserVisualFindings[number],
+  right: BrowserVisualFindings[number],
+): number {
+  return (
+    left.nodeId - right.nodeId ||
+    visualFindingOrder(left.issue) - visualFindingOrder(right.issue)
+  );
+}
+
+function visualFindingOrder(
+  issue: BrowserVisualFindings[number]["issue"],
+): number {
+  switch (issue) {
+    case "emptyBox":
+      return 0;
+    case "clippedHorizontally":
+      return 1;
+    case "clippedVertically":
+      return 2;
+    default:
+      throw new RuntimeAdapterError(
+        "operation",
+        "browser visual finding has an invalid issue",
+      );
+  }
 }
 
 function invalidRequest(requestId: number, message: string): BrowserResponse {

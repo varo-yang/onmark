@@ -11,20 +11,35 @@ use std::io::{self, Read as _};
 use std::path::{Path, PathBuf};
 
 use onmark_core::model::{FrameInterval, SourceSpan};
+use onmark_core::protocol::{
+    BrowserNodeId, BrowserOverlayKind, BrowserPlan, BrowserVisualFinding, BrowserVisualFindings,
+    BrowserVisualIssue,
+};
 use onmark_core::render_graph::PartitionPlan;
 use onmark_core::timeline::TimelineIr;
-use onmark_render::{CapturedFrame, FrameArtifact, RenderProfile};
+use onmark_render::{CapturedFrame, ExecutableUnit, FrameArtifact, RenderProfile};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 
 use super::plan::{ReviewAnchor, ReviewCheckpoint, ReviewPlan, ReviewSubject, TimelineFacts};
 
-const MANIFEST_VERSION: u16 = 1;
+const MANIFEST_VERSION: u16 = 2;
 const MANIFEST_FILE: &str = "manifest.json";
 const CONTACT_SHEET_FILE: &str = "index.html";
 const FRAME_DIRECTORY: &str = "frames";
 const MAX_MANIFEST_BYTES: u64 = 8 * 1024 * 1024;
 const REVIEW_ID_HEX_CHARS: usize = 12;
+
+/// Borrowed compiler, planner, and capture facts projected into one report.
+pub(super) struct ReviewReportInput<'a> {
+    pub(super) source: &'a str,
+    pub(super) timeline: &'a TimelineIr,
+    pub(super) profile: RenderProfile,
+    pub(super) partitions: &'a PartitionPlan,
+    pub(super) plan: &'a ReviewPlan,
+    pub(super) units: &'a [ExecutableUnit],
+    pub(super) artifacts: &'a [FrameArtifact],
+}
 
 pub(super) struct ReviewDocument {
     manifest: ReviewManifest,
@@ -36,17 +51,11 @@ pub(super) struct ReviewDocument {
 
 impl ReviewDocument {
     pub(super) fn build(
-        source: &str,
-        timeline: &TimelineIr,
-        profile: RenderProfile,
-        partitions: &PartitionPlan,
-        plan: &ReviewPlan,
-        artifacts: &[FrameArtifact],
+        input: &ReviewReportInput<'_>,
         frames: Vec<CapturedFrame>,
+        visual_findings: &[BrowserVisualFindings],
     ) -> Result<Self, ReviewReportError> {
-        let manifest = ReviewManifest::build(
-            source, timeline, profile, partitions, plan, artifacts, &frames,
-        )?;
+        let manifest = ReviewManifest::build(input, &frames, visual_findings)?;
         let mut manifest_bytes =
             serde_json::to_vec_pretty(&manifest).map_err(ReviewReportError::EncodeManifest)?;
         manifest_bytes.push(b'\n');
@@ -80,6 +89,14 @@ impl ReviewDocument {
 
     pub(super) fn checkpoints(&self) -> usize {
         self.manifest.checkpoints.len()
+    }
+
+    pub(super) fn visual_finding_count(&self) -> usize {
+        self.manifest
+            .checkpoints
+            .iter()
+            .map(|checkpoint| checkpoint.visual_findings.len())
+            .sum()
     }
 
     pub(super) fn compare(&self, prior: &ReviewBaseline) -> ReviewComparison {
@@ -260,28 +277,35 @@ struct ReviewManifest {
 
 impl ReviewManifest {
     fn build(
-        source: &str,
-        timeline: &TimelineIr,
-        profile: RenderProfile,
-        partitions: &PartitionPlan,
-        plan: &ReviewPlan,
-        artifacts: &[FrameArtifact],
+        input: &ReviewReportInput<'_>,
         frames: &[CapturedFrame],
+        visual_findings: &[BrowserVisualFindings],
     ) -> Result<Self, ReviewReportError> {
         ensure_lengths(
-            partitions.units().len(),
-            artifacts.len(),
+            input.partitions.units().len(),
+            input.artifacts.len(),
             "render region and frame artifact counts differ",
         )?;
         ensure_lengths(
-            plan.checkpoints().len(),
+            input.partitions.units().len(),
+            input.units.len(),
+            "render region and executable unit counts differ",
+        )?;
+        ensure_lengths(
+            input.plan.checkpoints().len(),
             frames.len(),
             "review checkpoint and captured frame counts differ",
         )?;
-        let regions = partitions
+        ensure_lengths(
+            input.plan.checkpoints().len(),
+            visual_findings.len(),
+            "review checkpoint and visual-evidence counts differ",
+        )?;
+        let regions = input
+            .partitions
             .units()
             .iter()
-            .zip(artifacts)
+            .zip(input.artifacts)
             .enumerate()
             .map(|(index, (partition, artifact))| RegionFact {
                 index,
@@ -291,27 +315,45 @@ impl ReviewManifest {
                 artifact_id: artifact.id().to_string(),
             })
             .collect();
-        let checkpoints = plan
-            .checkpoints()
-            .iter()
-            .zip(frames)
-            .map(|(checkpoint, frame)| CheckpointFact::new(checkpoint, frame))
-            .collect();
-        let rate = timeline.timebase().frame_rate();
+        let checkpoints = build_checkpoint_facts(input.plan, input.units, frames, visual_findings)?;
+        let rate = input.timeline.timebase().frame_rate();
 
         Ok(Self {
             version: MANIFEST_VERSION,
-            source_sha256: digest_hex(source.as_bytes()),
-            timeline_version: timeline.version().get(),
+            source_sha256: digest_hex(input.source.as_bytes()),
+            timeline_version: input.timeline.version().get(),
             frame_rate: FrameRateFact {
                 numerator: rate.numerator(),
                 denominator: rate.denominator(),
             },
-            profile,
+            profile: input.profile,
             regions,
             checkpoints,
         })
     }
+}
+
+fn build_checkpoint_facts(
+    review: &ReviewPlan,
+    units: &[ExecutableUnit],
+    frames: &[CapturedFrame],
+    findings: &[BrowserVisualFindings],
+) -> Result<Vec<CheckpointFact>, ReviewReportError> {
+    review
+        .checkpoints()
+        .iter()
+        .zip(frames)
+        .zip(findings)
+        .map(|((checkpoint, frame), findings)| {
+            let unit =
+                units
+                    .get(checkpoint.region())
+                    .ok_or(ReviewReportError::UnknownReviewRegion {
+                        region: checkpoint.region(),
+                    })?;
+            CheckpointFact::new(checkpoint, frame, findings, unit.browser_plan())
+        })
+        .collect()
 }
 
 #[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -342,15 +384,26 @@ struct CheckpointFact {
     png_sha256: String,
     raw_rgba_sha256: String,
     anchors: Vec<AnchorFact>,
+    visual_findings: Vec<VisualFindingFact>,
 }
 
 impl CheckpointFact {
-    fn new(checkpoint: &ReviewCheckpoint, frame: &CapturedFrame) -> Self {
+    fn new(
+        checkpoint: &ReviewCheckpoint,
+        frame: &CapturedFrame,
+        findings: &BrowserVisualFindings,
+        plan: &BrowserPlan,
+    ) -> Result<Self, ReviewReportError> {
         let png = format!(
             "{FRAME_DIRECTORY}/frame-{:012}.png",
             checkpoint.frame().get()
         );
-        Self {
+        let visual_findings = findings
+            .findings()
+            .iter()
+            .map(|finding| VisualFindingFact::new(plan, *finding))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Self {
             frame: checkpoint.frame().get(),
             region: checkpoint.region(),
             artifact_position: checkpoint.position(),
@@ -360,8 +413,75 @@ impl CheckpointFact {
             png_sha256: digest_hex(frame.png().as_bytes()),
             raw_rgba_sha256: frame.raw_rgba_hash().to_string(),
             anchors: checkpoint.anchors().iter().map(AnchorFact::from).collect(),
+            visual_findings,
+        })
+    }
+}
+
+#[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct VisualFindingFact {
+    node_id: u32,
+    kind: VisualSubjectKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    authored_id: Option<String>,
+    issue: BrowserVisualIssue,
+}
+
+impl VisualFindingFact {
+    fn new(plan: &BrowserPlan, finding: BrowserVisualFinding) -> Result<Self, ReviewReportError> {
+        let node_id = finding.node_id();
+        let Some((kind, authored_id)) = visual_subject(plan, node_id) else {
+            return Err(ReviewReportError::UnknownVisualNode {
+                node: node_id.get(),
+            });
+        };
+        Ok(Self {
+            node_id: node_id.get(),
+            kind,
+            authored_id: authored_id.map(str::to_owned),
+            issue: finding.issue(),
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum VisualSubjectKind {
+    Shot,
+    Title,
+    CallToAction,
+    Caption,
+}
+
+impl VisualSubjectKind {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Shot => "shot",
+            Self::Title => "title",
+            Self::CallToAction => "call to action",
+            Self::Caption => "caption",
         }
     }
+}
+
+fn visual_subject(
+    plan: &BrowserPlan,
+    node_id: BrowserNodeId,
+) -> Option<(VisualSubjectKind, Option<&str>)> {
+    if let Some(shot) = plan.shots().iter().find(|shot| shot.node().id() == node_id) {
+        return Some((VisualSubjectKind::Shot, shot.node().authored_id()));
+    }
+    let overlay = plan
+        .overlays()
+        .iter()
+        .find(|overlay| overlay.node().id() == node_id)?;
+    let kind = match overlay.kind() {
+        BrowserOverlayKind::Title => VisualSubjectKind::Title,
+        BrowserOverlayKind::CallToAction => VisualSubjectKind::CallToAction,
+        BrowserOverlayKind::Caption => VisualSubjectKind::Caption,
+    };
+    Some((kind, overlay.node().authored_id()))
 }
 
 #[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -472,6 +592,11 @@ fn contact_sheet(manifest: &ReviewManifest) -> String {
 }
 
 fn write_contact_sheet(output: &mut String, manifest: &ReviewManifest) -> fmt::Result {
+    let visual_findings = manifest
+        .checkpoints
+        .iter()
+        .map(|checkpoint| checkpoint.visual_findings.len())
+        .sum::<usize>();
     write!(
         output,
         concat!(
@@ -479,13 +604,14 @@ fn write_contact_sheet(output: &mut String, manifest: &ReviewManifest) -> fmt::R
             "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">",
             "<title>Onmark exact review</title><style>{style}</style></head>",
             "<body><header><p>ONMARK EXACT REVIEW</p>",
-            "<h1>{checkpoints} checkpoints · {regions} regions</h1>",
+            "<h1>{checkpoints} checkpoints · {findings} findings · {regions} regions</h1>",
             "<p class=\"meta\">Every image is a verified production frame. ",
             "See <a href=\"manifest.json\">manifest.json</a> for exact provenance.</p>",
             "</header><main>",
         ),
         style = CONTACT_SHEET_CSS,
         checkpoints = manifest.checkpoints.len(),
+        findings = visual_findings,
         regions = manifest.regions.len(),
     )?;
     for checkpoint in &manifest.checkpoints {
@@ -507,9 +633,38 @@ fn write_checkpoint_card(output: &mut String, checkpoint: &CheckpointFact) -> fm
         region = checkpoint.region,
     )?;
     write_reasons(output, &checkpoint.anchors)?;
-    output.write_str("</p><code>")?;
+    output.write_str("</p>")?;
+    write_visual_findings(output, &checkpoint.visual_findings)?;
+    output.write_str("<code>")?;
     escape_html(output, &checkpoint.raw_rgba_sha256)?;
     output.write_str("</code></div></article>")
+}
+
+fn write_visual_findings(output: &mut String, findings: &[VisualFindingFact]) -> fmt::Result {
+    if findings.is_empty() {
+        return Ok(());
+    }
+    output.write_str("<ul class=\"findings\">")?;
+    for finding in findings {
+        output.write_str("<li><b>")?;
+        output.write_str(finding.kind.label())?;
+        if let Some(id) = &finding.authored_id {
+            output.write_str(" #")?;
+            escape_html(output, id)?;
+        }
+        output.write_str("</b> · ")?;
+        output.write_str(visual_issue_label(finding.issue))?;
+        output.write_str("</li>")?;
+    }
+    output.write_str("</ul>")
+}
+
+const fn visual_issue_label(issue: BrowserVisualIssue) -> &'static str {
+    match issue {
+        BrowserVisualIssue::EmptyBox => "active element has no rendered area",
+        BrowserVisualIssue::ClippedHorizontally => "content is clipped horizontally",
+        BrowserVisualIssue::ClippedVertically => "content is clipped vertically",
+    }
 }
 
 fn write_reasons(output: &mut String, anchors: &[AnchorFact]) -> fmt::Result {
@@ -532,6 +687,8 @@ const CONTACT_SHEET_CSS: &str = concat!(
     "article{overflow:hidden;border:1px solid #292929;border-radius:14px;background:#111}",
     "img{display:block;width:100%;height:auto;background:#050505}article div{padding:14px}",
     "strong{font-size:18px}span{float:right;color:#999}article p{color:#bbb;margin:.6em 0}",
+    ".findings{border-left:3px solid #ff735c;color:#ffd4cc;margin:.8em 0;padding:.2em 0 .2em 1.2em}",
+    ".findings li{margin:.3em 0}.findings b{color:#fff}",
     "code{font-size:10px;color:#777;overflow-wrap:anywhere}@media(max-width:600px){",
     "body{padding:18px}main{grid-template-columns:1fr}}",
 );
@@ -659,6 +816,12 @@ pub(crate) enum ReviewReportError {
         expected: usize,
         actual: usize,
     },
+    UnknownVisualNode {
+        node: u32,
+    },
+    UnknownReviewRegion {
+        region: usize,
+    },
     EncodeManifest(serde_json::Error),
     ParseManifest {
         path: PathBuf,
@@ -703,6 +866,15 @@ impl fmt::Display for ReviewReportError {
                 formatter,
                 "{message}: expected {expected}, received {actual}"
             ),
+            Self::UnknownVisualNode { node } => {
+                write!(
+                    formatter,
+                    "review visual evidence names unknown browser node {node}"
+                )
+            }
+            Self::UnknownReviewRegion { region } => {
+                write!(formatter, "review checkpoint names unknown region {region}")
+            }
             Self::EncodeManifest(_) => {
                 formatter.write_str("failed to encode the exact review manifest")
             }
@@ -759,6 +931,8 @@ impl Error for ReviewReportError {
             | Self::Publish { source, .. }
             | Self::Stage(source) => Some(source),
             Self::InternalCount { .. }
+            | Self::UnknownVisualNode { .. }
+            | Self::UnknownReviewRegion { .. }
             | Self::UnsupportedManifest { .. }
             | Self::InvalidFile { .. }
             | Self::OutputExists(_) => None,
@@ -828,7 +1002,7 @@ mod tests {
             .collect::<Vec<_>>()
             .join(",");
         format!(
-            r#"{{"version":1,"sourceSha256":"sha256","timelineVersion":1,"frameRate":{{"numerator":30,"denominator":1}},"profile":{{"width":2,"height":2,"alpha":"opaque"}},"regions":[{regions}],"checkpoints":[]}}"#,
+            r#"{{"version":2,"sourceSha256":"sha256","timelineVersion":1,"frameRate":{{"numerator":30,"denominator":1}},"profile":{{"width":2,"height":2,"alpha":"opaque"}},"regions":[{regions}],"checkpoints":[]}}"#,
         )
     }
 }

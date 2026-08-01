@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  MAX_BROWSER_VISUAL_FINDINGS,
   MAX_PRESENTATION_EFFECTS,
   PresentationRuntimeAdapter,
   RuntimeAdapterError,
@@ -519,6 +520,68 @@ test("rejects an invalid readiness policy before binding browser effects", () =>
   assert.deepEqual(recorder.overlays, []);
 });
 
+test("reports bounded layout defects for active semantic elements", async () => {
+  const recorder = new PresentationRecorder();
+  const plan = presentationPlan();
+  const adapter = new PresentationRuntimeAdapter(recorder.bindings, 100);
+  await adapter.load(plan, "omitted");
+  await adapter.prepare(runtimeFrameAt(10, plan.frameRate));
+  recorder.setShotLayout(0, { height: 0, width: 0 });
+  recorder.setOverlayLayout(4, { height: 0, width: 0 });
+  recorder.setOverlayLayout(9, {
+    clientHeight: 20,
+    clientWidth: 40,
+    overflowX: "hidden",
+    overflowY: "clip",
+    scrollHeight: 30,
+    scrollWidth: 50,
+  });
+
+  const frame = runtimeFrameAt(25, plan.frameRate);
+  await adapter.seek(frame);
+  assert.deepEqual(await adapter.confirm(frame), [
+    { nodeId: 2, issue: "emptyBox" },
+    { nodeId: 4, issue: "emptyBox" },
+    { nodeId: 9, issue: "clippedHorizontally" },
+    { nodeId: 9, issue: "clippedVertically" },
+  ]);
+  await adapter.dispose();
+});
+
+test("retains the canonical visual prefix without failing the frame", async () => {
+  const recorder = new PresentationRecorder();
+  const baseline = presentationPlan();
+  const overlays = Array.from(
+    { length: MAX_BROWSER_VISUAL_FINDINGS + 1 },
+    (_, index) => ({
+      node: { nodeId: index + 3, authoredId: `overlay-${index}` },
+      shotId: 2,
+      kind: "title" as const,
+      text: `Overlay ${index}`,
+      interval: { start: 10, end: 30 },
+    }),
+  );
+  const plan: BrowserPlan = { ...baseline, videos: [], overlays };
+  const adapter = new PresentationRuntimeAdapter(recorder.bindings, 100);
+  await adapter.load(plan, "omitted");
+  await adapter.prepare(runtimeFrameAt(10, plan.frameRate));
+  for (const overlay of recorder.overlays) {
+    overlay.layout.layout.height = 0;
+  }
+
+  const frame = runtimeFrameAt(10, plan.frameRate);
+  await adapter.seek(frame);
+  const findings = await adapter.confirm(frame);
+
+  assert.equal(findings.length, MAX_BROWSER_VISUAL_FINDINGS);
+  assert.deepEqual(findings[0], { nodeId: 3, issue: "emptyBox" });
+  assert.deepEqual(findings.at(-1), {
+    nodeId: MAX_BROWSER_VISUAL_FINDINGS + 2,
+    issue: "emptyBox",
+  });
+  await adapter.dispose();
+});
+
 // ── Test presentation boundary ──
 
 interface RecordedVideo {
@@ -534,6 +597,7 @@ interface RecordedOverlay {
   readonly nodeId: number;
   readonly kind: "callToAction" | "caption" | "title";
   readonly text: string;
+  readonly layout: TestLayoutElement;
   disposed: boolean;
   visible: boolean;
 }
@@ -544,12 +608,68 @@ interface RecordedFrameEffect {
 }
 
 interface RecordedContainer {
+  readonly layout: TestLayoutElement;
   disposed: boolean;
   visible: boolean;
 }
 
 interface RecordedTransition {
   disposed: boolean;
+}
+
+interface TestLayout {
+  height: number;
+  width: number;
+  clientHeight: number;
+  clientWidth: number;
+  overflowX: string;
+  overflowY: string;
+  scrollHeight: number;
+  scrollWidth: number;
+}
+
+interface TestLayoutElement {
+  readonly element: HTMLElement;
+  readonly layout: TestLayout;
+}
+
+function testLayoutElement(): TestLayoutElement {
+  const layout: TestLayout = {
+    height: 9,
+    width: 16,
+    clientHeight: 9,
+    clientWidth: 16,
+    overflowX: "visible",
+    overflowY: "visible",
+    scrollHeight: 9,
+    scrollWidth: 16,
+  };
+  const element = {
+    get clientHeight(): number {
+      return layout.clientHeight;
+    },
+    get clientWidth(): number {
+      return layout.clientWidth;
+    },
+    get scrollHeight(): number {
+      return layout.scrollHeight;
+    },
+    get scrollWidth(): number {
+      return layout.scrollWidth;
+    },
+    getBoundingClientRect(): Pick<DOMRect, "height" | "width"> {
+      return { height: layout.height, width: layout.width };
+    },
+    ownerDocument: {
+      defaultView: {
+        getComputedStyle: () => ({
+          overflowX: layout.overflowX,
+          overflowY: layout.overflowY,
+        }),
+      },
+    },
+  } as unknown as HTMLElement;
+  return { element, layout };
 }
 
 class PresentationRecorder {
@@ -638,12 +758,13 @@ class PresentationRecorder {
         nodeId: placement.node.nodeId,
         kind: placement.kind,
         text: placement.text,
+        layout: testLayoutElement(),
         disposed: false,
         visible: false,
       };
       this.overlays.push(recorded);
       return {
-        element: {} as HTMLElement,
+        element: recorded.layout.element,
         setVisible(visible): void {
           recorded.visible = visible;
         },
@@ -698,6 +819,20 @@ class PresentationRecorder {
     this.#rejectedVideoCleanupIndex = index;
   }
 
+  setOverlayLayout(nodeId: number, layout: Partial<TestLayout>): void {
+    const overlay = this.overlays.find(
+      (candidate) => candidate.nodeId === nodeId,
+    );
+    assert.ok(overlay);
+    Object.assign(overlay.layout.layout, layout);
+  }
+
+  setShotLayout(index: number, layout: Partial<TestLayout>): void {
+    const shot = this.containers.at(index + 2);
+    assert.ok(shot);
+    Object.assign(shot.layout.layout, layout);
+  }
+
   visibility(): { videos: boolean[]; overlays: boolean[] } {
     return {
       videos: this.videos.map(({ visible }) => visible),
@@ -723,10 +858,14 @@ class PresentationRecorder {
 
   #bindContainer() {
     const index = this.containers.length;
-    const recorded: RecordedContainer = { disposed: false, visible: false };
+    const recorded: RecordedContainer = {
+      layout: testLayoutElement(),
+      disposed: false,
+      visible: false,
+    };
     this.containers.push(recorded);
     return {
-      element: {} as HTMLElement,
+      element: recorded.layout.element,
       setVisible: (visible: boolean): void => {
         if (!visible && index === this.#rejectedContainerCleanupIndex) {
           throw new Error("container cleanup failed");
@@ -870,8 +1009,9 @@ function video(
 }
 
 function emptyContainer() {
+  const layout = testLayoutElement();
   return {
-    element: {} as HTMLElement,
+    element: layout.element,
     setVisible(): void {},
     dispose(): void {},
   };

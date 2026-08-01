@@ -163,6 +163,54 @@ async fn captures_exact_raster_across_cold_cli_processes() {
         .expect("independent exact-raster sessions must reproduce every canonical pixel");
 }
 
+#[tokio::test]
+#[ignore = "requires ONMARK_CLI, ONMARK_BUNDLER, and a discoverable browser"]
+async fn publishes_objective_layout_findings_from_production_artifacts() {
+    let directory = tempdir().expect("the conformance workspace is available");
+    let fixture = Fixture::materialize(directory.path(), "cli/visual-defect.html");
+    let cache = directory.path().join("frame-cache");
+    let output = "visual-review";
+
+    let reviewed = fixture.review_cached(output, &cache).await;
+    assert_process_success("objective-layout review", &reviewed);
+    let reused = fixture.review_cached("visual-review-reused", &cache).await;
+    assert_process_success("reused objective-layout review", &reused);
+    assert!(
+        String::from_utf8_lossy(&reused.stdout).contains("Reused 1/1 regions"),
+        "the second review must reuse its verified production artifact",
+    );
+
+    let manifest = read_review_manifest(directory.path(), output);
+    let reused_manifest = read_review_manifest(directory.path(), "visual-review-reused");
+    assert_eq!(
+        manifest["checkpoints"], reused_manifest["checkpoints"],
+        "cache reuse must retain the same pixels and objective evidence",
+    );
+    let findings = manifest["checkpoints"]
+        .as_array()
+        .expect("the review contains checkpoints")
+        .iter()
+        .flat_map(|checkpoint| {
+            checkpoint["visualFindings"]
+                .as_array()
+                .expect("each checkpoint retains visual findings")
+        })
+        .collect::<Vec<_>>();
+
+    assert!(findings.iter().any(|finding| {
+        finding["authoredId"] == "clipped-title" && finding["issue"] == "clippedHorizontally"
+    }));
+    assert!(findings.iter().any(|finding| {
+        finding["authoredId"] == "clipped-title" && finding["issue"] == "clippedVertically"
+    }));
+}
+
+fn read_review_manifest(root: &Path, output: &str) -> serde_json::Value {
+    let manifest =
+        fs::read(root.join(output).join("manifest.json")).expect("the review manifest is readable");
+    serde_json::from_slice(&manifest).expect("the review manifest is valid JSON")
+}
+
 async fn render_fixture_twice(
     fixture: &Fixture,
     source_video: SourceVideo,

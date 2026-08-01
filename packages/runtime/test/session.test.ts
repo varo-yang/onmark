@@ -14,6 +14,7 @@ import {
   RuntimeSession,
   type BrowserPlan,
   type BrowserMediaLayout,
+  type BrowserVisualFindings,
   type BrowserRequest,
   type BrowserResponse,
   type RuntimeAdapter,
@@ -110,7 +111,7 @@ test("executes the browser protocol in order", async () => {
     {
       version: BROWSER_PROTOCOL_VERSION,
       requestId: 4,
-      event: { type: "frameReady", frame: 15 },
+      event: { type: "frameReady", frame: 15, visualFindings: [] },
     },
   );
   assert.deepEqual(await session.dispatch(request(5, { type: "dispose" })), {
@@ -166,6 +167,70 @@ test("rejects commands that violate session state or evaluation bounds", async (
   assertFailure(secondSeek, "invalidRequest");
   assertFailure(wrongConfirmation, "invalidRequest");
   assert.deepEqual(adapter.operations, ["load", "prepare:10", "seek:10"]);
+});
+
+test("owns canonical visual findings returned for the captured frame", async () => {
+  const adapter = new RecordingAdapter();
+  const session = new RuntimeSession(adapter);
+  const finding = { nodeId: 4, issue: "emptyBox" as const };
+  adapter.visualFindings = [finding];
+
+  await session.dispatch(request(1, { type: "load", plan }));
+  await session.dispatch(request(2, { type: "prepare", evaluationStart: 10 }));
+  await session.dispatch(request(3, { type: "seek", frame: 15 }));
+  const confirmed = await session.dispatch(
+    request(4, { type: "confirm", frame: 15 }),
+  );
+  finding.nodeId = 3;
+
+  assert.deepEqual(confirmed.event, {
+    type: "frameReady",
+    frame: 15,
+    visualFindings: [{ nodeId: 4, issue: "emptyBox" }],
+  });
+});
+
+test("canonicalizes visual findings returned by an adapter", async () => {
+  const adapter = new RecordingAdapter();
+  const session = new RuntimeSession(adapter);
+  adapter.visualFindings = [
+    { nodeId: 4, issue: "clippedVertically" },
+    { nodeId: 4, issue: "emptyBox" },
+  ];
+
+  await session.dispatch(request(1, { type: "load", plan }));
+  await session.dispatch(request(2, { type: "prepare", evaluationStart: 10 }));
+  await session.dispatch(request(3, { type: "seek", frame: 15 }));
+  const confirmed = await session.dispatch(
+    request(4, { type: "confirm", frame: 15 }),
+  );
+
+  assert.deepEqual(confirmed.event, {
+    type: "frameReady",
+    frame: 15,
+    visualFindings: [
+      { nodeId: 4, issue: "emptyBox" },
+      { nodeId: 4, issue: "clippedVertically" },
+    ],
+  });
+});
+
+test("rejects duplicate visual findings from an adapter", async () => {
+  const adapter = new RecordingAdapter();
+  const session = new RuntimeSession(adapter);
+  adapter.visualFindings = [
+    { nodeId: 4, issue: "emptyBox" },
+    { nodeId: 4, issue: "emptyBox" },
+  ];
+
+  await session.dispatch(request(1, { type: "load", plan }));
+  await session.dispatch(request(2, { type: "prepare", evaluationStart: 10 }));
+  await session.dispatch(request(3, { type: "seek", frame: 15 }));
+  const rejected = await session.dispatch(
+    request(4, { type: "confirm", frame: 15 }),
+  );
+
+  assertFailure(rejected, "confirmFailed");
 });
 
 // ── Concurrency, failures, and ownership ──
@@ -831,6 +896,7 @@ class RecordingAdapter implements RuntimeAdapter {
   preparedFrame: RuntimeFrame | undefined;
   readonly seekFrames: RuntimeFrame[] = [];
   readonly confirmedFrames: RuntimeFrame[] = [];
+  visualFindings: BrowserVisualFindings = [];
 
   async load(plan: RuntimePlan, mediaMode: RuntimeMediaMode): Promise<void> {
     this.operations.push("load");
@@ -861,12 +927,13 @@ class RecordingAdapter implements RuntimeAdapter {
     }
   }
 
-  async confirm(frame: RuntimeFrame): Promise<void> {
+  async confirm(frame: RuntimeFrame): Promise<BrowserVisualFindings> {
     this.operations.push(`confirm:${frame.index}`);
     this.confirmedFrames.push(frame);
     if (this.confirmError !== undefined) {
       throw this.confirmError;
     }
+    return this.visualFindings;
   }
 
   async dispose(): Promise<void> {

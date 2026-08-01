@@ -96,9 +96,10 @@ path, and verified pixel contract as the complete film; it is not a preview
 approximation.
 
 `review` reuses the production region cache and writes lossless checkpoints,
-`manifest.json`, and a static contact sheet under a content-addressed
-`reviews/film-*/` directory. Pass `--against <prior-manifest>` to compare exact
-region identities after an edit.
+objective empty-or-clipped semantic-layout findings, `manifest.json`, and a
+static contact sheet under a content-addressed `reviews/film-*/` directory.
+Pass `--against <prior-manifest>` to compare exact region identities after an
+edit.
 
 Declare typed presentation fields when one film needs many data variants:
 

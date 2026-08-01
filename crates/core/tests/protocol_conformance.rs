@@ -14,7 +14,8 @@ use onmark_core::model::{
 };
 use onmark_core::protocol::{
     BrowserCommand, BrowserEvent, BrowserMediaMode, BrowserPlan, BrowserRequest, BrowserResponse,
-    BundleManifest, InvalidBrowserPlan, ProtocolFailure, ProtocolFailureCode, RequestId, WireFrame,
+    BrowserVisualFindings, BundleManifest, InvalidBrowserPlan, ProtocolFailure,
+    ProtocolFailureCode, RequestId, WireFrame,
 };
 use onmark_core::timeline::TimelineIr;
 
@@ -37,7 +38,7 @@ fn browser_requests_match_the_versioned_wire_contract() {
     ];
 
     assert_or_update(
-        &fixture("protocol", "browser-requests-v8.jsonl"),
+        &fixture("protocol", "browser-requests-v9.jsonl"),
         &render_json_lines(&requests),
     );
 }
@@ -60,13 +61,19 @@ fn browser_responses_match_the_versioned_wire_contract() {
             },
         ),
         response(3, BrowserEvent::FrameStaged { frame: frame(15) }),
-        response(4, BrowserEvent::FrameReady { frame: frame(15) }),
+        response(
+            4,
+            BrowserEvent::FrameReady {
+                frame: frame(15),
+                visual_findings: BrowserVisualFindings::empty(),
+            },
+        ),
         response(4, BrowserEvent::Failed(timeout)),
         response(5, BrowserEvent::Disposed),
     ];
 
     assert_or_update(
-        &fixture("protocol", "browser-responses-v8.jsonl"),
+        &fixture("protocol", "browser-responses-v9.jsonl"),
         &render_json_lines(&responses),
     );
 }

@@ -314,14 +314,21 @@ retry at a bounded positive sub-millisecond offset; an empty retry fails rather
 than looping.
 
 `Confirm(frame)` waits for the pre-registered media observer before native
-accepts the captured payload. At a placement boundary the observer may complete
-on the pre-capture commit. After confirmation, native performs one bounded
-reconciliation capture at the transaction's next positive sub-millisecond
-tick. A no-damage response
-reuses the exact capture without copying its PNG payload; new pixels replace it.
-Only then may native execution write the payload. This closes the race in which
-the media observer and exact screenshot become ready on opposite sides of the
-same compositor turn.
+accepts the captured payload. It then measures only the active semantic shot
+and overlay bindings for three admitted layout failures: no positive rendered
+area, horizontal self-clipping, and vertical self-clipping. The result is a
+bounded, canonically ordered collection returned with `FrameReady`; it is not
+an arbitrary DOM traversal, aesthetic score, or inference of author intent.
+The runtime retains at most the first 256 facts in canonical node-and-issue
+order. Reaching that evidence budget stops further inspection but never fails
+the authored frame.
+At a placement boundary the observer may complete on the pre-capture commit.
+After confirmation, native performs one bounded reconciliation capture at the
+transaction's next positive sub-millisecond tick. A no-damage response reuses
+the exact capture and its findings without copying the PNG payload; new pixels
+replace it. Only then may native execution write the payload. This closes the
+race in which the media observer and exact screenshot become ready on opposite
+sides of the same compositor turn.
 
 This ordering avoids three boundary failures: waiting for
 `requestVideoFrameCallback` before advancing a BeginFrame-controlled compositor
@@ -480,11 +487,14 @@ is always independent.
 Incremental execution reuses verified `FrameArtifact` values rather than loose
 PNG files or encoded MP4 segments. A candidate must match the exact Browser
 Plan projection, presentation bytes consumed by that unit, render profile,
-capture backend, and locked capture-environment identity. The reader verifies
-the payload checksum before reuse and recomputes each canonical raw-RGBA
-fingerprint while assembly streams PNG payloads to the encoder. Hits, newly
-captured misses, local execution, and worker results all enter the same artifact
-assembler, so warm execution cannot acquire a second encoding or audio path.
+capture backend, and locked capture-environment identity. Each ordered frame
+record retains its PNG, raw-RGBA fingerprint, and bounded visual findings
+together. One checksum covers the complete payload. The reader validates the
+finding count and canonical ordering before reuse, then recomputes each
+canonical raw-RGBA fingerprint while assembly streams PNG payloads to the
+encoder. Hits, newly captured misses, local execution, and worker results all
+enter the same artifact assembler, so warm execution cannot acquire a second
+encoding, evidence, or audio path.
 
 The production authored-HTML artifact is admitted as random access by the
 presentation contract and is projected once per Render Graph region. Rust emits
@@ -1969,6 +1979,26 @@ batch rendering, captions, semantic music ducking, persistent artifact reuse,
 and no-clobber publication. The exact candidate and observed results are
 recorded in
 [`conformance/evidence/gate-eight-closure.md`](../../conformance/evidence/gate-eight-closure.md).
+
+**Gate nine (complete): admit bounded objective visual feedback.** The runtime
+measures the three layout facts described by the deterministic browser protocol
+inside the existing `Confirm` transaction, after exact-frame effects and media
+readiness. The evidence follows each frame through the same local or distributed
+`FrameArtifact`; cache hits retain it instead of rerunning Chromium or a second
+inspection path. `review` projects unit-local node identities back to authored
+shot, title, call-to-action, and caption facts in its versioned manifest and
+static contact sheet. Ordinary `render` output remains unchanged and findings
+do not decide success, mutate source, or alter pixels.
+
+This gate adds no general DOM crawler, screenshot heuristic, aesthetic scorer,
+computer-vision model, preview runtime, Studio surface, source mutation, or
+fallback capture. Its admission corpus detected all three injected defects,
+reported no findings across 29 semantic checkpoints from all 25 checked-in
+showcases, and added 0.45% median review time on the measured host. A cold CLI
+review and verified warm artifact reuse published identical pixels and
+findings. The contract, thresholds, environment, raw runs, and reuse evidence
+are recorded in
+[`conformance/evidence/objective-visual-feedback.md`](../../conformance/evidence/objective-visual-feedback.md).
 
 Every gate uses the final-direction contracts but implements only fields
 consumed by that gate. A failed gate blocks construction of the next gate's

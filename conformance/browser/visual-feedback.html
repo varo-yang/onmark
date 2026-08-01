@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Onmark visual-feedback conformance</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body,
+      om-film,
+      om-scene,
+      om-shot {
+        display: block;
+        height: 100%;
+        margin: 0;
+        width: 100%;
+      }
+
+      om-title {
+        display: block;
+        height: 48px;
+        overflow: hidden;
+        width: 200px;
+      }
+
+      om-title.clipped {
+        height: 20px;
+        width: 80px;
+      }
+
+      om-title span {
+        display: block;
+        height: 40px;
+        width: 160px;
+      }
+
+      om-title.empty {
+        height: 0;
+        width: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <om-film>
+      <om-scene>
+        <om-shot>
+          <om-title><span>Exact browser layout</span></om-title>
+        </om-shot>
+      </om-scene>
+    </om-film>
+    <script type="module">
+      import {
+        createDomPresentationBindings,
+        frameMotion,
+      } from "../../packages/authoring/dist/src/index.js";
+      import {
+        installRuntimeHost,
+        materializedVideoSource,
+        PresentationRuntimeAdapter,
+      } from "../../packages/runtime/dist/src/index.js";
+
+      const motion = frameMotion({
+        title({ element, localFrame }) {
+          element.classList.toggle(
+            "empty",
+            localFrame >= 30 && localFrame < 45,
+          );
+          element.classList.toggle("clipped", localFrame >= 45);
+        },
+      });
+      const bindings = createDomPresentationBindings({
+        document,
+        motion,
+        videoSource: materializedVideoSource,
+      });
+      installRuntimeHost(new PresentationRuntimeAdapter(bindings, 5_000));
+    </script>
+  </body>
+</html>

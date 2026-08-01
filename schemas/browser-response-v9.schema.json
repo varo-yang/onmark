@@ -71,11 +71,16 @@
             "type": {
               "const": "frameReady",
               "type": "string"
+            },
+            "visualFindings": {
+              "$ref": "#/$defs/BrowserVisualFindings",
+              "description": "Objective semantic-layout facts observed for the captured state."
             }
           },
           "required": [
             "type",
-            "frame"
+            "frame",
+            "visualFindings"
           ],
           "type": "object"
         },
@@ -248,6 +253,51 @@
       ],
       "type": "object"
     },
+    "BrowserVisualFinding": {
+      "additionalProperties": false,
+      "description": "One semantic node and the objective layout defect observed for it.",
+      "properties": {
+        "issue": {
+          "$ref": "#/$defs/BrowserVisualIssue"
+        },
+        "nodeId": {
+          "$ref": "#/$defs/BrowserNodeId"
+        }
+      },
+      "required": [
+        "nodeId",
+        "issue"
+      ],
+      "type": "object"
+    },
+    "BrowserVisualFindings": {
+      "description": "Canonically ordered objective layout findings for one captured frame.",
+      "items": {
+        "$ref": "#/$defs/BrowserVisualFinding"
+      },
+      "maxItems": 256,
+      "type": "array"
+    },
+    "BrowserVisualIssue": {
+      "description": "Closed objective defects measured from an active semantic element.",
+      "oneOf": [
+        {
+          "const": "emptyBox",
+          "description": "The active semantic element occupies no positive rendered area.",
+          "type": "string"
+        },
+        {
+          "const": "clippedHorizontally",
+          "description": "Authored horizontal clipping hides part of the overlay's contents.",
+          "type": "string"
+        },
+        {
+          "const": "clippedVertically",
+          "description": "Authored vertical clipping hides part of the overlay's contents.",
+          "type": "string"
+        }
+      ]
+    },
     "ProtocolFailureCode": {
       "description": "Stable browser protocol failure category.",
       "oneOf": [
@@ -294,7 +344,7 @@
       ]
     },
     "ProtocolVersion": {
-      "const": 8,
+      "const": 9,
       "description": "Version of the native-to-browser message contract.",
       "format": "uint16",
       "maximum": 65535,
@@ -316,7 +366,7 @@
       "type": "integer"
     }
   },
-  "$id": "https://onmark.dev/schemas/browser-response-v8.schema.json",
+  "$id": "https://onmark.dev/schemas/browser-response-v9.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "One versioned event returned by the browser runtime.",
@@ -338,6 +388,7 @@
   ],
   "title": "BrowserResponse",
   "type": "object",
+  "x-onmark-max-browser-visual-findings": 256,
   "x-onmark-max-failure-message-characters": 4096,
   "x-onmark-max-pending-resource-characters": 1024,
   "x-onmark-max-pending-resources": 256

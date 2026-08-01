@@ -2,13 +2,15 @@
 //!
 //! Encoding and decoding share one fixed field order. Checksums protect stored
 //! bytes; raw-RGBA fingerprints separately prove visual equivalence.
+//! Each frame record keeps its PNG, pixel fingerprint, and bounded visual
+//! findings adjacent, so evidence alignment is structural rather than inferred.
 
 use std::fmt;
 use std::io;
 use std::path::Path;
 
 use onmark_core::model::{FrameIndex, FrameInterval, FrameRate};
-use onmark_core::protocol::BrowserPlan;
+use onmark_core::protocol::{BrowserPlan, BrowserVisualIssue};
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sha2::{Digest as _, Sha256};
@@ -22,10 +24,30 @@ use crate::{
 pub(super) const HEADER_BYTES: usize = 156;
 pub(super) const FRAME_LENGTH_BYTES: u64 = 8;
 pub(super) const RAW_RGBA_HASH_BYTES: u64 = RawRgbaHash::BYTE_LENGTH as u64;
-pub(super) const MIN_FRAME_RECORD_BYTES: u64 = FRAME_LENGTH_BYTES + 1 + RAW_RGBA_HASH_BYTES;
+pub(super) const VISUAL_FINDING_COUNT_BYTES: u64 = 2;
+pub(super) const VISUAL_FINDING_BYTES: usize = 5;
+pub(super) const MIN_FRAME_RECORD_BYTES: u64 =
+    FRAME_LENGTH_BYTES + 1 + RAW_RGBA_HASH_BYTES + VISUAL_FINDING_COUNT_BYTES;
+
+pub(super) const fn visual_issue_code(issue: BrowserVisualIssue) -> u8 {
+    match issue {
+        BrowserVisualIssue::EmptyBox => 0,
+        BrowserVisualIssue::ClippedHorizontally => 1,
+        BrowserVisualIssue::ClippedVertically => 2,
+    }
+}
+
+pub(super) const fn visual_issue(code: u8) -> Option<BrowserVisualIssue> {
+    match code {
+        0 => Some(BrowserVisualIssue::EmptyBox),
+        1 => Some(BrowserVisualIssue::ClippedHorizontally),
+        2 => Some(BrowserVisualIssue::ClippedVertically),
+        _ => None,
+    }
+}
 
 const MAGIC: [u8; 8] = *b"ONMARKF1";
-const VERSION: u16 = 2;
+const VERSION: u16 = 3;
 const ID_DOMAIN: &[u8] = b"onmark-frame-artifact-id\0";
 
 /// Deterministic identity of one frame-artifact capture contract.

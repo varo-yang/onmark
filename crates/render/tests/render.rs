@@ -15,7 +15,8 @@ use onmark_core::model::{
 };
 use onmark_core::protocol::{
     BrowserCommand, BrowserEvent, BrowserMediaMode, BrowserOverlayKind, BrowserPlan,
-    BrowserRequest, BundleManifest, RequestId, WireFrame,
+    BrowserRequest, BrowserVisualFinding, BrowserVisualFindings, BrowserVisualIssue,
+    BundleManifest, RequestId, WireFrame,
 };
 use onmark_core::render_graph::{PartitionPlan, RenderGraph};
 use onmark_media::{Ffprobe, SubtitleLimits, parse_webvtt};
@@ -45,6 +46,33 @@ const TEMPORAL_SEEK_SEQUENCE: [u64; 4] = [17, 3, 29, 17];
 const MICROS_PER_SECOND: i64 = 1_000_000;
 const OUTPUT_AUDIO_SAMPLE_RATE: u64 = 48_000;
 const AUDIO_TIMESTAMP_TOLERANCE_MICROS: u64 = 25_000;
+const VISUAL_SHOWCASES: [&str; 25] = [
+    "analog-collage.html",
+    "caption-documentary.html",
+    "code-morph.html",
+    "data-river.html",
+    "editorial-fold.html",
+    "exact-system.html",
+    "fashion-rhythm.html",
+    "glass-product.html",
+    "instrument-one.html",
+    "isometric-machine.html",
+    "kinetic-signal.html",
+    "liquid-type.html",
+    "luminous-story.html",
+    "media-mosaic.html",
+    "neon-transit.html",
+    "network-pulse.html",
+    "noir-shadows.html",
+    "onmark-hero.html",
+    "onmark-manifesto.html",
+    "particle-current.html",
+    "printed-motion.html",
+    "ribbon-sculpture.html",
+    "shader-aurora.html",
+    "sports-broadcast.html",
+    "three-constellation.html",
+];
 
 #[test]
 fn render_executor_uses_the_environment_owned_capture_mode() {
@@ -118,6 +146,44 @@ async fn rejects_a_page_that_never_installs_the_runtime_host() {
 
     assert_eq!(error.kind(), BrowserErrorKind::RuntimeHost);
     shutdown.expect("headless shell must shut down after a readiness failure");
+}
+
+#[tokio::test]
+#[ignore = "requires ONMARK_HEADLESS_SHELL"]
+async fn observes_layout_after_exact_frame_effects() {
+    let mut session = BrowserSession::launch(
+        headless_shell(),
+        browser_options(BrowserCaptureMode::Screenshot, Duration::from_secs(10)),
+    )
+    .await
+    .expect("headless shell must launch");
+    let fixture = visual_feedback_fixture();
+    let result = exercise_visual_feedback(&mut session, &fixture).await;
+    let shutdown = session.shutdown().await;
+
+    result.expect("the browser must report layout from each captured state");
+    shutdown.expect("headless shell must shut down cleanly");
+}
+
+#[tokio::test]
+#[ignore = "requires ONMARK_HEADLESS_SHELL, ONMARK_BUNDLER, and ONMARK_FFPROBE"]
+async fn clean_showcase_midpoints_have_no_objective_layout_findings() {
+    let profile = RenderProfile::new(1_920, 1_080).expect("the showcase profile is valid");
+    let mut session = BrowserSession::launch(
+        headless_shell(),
+        BrowserSessionOptions {
+            render_profile: profile,
+            ..browser_options(BrowserCaptureMode::Screenshot, Duration::from_secs(10))
+        },
+    )
+    .await
+    .expect("headless shell must launch");
+    let workspace = tempdir().expect("the showcase experiment needs a workspace");
+    let result = inspect_clean_showcases(&mut session, workspace.path()).await;
+    let shutdown = session.shutdown().await;
+
+    result.expect("clean showcases must not produce objective layout findings");
+    shutdown.expect("headless shell must shut down cleanly");
 }
 
 #[tokio::test]
@@ -1440,6 +1506,229 @@ async fn exercise_protocol(
     Ok(captured.raw_rgba_hash())
 }
 
+async fn exercise_visual_feedback(
+    session: &mut BrowserSession,
+    fixture: &Url,
+) -> Result<(), Box<dyn Error>> {
+    load_and_prepare(session, fixture).await?;
+    let plan = browser_plan_fixture();
+    let frame_rate = plan.frame_rate();
+    let title = plan
+        .overlays()
+        .first()
+        .expect("the visual fixture contains one title")
+        .node()
+        .id();
+
+    stage(session, 3, 15).await?;
+    session.capture_frame(frame(15), frame_rate).await?;
+    let clean = confirm_findings(session, 4, 15).await?;
+    assert_eq!(clean, BrowserVisualFindings::empty());
+
+    stage(session, 5, 35).await?;
+    session.capture_frame(frame(35), frame_rate).await?;
+    let empty = confirm_findings(session, 6, 35).await?;
+    let expected = BrowserVisualFindings::new(vec![BrowserVisualFinding::new(
+        title,
+        BrowserVisualIssue::EmptyBox,
+    )])
+    .expect("one visual finding is canonical");
+    assert_eq!(empty, expected);
+
+    stage(session, 7, 55).await?;
+    session.capture_frame(frame(55), frame_rate).await?;
+    let clipped = confirm_findings(session, 8, 55).await?;
+    let expected = BrowserVisualFindings::new(vec![
+        BrowserVisualFinding::new(title, BrowserVisualIssue::ClippedHorizontally),
+        BrowserVisualFinding::new(title, BrowserVisualIssue::ClippedVertically),
+    ])
+    .expect("the two visual findings are canonical");
+    assert_eq!(clipped, expected);
+
+    let disposed = session
+        .dispatch(&BrowserRequest::new(
+            RequestId::new(9),
+            BrowserCommand::Dispose,
+        ))
+        .await?;
+    assert_eq!(disposed.event(), &BrowserEvent::Disposed);
+    Ok(())
+}
+
+async fn inspect_clean_showcases(
+    session: &mut BrowserSession,
+    workspace: &Path,
+) -> Result<(), Box<dyn Error>> {
+    let assets = showcase_assets().await;
+    let source_timings = assets
+        .values()
+        .filter_map(|asset| {
+            asset
+                .metadata()
+                .video_metadata()
+                .map(|video| (asset.id(), video.timing().clone()))
+        })
+        .collect();
+    let captions = showcase_captions();
+    let mut samples = 0_usize;
+    let mut unexpected = Vec::new();
+
+    for name in VISUAL_SHOWCASES {
+        let source_path = repository().join("showcases").join(name);
+        let source = fs::read_to_string(&source_path)?;
+        let timeline = solve_timeline(&source, &assets);
+        let timeline = if name == "caption-documentary.html" {
+            compiler::import_captions(timeline, [captions.clone()])?
+        } else {
+            timeline
+        };
+        let plan = BrowserPlan::from_timeline(&timeline, &source_timings)?;
+        let shot_indices = (0..timeline.shots().count())
+            .map(u32::try_from)
+            .collect::<Result<Vec<_>, _>>()?;
+        let projection = [shot_indices.as_slice()];
+        let bundle = FixtureBundle::build_from(
+            workspace,
+            name.trim_end_matches(".html"),
+            &source_path,
+            "randomAccess",
+            "browserComposite",
+            "perFrame",
+            &projection,
+        )
+        .await;
+        materialize_showcase_assets(&bundle.directory, &assets)?;
+
+        session
+            .navigate(&bundle.entry_url(), &bundle.directory)
+            .await?;
+        load_plan(session, &plan).await.map_err(|error| {
+            std::io::Error::other(format!("{name} failed to load its browser plan: {error}"))
+        })?;
+        session
+            .initialize_capture_surface(plan.frame_rate())
+            .await?;
+
+        let sample_frames = semantic_midpoints(&plan);
+        samples += sample_frames.len();
+        let mut request_id = 3_u32;
+        for index in sample_frames {
+            stage(session, request_id, index).await?;
+            session
+                .capture_frame(frame(index), plan.frame_rate())
+                .await?;
+            let findings = confirm_findings(session, request_id + 1, index).await?;
+            if !findings.findings().is_empty() {
+                unexpected.push(format!("{name}@{index}: {findings:?}"));
+            }
+            request_id += 2;
+        }
+        let disposed = session
+            .dispatch(&BrowserRequest::new(
+                RequestId::new(request_id),
+                BrowserCommand::Dispose,
+            ))
+            .await?;
+        assert_eq!(disposed.event(), &BrowserEvent::Disposed);
+    }
+
+    assert!(
+        samples >= VISUAL_SHOWCASES.len(),
+        "the clean corpus yielded only {samples} semantic samples",
+    );
+    assert!(
+        unexpected.is_empty(),
+        "clean showcase findings:\n{}",
+        unexpected.join("\n"),
+    );
+    Ok(())
+}
+
+async fn showcase_assets() -> BTreeMap<AssetRef, FrozenAsset> {
+    let assets = repository().join("showcases/assets");
+    let video = freeze_asset(&assets.join("fractal.mp4")).await;
+    let music = freeze_asset(&assets.join("pulse.wav")).await;
+
+    BTreeMap::from([
+        (asset_ref("assets/fractal.mp4"), video),
+        (asset_ref("assets/pulse.wav"), music),
+    ])
+}
+
+fn showcase_captions() -> ImportedCaptionTrack {
+    let path = repository().join("showcases/assets/field-notes.vtt");
+    let source = fs::read(path).expect("the showcase captions must remain readable");
+    let limits =
+        SubtitleLimits::new(source.len(), 4, 64).expect("the showcase subtitle limits are bounded");
+    imported_caption_track(SourceId::new(4), &source, "en", "en", limits)
+}
+
+fn materialize_showcase_assets(
+    bundle: &Path,
+    assets: &BTreeMap<AssetRef, FrozenAsset>,
+) -> Result<(), Box<dyn Error>> {
+    let target = bundle.join(BundleManifest::ASSET_DIRECTORY);
+    fs::create_dir_all(&target)?;
+    for (reference, asset) in assets {
+        let identity = asset.id().to_string();
+        let digest = identity
+            .strip_prefix("sha256:")
+            .expect("frozen assets use canonical SHA-256 identities");
+        fs::copy(
+            repository().join("showcases").join(reference.as_str()),
+            target.join(digest),
+        )?;
+    }
+    Ok(())
+}
+
+async fn load_plan(session: &BrowserSession, plan: &BrowserPlan) -> Result<(), Box<dyn Error>> {
+    let loaded = session
+        .dispatch(&BrowserRequest::new(
+            RequestId::new(1),
+            BrowserCommand::load(plan.clone(), BrowserMediaMode::Decoded),
+        ))
+        .await?;
+    if loaded.event() != &BrowserEvent::Loaded {
+        return Err(std::io::Error::other(format!(
+            "runtime returned {:?} while loading the plan",
+            loaded.event(),
+        ))
+        .into());
+    }
+
+    let evaluation_start = plan.evaluation().start();
+    let prepared = session
+        .dispatch(&BrowserRequest::new(
+            RequestId::new(2),
+            BrowserCommand::Prepare { evaluation_start },
+        ))
+        .await?;
+    let expected = BrowserEvent::Prepared {
+        evaluation_start,
+        media_layout: onmark_core::protocol::BrowserMediaLayout::empty(),
+    };
+    if prepared.event() != &expected {
+        return Err(std::io::Error::other(format!(
+            "runtime returned {:?} while preparing the plan",
+            prepared.event(),
+        ))
+        .into());
+    }
+    Ok(())
+}
+
+fn semantic_midpoints(plan: &BrowserPlan) -> BTreeSet<u64> {
+    plan.shots()
+        .iter()
+        .map(|shot| shot.interval())
+        .chain(plan.overlays().iter().map(|overlay| overlay.interval()))
+        .map(|interval| {
+            interval.start().get() + (interval.end().get() - interval.start().get()) / 2
+        })
+        .collect()
+}
+
 async fn load_and_prepare(
     session: &mut BrowserSession,
     fixture: &Url,
@@ -1512,9 +1801,32 @@ async fn confirm(
         response.event(),
         &BrowserEvent::FrameReady {
             frame: frame(index),
+            visual_findings: BrowserVisualFindings::empty(),
         },
     );
     Ok(())
+}
+
+async fn confirm_findings(
+    session: &BrowserSession,
+    request_id: u32,
+    index: u64,
+) -> Result<BrowserVisualFindings, Box<dyn Error>> {
+    let response = session
+        .dispatch(&BrowserRequest::new(
+            RequestId::new(request_id),
+            BrowserCommand::Confirm {
+                frame: frame(index),
+            },
+        ))
+        .await?;
+    match response.into_event() {
+        BrowserEvent::FrameReady {
+            frame: confirmed,
+            visual_findings,
+        } if confirmed == frame(index) => Ok(visual_findings),
+        event => Err(format!("unexpected visual-feedback event: {event:?}").into()),
+    }
 }
 
 fn frame(index: u64) -> WireFrame {
@@ -1905,6 +2217,19 @@ fn browser_fixture() -> Url {
     let repository = repository();
     let fixture = repository.join("conformance/browser/runtime-protocol.html");
     let runtime = repository.join("packages/runtime/dist/src/index.js");
+    assert!(runtime.is_file(), "run `pnpm --dir packages/runtime build`");
+    Url::from_file_path(fixture).expect("the fixture path is absolute")
+}
+
+fn visual_feedback_fixture() -> Url {
+    let repository = repository();
+    let fixture = repository.join("conformance/browser/visual-feedback.html");
+    let authoring = repository.join("packages/authoring/dist/src/index.js");
+    let runtime = repository.join("packages/runtime/dist/src/index.js");
+    assert!(
+        authoring.is_file(),
+        "run `pnpm --dir packages/authoring build`"
+    );
     assert!(runtime.is_file(), "run `pnpm --dir packages/runtime build`");
     Url::from_file_path(fixture).expect("the fixture path is absolute")
 }
@@ -2345,12 +2670,22 @@ fn caption_track() -> ImportedCaptionTrack {
     let source = b"WEBVTT\n\n00:00:00.750 --> 00:00:01.250\nAcross the partition\n";
     let limits =
         SubtitleLimits::new(source.len(), 1, 64).expect("the fixture subtitle limits are bounded");
-    let report = parse_webvtt(SourceId::new(3), source, limits);
+    imported_caption_track(SourceId::new(3), source, "en", "en", limits)
+}
+
+fn imported_caption_track(
+    source_id: SourceId,
+    source: &[u8],
+    id: &str,
+    language: &str,
+    limits: SubtitleLimits,
+) -> ImportedCaptionTrack {
+    let report = parse_webvtt(source_id, source, limits);
     let (track, errors) = report.into_parts();
     assert!(errors.is_empty());
     ImportedCaptionTrack::new(
-        CaptionTrackId::parse("en").expect("the fixture track ID is valid"),
-        CaptionLanguage::parse("en").expect("the fixture language is valid"),
+        CaptionTrackId::parse(id).expect("the fixture track ID is valid"),
+        CaptionLanguage::parse(language).expect("the fixture language is valid"),
         track.expect("the fixture subtitle is valid"),
     )
 }

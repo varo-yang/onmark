@@ -11,6 +11,7 @@ mod layout;
 mod message;
 mod plan;
 mod projection;
+mod visual;
 
 pub use bundle::{
     BundleFile, BundleIdentity, BundleManifest, BundleVersion, InvalidBundleFile,
@@ -37,4 +38,8 @@ pub use plan::{
     BrowserCaptionTrack, BrowserNode, BrowserNodeId, BrowserOverlay, BrowserOverlayKind,
     BrowserPlan, BrowserScene, BrowserShot, BrowserTransition, BrowserVariantField,
     BrowserVariantValue, BrowserVideo, BrowserVideoSource, BrowserVideoTiming, InvalidBrowserPlan,
+};
+pub use visual::{
+    BrowserVisualFinding, BrowserVisualFindings, BrowserVisualIssue, InvalidBrowserVisualFindings,
+    MAX_BROWSER_VISUAL_FINDINGS,
 };

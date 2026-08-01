@@ -4,6 +4,9 @@ export type { RuntimeFrame } from "./clock.js";
 export type {
   BrowserMediaLayout,
   BrowserMediaPlacement,
+  BrowserVisualFinding,
+  BrowserVisualFindings,
+  BrowserVisualIssue,
 } from "./generated/browser-response.js";
 export type { RuntimeVideo } from "./media.js";
 export type {

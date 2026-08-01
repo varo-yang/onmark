@@ -2,7 +2,7 @@
 
 Onmark is a screenplay-first, browser-rendered video compiler and execution engine. Rust owns deterministic compilation and native execution; TypeScript owns authoring and the browser runtime.
 
-**Current phase:** delivery gates one through eight and distributed incremental
+**Current phase:** delivery gates one through nine and distributed incremental
 capture reuse are complete. New language or pipeline work requires a separately
 admitted gate backed by real authoring, correctness, and performance evidence.
 Deployment work remains frozen: do not add a remote authoring command,

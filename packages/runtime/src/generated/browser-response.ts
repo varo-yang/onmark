@@ -28,6 +28,7 @@ export type BrowserEvent =
        */
       frame: number;
       type: "frameReady";
+      visualFindings: BrowserVisualFindings;
     }
   | {
       /**
@@ -77,13 +78,23 @@ export type BrowserObjectFit = "fill" | "contain" | "cover";
  */
 export type BrowserMediaLayout = BrowserMediaPlacement[];
 /**
+ * Closed objective defects measured from an active semantic element.
+ */
+export type BrowserVisualIssue = "emptyBox" | "clippedHorizontally" | "clippedVertically";
+/**
+ * Objective semantic-layout facts observed for the captured state.
+ *
+ * @maxItems 256
+ */
+export type BrowserVisualFindings = BrowserVisualFinding[];
+/**
  * Correlation identity shared by one request and its response events.
  */
 export type RequestId = number;
 /**
  * Version of the native-to-browser message contract.
  */
-export type ProtocolVersion = 8;
+export type ProtocolVersion = 9;
 
 /**
  * One versioned event returned by the browser runtime.
@@ -117,4 +128,11 @@ export interface BrowserPixelRectangle {
   width: number;
   x: number;
   y: number;
+}
+/**
+ * One semantic node and the objective layout defect observed for it.
+ */
+export interface BrowserVisualFinding {
+  issue: BrowserVisualIssue;
+  nodeId: BrowserNodeId;
 }
